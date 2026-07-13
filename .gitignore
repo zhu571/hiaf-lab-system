@@ -1,23 +1,37 @@
 # Go
+go-server/bin/
 go-server/vendor/
 *.exe
+*.test
+coverage.out
 
 # Python
 py-agent/.venv/
-py-agent/__pycache__/
+__pycache__/
 *.pyc
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
 
 # Frontend
 web-ui/node_modules/
 web-ui/dist/
+web-ui/.vite/
+web-ui/.pwa/
+web-ui/coverage/
 
 # IDE
 .idea/
 .vscode/
 *.swp
+*.swo
 
 # Environment
 .env
+.env.*
+!.env.example
 *.local
 
 # OS
@@ -26,9 +40,29 @@ Thumbs.db
 
 # Database
 *.db
+*.sqlite
+*.sqlite3
 *.db-wal
 *.db-shm
 pgdata/
 
+# Local legacy data and attachments
+backups/
+images/**
+!images/.gitkeep
+elog_config.json
+
 # Deploy
 deploy/pgdata/
+
+# Secrets, logs, and generated artifacts
+*.log
+logs/
+*.pem
+*.key
+*.crt
+*.p12
+*.pfx
+secrets/
+tmp/
+temp/

@@ -22,15 +22,14 @@
 
 当前仓库仍处在“设计完成、Phase 1 待启动/过渡期”状态，不是目标目录结构已经全部落地的成品项目。
 
-当前已有：
+当前 GitHub 仓库已有：
 
-- `lab_db.py`：现有 Python SQLite 双库访问层。
-- `lab_env.db`、`gas_cell.db`：当前本地 SQLite 数据库。
-- `schema_lab_env.sql`、`schema_gas_cell.sql`：当前 SQLite schema。
-- `elog_sync.py`、`elog_daily_push.py`、`elog_config.json`：ELOG 同步相关代码和配置。
-- `images/`：本地图片附件目录。
-- `backups/`：SQLite 备份。
-- 根目录下的设计文档：API、权限审计、仪器安全、项目设计、Agent 策略、维护策略等。
+- `docs/`：API、权限审计、仪器安全、项目设计、Agent 策略、维护策略等设计文档。
+- `AGENTS.md`：AI 编程助手入口。
+- `.github/workflows/ci.yml`：Go、前端、Python Agent 三个 CI job。
+- 目标目录的占位文件：`go-server/`、`web-ui/`、`py-agent/`、`migrations/`、`deploy/`。
+
+历史单机 SQLite/ELOG 链路可能存在于迁移前的本地工作目录或备份中，但不应直接提交数据库、附件、备份或含凭据配置到 GitHub。
 
 目标但未必已存在：
 
@@ -56,21 +55,21 @@
 
 ## 4. 开发前必须阅读
 
-设计文档目前在仓库根目录，不在 `docs/` 目录。写代码前按任务读取对应文档。
+设计文档目前在 `docs/` 目录。写代码前按任务读取对应文档。
 
 | 文档 | 什么时候读 |
 |------|-----------|
-| `实验室日志系统扩展方案.md` | 首先读。理解项目目标、架构、数据流、阶段计划 |
-| `api-contract.md` | 写任何 Go API、Agent REST 调用、前端 API 前必读 |
-| `permission-audit.md` | 写认证、权限、审计、Agent 代操作前必读 |
-| `instrument-security.md` | 写仪器控制、SCPI、租约、告警前必读 |
-| `仪器白名单.yaml` | 写仪器命令前必读，所有参数范围以此为准 |
-| `project-design.md` | 写项目维度、项目 ACL、项目报表前必读 |
-| `ai-qa-codex.md` | 写 AI 问答或 Codex 协作模块前必读 |
-| `agent-auto-review.md` | 写 Agent 自动解析、自动入库、审核队列前必读 |
-| `collab-guide.md` | 了解多人协作、分支、审核流程 |
-| `maintenance-strategy.md` | 写部署、迁移、备份、回滚前必读 |
-| `codex-plan.md` | 了解 Codex 对架构和实施顺序的补充建议 |
+| `docs/实验室日志系统扩展方案.md` | 首先读。理解项目目标、架构、数据流、阶段计划 |
+| `docs/api-contract.md` | 写任何 Go API、Agent REST 调用、前端 API 前必读 |
+| `docs/permission-audit.md` | 写认证、权限、审计、Agent 代操作前必读 |
+| `docs/instrument-security.md` | 写仪器控制、SCPI、租约、告警前必读 |
+| `docs/仪器白名单.yaml` | 写仪器命令前必读，所有参数范围以此为准 |
+| `docs/project-design.md` | 写项目维度、项目 ACL、项目报表前必读 |
+| `docs/ai-qa-codex.md` | 写 AI 问答或 Codex 协作模块前必读 |
+| `docs/agent-auto-review.md` | 写 Agent 自动解析、自动入库、审核队列前必读 |
+| `docs/collab-guide.md` | 了解多人协作、分支、审核流程 |
+| `docs/maintenance-strategy.md` | 写部署、迁移、备份、回滚前必读 |
+| `docs/codex-plan.md` | 了解 Codex 对架构和实施顺序的补充建议 |
 
 如果文档名和实际文件不一致，先用 `rg --files` 查找，不要凭记忆创建重复文档。
 
@@ -79,7 +78,7 @@
 新功能按下列目标结构推进；不存在的目录由对应任务创建。
 
 ```text
-lab-daily-report/
+hiaf-lab-system/
 ├── go-server/              # Go 后端
 │   ├── main.go             # 入口，注册所有模块路由
 │   ├── auth/               # 认证鉴权模块
@@ -97,7 +96,7 @@ lab-daily-report/
 ├── web-ui/                 # Vue 3 前端 PWA
 ├── migrations/             # PostgreSQL 迁移脚本
 ├── deploy/                 # Docker Compose、frp、Nginx 配置
-├── images/                 # 当前本地图片附件
+├── images/                 # 运行时图片附件目录，占位可提交，实际附件不提交
 └── AGENTS.md               # 本文件
 ```
 
@@ -181,7 +180,7 @@ go-server/<module>/
 
 ### 当前 SQLite/Python 链路
 
-这条链路在当前仓库可直接验证，会按 schema 初始化本地 SQLite 文件。
+这条链路只适用于迁移前的历史本地副本。如果当前仓库没有 `lab_db.py` 和对应 schema，不要为验证而临时重建旧链路。
 
 ```bash
 python3 - <<'PY'
