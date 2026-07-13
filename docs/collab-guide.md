@@ -58,30 +58,30 @@
 ### 2.2 推荐目录结构
 
 ```text
-lab-daily-report/
-├── backend/              # Go + chi API
-│   ├── cmd/api/
-│   ├── internal/auth/
-│   ├── internal/projects/
-│   ├── internal/logs/
-│   ├── internal/issues/
-│   ├── internal/experiences/
-│   ├── internal/plans/
-│   ├── internal/experimentruns/
-│   ├── internal/qa/
-│   ├── internal/sensors/
-│   ├── internal/instruments/
-│   ├── internal/audit/
-│   └── internal/platform/
-├── agent/                # Python + LightAgent
-├── frontend/             # Vue 3
-├── migrations/           # PostgreSQL 迁移
-├── deploy/               # Docker、Nginx、systemd、备份脚本
-├── docs/                 # 设计和协作文档
-└── tests/                # 跨模块集成测试
+hiaf-lab-system/
+├── go-server/              # Go + chi API
+│   ├── main.go             # 入口，注册所有模块路由
+│   ├── auth/
+│   ├── projects/
+│   ├── logs/
+│   ├── issues/
+│   ├── experiences/
+│   ├── plans/
+│   ├── qa/
+│   ├── sensors/
+│   ├── instruments/
+│   ├── middleware/
+│   └── common/
+├── py-agent/               # Python + LightAgent
+├── web-ui/                 # Vue 3
+├── migrations/             # PostgreSQL 迁移
+├── deploy/                 # Docker Compose、frp、Nginx、备份脚本
+├── images/                 # 运行时图片附件目录，只提交 .gitkeep
+├── docs/                   # 设计和协作文档
+└── tests/                  # 跨模块集成测试，可在需要时创建
 ```
 
-当前仓库已有 Python 脚本和设计文档，后续迁移到该结构时应分批进行，不要在一个 PR 中同时重构目录和实现大量业务功能。
+当前仓库仍处于设计完成、Phase 1 待启动/过渡期，部分目录可能只有 `.gitkeep`。后续落地时应分批进行，不要在一个 PR 中同时重构目录和实现大量业务功能。
 
 ### 2.3 依赖顺序
 
@@ -121,8 +121,8 @@ lab-daily-report/
 
 ```text
 main       # 稳定分支，只放可部署版本
-develop    # 日常集成分支，所有 feature 先合入这里
-feature/*  # 功能开发分支
+develop    # 日常集成分支，所有主题分支先合入这里
+feat/*     # 功能开发分支
 fix/*      # 普通缺陷修复分支
 hotfix/*   # 生产紧急修复分支，直接从 main 切出
 docs/*     # 文档修改分支
@@ -140,10 +140,10 @@ chore/*    # CI、格式化、依赖、脚手架等非业务修改
 示例：
 
 ```text
-feature/auth-jwt-login
-feature/logs-create-api
-feature/instruments-lease
-feature/agent-log-parser
+feat/auth-jwt-login
+feat/logs-create-api
+feat/instruments-lease
+feat/agent-log-parser
 fix/issues-status-transition
 docs/collab-guide
 chore/github-actions
@@ -191,7 +191,7 @@ chore(ci): add backend test workflow
 
 ### 4.1 PR 流程
 
-1. 开发者从 `develop` 创建 feature 分支。
+1. 开发者从 `develop` 创建 `feat/*`、`fix/*`、`docs/*` 或 `chore/*` 主题分支。
 2. 开发过程中本地运行相关测试。
 3. PR 提交到 `develop`。
 4. PR 描述必须写清楚变更范围、测试结果、风险点。
@@ -385,9 +385,9 @@ AI 问答检查：
 
 ## 6. 模块合并流程
 
-项目使用 `feature -> develop -> main`。
+项目使用 `feat/fix/docs/chore/* -> develop -> main`。
 
-### 6.1 feature 合并到 develop
+### 6.1 主题分支合并到 develop
 
 允许合并条件：
 
@@ -449,12 +449,9 @@ on:
     branches: [develop, main]
 
 jobs:
-  backend:
-    name: backend
+  go-test:
+    name: go-test
     runs-on: ubuntu-latest
-    defaults:
-      run:
-        working-directory: backend
     services:
       postgres:
         image: postgres:16
@@ -474,50 +471,65 @@ jobs:
       - uses: actions/setup-go@v5
         with:
           go-version: "1.22"
-      - run: go mod download
-      - run: gofmt -w .
-      - run: test -z "$(git status --porcelain)" || (git diff && exit 1)
-      - run: go test ./...
+      - name: Test and vet Go backend
+        run: |
+          if [ ! -f go-server/go.mod ]; then
+            echo "go-server/go.mod not found; Go backend not implemented yet, skipping."
+            exit 0
+          fi
+          cd go-server
+          go test ./...
+          go vet ./...
         env:
           DATABASE_URL: postgres://lab:lab@localhost:5432/lab_daily_test?sslmode=disable
 
-  agent:
-    name: agent
+  python-check:
+    name: python-check
     runs-on: ubuntu-latest
-    defaults:
-      run:
-        working-directory: agent
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
           python-version: "3.11"
-      - run: python -m pip install --upgrade pip
-      - run: pip install -r requirements.txt
-      - run: pytest
+      - name: Compile Python agent
+        run: |
+          if ! find py-agent -type f -name '*.py' | grep -q .; then
+            echo "No Python agent files found; agent not implemented yet, skipping."
+            exit 0
+          fi
+          if [ -f py-agent/requirements.txt ]; then
+            python -m pip install --upgrade pip
+            python -m pip install -r py-agent/requirements.txt
+          fi
+          python -m compileall -q py-agent
 
-  frontend:
-    name: frontend
+  frontend-test:
+    name: frontend-test
     runs-on: ubuntu-latest
-    defaults:
-      run:
-        working-directory: frontend
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
           node-version: "20"
-          cache: npm
-          cache-dependency-path: frontend/package-lock.json
-      - run: npm ci
-      - run: npm run lint
-      - run: npm run test -- --run
-      - run: npm run build
+      - name: Test and build frontend
+        run: |
+          if [ ! -f web-ui/package.json ]; then
+            echo "web-ui/package.json not found; frontend not implemented yet, skipping."
+            exit 0
+          fi
+          cd web-ui
+          if [ ! -f package-lock.json ]; then
+            echo "package-lock.json missing; commit the lockfile for reproducible CI."
+            exit 1
+          fi
+          npm ci
+          npm test --if-present
+          npm run build --if-present
 ```
 
 说明：
 
-- 当前仓库如果还没有 `backend/agent/frontend` 目录，可先按实际目录删减 job。
+- 根目录 `.github/workflows/ci.yml` 是当前权威 CI 配置；上面的示例应随实际仓库同步更新。
 - CI 中的格式检查应只检查，不在 CI 自动提交格式化结果。
 - 后续可增加 `migrations` job，专门验证 PostgreSQL 迁移。
 
@@ -561,7 +573,7 @@ jobs:
 
 ```bash
 git clone <repo-url>
-cd lab-daily-report
+cd hiaf-lab-system
 git checkout develop
 ```
 
@@ -794,7 +806,7 @@ except ApiPermissionError:
 目录建议：
 
 ```text
-frontend/src/
+web-ui/src/
 ├── api/
 ├── components/
 ├── views/

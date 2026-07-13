@@ -71,6 +71,8 @@
 | `docs/maintenance-strategy.md` | 写部署、迁移、备份、回滚前必读 |
 | `docs/codex-plan.md` | 了解 Codex 对架构和实施顺序的补充建议 |
 
+Git 分支、提交、push 和 PR 规则以仓库根目录 `CONTRIBUTING.md` 为准。AI 编程助手 clone 后必须从 `develop` 创建主题分支，推送到同名远端分支，并让用户创建 `主题分支 → develop` 的 PR；不得直接 push 到 `main` 或 `develop`。
+
 如果文档名和实际文件不一致，先用 `rg --files` 查找，不要凭记忆创建重复文档。
 
 ## 5. 目标目录结构
