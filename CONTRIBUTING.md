@@ -161,6 +161,7 @@ git push -u origin docs/<topic>
 | 写认证、权限、审计、Agent 代操作 | `docs/permission-audit.md` |
 | 写项目维度或项目 ACL | `docs/project-design.md` |
 | 控制仪器 | `docs/instrument-security.md` + `docs/仪器白名单.yaml` |
+| 写 Agent 自动解析或自动入库 | `docs/agent-auto-review.md` |
 | 审核代码（常规） | 找同事 Review |
 | 审核代码（单人/紧急） | `docs/code-review.md` — Codex AI 审查流程 |
 | 搭建开发环境 | `docs/collab-guide.md` 第 7 节 |
