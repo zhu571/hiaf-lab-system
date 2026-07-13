@@ -1,0 +1,34 @@
+# Go
+go-server/vendor/
+*.exe
+
+# Python
+py-agent/.venv/
+py-agent/__pycache__/
+*.pyc
+
+# Frontend
+web-ui/node_modules/
+web-ui/dist/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+
+# Environment
+.env
+*.local
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Database
+*.db
+*.db-wal
+*.db-shm
+pgdata/
+
+# Deploy
+deploy/pgdata/
