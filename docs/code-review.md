@@ -39,7 +39,11 @@ codex exec --skip-git-repo-check --sandbox danger-full-access \
   - [ ] 无跨模块直接访问 DB
   - [ ] 无硬编码密码/Token
 
-  只读模式，不要修改任何文件。"
+  只读模式，不要修改任何文件。
+
+  注意: --sandbox danger-full-access 是必需的——Linux bubblewrap
+  沙箱默认阻止文件读取，不加此参数 Codex 无法访问仓库文件。
+  审查 prompt 内已明确要求只读不修改，权限由 prompt 约束。"
 
 # 2. 根据审查报告修复问题
 
