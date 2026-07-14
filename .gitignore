@@ -57,6 +57,13 @@ deploy/pgdata/
 
 # Secrets, logs, and generated artifacts
 *.log
+*.bak
+*.backup
+*.dump
+*.sql.gz
+*.tar.gz
+*.tgz
+*.zip
 logs/
 *.pem
 *.key
