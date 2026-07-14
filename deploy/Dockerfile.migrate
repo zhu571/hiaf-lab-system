@@ -1,0 +1,10 @@
+FROM migrate/migrate:v4.17.0 AS migrate
+
+FROM python:3.12-alpine
+
+RUN apk add --no-cache ca-certificates
+
+COPY --from=migrate /usr/bin/migrate /usr/local/bin/migrate
+
+ENTRYPOINT ["migrate"]
+CMD ["--help"]

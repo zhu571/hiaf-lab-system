@@ -1,0 +1,76 @@
+version: "3.8"
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: lab-postgres
+    environment:
+      POSTGRES_USER: lab
+      POSTGRES_DB: lab
+      POSTGRES_PASSWORD_FILE: /run/secrets/db_password
+    secrets:
+      - db_password
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U lab -d lab"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 5s
+    restart: unless-stopped
+
+  migrate:
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile.migrate
+    container_name: lab-migrate
+    depends_on:
+      postgres:
+        condition: service_healthy
+    volumes:
+      - ../migrations:/migrations
+    secrets:
+      - db_password
+    entrypoint:
+      - "/bin/sh"
+      - "-c"
+      - "PASSWORD=$$(cat /run/secrets/db_password); ENCODED=$$(PASSWORD=\"$$PASSWORD\" python3 -c \"import os, urllib.parse; print(urllib.parse.quote_plus(os.environ['PASSWORD']))\"); migrate -path /migrations -database postgres://lab:$$ENCODED@postgres:5432/lab?sslmode=disable up"
+
+  server:
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile
+    container_name: lab-server
+    environment:
+      DB_HOST: postgres
+      DB_PORT: 5432
+      DB_USER: lab
+      DB_NAME: lab
+      PORT: 8000
+    secrets:
+      - db_password
+      - jwt_key
+    ports:
+      - "8000:8000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:8000/health || exit 1"]
+      interval: 10s
+      timeout: 3s
+      retries: 3
+      start_period: 5s
+    restart: unless-stopped
+
+volumes:
+  pgdata:
+
+secrets:
+  db_password:
+    file: ./secrets/db_password.txt
+  jwt_key:
+    file: ./secrets/jwt_key.txt
