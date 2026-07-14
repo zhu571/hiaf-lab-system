@@ -70,6 +70,9 @@ logs/
 *.crt
 *.p12
 *.pfx
-secrets/
+# Deploy secrets: keep directory, ignore generated credential files
+deploy/secrets/*.txt
+!deploy/secrets/.gitkeep
+
 tmp/
 temp/
