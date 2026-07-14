@@ -38,7 +38,7 @@ func RequireProjectAccess(lookup ProjectMemberLookup, minRole string) func(http.
 				common.WriteError(w, r, http.StatusInternalServerError, "internal_error", "项目权限查询失败", nil)
 				return
 			}
-			if !found || status != "active" || ProjectRoleRank(role) < ProjectRoleRank(minRole) {
+			if !found || status != "active" || roleRank(role) < roleRank(minRole) {
 				common.WriteError(w, r, http.StatusForbidden, "permission_denied", "当前用户无权访问该项目", nil)
 				return
 			}
@@ -54,7 +54,7 @@ func GetProjectRole(ctx context.Context) string {
 	return role
 }
 
-func ProjectRoleRank(role string) int {
+func roleRank(role string) int {
 	switch role {
 	case "viewer":
 		return 1

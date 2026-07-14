@@ -9,7 +9,6 @@ import (
 	"github.com/go-chi/chi/v5/middleware"
 	"github.com/zhu571/hiaf-lab-system/go-server/auth"
 	"github.com/zhu571/hiaf-lab-system/go-server/common"
-	"github.com/zhu571/hiaf-lab-system/go-server/logs"
 	mw "github.com/zhu571/hiaf-lab-system/go-server/middleware"
 	"github.com/zhu571/hiaf-lab-system/go-server/projects"
 )
@@ -44,9 +43,6 @@ func main() {
 	projectsRepo := projects.NewRepository(db)
 	projectsSvc := projects.NewService(projectsRepo)
 	projectsHandler := projects.NewHandler(projectsSvc)
-	logsRepo := logs.NewRepository(db)
-	logsSvc := logs.NewService(logsRepo, commonEnv("APP_TIMEZONE", "Asia/Shanghai"), logs.ProjectAccessAdapter{Repo: projectsRepo})
-	logsHandler := logs.NewHandler(logsSvc)
 	projectMemberLookup := func(projectID, userID string) (string, string, bool, error) {
 		member, err := projectsRepo.GetMember(projectID, userID)
 		if err != nil {
@@ -69,21 +65,6 @@ func main() {
 	})
 
 	r.Mount("/api/v1/auth", authHandler.Routes(mw.Audit(db)))
-	r.Route("/api/v1/daily-reports", func(r chi.Router) {
-		r.Use(mw.AuthRequired)
-		r.Use(mw.Audit(db))
-		r.Post("/", logsHandler.GetOrCreateTodayReport)
-		r.Get("/", logsHandler.GetReportByDate)
-		r.Get("/mine", logsHandler.ListMyReports)
-		r.Patch("/{id}", logsHandler.UpdateReportRawText)
-		r.Post("/{id}/submit", logsHandler.SubmitReport)
-	})
-	r.Route("/api/v1/logs", func(r chi.Router) {
-		r.Use(mw.AuthRequired)
-		r.Use(mw.Audit(db))
-		r.Get("/{id}", logsHandler.GetLog)
-		r.Patch("/{id}", logsHandler.UpdateLog)
-	})
 	r.Route("/api/v1/projects", func(r chi.Router) {
 		r.Use(mw.AuthRequired)
 		r.Use(mw.Audit(db))
@@ -95,12 +76,6 @@ func main() {
 			r.Get("/", projectsHandler.GetByID)
 			r.Post("/transition", projectsHandler.TransitionStatus)
 			r.Get("/members", projectsHandler.ListMembers)
-			r.Get("/logs", logsHandler.ListLogs)
-
-			r.Group(func(r chi.Router) {
-				r.Use(mw.RequireProjectAccess(projectMemberLookup, projects.RoleMember))
-				r.Post("/logs", logsHandler.CreateLog)
-			})
 
 			r.Group(func(r chi.Router) {
 				r.Use(mw.RequireProjectAccess(projectMemberLookup, projects.RoleMaintainer))
