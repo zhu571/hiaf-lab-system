@@ -449,12 +449,12 @@ on:
     branches: [develop, main]
 
 jobs:
-  backend:
-    name: backend
+  go-server:
+    name: go-server
     runs-on: ubuntu-latest
     defaults:
       run:
-        working-directory: backend
+        working-directory: go-server
     services:
       postgres:
         image: postgres:16
@@ -481,12 +481,12 @@ jobs:
         env:
           DATABASE_URL: postgres://lab:lab@localhost:5432/lab_daily_test?sslmode=disable
 
-  agent:
-    name: agent
+  py-agent:
+    name: py-agent
     runs-on: ubuntu-latest
     defaults:
       run:
-        working-directory: agent
+        working-directory: py-agent
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -496,12 +496,12 @@ jobs:
       - run: pip install -r requirements.txt
       - run: pytest
 
-  frontend:
-    name: frontend
+  web-ui:
+    name: web-ui
     runs-on: ubuntu-latest
     defaults:
       run:
-        working-directory: frontend
+        working-directory: web-ui
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -607,7 +607,7 @@ make migrate-up
 ### 8.5 启动后端
 
 ```bash
-cd backend
+cd go-server
 go mod download
 go run ./cmd/api
 ```
@@ -621,12 +621,12 @@ curl http://localhost:8080/healthz
 ### 8.6 启动 Agent
 
 ```bash
-cd agent
+cd py-agent
 python -m venv .venv
 source .venv/bin/activate
 pip install -r requirements.txt
 pytest
-python -m agent
+python worker.py
 ```
 
 Agent 本地开发默认只能调用测试 API 或 dry-run API。
@@ -634,7 +634,7 @@ Agent 本地开发默认只能调用测试 API 或 dry-run API。
 ### 8.7 启动前端
 
 ```bash
-cd frontend
+cd web-ui
 npm install
 npm run dev
 ```
