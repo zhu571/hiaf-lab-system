@@ -10,6 +10,7 @@ import (
 	"github.com/zhu571/hiaf-lab-system/go-server/auth"
 	"github.com/zhu571/hiaf-lab-system/go-server/common"
 	mw "github.com/zhu571/hiaf-lab-system/go-server/middleware"
+	"github.com/zhu571/hiaf-lab-system/go-server/projects"
 )
 
 func main() {
@@ -39,6 +40,19 @@ func main() {
 	}
 	authSvc := auth.NewService(authRepo, []byte(jwtSecret))
 	authHandler := auth.NewHandler(authSvc)
+	projectsRepo := projects.NewRepository(db)
+	projectsSvc := projects.NewService(projectsRepo)
+	projectsHandler := projects.NewHandler(projectsSvc)
+	projectMemberLookup := func(projectID, userID string) (string, string, bool, error) {
+		member, err := projectsRepo.GetMember(projectID, userID)
+		if err != nil {
+			return "", "", false, err
+		}
+		if member == nil {
+			return "", "", false, nil
+		}
+		return member.Role, member.Status, true, nil
+	}
 
 	r := chi.NewRouter()
 	r.Use(middleware.RealIP)
@@ -51,6 +65,27 @@ func main() {
 	})
 
 	r.Mount("/api/v1/auth", authHandler.Routes(mw.Audit(db)))
+	r.Route("/api/v1/projects", func(r chi.Router) {
+		r.Use(mw.AuthRequired)
+		r.Use(mw.Audit(db))
+		r.Get("/", projectsHandler.List)
+		r.Post("/", projectsHandler.Create)
+
+		r.Route("/{id}", func(r chi.Router) {
+			r.Use(mw.RequireProjectAccess(projectMemberLookup, projects.RoleViewer))
+			r.Get("/", projectsHandler.GetByID)
+			r.Post("/transition", projectsHandler.TransitionStatus)
+			r.Get("/members", projectsHandler.ListMembers)
+
+			r.Group(func(r chi.Router) {
+				r.Use(mw.RequireProjectAccess(projectMemberLookup, projects.RoleMaintainer))
+				r.Patch("/", projectsHandler.Update)
+				r.Post("/members", projectsHandler.AddMember)
+				r.Patch("/members/{userID}", projectsHandler.UpdateMemberRole)
+				r.Delete("/members/{userID}", projectsHandler.RemoveMember)
+			})
+		})
+	})
 
 	port := commonEnv("PORT", "8000")
 	slog.Info("server starting", "port", port)
