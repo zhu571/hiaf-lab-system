@@ -65,6 +65,8 @@ deploy/pgdata/
 *.tgz
 *.zip
 logs/
+!go-server/logs/
+!go-server/logs/**
 *.pem
 *.key
 *.crt
