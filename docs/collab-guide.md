@@ -59,7 +59,7 @@
 
 ```text
 lab-daily-report/
-├── backend/              # Go + chi API
+├── go-server/           # Go + chi API
 │   ├── cmd/api/
 │   ├── internal/auth/
 │   ├── internal/projects/
@@ -73,8 +73,8 @@ lab-daily-report/
 │   ├── internal/instruments/
 │   ├── internal/audit/
 │   └── internal/platform/
-├── agent/                # Python + LightAgent
-├── frontend/             # Vue 3
+├── py-agent/             # Python + LightAgent
+├── web-ui/               # Vue 3
 ├── migrations/           # PostgreSQL 迁移
 ├── deploy/               # Docker、Nginx、systemd、备份脚本
 ├── docs/                 # 设计和协作文档
@@ -508,7 +508,7 @@ jobs:
         with:
           node-version: "20"
           cache: npm
-          cache-dependency-path: frontend/package-lock.json
+          cache-dependency-path: web-ui/package-lock.json
       - run: npm ci
       - run: npm run lint
       - run: npm run test -- --run
@@ -517,7 +517,7 @@ jobs:
 
 说明：
 
-- 当前仓库如果还没有 `backend/agent/frontend` 目录，可先按实际目录删减 job。
+- 当前仓库如果还没有 `go-server/py-agent/web-ui` 目录，可先按实际目录删减 job。
 - CI 中的格式检查应只检查，不在 CI 自动提交格式化结果。
 - 后续可增加 `migrations` job，专门验证 PostgreSQL 迁移。
 
@@ -794,7 +794,7 @@ except ApiPermissionError:
 目录建议：
 
 ```text
-frontend/src/
+web-ui/src/
 ├── api/
 ├── components/
 ├── views/
