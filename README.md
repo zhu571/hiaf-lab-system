@@ -10,10 +10,11 @@ Go (chi) + Vue 3 (Element Plus) + PostgreSQL + Python (LightAgent)
 
 ## 入口文档
 
-- 人类入口：[docs/设计总纲.md](docs/设计总纲.md)
-- AI 编程助手入口：[AGENTS.md](AGENTS.md)
-- 协作流程：[docs/collab-guide.md](docs/collab-guide.md)
-- API 契约：[docs/api-contract.md](docs/api-contract.md)
+| 人类入口：[docs/设计总纲.md](docs/设计总纲.md) |
+| AI 编程助手入口：[AGENTS.md](AGENTS.md) |
+| Git 工作流与 PR 流程：[CONTRIBUTING.md](CONTRIBUTING.md) |
+| 协作流程：[docs/collab-guide.md](docs/collab-guide.md) |
+| API 契约：[docs/api-contract.md](docs/api-contract.md) |
 
 ## 快速开始
 
