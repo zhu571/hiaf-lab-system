@@ -9,6 +9,7 @@ import (
 	"github.com/go-chi/chi/v5/middleware"
 	"github.com/zhu571/hiaf-lab-system/go-server/auth"
 	"github.com/zhu571/hiaf-lab-system/go-server/common"
+	"github.com/zhu571/hiaf-lab-system/go-server/issues"
 	mw "github.com/zhu571/hiaf-lab-system/go-server/middleware"
 	"github.com/zhu571/hiaf-lab-system/go-server/projects"
 )
@@ -43,6 +44,9 @@ func main() {
 	projectsRepo := projects.NewRepository(db)
 	projectsSvc := projects.NewService(projectsRepo)
 	projectsHandler := projects.NewHandler(projectsSvc)
+	issuesRepo := issues.NewRepository(db)
+	issuesSvc := issues.NewService(issuesRepo, issues.ProjectAccessAdapter{Repo: projectsRepo})
+	issuesHandler := issues.NewHandler(issuesSvc)
 	projectMemberLookup := func(projectID, userID string) (string, string, bool, error) {
 		member, err := projectsRepo.GetMember(projectID, userID)
 		if err != nil {
@@ -76,6 +80,7 @@ func main() {
 			r.Get("/", projectsHandler.GetByID)
 			r.Post("/transition", projectsHandler.TransitionStatus)
 			r.Get("/members", projectsHandler.ListMembers)
+			r.Get("/issues", issuesHandler.List)
 
 			r.Group(func(r chi.Router) {
 				r.Use(mw.RequireProjectAccess(projectMemberLookup, projects.RoleMaintainer))
@@ -84,6 +89,21 @@ func main() {
 				r.Patch("/members/{userID}", projectsHandler.UpdateMemberRole)
 				r.Delete("/members/{userID}", projectsHandler.RemoveMember)
 			})
+
+			r.Group(func(r chi.Router) {
+				r.Use(mw.RequireProjectAccess(projectMemberLookup, projects.RoleMember))
+				r.Post("/issues", issuesHandler.Create)
+			})
+		})
+	})
+	r.Route("/api/v1/issues", func(r chi.Router) {
+		r.Use(mw.AuthRequired)
+		r.Use(mw.Audit(db))
+		r.Route("/{id}", func(r chi.Router) {
+			r.Get("/", issuesHandler.GetByID)
+			r.Patch("/", issuesHandler.Update)
+			r.Post("/transition", issuesHandler.Transition)
+			r.Post("/comments", issuesHandler.AddComment)
 		})
 	})
 
