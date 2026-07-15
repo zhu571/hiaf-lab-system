@@ -6,20 +6,32 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"os"
+	"strings"
 	"time"
 )
 
-// epicsGateway is the base URL for the EPICS gateway service.
-const epicsGateway = "http://localhost:5070"
-
 // Service wraps calls to the EPICS gateway.
 type Service struct {
-	client *http.Client
+	client  *http.Client
+	gateway string
 }
 
 // NewService creates an instruments Service with a 10s timeout HTTP client.
-func NewService() *Service {
-	return &Service{client: &http.Client{Timeout: 10 * time.Second}}
+func NewService() (*Service, error) {
+	gateway := os.Getenv("EPICS_GATEWAY_ADDR")
+	if gateway == "" {
+		return nil, fmt.Errorf("EPICS_GATEWAY_ADDR is required")
+	}
+	return NewServiceWithGateway(gateway), nil
+}
+
+// NewServiceWithGateway creates a Service for tests and explicit callers.
+func NewServiceWithGateway(gateway string) *Service {
+	return &Service{
+		client:  &http.Client{Timeout: 10 * time.Second},
+		gateway: normalizeHTTPBase(gateway),
+	}
 }
 
 // gatewayPV represents a single PV value from the EPICS gateway.
@@ -40,19 +52,40 @@ type gatewayRunningPV struct {
 	Value int    `json:"value"`
 }
 
-// getPV fetches a float64 PV from the gateway by name.
-func (s *Service) getPV(name string) (float64, error) {
-	resp, err := s.client.Get(epicsGateway + "/" + name)
+func normalizeHTTPBase(addr string) string {
+	addr = strings.TrimRight(addr, "/")
+	if strings.HasPrefix(addr, "http://") || strings.HasPrefix(addr, "https://") {
+		return addr
+	}
+	return "http://" + addr
+}
+
+// getPVRaw fetches a raw PV JSON body from the gateway by name.
+func (s *Service) getPVRaw(name string) ([]byte, error) {
+	resp, err := s.client.Get(s.gateway + "/" + name)
 	if err != nil {
-		return 0, fmt.Errorf("epics gateway get %s: %w", name, err)
+		return nil, fmt.Errorf("epics gateway get %s: %w", name, err)
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
 		body, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
-		return 0, fmt.Errorf("epics gateway returned %d for %s: %s", resp.StatusCode, name, string(body))
+		return nil, fmt.Errorf("epics gateway returned %d for %s: %s", resp.StatusCode, name, string(body))
+	}
+	body, err := io.ReadAll(io.LimitReader(resp.Body, 4096))
+	if err != nil {
+		return nil, fmt.Errorf("read %s response: %w", name, err)
+	}
+	return body, nil
+}
+
+// getPV fetches a float64 PV from the gateway by name.
+func (s *Service) getPV(name string) (float64, error) {
+	body, err := s.getPVRaw(name)
+	if err != nil {
+		return 0, err
 	}
 	var pv gatewayPV
-	if err := json.NewDecoder(resp.Body).Decode(&pv); err != nil {
+	if err := json.Unmarshal(body, &pv); err != nil {
 		return 0, fmt.Errorf("decode %s response: %w", name, err)
 	}
 	return pv.Value, nil
@@ -60,17 +93,12 @@ func (s *Service) getPV(name string) (float64, error) {
 
 // getStringPV fetches a string PV from the gateway.
 func (s *Service) getStringPV(name string) (string, error) {
-	resp, err := s.client.Get(epicsGateway + "/" + name)
+	body, err := s.getPVRaw(name)
 	if err != nil {
-		return "", fmt.Errorf("epics gateway get %s: %w", name, err)
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		body, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
-		return "", fmt.Errorf("epics gateway returned %d for %s: %s", resp.StatusCode, name, string(body))
+		return "", err
 	}
 	var pv gatewayStringPV
-	if err := json.NewDecoder(resp.Body).Decode(&pv); err != nil {
+	if err := json.Unmarshal(body, &pv); err != nil {
 		return "", fmt.Errorf("decode %s response: %w", name, err)
 	}
 	return pv.Value, nil
@@ -78,17 +106,12 @@ func (s *Service) getStringPV(name string) (string, error) {
 
 // getIntPV fetches an int PV from the gateway.
 func (s *Service) getIntPV(name string) (int, error) {
-	resp, err := s.client.Get(epicsGateway + "/" + name)
+	body, err := s.getPVRaw(name)
 	if err != nil {
-		return 0, fmt.Errorf("epics gateway get %s: %w", name, err)
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		body, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
-		return 0, fmt.Errorf("epics gateway returned %d for %s: %s", resp.StatusCode, name, string(body))
+		return 0, err
 	}
 	var pv gatewayRunningPV
-	if err := json.NewDecoder(resp.Body).Decode(&pv); err != nil {
+	if err := json.Unmarshal(body, &pv); err != nil {
 		return 0, fmt.Errorf("decode %s response: %w", name, err)
 	}
 	return pv.Value, nil
@@ -100,7 +123,7 @@ func (s *Service) putPV(name string, value any) error {
 	if err != nil {
 		return fmt.Errorf("marshal setpoint: %w", err)
 	}
-	resp, err := s.client.Post(epicsGateway+"/"+name, "application/json", bytes.NewReader(body))
+	resp, err := s.client.Post(s.gateway+"/"+name, "application/json", bytes.NewReader(body))
 	if err != nil {
 		return fmt.Errorf("epics gateway post %s: %w", name, err)
 	}

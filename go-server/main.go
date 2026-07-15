@@ -12,9 +12,9 @@ import (
 	"github.com/zhu571/hiaf-lab-system/go-server/experiences"
 	"github.com/zhu571/hiaf-lab-system/go-server/instruments"
 	"github.com/zhu571/hiaf-lab-system/go-server/issues"
-	"github.com/zhu571/hiaf-lab-system/go-server/sensors"
 	mw "github.com/zhu571/hiaf-lab-system/go-server/middleware"
 	"github.com/zhu571/hiaf-lab-system/go-server/projects"
+	"github.com/zhu571/hiaf-lab-system/go-server/sensors"
 )
 
 func main() {
@@ -53,9 +53,17 @@ func main() {
 	experiencesRepo := experiences.NewRepository(db)
 	experiencesSvc := experiences.NewService(experiencesRepo, experiences.ProjectAccessAdapter{Repo: projectsRepo})
 	experiencesHandler := experiences.NewHandler(experiencesSvc)
-	instrumentsSvc := instruments.NewService()
+	instrumentsSvc, err := instruments.NewService()
+	if err != nil {
+		slog.Error("failed to configure instruments service", "error", err)
+		os.Exit(1)
+	}
 	instrumentsHandler := instruments.NewHandler(instrumentsSvc)
-	sensorsSvc := sensors.NewService()
+	sensorsSvc, err := sensors.NewService()
+	if err != nil {
+		slog.Error("failed to configure sensors service", "error", err)
+		os.Exit(1)
+	}
 	sensorsHandler := sensors.NewHandler(sensorsSvc)
 	projectMemberLookup := func(projectID, userID string) (string, string, bool, error) {
 		member, err := projectsRepo.GetMember(projectID, userID)

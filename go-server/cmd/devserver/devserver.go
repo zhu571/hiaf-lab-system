@@ -5,6 +5,7 @@
 package main
 
 import (
+	"log"
 	"net/http"
 	"os"
 
@@ -14,8 +15,16 @@ import (
 )
 
 func main() {
-	is := instruments.NewHandler(instruments.NewService())
-	ss := sensors.NewHandler(sensors.NewService())
+	instrumentsSvc, err := instruments.NewService()
+	if err != nil {
+		log.Fatal(err)
+	}
+	sensorsSvc, err := sensors.NewService()
+	if err != nil {
+		log.Fatal(err)
+	}
+	is := instruments.NewHandler(instrumentsSvc)
+	ss := sensors.NewHandler(sensorsSvc)
 
 	r := chi.NewRouter()
 	r.Get("/health", func(w http.ResponseWriter, _ *http.Request) {
