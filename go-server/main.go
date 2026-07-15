@@ -9,7 +9,10 @@ import (
 	"github.com/go-chi/chi/v5/middleware"
 	"github.com/zhu571/hiaf-lab-system/go-server/auth"
 	"github.com/zhu571/hiaf-lab-system/go-server/common"
+	"github.com/zhu571/hiaf-lab-system/go-server/experiences"
+	"github.com/zhu571/hiaf-lab-system/go-server/instruments"
 	"github.com/zhu571/hiaf-lab-system/go-server/issues"
+	"github.com/zhu571/hiaf-lab-system/go-server/sensors"
 	mw "github.com/zhu571/hiaf-lab-system/go-server/middleware"
 	"github.com/zhu571/hiaf-lab-system/go-server/projects"
 )
@@ -47,6 +50,13 @@ func main() {
 	issuesRepo := issues.NewRepository(db)
 	issuesSvc := issues.NewService(issuesRepo, issues.ProjectAccessAdapter{Repo: projectsRepo})
 	issuesHandler := issues.NewHandler(issuesSvc)
+	experiencesRepo := experiences.NewRepository(db)
+	experiencesSvc := experiences.NewService(experiencesRepo, experiences.ProjectAccessAdapter{Repo: projectsRepo})
+	experiencesHandler := experiences.NewHandler(experiencesSvc)
+	instrumentsSvc := instruments.NewService()
+	instrumentsHandler := instruments.NewHandler(instrumentsSvc)
+	sensorsSvc := sensors.NewService()
+	sensorsHandler := sensors.NewHandler(sensorsSvc)
 	projectMemberLookup := func(projectID, userID string) (string, string, bool, error) {
 		member, err := projectsRepo.GetMember(projectID, userID)
 		if err != nil {
@@ -105,6 +115,34 @@ func main() {
 			r.Post("/transition", issuesHandler.Transition)
 			r.Post("/comments", issuesHandler.AddComment)
 		})
+	})
+	r.Route("/api/v1/experiences", func(r chi.Router) {
+		r.Use(mw.AuthRequired)
+		r.Use(mw.Audit(db))
+		r.Get("/", experiencesHandler.List)
+		r.Post("/", experiencesHandler.Create)
+		r.Route("/{id}", func(r chi.Router) {
+			r.Get("/", experiencesHandler.GetByID)
+			r.Patch("/", experiencesHandler.Update)
+			r.Post("/publish", experiencesHandler.Publish)
+			r.Post("/archive", experiencesHandler.Archive)
+		})
+	})
+	r.Route("/api/v1/instruments", func(r chi.Router) {
+		r.Use(mw.AuthRequired)
+		r.Use(mw.Audit(db))
+		r.Route("/piezo", func(r chi.Router) {
+			r.Get("/status", instrumentsHandler.PiezoStatus)
+			r.Post("/start", instrumentsHandler.PiezoStart)
+			r.Post("/stop", instrumentsHandler.PiezoStop)
+			r.Post("/setpoint", instrumentsHandler.PiezoSetpoint)
+		})
+	})
+	r.Route("/api/v1/sensors", func(r chi.Router) {
+		r.Use(mw.AuthRequired)
+		r.Use(mw.Audit(db))
+		r.Get("/latest", sensorsHandler.Latest)
+		r.Get("/history", sensorsHandler.History)
 	})
 
 	port := commonEnv("PORT", "8000")
