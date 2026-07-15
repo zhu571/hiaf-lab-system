@@ -1,4 +1,5 @@
-// +build ignore
+//go:build ignore
+
 // Minimal server to test instruments/sensors without PostgreSQL.
 // Usage: go run devserver.go
 package main
