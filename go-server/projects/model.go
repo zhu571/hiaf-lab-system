@@ -11,6 +11,10 @@ const (
 	VisibilityRestricted = "restricted"
 	VisibilityWorkspace  = "workspace"
 
+	CommentPolicyEveryone = "everyone"
+	CommentPolicyMembers  = "members"
+	CommentPolicyDisabled = "disabled"
+
 	RoleOwner      = "owner"
 	RoleMaintainer = "maintainer"
 	RoleMember     = "member"
@@ -28,6 +32,7 @@ type Project struct {
 	Description     string     `json:"description"`
 	Status          string     `json:"status"`
 	Visibility      string     `json:"visibility"`
+	CommentPolicy   string     `json:"comment_policy"`
 	OwnerUserID     string     `json:"owner_user_id"`
 	StartDate       *string    `json:"start_date"`
 	TargetEndDate   *string    `json:"target_end_date"`
@@ -46,6 +51,8 @@ type ProjectMember struct {
 	UserID    string    `json:"user_id"`
 	Role      string    `json:"role"`
 	Status    string    `json:"status"`
+	Overrides []byte    `json:"-"`
+	Muted     bool      `json:"muted"`
 	JoinedAt  time.Time `json:"joined_at"`
 	AddedBy   string    `json:"added_by"`
 }
@@ -67,6 +74,7 @@ type UpdateProjectRequest struct {
 	ShortName       *string  `json:"short_name,omitempty"`
 	Description     *string  `json:"description,omitempty"`
 	Visibility      *string  `json:"visibility,omitempty"`
+	CommentPolicy   *string  `json:"comment_policy,omitempty"`
 	StartDate       *string  `json:"start_date,omitempty"`
 	TargetEndDate   *string  `json:"target_end_date,omitempty"`
 	DefaultCategory *string  `json:"default_category,omitempty"`

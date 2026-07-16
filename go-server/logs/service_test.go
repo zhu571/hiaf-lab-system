@@ -5,6 +5,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/zhu571/hiaf-lab-system/go-server/middleware"
 	"github.com/zhu571/hiaf-lab-system/go-server/projects"
 )
 
@@ -183,7 +184,11 @@ func (f fakeAccess) ProjectExists(projectID string) (bool, error) {
 	return true, nil
 }
 
-func (f fakeAccess) CanAccessProject(projectID, userID, userRole, minRole string) (bool, error) {
+func (f fakeAccess) ProjectStatus(projectID string) (string, error) {
+	return projects.StatusActive, nil
+}
+
+func (f fakeAccess) HasProjectPermission(projectID, userID string, perm middleware.Permission) (bool, error) {
 	return f.canAccess, nil
 }
 

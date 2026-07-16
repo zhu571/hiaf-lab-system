@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/zhu571/hiaf-lab-system/go-server/auth"
+	"github.com/zhu571/hiaf-lab-system/go-server/middleware"
 	"github.com/zhu571/hiaf-lab-system/go-server/projects"
 )
 
@@ -116,13 +117,12 @@ func TestTransitionPermissionMatrix(t *testing.T) {
 			target: StatusResolved,
 		},
 		{
-			name:   "in_progress to resolved rejects maintainer",
+			name:   "in_progress to resolved allows maintainer",
 			issue:  testIssue("iss_1", StatusInProgress, "usr_author", &assignee),
 			userID: "usr_maintainer",
 			role:   auth.RoleMember,
 			target: StatusResolved,
 			roles:  map[string]string{"usr_maintainer": projects.RoleMaintainer},
-			want:   ErrTransitionForbidden,
 		},
 		{
 			name:   "resolved to closed allows author",
@@ -155,12 +155,11 @@ func TestTransitionPermissionMatrix(t *testing.T) {
 			roles:  map[string]string{"usr_owner": projects.RoleOwner},
 		},
 		{
-			name:   "open to closed rejects author",
+			name:   "open to closed allows author with update_issue",
 			issue:  testIssue("iss_1", StatusOpen, "usr_author", &assignee),
 			userID: "usr_author",
 			role:   auth.RoleMember,
 			target: StatusClosed,
-			want:   ErrTransitionForbidden,
 		},
 	}
 
@@ -256,9 +255,10 @@ func reasonFor(from, to string) string {
 }
 
 type fakeProjectAccess struct {
-	status string
-	roles  map[string]string
-	exists bool
+	status        string
+	roles         map[string]string
+	exists        bool
+	commentPolicy string
 }
 
 func (f fakeProjectAccess) ProjectExists(projectID string) (bool, error) {
@@ -272,29 +272,46 @@ func (f fakeProjectAccess) ProjectStatus(projectID string) (string, error) {
 	return f.status, nil
 }
 
-func (f fakeProjectAccess) CanAccessProject(projectID, userID, userRole, minRole string) (bool, error) {
-	if userRole == auth.RoleAdmin {
+func (f fakeProjectAccess) ProjectCommentPolicy(projectID string) (string, error) {
+	if f.commentPolicy != "" {
+		return f.commentPolicy, nil
+	}
+	return projects.CommentPolicyMembers, nil
+}
+
+func (f fakeProjectAccess) HasProjectPermission(projectID, userID string, perm middleware.Permission) (bool, error) {
+	if userID == "admin_1" {
 		return true, nil
 	}
 	role, ok := f.roles[userID]
 	if !ok {
 		return false, nil
 	}
-	return projectRoleRank(role) >= projectRoleRank(minRole), nil
+	return fakeRoleHasPermission(role, perm), nil
 }
 
-func projectRoleRank(role string) int {
+func fakeRoleHasPermission(role string, perm middleware.Permission) bool {
 	switch role {
 	case projects.RoleOwner:
-		return 40
+		return true
 	case projects.RoleMaintainer:
-		return 30
+		return perm != middleware.PermManageMembers
 	case projects.RoleMember:
-		return 20
+		switch perm {
+		case middleware.PermRead,
+			middleware.PermCreateLog,
+			middleware.PermUpdateOwnLog,
+			middleware.PermCreateIssue,
+			middleware.PermUpdateIssue,
+			middleware.PermCreateExperience:
+			return true
+		default:
+			return false
+		}
 	case projects.RoleViewer:
-		return 10
+		return perm == middleware.PermRead
 	default:
-		return 0
+		return false
 	}
 }
 

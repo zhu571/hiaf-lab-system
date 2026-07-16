@@ -238,6 +238,8 @@ func (h *Handler) writeError(w http.ResponseWriter, r *http.Request, err error, 
 		common.WriteError(w, r, http.StatusBadRequest, "no_log_entries", err.Error(), details)
 	case errors.Is(err, ErrLogProjectMissing):
 		common.WriteError(w, r, http.StatusBadRequest, "log_project_missing", err.Error(), details)
+	case errors.Is(err, ErrProjectLifecycleBlocked):
+		common.WriteError(w, r, http.StatusBadRequest, "project_lifecycle_blocked", err.Error(), details)
 	case errors.Is(err, ErrLogVoided):
 		common.WriteError(w, r, http.StatusBadRequest, "log_voided", err.Error(), details)
 	case errors.Is(err, ErrLogNotDraft):

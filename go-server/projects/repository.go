@@ -24,13 +24,13 @@ func (r *Repository) Create(p *Project) (*Project, error) {
 	var project Project
 	err = scanProject(r.db.QueryRow(
 		`INSERT INTO projects
-		 (code, name, short_name, description, status, visibility, owner_user_id,
+		 (code, name, short_name, description, status, visibility, comment_policy, owner_user_id,
 		  start_date, target_end_date, default_category, tags_json, created_by)
-		 VALUES ($1, $2, $3, $4, $5, $6, $7, NULLIF($8, '')::date, NULLIF($9, '')::date, $10, $11, $12)
-		 RETURNING id, code, name, short_name, description, status, visibility, owner_user_id,
+		 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, NULLIF($9, '')::date, NULLIF($10, '')::date, $11, $12, $13)
+		 RETURNING id, code, name, short_name, description, status, visibility, comment_policy, owner_user_id,
 		           start_date, target_end_date, completed_at, archived_at, default_category, tags_json,
 		           created_by, created_at, updated_at`,
-		p.Code, p.Name, p.ShortName, p.Description, p.Status, p.Visibility, p.OwnerUserID,
+		p.Code, p.Name, p.ShortName, p.Description, p.Status, p.Visibility, p.CommentPolicy, p.OwnerUserID,
 		stringPtrValue(p.StartDate), stringPtrValue(p.TargetEndDate), p.DefaultCategory, tagsJSON, p.CreatedBy,
 	), &project)
 	if err != nil {
@@ -50,7 +50,7 @@ func (r *Repository) GetByCode(code string) (*Project, error) {
 func (r *Repository) List(userID, status string, includeAll bool) ([]Project, error) {
 	args := []any{}
 	query := `SELECT p.id, p.code, p.name, p.short_name, p.description, p.status, p.visibility,
-	                 p.owner_user_id, p.start_date, p.target_end_date, p.completed_at, p.archived_at, p.default_category,
+	                 p.comment_policy, p.owner_user_id, p.start_date, p.target_end_date, p.completed_at, p.archived_at, p.default_category,
 	                 p.tags_json, p.created_by, p.created_at, p.updated_at
 	          FROM projects p`
 	if !includeAll {
@@ -101,16 +101,17 @@ func (r *Repository) Update(p *Project) (*Project, error) {
 		     short_name = $3,
 		     description = $4,
 		     visibility = $5,
-		     start_date = NULLIF($6, '')::date,
-		     target_end_date = NULLIF($7, '')::date,
-		     default_category = $8,
-		     tags_json = $9,
+		     comment_policy = $6,
+		     start_date = NULLIF($7, '')::date,
+		     target_end_date = NULLIF($8, '')::date,
+		     default_category = $9,
+		     tags_json = $10,
 		     updated_at = now()
 		 WHERE id = $1
-		 RETURNING id, code, name, short_name, description, status, visibility, owner_user_id,
+		 RETURNING id, code, name, short_name, description, status, visibility, comment_policy, owner_user_id,
 		           start_date, target_end_date, completed_at, archived_at, default_category, tags_json,
 		           created_by, created_at, updated_at`,
-		p.ID, p.Name, p.ShortName, p.Description, p.Visibility, stringPtrValue(p.StartDate),
+		p.ID, p.Name, p.ShortName, p.Description, p.Visibility, p.CommentPolicy, stringPtrValue(p.StartDate),
 		stringPtrValue(p.TargetEndDate), p.DefaultCategory, tagsJSON,
 	), &project)
 	if err != nil {
@@ -131,7 +132,7 @@ func (r *Repository) UpdateStatus(id, status string) (*Project, error) {
 		     archived_at = CASE WHEN $2 = 'archived' THEN COALESCE(archived_at, now()) ELSE archived_at END,
 		     updated_at = now()
 		 WHERE id = $1
-		 RETURNING id, code, name, short_name, description, status, visibility, owner_user_id,
+		 RETURNING id, code, name, short_name, description, status, visibility, comment_policy, owner_user_id,
 		           start_date, target_end_date, completed_at, archived_at, default_category, tags_json,
 		           created_by, created_at, updated_at`,
 		id, status,
@@ -152,9 +153,9 @@ func (r *Repository) AddMember(projectID, userID, role, addedBy string) (*Projec
 		 VALUES ($1, $2, $3, 'active', $4)
 		 ON CONFLICT (project_id, user_id)
 		 DO UPDATE SET role = EXCLUDED.role, status = 'active', added_by = EXCLUDED.added_by
-		 RETURNING project_id, user_id, role, status, joined_at, added_by`,
+		 RETURNING project_id, user_id, role, status, overrides, muted, joined_at, added_by`,
 		projectID, userID, role, addedBy,
-	).Scan(&m.ProjectID, &m.UserID, &m.Role, &m.Status, &m.JoinedAt, &m.AddedBy)
+	).Scan(&m.ProjectID, &m.UserID, &m.Role, &m.Status, &m.Overrides, &m.Muted, &m.JoinedAt, &m.AddedBy)
 	if err != nil {
 		return nil, fmt.Errorf("add project member: %w", err)
 	}
@@ -173,9 +174,9 @@ func (r *Repository) UpdateMemberRole(projectID, userID, role string) (*ProjectM
 	err := r.db.QueryRow(
 		`UPDATE project_members SET role = $3
 		 WHERE project_id = $1 AND user_id = $2
-		 RETURNING project_id, user_id, role, status, joined_at, added_by`,
+		 RETURNING project_id, user_id, role, status, overrides, muted, joined_at, added_by`,
 		projectID, userID, role,
-	).Scan(&m.ProjectID, &m.UserID, &m.Role, &m.Status, &m.JoinedAt, &m.AddedBy)
+	).Scan(&m.ProjectID, &m.UserID, &m.Role, &m.Status, &m.Overrides, &m.Muted, &m.JoinedAt, &m.AddedBy)
 	if err != nil {
 		if err == sql.ErrNoRows {
 			return nil, nil
@@ -187,7 +188,7 @@ func (r *Repository) UpdateMemberRole(projectID, userID, role string) (*ProjectM
 
 func (r *Repository) ListMembers(projectID string) ([]ProjectMember, error) {
 	rows, err := r.db.Query(
-		`SELECT project_id, user_id, role, status, joined_at, added_by
+		`SELECT project_id, user_id, role, status, overrides, muted, joined_at, added_by
 		 FROM project_members
 		 WHERE project_id = $1
 		 ORDER BY role, joined_at`,
@@ -201,7 +202,7 @@ func (r *Repository) ListMembers(projectID string) ([]ProjectMember, error) {
 	var members []ProjectMember
 	for rows.Next() {
 		var m ProjectMember
-		if err := rows.Scan(&m.ProjectID, &m.UserID, &m.Role, &m.Status, &m.JoinedAt, &m.AddedBy); err != nil {
+		if err := rows.Scan(&m.ProjectID, &m.UserID, &m.Role, &m.Status, &m.Overrides, &m.Muted, &m.JoinedAt, &m.AddedBy); err != nil {
 			return nil, fmt.Errorf("scan project member: %w", err)
 		}
 		members = append(members, m)
@@ -215,11 +216,11 @@ func (r *Repository) ListMembers(projectID string) ([]ProjectMember, error) {
 func (r *Repository) GetMember(projectID, userID string) (*ProjectMember, error) {
 	var m ProjectMember
 	err := r.db.QueryRow(
-		`SELECT project_id, user_id, role, status, joined_at, added_by
+		`SELECT project_id, user_id, role, status, overrides, muted, joined_at, added_by
 		 FROM project_members
 		 WHERE project_id = $1 AND user_id = $2`,
 		projectID, userID,
-	).Scan(&m.ProjectID, &m.UserID, &m.Role, &m.Status, &m.JoinedAt, &m.AddedBy)
+	).Scan(&m.ProjectID, &m.UserID, &m.Role, &m.Status, &m.Overrides, &m.Muted, &m.JoinedAt, &m.AddedBy)
 	if err != nil {
 		if err == sql.ErrNoRows {
 			return nil, nil
@@ -290,7 +291,7 @@ func (r *Repository) CountOwners(projectID string) (int, error) {
 func (r *Repository) get(where string, arg any) (*Project, error) {
 	var project Project
 	err := scanProject(r.db.QueryRow(
-		`SELECT id, code, name, short_name, description, status, visibility, owner_user_id,
+		`SELECT id, code, name, short_name, description, status, visibility, comment_policy, owner_user_id,
 		        start_date, target_end_date, completed_at, archived_at, default_category, tags_json,
 		        created_by, created_at, updated_at
 		 FROM projects `+where,
@@ -314,7 +315,7 @@ func scanProject(row rowScanner, p *Project) error {
 	var completedAt, archivedAt sql.NullTime
 	err := row.Scan(
 		&p.ID, &p.Code, &p.Name, &p.ShortName, &p.Description, &p.Status, &p.Visibility,
-		&p.OwnerUserID, &startDate, &targetEndDate, &completedAt, &archivedAt, &p.DefaultCategory, &p.TagsJSON,
+		&p.CommentPolicy, &p.OwnerUserID, &startDate, &targetEndDate, &completedAt, &archivedAt, &p.DefaultCategory, &p.TagsJSON,
 		&p.CreatedBy, &p.CreatedAt, &p.UpdatedAt,
 	)
 	if err != nil {

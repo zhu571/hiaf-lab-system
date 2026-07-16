@@ -1,11 +1,11 @@
 package logs
 
 import (
+	"database/sql"
 	"errors"
 	"strings"
 	"time"
 
-	"github.com/zhu571/hiaf-lab-system/go-server/auth"
 	"github.com/zhu571/hiaf-lab-system/go-server/middleware"
 	"github.com/zhu571/hiaf-lab-system/go-server/projects"
 )
@@ -21,18 +21,20 @@ var (
 	ErrLogNotDraft       = errors.New("只能修改草稿状态下的记录")
 	ErrPerPageTooLarge   = errors.New("每页最大100条")
 
-	ErrLogNotFound      = errors.New("工作记录不存在")
-	ErrProjectNotFound  = errors.New("项目不存在")
-	ErrForbidden        = errors.New("当前用户无权访问该项目")
-	ErrInvalidInput     = errors.New("请求参数无效")
-	ErrReportWarning    = errors.New("日报存在警告")
-	ErrInvalidTimeZone  = errors.New("时区配置无效")
-	ErrLogOwnerMismatch = errors.New("只能修改自己的工作记录")
+	ErrLogNotFound             = errors.New("工作记录不存在")
+	ErrProjectNotFound         = errors.New("项目不存在")
+	ErrForbidden               = errors.New("当前用户无权访问该项目")
+	ErrInvalidInput            = errors.New("请求参数无效")
+	ErrReportWarning           = errors.New("日报存在警告")
+	ErrInvalidTimeZone         = errors.New("时区配置无效")
+	ErrLogOwnerMismatch        = errors.New("只能修改自己的工作记录")
+	ErrProjectLifecycleBlocked = errors.New("项目当前状态不允许修改工作记录")
 )
 
 type ProjectAccessChecker interface {
 	ProjectExists(projectID string) (bool, error)
-	CanAccessProject(projectID, userID, userRole, minRole string) (bool, error)
+	ProjectStatus(projectID string) (string, error)
+	HasProjectPermission(projectID, userID string, perm middleware.Permission) (bool, error)
 }
 
 type logRepository interface {
@@ -131,7 +133,7 @@ func (s *Service) CreateLog(projectID, userID, userRole string, req CreateLogReq
 	if !exists {
 		return nil, ErrProjectNotFound
 	}
-	ok, err := s.access.CanAccessProject(projectID, userID, userRole, projects.RoleMember)
+	ok, err := s.access.HasProjectPermission(projectID, userID, middleware.PermCreateLog)
 	if err != nil {
 		return nil, err
 	}
@@ -201,7 +203,7 @@ func (s *Service) SubmitReport(id, userID, userRole string, force bool) (*Submit
 		if item.ContentStatus == LogStatusVoided {
 			return nil, ErrLogVoided
 		}
-		ok, err := s.access.CanAccessProject(item.ProjectID, userID, userRole, projects.RoleViewer)
+		ok, err := s.access.HasProjectPermission(item.ProjectID, userID, middleware.PermRead)
 		if err != nil {
 			return nil, err
 		}
@@ -244,7 +246,7 @@ func (s *Service) ListLogs(projectID, userID, userRole string, params LogListPar
 	if err := validateOptionalRFC3339(params.DateTo); err != nil {
 		return nil, err
 	}
-	ok, err := s.access.CanAccessProject(projectID, userID, userRole, projects.RoleViewer)
+	ok, err := s.access.HasProjectPermission(projectID, userID, middleware.PermRead)
 	if err != nil {
 		return nil, err
 	}
@@ -270,7 +272,7 @@ func (s *Service) GetLog(id, userID, userRole string) (*Log, error) {
 	if item == nil {
 		return nil, ErrLogNotFound
 	}
-	ok, err := s.access.CanAccessProject(item.ProjectID, userID, userRole, projects.RoleViewer)
+	ok, err := s.access.HasProjectPermission(item.ProjectID, userID, middleware.PermRead)
 	if err != nil {
 		return nil, err
 	}
@@ -288,18 +290,29 @@ func (s *Service) UpdateLog(id, userID, userRole string, req UpdateLogRequest) (
 	if item == nil {
 		return nil, ErrLogNotFound
 	}
-	if item.AuthorID != userID {
-		return nil, ErrLogOwnerMismatch
-	}
 	if item.ContentStatus != LogStatusDraft {
 		return nil, ErrLogNotDraft
 	}
-	ok, err := s.access.CanAccessProject(item.ProjectID, userID, userRole, projects.RoleMember)
+	status, err := s.access.ProjectStatus(item.ProjectID)
 	if err != nil {
 		return nil, err
 	}
-	if !ok {
+	if status != projects.StatusActive {
+		return nil, ErrProjectLifecycleBlocked
+	}
+	canAny, err := s.access.HasProjectPermission(item.ProjectID, userID, middleware.PermUpdateAnyLog)
+	if err != nil {
+		return nil, err
+	}
+	canOwn, err := s.access.HasProjectPermission(item.ProjectID, userID, middleware.PermUpdateOwnLog)
+	if err != nil {
+		return nil, err
+	}
+	if !canAny && !canOwn {
 		return nil, ErrForbidden
+	}
+	if !canAny && item.AuthorID != userID {
+		return nil, ErrLogOwnerMismatch
 	}
 	if req.Category != nil && !validCategory(*req.Category) {
 		return nil, ErrInvalidInput
@@ -431,9 +444,9 @@ func validOptionalStatus(v string) bool {
 }
 
 type ProjectAccessAdapter struct {
+	DB   *sql.DB
 	Repo interface {
 		GetByID(id string) (*projects.Project, error)
-		GetMember(projectID, userID string) (*projects.ProjectMember, error)
 	}
 }
 
@@ -442,13 +455,14 @@ func (a ProjectAccessAdapter) ProjectExists(projectID string) (bool, error) {
 	return project != nil, err
 }
 
-func (a ProjectAccessAdapter) CanAccessProject(projectID, userID, userRole, minRole string) (bool, error) {
-	if userRole == auth.RoleAdmin {
-		return true, nil
+func (a ProjectAccessAdapter) ProjectStatus(projectID string) (string, error) {
+	project, err := a.Repo.GetByID(projectID)
+	if err != nil || project == nil {
+		return "", err
 	}
-	member, err := a.Repo.GetMember(projectID, userID)
-	if err != nil {
-		return false, err
-	}
-	return member != nil && member.Status == projects.MemberStatusActive && middleware.ProjectRoleRank(member.Role) >= middleware.ProjectRoleRank(minRole), nil
+	return project.Status, nil
+}
+
+func (a ProjectAccessAdapter) HasProjectPermission(projectID, userID string, perm middleware.Permission) (bool, error) {
+	return middleware.HasPermission(a.DB, projectID, userID, perm)
 }

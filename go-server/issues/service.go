@@ -1,11 +1,11 @@
 package issues
 
 import (
+	"database/sql"
 	"errors"
 	"strings"
 	"time"
 
-	"github.com/zhu571/hiaf-lab-system/go-server/auth"
 	"github.com/zhu571/hiaf-lab-system/go-server/middleware"
 	"github.com/zhu571/hiaf-lab-system/go-server/projects"
 )
@@ -22,12 +22,14 @@ var (
 	ErrForbidden                 = errors.New("当前用户无权访问该项目")
 	ErrProjectLifecycleBlocked   = errors.New("项目当前状态不允许创建 Issue")
 	ErrIssueClosed               = errors.New("已关闭 Issue 不允许修改")
+	ErrCommentsDisabled          = errors.New("项目已关闭评论")
 )
 
 type ProjectAccessChecker interface {
 	ProjectExists(projectID string) (bool, error)
 	ProjectStatus(projectID string) (string, error)
-	CanAccessProject(projectID, userID, userRole, minRole string) (bool, error)
+	ProjectCommentPolicy(projectID string) (string, error)
+	HasProjectPermission(projectID, userID string, perm middleware.Permission) (bool, error)
 }
 
 type issueRepository interface {
@@ -76,7 +78,7 @@ func (s *Service) Create(projectID, userID, userRole string, req CreateIssueRequ
 	if status != projects.StatusActive {
 		return nil, ErrProjectLifecycleBlocked
 	}
-	ok, err := s.access.CanAccessProject(projectID, userID, userRole, projects.RoleMember)
+	ok, err := s.access.HasProjectPermission(projectID, userID, middleware.PermCreateIssue)
 	if err != nil {
 		return nil, err
 	}
@@ -130,7 +132,7 @@ func (s *Service) List(projectID, userID, userRole string, params IssueListParam
 	if !validStatus(params.Status) || !validOptionalSeverity(params.Severity) || !validSort(params.Sort) || !validOrder(params.Order) {
 		return nil, ErrInvalidInput
 	}
-	ok, err := s.access.CanAccessProject(projectID, userID, userRole, projects.RoleViewer)
+	ok, err := s.access.HasProjectPermission(projectID, userID, middleware.PermRead)
 	if err != nil {
 		return nil, err
 	}
@@ -156,7 +158,7 @@ func (s *Service) GetByID(id, userID, userRole string) (*Issue, error) {
 	if issue == nil {
 		return nil, ErrIssueNotFound
 	}
-	ok, err := s.access.CanAccessProject(issue.ProjectID, userID, userRole, projects.RoleViewer)
+	ok, err := s.access.HasProjectPermission(issue.ProjectID, userID, middleware.PermRead)
 	if err != nil {
 		return nil, err
 	}
@@ -177,7 +179,11 @@ func (s *Service) Update(id, userID, userRole string, req UpdateIssueRequest) (*
 	if issue.Status == StatusClosed {
 		return nil, ErrIssueClosed
 	}
-	if !s.canUpdateIssue(*issue, userID, userRole) {
+	ok, err := s.access.HasProjectPermission(issue.ProjectID, userID, middleware.PermUpdateIssue)
+	if err != nil {
+		return nil, err
+	}
+	if !ok {
 		return nil, ErrForbidden
 	}
 	if req.Title != nil {
@@ -230,7 +236,18 @@ func (s *Service) Transition(id, userID, userRole string, req TransitionRequest)
 	if req.AddComment && req.Reason == "" {
 		return nil, ErrInvalidInput
 	}
-	if !s.canTransition(*issue, userID, userRole, req.TargetStatus) {
+	projectStatus, err := s.access.ProjectStatus(issue.ProjectID)
+	if err != nil {
+		return nil, err
+	}
+	if projectStatus != projects.StatusActive {
+		return nil, ErrProjectLifecycleBlocked
+	}
+	ok, err := s.access.HasProjectPermission(issue.ProjectID, userID, middleware.PermUpdateIssue)
+	if err != nil {
+		return nil, err
+	}
+	if !ok {
 		return nil, ErrTransitionForbidden
 	}
 	updated, err := s.repo.TransitionStatus(id, req.TargetStatus, userID, req.Reason, req.AddComment)
@@ -255,12 +272,24 @@ func (s *Service) AddComment(id, userID, userRole string, req AddCommentRequest)
 	if issue == nil {
 		return nil, ErrIssueNotFound
 	}
-	ok, err := s.access.CanAccessProject(issue.ProjectID, userID, userRole, projects.RoleViewer)
+	policy, err := s.access.ProjectCommentPolicy(issue.ProjectID)
 	if err != nil {
 		return nil, err
 	}
-	if !ok {
-		return nil, ErrForbidden
+	switch policy {
+	case projects.CommentPolicyEveryone:
+	case projects.CommentPolicyMembers:
+		ok, err := s.access.HasProjectPermission(issue.ProjectID, userID, middleware.PermRead)
+		if err != nil {
+			return nil, err
+		}
+		if !ok {
+			return nil, ErrForbidden
+		}
+	case projects.CommentPolicyDisabled:
+		return nil, ErrCommentsDisabled
+	default:
+		return nil, ErrInvalidInput
 	}
 	return s.repo.AddComment(id, userID, content)
 }
@@ -271,43 +300,6 @@ func (s *Service) GetComments(id, userID, userRole string, page, perPage int) ([
 		return nil, err
 	}
 	return s.repo.GetComments(issue.ID, page, perPage)
-}
-
-func (s *Service) canUpdateIssue(issue Issue, userID, userRole string) bool {
-	if issue.AuthorID == userID {
-		return true
-	}
-	ok, err := s.access.CanAccessProject(issue.ProjectID, userID, userRole, projects.RoleMaintainer)
-	return err == nil && ok
-}
-
-func (s *Service) canTransition(issue Issue, userID, userRole, target string) bool {
-	isAssignee := issue.AssigneeID != nil && *issue.AssigneeID == userID
-	isAuthor := issue.AuthorID == userID
-	isOwner := s.canAccess(issue.ProjectID, userID, userRole, projects.RoleOwner)
-	isMaintainer := s.canAccess(issue.ProjectID, userID, userRole, projects.RoleMaintainer)
-	isAdmin := userRole == auth.RoleAdmin
-
-	if target == StatusClosed && (isOwner || isAdmin) {
-		return true
-	}
-	switch {
-	case issue.Status == StatusOpen && target == StatusInProgress:
-		return isAssignee || isMaintainer || isOwner || isAdmin
-	case issue.Status == StatusInProgress && target == StatusResolved:
-		return isAssignee || isOwner || isAdmin
-	case issue.Status == StatusResolved && target == StatusClosed:
-		return isAuthor || isOwner || isAdmin
-	case (issue.Status == StatusResolved || issue.Status == StatusClosed) && target == StatusOpen:
-		return isOwner || isAdmin
-	default:
-		return false
-	}
-}
-
-func (s *Service) canAccess(projectID, userID, userRole, minRole string) bool {
-	ok, err := s.access.CanAccessProject(projectID, userID, userRole, minRole)
-	return err == nil && ok
 }
 
 func validSeverity(v string) bool {
@@ -365,9 +357,9 @@ func dedupeNonEmpty(in []string) []string {
 }
 
 type ProjectAccessAdapter struct {
+	DB   *sql.DB
 	Repo interface {
 		GetByID(id string) (*projects.Project, error)
-		GetMember(projectID, userID string) (*projects.ProjectMember, error)
 	}
 }
 
@@ -384,13 +376,14 @@ func (a ProjectAccessAdapter) ProjectStatus(projectID string) (string, error) {
 	return project.Status, nil
 }
 
-func (a ProjectAccessAdapter) CanAccessProject(projectID, userID, userRole, minRole string) (bool, error) {
-	if userRole == auth.RoleAdmin {
-		return true, nil
+func (a ProjectAccessAdapter) ProjectCommentPolicy(projectID string) (string, error) {
+	project, err := a.Repo.GetByID(projectID)
+	if err != nil || project == nil {
+		return "", err
 	}
-	member, err := a.Repo.GetMember(projectID, userID)
-	if err != nil {
-		return false, err
-	}
-	return member != nil && member.Status == projects.MemberStatusActive && middleware.ProjectRoleRank(member.Role) >= middleware.ProjectRoleRank(minRole), nil
+	return project.CommentPolicy, nil
+}
+
+func (a ProjectAccessAdapter) HasProjectPermission(projectID, userID string, perm middleware.Permission) (bool, error) {
+	return middleware.HasPermission(a.DB, projectID, userID, perm)
 }
