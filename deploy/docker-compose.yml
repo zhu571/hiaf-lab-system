@@ -48,9 +48,15 @@ services:
       DB_USER: lab
       DB_NAME: lab
       PORT: 8000
+      EPICS_GATEWAY_ADDR: ${EPICS_GATEWAY_ADDR}
+      INFLUXDB_ADDR: ${INFLUXDB_ADDR}
+      INFLUXDB_ORG: ${INFLUXDB_ORG}
+      INFLUXDB_BUCKET: ${INFLUXDB_BUCKET}
+      INFLUXDB_MEASUREMENTS: ${INFLUXDB_MEASUREMENTS:-pressure,vacuum,control,temperature,pump}
     secrets:
       - db_password
       - jwt_key
+      - influxdb_token
     ports:
       - "8000:8000"
     depends_on:
@@ -74,3 +80,5 @@ secrets:
     file: ./secrets/db_password.txt
   jwt_key:
     file: ./secrets/jwt_key.txt
+  influxdb_token:
+    file: ./secrets/influxdb_token.txt

@@ -12,7 +12,6 @@ import (
 	"github.com/zhu571/hiaf-lab-system/go-server/experiences"
 	"github.com/zhu571/hiaf-lab-system/go-server/instruments"
 	"github.com/zhu571/hiaf-lab-system/go-server/issues"
-	"github.com/zhu571/hiaf-lab-system/go-server/logs"
 	mw "github.com/zhu571/hiaf-lab-system/go-server/middleware"
 	"github.com/zhu571/hiaf-lab-system/go-server/projects"
 	"github.com/zhu571/hiaf-lab-system/go-server/sensors"
@@ -48,19 +47,34 @@ func main() {
 	projectsRepo := projects.NewRepository(db)
 	projectsSvc := projects.NewService(projectsRepo)
 	projectsHandler := projects.NewHandler(projectsSvc)
-	logsRepo := logs.NewRepository(db)
-	logsSvc := logs.NewService(logsRepo, "Asia/Shanghai", logs.ProjectAccessAdapter{DB: db, Repo: projectsRepo})
-	logsHandler := logs.NewHandler(logsSvc)
 	issuesRepo := issues.NewRepository(db)
-	issuesSvc := issues.NewService(issuesRepo, issues.ProjectAccessAdapter{DB: db, Repo: projectsRepo})
+	issuesSvc := issues.NewService(issuesRepo, issues.ProjectAccessAdapter{Repo: projectsRepo})
 	issuesHandler := issues.NewHandler(issuesSvc)
 	experiencesRepo := experiences.NewRepository(db)
-	experiencesSvc := experiences.NewService(experiencesRepo, experiences.ProjectAccessAdapter{DB: db, Repo: projectsRepo})
+	experiencesSvc := experiences.NewService(experiencesRepo, experiences.ProjectAccessAdapter{Repo: projectsRepo})
 	experiencesHandler := experiences.NewHandler(experiencesSvc)
-	instrumentsSvc := instruments.NewService()
+	instrumentsSvc, err := instruments.NewService()
+	if err != nil {
+		slog.Error("failed to configure instruments service", "error", err)
+		os.Exit(1)
+	}
 	instrumentsHandler := instruments.NewHandler(instrumentsSvc)
-	sensorsSvc := sensors.NewService()
+	sensorsSvc, err := sensors.NewService()
+	if err != nil {
+		slog.Error("failed to configure sensors service", "error", err)
+		os.Exit(1)
+	}
 	sensorsHandler := sensors.NewHandler(sensorsSvc)
+	projectMemberLookup := func(projectID, userID string) (string, string, bool, error) {
+		member, err := projectsRepo.GetMember(projectID, userID)
+		if err != nil {
+			return "", "", false, err
+		}
+		if member == nil {
+			return "", "", false, nil
+		}
+		return member.Role, member.Status, true, nil
+	}
 
 	r := chi.NewRouter()
 	r.Use(middleware.RealIP)
@@ -80,42 +94,24 @@ func main() {
 		r.Post("/", projectsHandler.Create)
 
 		r.Route("/{id}", func(r chi.Router) {
-			r.Use(mw.RequireProjectPermission(db, mw.PermRead))
+			r.Use(mw.RequireProjectAccess(projectMemberLookup, projects.RoleViewer))
 			r.Get("/", projectsHandler.GetByID)
+			r.Post("/transition", projectsHandler.TransitionStatus)
 			r.Get("/members", projectsHandler.ListMembers)
 			r.Get("/issues", issuesHandler.List)
-			r.Get("/logs", logsHandler.ListLogs)
 
 			r.Group(func(r chi.Router) {
-				r.Use(mw.RequireProjectPermission(db, mw.PermManageProject))
+				r.Use(mw.RequireProjectAccess(projectMemberLookup, projects.RoleMaintainer))
 				r.Patch("/", projectsHandler.Update)
-				r.Post("/transition", projectsHandler.TransitionStatus)
-			})
-
-			r.Group(func(r chi.Router) {
-				r.Use(mw.RequireProjectPermission(db, mw.PermManageMembers))
 				r.Post("/members", projectsHandler.AddMember)
 				r.Patch("/members/{userID}", projectsHandler.UpdateMemberRole)
 				r.Delete("/members/{userID}", projectsHandler.RemoveMember)
 			})
 
 			r.Group(func(r chi.Router) {
-				r.Use(mw.RequireProjectPermission(db, mw.PermCreateLog))
-				r.Post("/logs", logsHandler.CreateLog)
-			})
-
-			r.Group(func(r chi.Router) {
-				r.Use(mw.RequireProjectPermission(db, mw.PermCreateIssue))
+				r.Use(mw.RequireProjectAccess(projectMemberLookup, projects.RoleMember))
 				r.Post("/issues", issuesHandler.Create)
 			})
-		})
-	})
-	r.Route("/api/v1/logs", func(r chi.Router) {
-		r.Use(mw.AuthRequired)
-		r.Use(mw.Audit(db))
-		r.Route("/{id}", func(r chi.Router) {
-			r.Get("/", logsHandler.GetLog)
-			r.Patch("/", logsHandler.UpdateLog)
 		})
 	})
 	r.Route("/api/v1/issues", func(r chi.Router) {

@@ -6,31 +6,63 @@ import (
 	"fmt"
 	"io"
 	"net/http"
-	"strconv"
+	"os"
+	"strings"
 	"time"
 )
 
-// epicsGateway is the base URL for the EPICS gateway service.
-const epicsGateway = "http://localhost:5070"
-
 // Service wraps calls to the EPICS gateway.
 type Service struct {
-	client *http.Client
+	client  *http.Client
+	gateway string
 }
 
 // NewService creates an instruments Service with a 10s timeout HTTP client.
-func NewService() *Service {
-	return &Service{client: &http.Client{Timeout: 10 * time.Second}}
+func NewService() (*Service, error) {
+	gateway := os.Getenv("EPICS_GATEWAY_ADDR")
+	if gateway == "" {
+		return nil, fmt.Errorf("EPICS_GATEWAY_ADDR is required")
+	}
+	return NewServiceWithGateway(gateway), nil
+}
+
+// NewServiceWithGateway creates a Service for tests and explicit callers.
+func NewServiceWithGateway(gateway string) *Service {
+	return &Service{
+		client:  &http.Client{Timeout: 10 * time.Second},
+		gateway: normalizeHTTPBase(gateway),
+	}
 }
 
 // gatewayPV represents a single PV value from the EPICS gateway.
 type gatewayPV struct {
-	PV    string          `json:"pv"`
-	Value json.RawMessage `json:"value"`
+	PV    string  `json:"pv"`
+	Value float64 `json:"value"`
 }
 
-func (s *Service) getRawPV(name string) (json.RawMessage, error) {
-	resp, err := s.client.Get(epicsGateway + "/" + name)
+// gatewayStringPV is for string-valued PVs (Error).
+type gatewayStringPV struct {
+	PV    string `json:"pv"`
+	Value string `json:"value"`
+}
+
+// gatewayRunningPV is for integer-valued PVs (Running).
+type gatewayRunningPV struct {
+	PV    string `json:"pv"`
+	Value int    `json:"value"`
+}
+
+func normalizeHTTPBase(addr string) string {
+	addr = strings.TrimRight(addr, "/")
+	if strings.HasPrefix(addr, "http://") || strings.HasPrefix(addr, "https://") {
+		return addr
+	}
+	return "http://" + addr
+}
+
+// getPVRaw fetches a raw PV JSON body from the gateway by name.
+func (s *Service) getPVRaw(name string) ([]byte, error) {
+	resp, err := s.client.Get(s.gateway + "/" + name)
 	if err != nil {
 		return nil, fmt.Errorf("epics gateway get %s: %w", name, err)
 	}
@@ -39,76 +71,50 @@ func (s *Service) getRawPV(name string) (json.RawMessage, error) {
 		body, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
 		return nil, fmt.Errorf("epics gateway returned %d for %s: %s", resp.StatusCode, name, string(body))
 	}
-	var pv gatewayPV
-	if err := json.NewDecoder(resp.Body).Decode(&pv); err != nil {
-		return nil, fmt.Errorf("decode %s response: %w", name, err)
+	body, err := io.ReadAll(io.LimitReader(resp.Body, 4096))
+	if err != nil {
+		return nil, fmt.Errorf("read %s response: %w", name, err)
 	}
-	if len(pv.Value) == 0 || string(pv.Value) == "null" {
-		return nil, fmt.Errorf("%s value is null", name)
-	}
-	return pv.Value, nil
+	return body, nil
 }
 
 // getPV fetches a float64 PV from the gateway by name.
 func (s *Service) getPV(name string) (float64, error) {
-	raw, err := s.getRawPV(name)
+	body, err := s.getPVRaw(name)
 	if err != nil {
 		return 0, err
 	}
-	var n json.Number
-	if err := json.Unmarshal(raw, &n); err == nil {
-		return n.Float64()
+	var pv gatewayPV
+	if err := json.Unmarshal(body, &pv); err != nil {
+		return 0, fmt.Errorf("decode %s response: %w", name, err)
 	}
-	var str string
-	if err := json.Unmarshal(raw, &str); err != nil {
-		return 0, fmt.Errorf("decode %s numeric value: %w", name, err)
-	}
-	v, err := strconv.ParseFloat(str, 64)
-	if err != nil {
-		return 0, fmt.Errorf("decode %s numeric string: %w", name, err)
-	}
-	return v, nil
+	return pv.Value, nil
 }
 
 // getStringPV fetches a string PV from the gateway.
 func (s *Service) getStringPV(name string) (string, error) {
-	raw, err := s.getRawPV(name)
+	body, err := s.getPVRaw(name)
 	if err != nil {
 		return "", err
 	}
-	var str string
-	if err := json.Unmarshal(raw, &str); err == nil {
-		return str, nil
+	var pv gatewayStringPV
+	if err := json.Unmarshal(body, &pv); err != nil {
+		return "", fmt.Errorf("decode %s response: %w", name, err)
 	}
-	var n json.Number
-	if err := json.Unmarshal(raw, &n); err == nil {
-		return n.String(), nil
-	}
-	return "", fmt.Errorf("decode %s string value", name)
+	return pv.Value, nil
 }
 
 // getIntPV fetches an int PV from the gateway.
 func (s *Service) getIntPV(name string) (int, error) {
-	v, err := s.getPV(name)
+	body, err := s.getPVRaw(name)
 	if err != nil {
 		return 0, err
 	}
-	return int(v), nil
-}
-
-func (s *Service) optionalPV(name string) float64 {
-	v, _ := s.getPV(name)
-	return v
-}
-
-func (s *Service) optionalIntPV(name string) int {
-	v, _ := s.getIntPV(name)
-	return v
-}
-
-func (s *Service) optionalStringPV(name string) string {
-	v, _ := s.getStringPV(name)
-	return v
+	var pv gatewayRunningPV
+	if err := json.Unmarshal(body, &pv); err != nil {
+		return 0, fmt.Errorf("decode %s response: %w", name, err)
+	}
+	return pv.Value, nil
 }
 
 // putPV sends a POST to the gateway to set a PV value.
@@ -117,7 +123,7 @@ func (s *Service) putPV(name string, value any) error {
 	if err != nil {
 		return fmt.Errorf("marshal setpoint: %w", err)
 	}
-	resp, err := s.client.Post(epicsGateway+"/"+name, "application/json", bytes.NewReader(body))
+	resp, err := s.client.Post(s.gateway+"/"+name, "application/json", bytes.NewReader(body))
 	if err != nil {
 		return fmt.Errorf("epics gateway post %s: %w", name, err)
 	}
@@ -145,15 +151,10 @@ func (s *Service) PiezoStatus() (*PiezoStatus, error) {
 	}
 	errMsg, _ := s.getStringPV("GasCell:Piezo:Error") // ponytail: Error PV may not exist; ignore fetch failure
 	return &PiezoStatus{
-		A1:         a1,
-		ValveSP:    valveSP,
-		Running:    runningInt != 0,
-		Error:      errMsg,
-		Setpoint:   s.optionalPV("GasCell:Piezo:Setpoint"),
-		Cycle:      s.optionalIntPV("GasCell:Piezo:Cycle"),
-		A5Trip:     s.optionalIntPV("GasCell:Safety:A5Trip"),
-		A5TripPV:   s.optionalStringPV("GasCell:Safety:A5TripPV"),
-		A5TripTime: s.optionalStringPV("GasCell:Safety:A5TripTime"),
+		A1:      a1,
+		ValveSP: valveSP,
+		Running: runningInt != 0,
+		Error:   errMsg,
 	}, nil
 }
 
@@ -170,47 +171,4 @@ func (s *Service) PiezoStop() error {
 // PiezoSetpoint sets the setpoint value.
 func (s *Service) PiezoSetpoint(value float64) error {
 	return s.putPV("GasCell:Piezo:Setpoint", value)
-}
-
-// PiezoParams reads Kp, Ki, and A5Max from the gateway.
-func (s *Service) PiezoParams() (*ParamsResponse, error) {
-	kp, err := s.getPV("GasCell:Piezo:Kp")
-	if err != nil {
-		return nil, err
-	}
-	ki, err := s.getPV("GasCell:Piezo:Ki")
-	if err != nil {
-		return nil, err
-	}
-	a5Max, err := s.getPV("GasCell:Safety:A5Max")
-	if err != nil {
-		return nil, err
-	}
-	return &ParamsResponse{Kp: kp, Ki: ki, A5Max: a5Max}, nil
-}
-
-// PiezoSetParams writes Kp and Ki to the gateway.
-func (s *Service) PiezoSetParams(kp, ki float64) error {
-	if err := s.putPV("GasCell:Piezo:Kp", kp); err != nil {
-		return err
-	}
-	return s.putPV("GasCell:Piezo:Ki", ki)
-}
-
-// PiezoSetValve sets the valve position (0-100%).
-func (s *Service) PiezoSetValve(value float64) error {
-	return s.putPV("GasCell:Piezo:ValveSP", value)
-}
-
-// PiezoSetSafety writes A5Max (if non-nil) and/or triggers A5Clear.
-func (s *Service) PiezoSetSafety(a5Max *float64, a5Clear bool) error {
-	if a5Max != nil {
-		if err := s.putPV("GasCell:Safety:A5Max", *a5Max); err != nil {
-			return err
-		}
-	}
-	if a5Clear {
-		return s.putPV("GasCell:Safety:A5Clear", 1)
-	}
-	return nil
 }

@@ -6,7 +6,6 @@ import (
 	"time"
 
 	"github.com/zhu571/hiaf-lab-system/go-server/auth"
-	"github.com/zhu571/hiaf-lab-system/go-server/middleware"
 	"github.com/zhu571/hiaf-lab-system/go-server/projects"
 )
 
@@ -126,39 +125,36 @@ func (f fakeProjectAccess) ProjectExists(projectID string) (bool, error) {
 	return projectID == "prj_1" || projectID == "prj_2", nil
 }
 
-func (f fakeProjectAccess) HasProjectPermission(projectID, userID string, perm middleware.Permission) (bool, error) {
-	if userID == "usr_admin" {
+func (f fakeProjectAccess) CanAccessProject(projectID, userID, userRole, minRole string) (bool, error) {
+	if userRole == auth.RoleAdmin {
 		return true, nil
 	}
 	role, ok := f.roles[userID]
 	if !ok {
 		return false, nil
 	}
-	return fakeRoleHasPermission(role, perm), nil
+	return projectRoleRank(role) >= projectRoleRank(minRole), nil
 }
 
-func fakeRoleHasPermission(role string, perm middleware.Permission) bool {
+func (f fakeProjectAccess) ProjectRole(projectID, userID, userRole string) (string, error) {
+	if userRole == auth.RoleAdmin {
+		return projects.RoleOwner, nil
+	}
+	return f.roles[userID], nil
+}
+
+func projectRoleRank(role string) int {
 	switch role {
 	case projects.RoleOwner:
-		return true
+		return 40
 	case projects.RoleMaintainer:
-		return perm != middleware.PermManageMembers
+		return 30
 	case projects.RoleMember:
-		switch perm {
-		case middleware.PermRead,
-			middleware.PermCreateLog,
-			middleware.PermUpdateOwnLog,
-			middleware.PermCreateIssue,
-			middleware.PermUpdateIssue,
-			middleware.PermCreateExperience:
-			return true
-		default:
-			return false
-		}
+		return 20
 	case projects.RoleViewer:
-		return perm == middleware.PermRead
+		return 10
 	default:
-		return false
+		return 0
 	}
 }
 
