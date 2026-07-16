@@ -179,6 +179,8 @@ func (h *Handler) writeError(w http.ResponseWriter, r *http.Request, err error, 
 		common.WriteError(w, r, http.StatusBadRequest, "project_lifecycle_blocked", err.Error(), details)
 	case errors.Is(err, ErrIssueClosed):
 		common.WriteError(w, r, http.StatusBadRequest, "issue_closed", err.Error(), details)
+	case errors.Is(err, ErrCommentsDisabled):
+		common.WriteError(w, r, http.StatusForbidden, "comments_disabled", err.Error(), details)
 	case errors.Is(err, ErrInvalidTransition):
 		common.WriteError(w, r, http.StatusBadRequest, "invalid_transition", err.Error(), details)
 	case errors.Is(err, ErrReasonRequired):

@@ -54,6 +54,7 @@ func (s *Service) Create(req CreateProjectRequest, userID string) (*Project, err
 		Description:     req.Description,
 		Status:          StatusDraft,
 		Visibility:      defaultString(req.Visibility, VisibilityRestricted),
+		CommentPolicy:   CommentPolicyMembers,
 		OwnerUserID:     userID,
 		StartDate:       req.StartDate,
 		TargetEndDate:   req.TargetEndDate,
@@ -135,6 +136,12 @@ func (s *Service) Update(id string, req UpdateProjectRequest) (*Project, error) 
 	if req.Visibility != nil {
 		project.Visibility = strings.TrimSpace(*req.Visibility)
 		if !validVisibility(project.Visibility) {
+			return nil, ErrInvalidInput
+		}
+	}
+	if req.CommentPolicy != nil {
+		project.CommentPolicy = strings.TrimSpace(*req.CommentPolicy)
+		if !validCommentPolicy(project.CommentPolicy) {
 			return nil, ErrInvalidInput
 		}
 	}
@@ -374,6 +381,15 @@ func validStatus(status string) bool {
 func validVisibility(v string) bool {
 	switch v {
 	case VisibilityRestricted, VisibilityWorkspace:
+		return true
+	default:
+		return false
+	}
+}
+
+func validCommentPolicy(v string) bool {
+	switch v {
+	case CommentPolicyEveryone, CommentPolicyMembers, CommentPolicyDisabled:
 		return true
 	default:
 		return false

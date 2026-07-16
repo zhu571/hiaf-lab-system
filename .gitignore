@@ -78,3 +78,4 @@ deploy/secrets/*.txt
 
 tmp/
 temp/
+go-server/go-server
