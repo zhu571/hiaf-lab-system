@@ -5,7 +5,6 @@ import (
 	"strings"
 
 	"github.com/zhu571/hiaf-lab-system/go-server/auth"
-	"github.com/zhu571/hiaf-lab-system/go-server/middleware"
 	"github.com/zhu571/hiaf-lab-system/go-server/projects"
 )
 
@@ -344,7 +343,12 @@ func validRelation(relation string) bool {
 }
 
 func canReviewProjectRole(role string) bool {
-	return middleware.ProjectRoleRank(role) >= middleware.ProjectRoleRank(projects.RoleMaintainer)
+	switch role {
+	case "maintainer", "owner":
+		return true
+	default:
+		return false
+	}
 }
 
 type ProjectAccessAdapter struct {
@@ -367,7 +371,8 @@ func (a ProjectAccessAdapter) CanAccessProject(projectID, userID, userRole, minR
 	if err != nil {
 		return false, err
 	}
-	return member != nil && member.Status == projects.MemberStatusActive && middleware.ProjectRoleRank(member.Role) >= middleware.ProjectRoleRank(minRole), nil
+	roleRank := map[string]int{"viewer": 1, "member": 2, "maintainer": 3, "owner": 4}
+	return member != nil && member.Status == projects.MemberStatusActive && roleRank[member.Role] >= roleRank[minRole], nil
 }
 
 func (a ProjectAccessAdapter) ProjectRole(projectID, userID, userRole string) (string, error) {
