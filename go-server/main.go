@@ -29,7 +29,7 @@ import (
 	"github.com/zhu571/hiaf-lab-system/go-server/testdata"
 )
 
-//go:embed static/*
+//go:embed static
 var frontendFiles embed.FS
 
 func main() {
