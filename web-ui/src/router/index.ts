@@ -10,6 +10,7 @@ import SettingsView from '../views/SettingsView.vue'
 import DailyHistoryView from '../views/DailyHistoryView.vue'
 import AdminUsersView from '../views/AdminUsersView.vue'
 import AgentCandidatesView from '../views/AgentCandidatesView.vue'
+import RunListView from '../views/RunListView.vue'
 
 const router = createRouter({
   history: createWebHistory(),
@@ -19,6 +20,12 @@ const router = createRouter({
     { path: '/projects', component: ProjectsView },
     { path: '/daily-report', component: DailyReportView },
     { path: '/projects/:id/issues', component: IssuesView },
+    { path: '/projects/:id/runs', component: RunListView },
+    { path: '/runs/:id', component: () => import('../views/RunDetailView.vue') },
+    { path: '/projects/:id/test-data', component: () => import('../views/TestDataView.vue') },
+    { path: '/projects/:id/rf-matching', component: () => import('../views/RFMatchingView.vue') },
+    { path: '/projects/:id/assembly', component: () => import('../views/AssemblyView.vue') },
+    { path: '/attachments', component: () => import('../views/AttachmentView.vue') },
     { path: '/issues', component: () => import('../views/IssuesFallback.vue') },
     { path: '/experiences', component: ExperiencesView },
     { path: '/audit', component: AuditView },
