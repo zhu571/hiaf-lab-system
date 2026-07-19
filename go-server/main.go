@@ -10,6 +10,7 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
 	"github.com/zhu571/hiaf-lab-system/go-server/agent"
+	"github.com/zhu571/hiaf-lab-system/go-server/assembly"
 	"github.com/zhu571/hiaf-lab-system/go-server/attachments"
 	"github.com/zhu571/hiaf-lab-system/go-server/audit"
 	"github.com/zhu571/hiaf-lab-system/go-server/auth"
@@ -20,7 +21,10 @@ import (
 	"github.com/zhu571/hiaf-lab-system/go-server/logs"
 	mw "github.com/zhu571/hiaf-lab-system/go-server/middleware"
 	"github.com/zhu571/hiaf-lab-system/go-server/projects"
+	"github.com/zhu571/hiaf-lab-system/go-server/rfmatch"
+	"github.com/zhu571/hiaf-lab-system/go-server/runs"
 	"github.com/zhu571/hiaf-lab-system/go-server/sensors"
+	"github.com/zhu571/hiaf-lab-system/go-server/testdata"
 )
 
 func main() {
@@ -68,6 +72,19 @@ func main() {
 	experiencesRepo := experiences.NewRepository(db)
 	experiencesSvc := experiences.NewService(experiencesRepo, experiences.ProjectAccessAdapter{Repo: projectsRepo}, agentSvc)
 	experiencesHandler := experiences.NewHandler(experiencesSvc)
+	runsRepo := runs.NewRepository(db)
+	runsSvc := runs.NewService(runsRepo, runs.ProjectAccessAdapter{Repo: projectsRepo})
+	runsHandler := runs.NewHandler(runsSvc)
+	assemblyRepo := assembly.NewRepository(db)
+	assemblySvc := assembly.NewService(assemblyRepo, assembly.ProjectAccessAdapter{Repo: projectsRepo})
+	assemblyHandler := assembly.NewHandler(assemblySvc)
+	testDataRepo := testdata.NewRepository(db)
+	testDataSvc := testdata.NewService(testDataRepo, testdata.ProjectAccessAdapter{Repo: projectsRepo},
+		testdata.NewHTTPRunValidator("http://127.0.0.1:"+port))
+	testDataHandler := testdata.NewHandler(testDataSvc)
+	rfMatchingRepo := rfmatch.NewRepository(db)
+	rfMatchingSvc := rfmatch.NewService(rfMatchingRepo, rfmatch.ProjectAccessAdapter{Repo: projectsRepo})
+	rfMatchingHandler := rfmatch.NewHandler(rfMatchingSvc)
 	attachmentsRepo := attachments.NewRepository(db)
 	attachmentsSvc := attachments.NewService(attachmentsRepo,
 		attachments.NewHTTPPermissionChecker("http://127.0.0.1:"+port),
@@ -176,6 +193,14 @@ func main() {
 			r.Get("/members", projectsHandler.ListMembers)
 			r.Get("/issues", issuesHandler.List)
 			r.Get("/logs", logsHandler.ListLogs)
+			r.Get("/experiment-runs", runsHandler.List)
+			r.Post("/experiment-runs", runsHandler.Create)
+			r.Get("/assembly", assemblyHandler.List)
+			r.Post("/assembly", assemblyHandler.Create)
+			r.Get("/test-data", testDataHandler.List)
+			r.Post("/test-data", testDataHandler.Create)
+			r.Get("/rf-matching", rfMatchingHandler.List)
+			r.Post("/rf-matching", rfMatchingHandler.Create)
 
 			r.Group(func(r chi.Router) {
 				r.Use(mw.RequireProjectPermission(db, mw.PermManageProject))
@@ -199,6 +224,49 @@ func main() {
 				r.Use(mw.RequireProjectPermission(db, mw.PermCreateIssue))
 				r.Post("/issues", issuesHandler.Create)
 			})
+		})
+	})
+	r.Route("/api/v1/experiment-runs", func(r chi.Router) {
+		r.Use(mw.AuthRequired)
+		r.Use(mw.AgentContext(db))
+		r.Use(mw.Audit(db))
+		r.Route("/{id}", func(r chi.Router) {
+			r.Get("/", runsHandler.GetByID)
+			r.Patch("/", runsHandler.Update)
+			r.Delete("/", runsHandler.SoftDelete)
+			r.Post("/daily-reports/{report_id}", runsHandler.AddReportLink)
+			r.Delete("/daily-reports/{report_id}", runsHandler.RemoveReportLink)
+		})
+	})
+	r.Route("/api/v1/assembly", func(r chi.Router) {
+		r.Use(mw.AuthRequired)
+		r.Use(mw.AgentContext(db))
+		r.Use(mw.Audit(db))
+		r.Post("/reorder", assemblyHandler.Reorder)
+		r.Route("/{id}", func(r chi.Router) {
+			r.Get("/", assemblyHandler.GetByID)
+			r.Patch("/", assemblyHandler.Update)
+			r.Delete("/", assemblyHandler.SoftDelete)
+		})
+	})
+	r.Route("/api/v1/test-data", func(r chi.Router) {
+		r.Use(mw.AuthRequired)
+		r.Use(mw.AgentContext(db))
+		r.Use(mw.Audit(db))
+		r.Route("/{id}", func(r chi.Router) {
+			r.Get("/", testDataHandler.GetByID)
+			r.Patch("/", testDataHandler.Update)
+			r.Delete("/", testDataHandler.MarkInvalid)
+		})
+	})
+	r.Route("/api/v1/rf-matching", func(r chi.Router) {
+		r.Use(mw.AuthRequired)
+		r.Use(mw.AgentContext(db))
+		r.Use(mw.Audit(db))
+		r.Route("/{id}", func(r chi.Router) {
+			r.Get("/", rfMatchingHandler.GetByID)
+			r.Patch("/", rfMatchingHandler.Update)
+			r.Delete("/", rfMatchingHandler.MarkVoid)
 		})
 	})
 	r.Route("/api/v1/logs", func(r chi.Router) {

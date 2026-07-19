@@ -95,6 +95,7 @@ func agentBusinessPathAllowed(method, path string) bool {
 		for _, prefix := range []string{
 			"/api/v1/daily-reports", "/api/v1/projects", "/api/v1/logs",
 			"/api/v1/issues", "/api/v1/experiences", "/api/v1/attachments",
+			"/api/v1/experiment-runs", "/api/v1/test-data",
 		} {
 			if strings.HasPrefix(path, prefix) {
 				return true
@@ -108,6 +109,7 @@ func agentBusinessPathAllowed(method, path string) bool {
 	return path == "/api/v1/experiences/candidates" ||
 		path == "/api/v1/attachments" || path == "/api/v1/attachments/" ||
 		(strings.HasPrefix(path, "/api/v1/attachments/") && strings.HasSuffix(path, "/links")) ||
+		(strings.HasPrefix(path, "/api/v1/projects/") && strings.HasSuffix(path, "/test-data")) ||
 		(strings.HasPrefix(path, "/api/v1/projects/") && (strings.HasSuffix(path, "/issues") || strings.HasSuffix(path, "/logs"))) ||
 		(strings.HasPrefix(path, "/api/v1/issues/") && strings.HasSuffix(path, "/comments"))
 }
