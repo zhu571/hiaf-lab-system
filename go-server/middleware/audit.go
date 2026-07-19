@@ -20,7 +20,7 @@ func (rw *responseWriter) WriteHeader(code int) {
 	rw.ResponseWriter.WriteHeader(code)
 }
 
-// Audit logs non-read HTTP requests to the audit_log table asynchronously.
+// Audit logs non-read HTTP requests to the audit_log table.
 func Audit(db *sql.DB) func(next http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -33,10 +33,14 @@ func Audit(db *sql.DB) func(next http.Handler) http.Handler {
 			next.ServeHTTP(rw, r)
 
 			claims := GetUserClaims(r.Context())
-			var userID, username string
+			var userID, username, actorType string
 			if claims != nil {
 				userID = claims.UserID
 				username = claims.Username
+				actorType = "user"
+				if claims.Role == "agent" {
+					actorType = "agent"
+				}
 			}
 
 			action := strings.TrimPrefix(r.URL.Path, "/api/v1/")
@@ -47,23 +51,26 @@ func Audit(db *sql.DB) func(next http.Handler) http.Handler {
 				clientIP = fwd
 			}
 
-			// Async insert so audit logging never blocks the response.
-			go func() {
-				if _, err := db.Exec(
-					`INSERT INTO audit_log (request_id, user_id, username, method, path, action, status_code, client_ip)
-					 VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
-					common.GetRequestID(r.Context()),
-					nullString(userID),
-					username,
-					r.Method,
-					r.URL.Path,
-					action,
-					rw.statusCode,
-					clientIP,
-				); err != nil {
-					slog.Error("audit log insert failed", "error", err, "request_id", common.GetRequestID(r.Context()))
-				}
-			}()
+			if _, err := db.Exec(
+				`INSERT INTO audit_log
+				 (request_id, user_id, username, method, path, action, status_code, client_ip,
+				  actor_type, acting_user_id, agent_task_id, idempotency_key)
+				 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)`,
+				common.GetRequestID(r.Context()),
+				nullString(userID),
+				username,
+				r.Method,
+				r.URL.Path,
+				action,
+				rw.statusCode,
+				clientIP,
+				actorType,
+				nullString(ActingUserID(r.Context())),
+				nullString(AgentTaskID(r.Context())),
+				nullString(r.Header.Get("Idempotency-Key")),
+			); err != nil {
+				slog.Error("audit log insert failed", "error", err, "request_id", common.GetRequestID(r.Context()))
+			}
 		})
 	}
 }

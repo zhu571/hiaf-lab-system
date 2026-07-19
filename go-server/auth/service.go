@@ -18,8 +18,12 @@ import (
 var (
 	ErrInvalidCredentials = errors.New("用户名或密码错误")
 	ErrAccountLocked      = errors.New("账户已锁定，请15分钟后再试")
+	ErrAccountDisabled    = errors.New("账户已停用，请联系管理员")
 	ErrUsernameTaken      = errors.New("用户名已存在")
 	ErrPasswordTooShort   = errors.New("密码长度至少8位")
+	ErrInvalidRole        = errors.New("用户角色无效")
+	ErrCannotModifySelf   = errors.New("不能通过用户管理修改自己的账户")
+	ErrLastActiveAdmin    = errors.New("不能停用或降级最后一个管理员账户")
 )
 
 const (
@@ -47,6 +51,129 @@ func NewService(repo *Repository, jwtKey []byte) *Service {
 // GetUser returns a user by ID.
 func (s *Service) GetUser(userID string) (*User, error) {
 	return s.repo.GetByID(userID)
+}
+
+func (s *Service) ListUsers() ([]UserInfo, error) {
+	users, err := s.repo.ListUsers()
+	if err != nil {
+		return nil, err
+	}
+	infos := make([]UserInfo, 0, len(users))
+	for i := range users {
+		infos = append(infos, toUserInfo(&users[i]))
+	}
+	return infos, nil
+}
+
+func (s *Service) AdminCreateUser(req AdminCreateUserRequest) (*AdminResetPasswordResponse, *UserInfo, error) {
+	role := req.Role
+	if role == "" {
+		role = RoleMember
+	}
+	if !validRole(role) {
+		return nil, nil, ErrInvalidRole
+	}
+	password := req.Password
+	if password == "" {
+		generated, err := generateTemporaryPassword()
+		if err != nil {
+			return nil, nil, err
+		}
+		password = generated
+	}
+	if len(password) < 8 {
+		return nil, nil, ErrPasswordTooShort
+	}
+	taken, err := s.repo.IsUsernameTaken(req.Username)
+	if err != nil {
+		return nil, nil, err
+	}
+	if taken {
+		return nil, nil, ErrUsernameTaken
+	}
+	hash, err := hashPassword(password)
+	if err != nil {
+		return nil, nil, fmt.Errorf("hash admin password: %w", err)
+	}
+	user, err := s.repo.CreateUserWithProfile(req.Username, hash, req.DisplayName, role)
+	if err != nil {
+		return nil, nil, err
+	}
+	info := toUserInfo(user)
+	return &AdminResetPasswordResponse{TemporaryPassword: password}, &info, nil
+}
+
+func (s *Service) AdminUpdateUser(actingUserID, id string, req AdminUpdateUserRequest) (*UserInfo, error) {
+	if actingUserID == id {
+		return nil, ErrCannotModifySelf
+	}
+	if req.Role != nil && !validRole(*req.Role) {
+		return nil, ErrInvalidRole
+	}
+	if removesActiveAdmin(req) {
+		target, err := s.repo.GetByID(id)
+		if err != nil {
+			return nil, err
+		}
+		if target == nil {
+			return nil, ErrInvalidCredentials
+		}
+		if target.Role == RoleAdmin && !target.Disabled {
+			count, err := s.repo.CountActiveAdmins()
+			if err != nil {
+				return nil, err
+			}
+			if count <= 1 {
+				return nil, ErrLastActiveAdmin
+			}
+		}
+	}
+	user, err := s.repo.UpdateUser(id, req.DisplayName, req.Role, req.Disabled)
+	if err != nil {
+		return nil, err
+	}
+	if user == nil {
+		return nil, ErrInvalidCredentials
+	}
+	info := toUserInfo(user)
+	return &info, nil
+}
+
+// removesActiveAdmin reports whether the update would strip the target account
+// of its active-admin status, either by disabling it or demoting its role.
+func removesActiveAdmin(req AdminUpdateUserRequest) bool {
+	if req.Disabled != nil && *req.Disabled {
+		return true
+	}
+	return req.Role != nil && *req.Role != RoleAdmin
+}
+
+func (s *Service) AdminResetPassword(id, password string) (*AdminResetPasswordResponse, error) {
+	if password == "" {
+		generated, err := generateTemporaryPassword()
+		if err != nil {
+			return nil, err
+		}
+		password = generated
+	}
+	if len(password) < 8 {
+		return nil, ErrPasswordTooShort
+	}
+	user, err := s.repo.GetByID(id)
+	if err != nil {
+		return nil, err
+	}
+	if user == nil {
+		return nil, ErrInvalidCredentials
+	}
+	hash, err := hashPassword(password)
+	if err != nil {
+		return nil, fmt.Errorf("hash reset password: %w", err)
+	}
+	if err := s.repo.UpdatePassword(id, hash); err != nil {
+		return nil, err
+	}
+	return &AdminResetPasswordResponse{TemporaryPassword: password}, nil
 }
 
 // Register creates a new user account.
@@ -86,6 +213,10 @@ func (s *Service) Login(username, password string) (*LoginResponse, error) {
 
 	if user.LockedUntil != nil && time.Now().Before(*user.LockedUntil) {
 		return nil, ErrAccountLocked
+	}
+
+	if user.Disabled {
+		return nil, ErrAccountDisabled
 	}
 
 	if !verifyPassword(user.PasswordHash, password) {
@@ -168,6 +299,9 @@ func (s *Service) RefreshAccessToken(rawToken string) (*LoginResponse, error) {
 	if user == nil {
 		return nil, ErrInvalidCredentials
 	}
+	if user.Disabled {
+		return nil, ErrAccountDisabled
+	}
 
 	accessToken, err := middleware.GenerateToken(user.ID, user.Username, user.Role, user.TokenVersion, s.jwtKey)
 	if err != nil {
@@ -186,20 +320,29 @@ func (s *Service) RefreshAccessToken(rawToken string) (*LoginResponse, error) {
 	return loginResponse(user, accessToken, newRefreshToken), nil
 }
 
+func (s *Service) Logout(rawToken string) error {
+	if rawToken == "" {
+		return nil
+	}
+	rec, err := s.repo.FindRefreshToken(rawToken)
+	if err != nil {
+		return err
+	}
+	if rec == nil {
+		return nil
+	}
+	return s.repo.RevokeRefreshToken(rec.ID)
+}
+
 func loginResponse(user *User, accessToken, refreshToken string) *LoginResponse {
+	info := toUserInfo(user)
 	return &LoginResponse{
 		AccessToken:        accessToken,
 		RefreshToken:       refreshToken,
 		ExpiresIn:          int(accessTokenTTL.Seconds()),
 		RefreshExpiresIn:   int(refreshTokenTTL.Seconds()),
 		MustChangePassword: user.MustChangePW,
-		User: &UserInfo{
-			ID:           user.ID,
-			Username:     user.Username,
-			DisplayName:  user.DisplayName,
-			Role:         user.Role,
-			MustChangePW: user.MustChangePW,
-		},
+		User:               &info,
 	}
 }
 
@@ -253,4 +396,21 @@ func generateRefreshToken() (string, string, error) {
 	}
 	family := uuid.New().String()
 	return hex.EncodeToString(raw), family, nil
+}
+
+func generateTemporaryPassword() (string, error) {
+	raw := make([]byte, 9)
+	if _, err := rand.Read(raw); err != nil {
+		return "", fmt.Errorf("generate temporary password: %w", err)
+	}
+	return hex.EncodeToString(raw), nil
+}
+
+func validRole(role string) bool {
+	switch role {
+	case RoleAdmin, RoleMaintainer, RoleMember, RoleViewer, RoleAgent:
+		return true
+	default:
+		return false
+	}
 }

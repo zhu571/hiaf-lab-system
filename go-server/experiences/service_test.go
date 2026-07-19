@@ -38,6 +38,15 @@ func TestCreateNormalizesTagsAndRequiresAdminForGlobal(t *testing.T) {
 	}
 }
 
+func TestCreateRejectsAiGeneratedFromNonAgent(t *testing.T) {
+	svc := NewService(newFakeExperienceRepo(), fakeProjectAccess{})
+
+	_, err := svc.Create("usr_1", auth.RoleMember, CreateExperienceRequest{AiGenerated: true})
+	if !errors.Is(err, ErrInvalidInput) {
+		t.Fatalf("Create error = %v, want %v", err, ErrInvalidInput)
+	}
+}
+
 func TestCandidateListFiltersOrdinaryUserToOwnItems(t *testing.T) {
 	repo := newFakeExperienceRepo()
 	prj := "prj_1"
@@ -169,15 +178,17 @@ func newFakeExperienceRepo() *fakeExperienceRepo {
 
 func (f *fakeExperienceRepo) Create(authorID string, req CreateExperienceRequest) (*Experience, error) {
 	exp := Experience{
-		ID:        "exp_new",
-		ProjectID: req.ProjectID,
-		Title:     req.Title,
-		Content:   req.Content,
-		Tags:      append([]string(nil), req.Tags...),
-		Status:    StatusCandidate,
-		AuthorID:  authorID,
-		CreatedAt: time.Now(),
-		UpdatedAt: time.Now(),
+		ID:          "exp_new",
+		ProjectID:   req.ProjectID,
+		Title:       req.Title,
+		Content:     req.Content,
+		Tags:        append([]string(nil), req.Tags...),
+		Status:      StatusCandidate,
+		AuthorID:    authorID,
+		AiGenerated: req.AiGenerated,
+		AgentTaskID: req.AgentTaskID,
+		CreatedAt:   time.Now(),
+		UpdatedAt:   time.Now(),
 	}
 	f.experiences[exp.ID] = cloneExperience(exp)
 	return cloneExperience(exp), nil

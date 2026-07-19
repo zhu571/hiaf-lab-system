@@ -25,6 +25,10 @@ type ProjectAccessChecker interface {
 	ProjectRole(projectID, userID, userRole string) (string, error)
 }
 
+type AgentTaskValidator interface {
+	ValidateAgentTask(taskID, actingUserID string) (bool, error)
+}
+
 type experienceRepository interface {
 	Create(authorID string, req CreateExperienceRequest) (*Experience, error)
 	GetByID(id string) (*Experience, error)
@@ -35,15 +39,23 @@ type experienceRepository interface {
 }
 
 type Service struct {
-	repo   experienceRepository
-	access ProjectAccessChecker
+	repo      experienceRepository
+	access    ProjectAccessChecker
+	validator AgentTaskValidator
 }
 
-func NewService(repo experienceRepository, access ProjectAccessChecker) *Service {
-	return &Service{repo: repo, access: access}
+func NewService(repo experienceRepository, access ProjectAccessChecker, validators ...AgentTaskValidator) *Service {
+	s := &Service{repo: repo, access: access}
+	if len(validators) > 0 {
+		s.validator = validators[0]
+	}
+	return s
 }
 
 func (s *Service) Create(userID, userRole string, req CreateExperienceRequest) (*Experience, error) {
+	if err := s.validateAgentFields(userID, userRole, req.AiGenerated, req.AgentTaskID); err != nil {
+		return nil, ErrInvalidInput
+	}
 	req.Title = strings.TrimSpace(req.Title)
 	req.Content = strings.TrimSpace(req.Content)
 	if req.Title == "" || len(req.Title) > 256 || req.Content == "" {
@@ -82,6 +94,26 @@ func (s *Service) Create(userID, userRole string, req CreateExperienceRequest) (
 		return nil, ErrForbidden
 	}
 	return s.repo.Create(userID, req)
+}
+
+func (s *Service) validateAgentFields(userID, userRole string, aiGenerated bool, taskID *string) error {
+	if userRole != auth.RoleAgent {
+		if aiGenerated || taskID != nil {
+			return ErrInvalidInput
+		}
+		return nil
+	}
+	if !aiGenerated || taskID == nil || strings.TrimSpace(*taskID) == "" || s.validator == nil {
+		return ErrInvalidInput
+	}
+	valid, err := s.validator.ValidateAgentTask(strings.TrimSpace(*taskID), userID)
+	if err != nil {
+		return err
+	}
+	if !valid {
+		return ErrInvalidInput
+	}
+	return nil
 }
 
 func (s *Service) List(userID, userRole string, params ExperienceListParams) (*ExperienceListResult, error) {

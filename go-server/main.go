@@ -1,12 +1,16 @@
 package main
 
 import (
+	"encoding/json"
+	"fmt"
 	"log/slog"
 	"net/http"
 	"os"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
+	"github.com/zhu571/hiaf-lab-system/go-server/agent"
+	"github.com/zhu571/hiaf-lab-system/go-server/audit"
 	"github.com/zhu571/hiaf-lab-system/go-server/auth"
 	"github.com/zhu571/hiaf-lab-system/go-server/common"
 	"github.com/zhu571/hiaf-lab-system/go-server/experiences"
@@ -41,7 +45,8 @@ func main() {
 		if err != nil || user == nil {
 			return false
 		}
-		return user.TokenVersion == version
+		// disabled 用户的 access token 立即失效，即使 token_version 仍然匹配。
+		return user.TokenVersion == version && !user.Disabled
 	}
 	authSvc := auth.NewService(authRepo, []byte(jwtSecret))
 	authHandler := auth.NewHandler(authSvc)
@@ -51,12 +56,17 @@ func main() {
 	logsRepo := logs.NewRepository(db)
 	logsSvc := logs.NewService(logsRepo, "Asia/Shanghai", logs.ProjectAccessAdapter{DB: db, Repo: projectsRepo})
 	logsHandler := logs.NewHandler(logsSvc)
+	auditHandler := audit.NewHandler(db)
+	agentRepo := agent.NewRepository(db)
+	agentSvc := agent.NewService(agentRepo)
+	agentHandler := agent.NewHandler(agentSvc)
 	issuesRepo := issues.NewRepository(db)
-	issuesSvc := issues.NewService(issuesRepo, issues.ProjectAccessAdapter{DB: db, Repo: projectsRepo})
+	issuesSvc := issues.NewService(issuesRepo, issues.ProjectAccessAdapter{DB: db, Repo: projectsRepo}, agentSvc)
 	issuesHandler := issues.NewHandler(issuesSvc)
 	experiencesRepo := experiences.NewRepository(db)
-	experiencesSvc := experiences.NewService(experiencesRepo, experiences.ProjectAccessAdapter{Repo: projectsRepo})
+	experiencesSvc := experiences.NewService(experiencesRepo, experiences.ProjectAccessAdapter{Repo: projectsRepo}, agentSvc)
 	experiencesHandler := experiences.NewHandler(experiencesSvc)
+	agentSvc.SetExecutor(candidateExecutor{issues: issuesSvc, experiences: experiencesSvc})
 	sensorsSvc, err := sensors.NewService()
 	if err != nil {
 		slog.Error("failed to create sensors service", "error", err)
@@ -67,13 +77,33 @@ func main() {
 		slog.Error("failed to create instruments service", "error", err)
 		os.Exit(1)
 	}
-	instrumentsHandler := instruments.NewHandler(instrumentsSvc)
+	e5063aWorker := instruments.NewInstrumentWorker(instruments.WorkerConfig{
+		InstrumentID: "e5063a",
+		Addr:         "10.51.12.157:5025",
+		Terminator:   "\n",
+	})
+	hiokiWorker := instruments.NewInstrumentWorker(instruments.WorkerConfig{
+		InstrumentID: "hioki_im3536",
+		Addr:         "10.51.12.101:3500",
+		Terminator:   "\r\n",
+	})
+	workers := map[string]*instruments.InstrumentWorker{
+		"e5063a":       e5063aWorker,
+		"hioki_im3536": hiokiWorker,
+	}
+	for id, worker := range workers {
+		if err := worker.Start(); err != nil {
+			slog.Warn("instrument worker unavailable", "instrument_id", id, "error", err)
+		}
+	}
+	instrumentsHandler := instruments.NewHandler(instrumentsSvc, workers)
 	sensorsHandler := sensors.NewHandler(sensorsSvc)
 
 	r := chi.NewRouter()
 	r.Use(middleware.RealIP)
 	r.Use(mw.RequestID)
 	r.Use(mw.CORS)
+	r.Use(mw.CSRF)
 	r.Use(middleware.Logger)
 
 	r.Get("/health", func(w http.ResponseWriter, r *http.Request) {
@@ -81,8 +111,54 @@ func main() {
 	})
 
 	r.Mount("/api/v1/auth", authHandler.Routes(mw.Audit(db)))
+	r.Route("/api/v1/admin/users", func(r chi.Router) {
+		r.Use(mw.AuthRequired)
+		r.Use(mw.RequireRole(auth.RoleAdmin))
+		r.Use(mw.Audit(db))
+		r.Get("/", authHandler.AdminListUsers)
+		r.Post("/", authHandler.AdminCreateUser)
+		r.Patch("/{id}", authHandler.AdminUpdateUser)
+		r.Post("/{id}/reset-password", authHandler.AdminResetPassword)
+	})
+	r.Route("/api/v1/audit", func(r chi.Router) {
+		r.Use(mw.AuthRequired)
+		r.Get("/{request_id}", auditHandler.GetByRequestID)
+	})
+	r.Route("/api/v1/agent/tasks", func(r chi.Router) {
+		r.Use(mw.AuthRequired)
+		r.Use(mw.RequireRole(auth.RoleAgent))
+		r.With(mw.Audit(db)).Post("/claim", agentHandler.Claim)
+		r.Route("/{id}", func(r chi.Router) {
+			r.Use(mw.QueueTaskContext(db))
+			r.Use(mw.Audit(db))
+			r.Post("/complete", agentHandler.Complete)
+			r.Post("/fail", agentHandler.Fail)
+		})
+	})
+	r.Route("/api/v1/agent/candidates", func(r chi.Router) {
+		r.Use(mw.AuthRequired)
+		r.Use(mw.RequireRole(auth.RoleAdmin, auth.RoleMaintainer))
+		r.Use(mw.Audit(db))
+		r.Get("/", agentHandler.ListCandidates)
+		r.Post("/{id}/approve", agentHandler.ApproveCandidate)
+		r.Post("/{id}/reject", agentHandler.RejectCandidate)
+	})
+	r.Route("/api/v1/daily-reports", func(r chi.Router) {
+		r.Use(mw.AuthRequired)
+		r.Use(mw.AgentContext(db))
+		r.Use(mw.Audit(db))
+		r.Get("/", logsHandler.ListReports)
+		r.Post("/today", logsHandler.GetOrCreateTodayReport)
+		r.Get("/by-date", logsHandler.GetReportByDate)
+		r.Route("/{id}", func(r chi.Router) {
+			r.Get("/", logsHandler.GetReportByID)
+			r.Patch("/", logsHandler.UpdateReportRawText)
+			r.Post("/submit", logsHandler.SubmitReport)
+		})
+	})
 	r.Route("/api/v1/projects", func(r chi.Router) {
 		r.Use(mw.AuthRequired)
+		r.Use(mw.AgentContext(db))
 		r.Use(mw.Audit(db))
 		r.Get("/", projectsHandler.List)
 		r.Post("/", projectsHandler.Create)
@@ -120,6 +196,7 @@ func main() {
 	})
 	r.Route("/api/v1/logs", func(r chi.Router) {
 		r.Use(mw.AuthRequired)
+		r.Use(mw.AgentContext(db))
 		r.Use(mw.Audit(db))
 		r.Route("/{id}", func(r chi.Router) {
 			r.Get("/", logsHandler.GetLog)
@@ -128,6 +205,7 @@ func main() {
 	})
 	r.Route("/api/v1/issues", func(r chi.Router) {
 		r.Use(mw.AuthRequired)
+		r.Use(mw.AgentContext(db))
 		r.Use(mw.Audit(db))
 		r.Route("/{id}", func(r chi.Router) {
 			r.Get("/", issuesHandler.GetByID)
@@ -138,9 +216,11 @@ func main() {
 	})
 	r.Route("/api/v1/experiences", func(r chi.Router) {
 		r.Use(mw.AuthRequired)
+		r.Use(mw.AgentContext(db))
 		r.Use(mw.Audit(db))
 		r.Get("/", experiencesHandler.List)
 		r.Post("/", experiencesHandler.Create)
+		r.Post("/candidates", experiencesHandler.Create)
 		r.Route("/{id}", func(r chi.Router) {
 			r.Get("/", experiencesHandler.GetByID)
 			r.Patch("/", experiencesHandler.Update)
@@ -149,17 +229,29 @@ func main() {
 		})
 	})
 	r.Route("/api/v1/instruments", func(r chi.Router) {
-		r.Use(mw.AuthRequired)
-		r.Use(mw.Audit(db))
-		r.Route("/piezo", func(r chi.Router) {
-			r.Get("/status", instrumentsHandler.PiezoStatus)
-			r.Post("/start", instrumentsHandler.PiezoStart)
-			r.Post("/stop", instrumentsHandler.PiezoStop)
-			r.Post("/setpoint", instrumentsHandler.PiezoSetpoint)
+		r.Get("/", instrumentsHandler.ListInstruments)
+		r.Get("/whitelist", instrumentsHandler.GetWhitelist)
+		r.Get("/{id}/status", instrumentsHandler.InstrumentStatus)
+		r.Group(func(r chi.Router) {
+			r.Use(mw.AuthRequired)
+			r.Use(mw.AgentContext(db))
+			r.Use(mw.Audit(db))
+			r.Post("/{id}/emergency-stop", instrumentsHandler.EmergencyStop)
+			r.With(mw.RequireRole(auth.RoleMaintainer, auth.RoleAdmin)).Post("/{id}/commands", instrumentsHandler.ExecuteCommand)
+			r.Route("/piezo", func(r chi.Router) {
+				r.Get("/status", instrumentsHandler.PiezoStatus)
+				r.Group(func(r chi.Router) {
+					r.Use(mw.RequireRole(auth.RoleMaintainer, auth.RoleAdmin))
+					r.Post("/start", instrumentsHandler.PiezoStart)
+					r.Post("/stop", instrumentsHandler.PiezoStop)
+					r.Post("/setpoint", instrumentsHandler.PiezoSetpoint)
+				})
+			})
 		})
 	})
 	r.Route("/api/v1/sensors", func(r chi.Router) {
 		r.Use(mw.AuthRequired)
+		r.Use(mw.AgentContext(db))
 		r.Use(mw.Audit(db))
 		r.Get("/latest", sensorsHandler.Latest)
 		r.Get("/history", sensorsHandler.History)
@@ -178,4 +270,51 @@ func commonEnv(key, def string) string {
 		return v
 	}
 	return def
+}
+
+type candidateExecutor struct {
+	issues      *issues.Service
+	experiences *experiences.Service
+}
+
+func (e candidateExecutor) Execute(candidate agent.AgentCandidateAction, actingUserID string) error {
+	switch candidate.ActionType {
+	case "create_issue":
+		if candidate.ProjectID == nil {
+			return fmt.Errorf("create_issue candidate has no project_id")
+		}
+		var req issues.CreateIssueRequest
+		if err := json.Unmarshal(candidate.Payload, &req); err != nil {
+			return err
+		}
+		req.AiGenerated = true
+		req.AgentTaskID = &candidate.TaskID
+		_, err := e.issues.Create(*candidate.ProjectID, actingUserID, auth.RoleAgent, req)
+		return err
+	case "add_comment":
+		var req struct {
+			IssueID string `json:"issue_id"`
+			Content string `json:"content"`
+		}
+		if err := json.Unmarshal(candidate.Payload, &req); err != nil {
+			return err
+		}
+		_, err := e.issues.AddComment(req.IssueID, actingUserID, auth.RoleAgent, issues.AddCommentRequest{Content: req.Content})
+		return err
+	case "create_experience":
+		if candidate.ProjectID == nil {
+			return fmt.Errorf("create_experience candidate has no project_id")
+		}
+		var req experiences.CreateExperienceRequest
+		if err := json.Unmarshal(candidate.Payload, &req); err != nil {
+			return err
+		}
+		req.ProjectID = candidate.ProjectID
+		req.AiGenerated = true
+		req.AgentTaskID = &candidate.TaskID
+		_, err := e.experiences.Create(actingUserID, auth.RoleAgent, req)
+		return err
+	default:
+		return fmt.Errorf("unsupported candidate action %q", candidate.ActionType)
+	}
 }

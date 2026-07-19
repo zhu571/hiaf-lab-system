@@ -31,7 +31,7 @@ func (h *Handler) GetOrCreateTodayReport(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
-	report, err := h.svc.GetOrCreateTodayReport(claims.UserID)
+	report, err := h.svc.GetOrCreateTodayReport(middleware.EffectiveUserID(r.Context()))
 	if err != nil {
 		h.writeError(w, r, err, nil)
 		return
@@ -55,7 +55,7 @@ func (h *Handler) UpdateReportRawText(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
-	report, err := h.svc.UpdateReportRawText(chi.URLParam(r, "id"), claims.UserID, req.RawText)
+	report, err := h.svc.UpdateReportRawText(chi.URLParam(r, "id"), middleware.EffectiveUserID(r.Context()), req.RawText)
 	if err != nil {
 		h.writeError(w, r, err, nil)
 		return
@@ -74,7 +74,7 @@ func (h *Handler) GetReportByDate(w http.ResponseWriter, r *http.Request) {
 		common.WriteError(w, r, http.StatusBadRequest, "bad_request", "缺少 date 参数", nil)
 		return
 	}
-	report, err := h.svc.GetReportByDate(claims.UserID, reportDate)
+	report, err := h.svc.GetReportByDate(middleware.EffectiveUserID(r.Context()), reportDate)
 	if err != nil {
 		h.writeError(w, r, err, nil)
 		return
@@ -82,20 +82,40 @@ func (h *Handler) GetReportByDate(w http.ResponseWriter, r *http.Request) {
 	common.WriteSuccess(w, r, report)
 }
 
-func (h *Handler) ListMyReports(w http.ResponseWriter, r *http.Request) {
+func (h *Handler) GetReportByID(w http.ResponseWriter, r *http.Request) {
 	claims := middleware.GetUserClaims(r.Context())
 	if claims == nil {
 		common.WriteError(w, r, http.StatusUnauthorized, "unauthorized", "未登录", nil)
 		return
 	}
-	page := queryInt(r, "page", 1)
-	perPage := queryInt(r, "per_page", 20)
-	reports, total, err := h.svc.ListReports(claims.UserID, page, perPage)
+	report, err := h.svc.GetReportByID(chi.URLParam(r, "id"), middleware.EffectiveUserID(r.Context()), claims.Role)
 	if err != nil {
 		h.writeError(w, r, err, nil)
 		return
 	}
-	common.WriteSuccess(w, r, map[string]any{"items": reports, "total": total, "page": page})
+	common.WriteSuccess(w, r, report)
+}
+
+func (h *Handler) ListReports(w http.ResponseWriter, r *http.Request) {
+	claims := middleware.GetUserClaims(r.Context())
+	if claims == nil {
+		common.WriteError(w, r, http.StatusUnauthorized, "unauthorized", "未登录", nil)
+		return
+	}
+	params := ReportListParams{
+		AuthorID: middleware.EffectiveUserID(r.Context()),
+		Status:   r.URL.Query().Get("status"),
+		Keyword:  r.URL.Query().Get("keyword"),
+		Date:     r.URL.Query().Get("date"),
+		Page:     queryInt(r, "page", 1),
+		PerPage:  queryInt(r, "per_page", 20),
+	}
+	reports, total, err := h.svc.ListReports(params)
+	if err != nil {
+		h.writeError(w, r, err, nil)
+		return
+	}
+	common.WriteSuccess(w, r, map[string]any{"items": reports, "total": total, "page": params.Page})
 }
 
 func (h *Handler) SubmitReport(w http.ResponseWriter, r *http.Request) {
@@ -112,7 +132,7 @@ func (h *Handler) SubmitReport(w http.ResponseWriter, r *http.Request) {
 		common.WriteError(w, r, http.StatusBadRequest, "bad_request", "请求体解析失败", nil)
 		return
 	}
-	result, err := h.svc.SubmitReport(chi.URLParam(r, "id"), claims.UserID, claims.Role, req.Force)
+	result, err := h.svc.SubmitReport(chi.URLParam(r, "id"), middleware.EffectiveUserID(r.Context()), claims.Role, req.Force)
 	if err != nil {
 		h.writeError(w, r, err, nil)
 		return
@@ -134,7 +154,7 @@ func (h *Handler) CreateLog(w http.ResponseWriter, r *http.Request) {
 		common.WriteError(w, r, http.StatusBadRequest, "bad_request", "请求体解析失败", nil)
 		return
 	}
-	item, err := h.svc.CreateLog(chi.URLParam(r, "id"), claims.UserID, claims.Role, req)
+	item, err := h.svc.CreateLog(chi.URLParam(r, "id"), middleware.EffectiveUserID(r.Context()), claims.Role, req)
 	if err != nil {
 		h.writeError(w, r, err, nil)
 		return
@@ -156,7 +176,7 @@ func (h *Handler) ListLogs(w http.ResponseWriter, r *http.Request) {
 		DateTo:   r.URL.Query().Get("date_to"),
 		Status:   r.URL.Query().Get("status"),
 	}
-	result, err := h.svc.ListLogs(chi.URLParam(r, "id"), claims.UserID, claims.Role, params)
+	result, err := h.svc.ListLogs(chi.URLParam(r, "id"), middleware.EffectiveUserID(r.Context()), claims.Role, params)
 	if err != nil {
 		h.writeError(w, r, err, nil)
 		return
@@ -170,7 +190,7 @@ func (h *Handler) GetLog(w http.ResponseWriter, r *http.Request) {
 		common.WriteError(w, r, http.StatusUnauthorized, "unauthorized", "未登录", nil)
 		return
 	}
-	item, err := h.svc.GetLog(chi.URLParam(r, "id"), claims.UserID, claims.Role)
+	item, err := h.svc.GetLog(chi.URLParam(r, "id"), middleware.EffectiveUserID(r.Context()), claims.Role)
 	if err != nil {
 		h.writeError(w, r, err, nil)
 		return
@@ -192,7 +212,7 @@ func (h *Handler) UpdateLog(w http.ResponseWriter, r *http.Request) {
 		common.WriteError(w, r, http.StatusBadRequest, "bad_request", "请求体解析失败", nil)
 		return
 	}
-	item, err := h.svc.UpdateLog(chi.URLParam(r, "id"), claims.UserID, claims.Role, req)
+	item, err := h.svc.UpdateLog(chi.URLParam(r, "id"), middleware.EffectiveUserID(r.Context()), claims.Role, req)
 	if err != nil {
 		h.writeError(w, r, err, nil)
 		return

@@ -127,9 +127,9 @@ func (r *Repository) UpdateStatus(id, status string) (*Project, error) {
 	var project Project
 	err := scanProject(r.db.QueryRow(
 		`UPDATE projects
-		 SET status = $2,
-		     completed_at = CASE WHEN $2 = 'completed' THEN COALESCE(completed_at, now()) ELSE completed_at END,
-		     archived_at = CASE WHEN $2 = 'archived' THEN COALESCE(archived_at, now()) ELSE archived_at END,
+		 SET status = $2::varchar,
+		     completed_at = CASE WHEN $2::varchar = 'completed' THEN COALESCE(completed_at, now()) ELSE completed_at END,
+		     archived_at = CASE WHEN $2::varchar = 'archived' THEN COALESCE(archived_at, now()) ELSE archived_at END,
 		     updated_at = now()
 		 WHERE id = $1
 		 RETURNING id, code, name, short_name, description, status, visibility, comment_policy, owner_user_id,

@@ -2,6 +2,7 @@ package logs
 
 import (
 	"errors"
+	"strings"
 	"testing"
 	"time"
 
@@ -78,6 +79,13 @@ func TestSubmitReportHardBlocks(t *testing.T) {
 	}
 }
 
+func TestGetReportByIDUsesOwnerBoundary(t *testing.T) {
+	svc := testService(testReport("usr_1", ReportStatusSubmitted, "worked"), nil, true)
+	if _, err := svc.GetReportByID("report_1", "usr_2", projects.RoleMember); !errors.Is(err, ErrNotReportOwner) {
+		t.Fatalf("GetReportByID error = %v, want %v", err, ErrNotReportOwner)
+	}
+}
+
 func TestSubmitReportWarningsBlockWithoutForce(t *testing.T) {
 	report := testReport("usr_1", ReportStatusDraft, "raw text has no log content")
 	item := testLog("log_1", "prj_1", LogStatusDraft, "actual log content", "2026-07-13T10:00:00+08:00")
@@ -141,6 +149,21 @@ func TestUpdateLogRequiresCurrentProjectAccess(t *testing.T) {
 	_, err := svc.UpdateLog(item.ID, "usr_1", projects.RoleMember, UpdateLogRequest{Content: &content})
 	if !errors.Is(err, ErrForbidden) {
 		t.Fatalf("UpdateLog error = %v, want %v", err, ErrForbidden)
+	}
+}
+
+func TestUpdateLogConfirmsDraft(t *testing.T) {
+	report := testReport("usr_1", ReportStatusDraft, "worked")
+	item := testLog("log_1", "prj_1", LogStatusDraft, "old", "2026-07-14T10:00:00+08:00")
+	svc := testService(report, []Log{item}, true)
+	confirmed := LogStatusConfirmed
+
+	updated, err := svc.UpdateLog(item.ID, "usr_1", projects.RoleMember, UpdateLogRequest{ContentStatus: &confirmed})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if updated.ContentStatus != LogStatusConfirmed {
+		t.Fatalf("status = %q, want %q", updated.ContentStatus, LogStatusConfirmed)
 	}
 }
 
@@ -237,12 +260,22 @@ func (f *fakeRepo) GetReportByDate(authorID, reportDate string) (*DailyReport, e
 	return nil, nil
 }
 
-func (f *fakeRepo) ListReports(authorID string, page, perPage int) ([]DailyReport, int, error) {
+func (f *fakeRepo) ListReports(params ReportListParams) ([]DailyReport, int, error) {
 	var out []DailyReport
 	for _, report := range f.reports {
-		if report.AuthorID == authorID {
-			out = append(out, *cloneReport(*report))
+		if params.AuthorID != "" && report.AuthorID != params.AuthorID {
+			continue
 		}
+		if params.Status != "" && report.ContentStatus != params.Status {
+			continue
+		}
+		if params.Keyword != "" && !strings.Contains(report.Summary, params.Keyword) && !strings.Contains(report.RawText, params.Keyword) {
+			continue
+		}
+		if params.Date != "" && report.ReportDate != params.Date {
+			continue
+		}
+		out = append(out, *cloneReport(*report))
 	}
 	return out, len(out), nil
 }
@@ -303,6 +336,9 @@ func (f *fakeRepo) UpdateLog(id string, req UpdateLogRequest, occurredAt *time.T
 	}
 	if occurredAt != nil {
 		item.OccurredAt = *occurredAt
+	}
+	if req.ContentStatus != nil {
+		item.ContentStatus = *req.ContentStatus
 	}
 	return cloneLog(*item), nil
 }

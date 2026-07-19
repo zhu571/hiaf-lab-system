@@ -69,6 +69,15 @@ func TestCreateAdminStillRespectsProjectLifecycle(t *testing.T) {
 	}
 }
 
+func TestCreateRejectsAiGeneratedFromNonAgent(t *testing.T) {
+	svc := NewService(newFakeIssueRepo(), fakeProjectAccess{})
+
+	_, err := svc.Create("prj_1", "usr_1", auth.RoleMember, CreateIssueRequest{AiGenerated: true})
+	if !errors.Is(err, ErrInvalidInput) {
+		t.Fatalf("Create error = %v, want %v", err, ErrInvalidInput)
+	}
+}
+
 func TestUpdateRejectsClosedIssue(t *testing.T) {
 	repo := newFakeIssueRepo()
 	closed := testIssue("iss_1", StatusClosed, "usr_1", nil)
@@ -343,6 +352,8 @@ func (f *fakeIssueRepo) Create(projectID, authorID string, req CreateIssueReques
 		Severity:    defaultSeverity(req.Severity),
 		AuthorID:    authorID,
 		AssigneeID:  req.AssigneeID,
+		AiGenerated: req.AiGenerated,
+		AgentTaskID: req.AgentTaskID,
 		ReportDate:  reportDate,
 		OccurredAt:  occurredAt,
 		CreatedAt:   time.Now(),

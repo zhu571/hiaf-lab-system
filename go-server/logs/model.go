@@ -36,6 +36,7 @@ type DailyReport struct {
 	ID            string    `json:"id"`
 	ReportDate    string    `json:"report_date"`
 	AuthorID      string    `json:"author_id"`
+	AuthorName    string    `json:"author_name,omitempty"`
 	RawText       string    `json:"raw_text"`
 	Summary       string    `json:"summary"`
 	ContentStatus string    `json:"content_status"`
@@ -72,9 +73,10 @@ type CreateLogRequest struct {
 }
 
 type UpdateLogRequest struct {
-	Category   *string `json:"category,omitempty"`
-	Content    *string `json:"content,omitempty"`
-	OccurredAt *string `json:"occurred_at,omitempty"`
+	Category      *string `json:"category,omitempty"`
+	Content       *string `json:"content,omitempty"`
+	OccurredAt    *string `json:"occurred_at,omitempty"`
+	ContentStatus *string `json:"content_status,omitempty"`
 }
 
 type SubmitReportRequest struct {
@@ -106,4 +108,13 @@ type LogListResult struct {
 	Items []Log `json:"items"`
 	Total int   `json:"total"`
 	Page  int   `json:"page"`
+}
+
+type ReportListParams struct {
+	AuthorID string `json:"author_id,omitempty"`
+	Status   string `json:"status,omitempty"`
+	Keyword  string `json:"keyword,omitempty"`
+	Date     string `json:"date,omitempty"`
+	Page     int    `json:"page"`
+	PerPage  int    `json:"per_page"`
 }

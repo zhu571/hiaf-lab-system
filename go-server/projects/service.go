@@ -177,6 +177,10 @@ func (s *Service) TransitionStatus(id string, req StatusTransitionRequest, userI
 		return nil, nil, ErrProjectNotFound
 	}
 
+	if adminOnlyAction(req.Action) && userRole != auth.RoleAdmin {
+		return project, nil, ErrForbidden
+	}
+
 	target, err := targetStatus(project.Status, req.Action)
 	if err != nil {
 		return project, nil, err
@@ -348,8 +352,26 @@ func targetStatus(current, action string) (string, error) {
 		if current == StatusArchived {
 			return StatusActive, nil
 		}
+	case "deactivate":
+		if current == StatusActive {
+			return StatusDraft, nil
+		}
+	case "reopen":
+		if current == StatusCompleted {
+			return StatusActive, nil
+		}
 	}
 	return "", ErrInvalidTransition
+}
+
+// adminOnlyAction 标记进度倒退操作，仅 admin 可触发
+func adminOnlyAction(action string) bool {
+	switch strings.TrimSpace(action) {
+	case "deactivate", "reopen":
+		return true
+	default:
+		return false
+	}
 }
 
 func validateDate(s *string) error {

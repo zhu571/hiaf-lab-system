@@ -34,7 +34,7 @@ func (h *Handler) Create(w http.ResponseWriter, r *http.Request) {
 		common.WriteError(w, r, http.StatusBadRequest, "bad_request", "请求体解析失败", nil)
 		return
 	}
-	project, err := h.svc.Create(req, claims.UserID)
+	project, err := h.svc.Create(req, middleware.EffectiveUserID(r.Context()))
 	if err != nil {
 		h.writeError(w, r, err, nil)
 		return
@@ -48,7 +48,7 @@ func (h *Handler) List(w http.ResponseWriter, r *http.Request) {
 		common.WriteError(w, r, http.StatusUnauthorized, "unauthorized", "未登录", nil)
 		return
 	}
-	projects, err := h.svc.List(claims.UserID, claims.Role, r.URL.Query().Get("status"))
+	projects, err := h.svc.List(middleware.EffectiveUserID(r.Context()), claims.Role, r.URL.Query().Get("status"))
 	if err != nil {
 		h.writeError(w, r, err, nil)
 		return
@@ -97,7 +97,7 @@ func (h *Handler) TransitionStatus(w http.ResponseWriter, r *http.Request) {
 		common.WriteError(w, r, http.StatusBadRequest, "bad_request", "请求体解析失败", nil)
 		return
 	}
-	project, warnings, err := h.svc.TransitionStatus(chi.URLParam(r, "id"), req, claims.UserID, claims.Role)
+	project, warnings, err := h.svc.TransitionStatus(chi.URLParam(r, "id"), req, middleware.EffectiveUserID(r.Context()), claims.Role)
 	if err != nil {
 		details := map[string]any{}
 		if len(warnings) > 0 {
@@ -126,7 +126,7 @@ func (h *Handler) AddMember(w http.ResponseWriter, r *http.Request) {
 		common.WriteError(w, r, http.StatusBadRequest, "bad_request", "请求体解析失败", nil)
 		return
 	}
-	member, err := h.svc.AddMember(chi.URLParam(r, "id"), req, claims.UserID)
+	member, err := h.svc.AddMember(chi.URLParam(r, "id"), req, middleware.EffectiveUserID(r.Context()))
 	if err != nil {
 		h.writeError(w, r, err, nil)
 		return

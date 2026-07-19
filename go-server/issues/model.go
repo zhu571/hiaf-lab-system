@@ -23,6 +23,8 @@ type Issue struct {
 	Severity    string     `json:"severity"`
 	AuthorID    string     `json:"author_id"`
 	AssigneeID  *string    `json:"assignee_id,omitempty"`
+	AiGenerated bool       `json:"ai_generated"`
+	AgentTaskID *string    `json:"agent_task_id,omitempty"`
 	ReportDate  string     `json:"report_date"`
 	OccurredAt  time.Time  `json:"occurred_at"`
 	ResolvedAt  *time.Time `json:"resolved_at,omitempty"`
@@ -47,6 +49,8 @@ type CreateIssueRequest struct {
 	OccurredAt    *string  `json:"occurred_at,omitempty"`
 	ReportDate    *string  `json:"report_date,omitempty"`
 	RelatedLogIDs []string `json:"related_log_ids,omitempty"`
+	AiGenerated   bool     `json:"ai_generated"`
+	AgentTaskID   *string  `json:"agent_task_id,omitempty"`
 }
 
 type UpdateIssueRequest struct {

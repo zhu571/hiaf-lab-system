@@ -1,10 +1,12 @@
 package instruments
 
 import (
+	"bufio"
 	"bytes"
 	"encoding/json"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"os"
 	"strings"
@@ -16,6 +18,11 @@ type Service struct {
 	client  *http.Client
 	gateway string
 }
+
+const (
+	piezoSetpointMin = 0.0
+	piezoSetpointMax = 100.0
+)
 
 // NewService creates an instruments Service with a 10s timeout HTTP client.
 func NewService() (*Service, error) {
@@ -32,6 +39,67 @@ func NewServiceWithGateway(gateway string) *Service {
 		client:  &http.Client{Timeout: 10 * time.Second},
 		gateway: normalizeHTTPBase(gateway),
 	}
+}
+
+// NewSCPIConnection opens a TCP connection to a SCPI instrument.
+func NewSCPIConnection(addr, terminator string) (*SCPIConnection, error) {
+	if addr == "" {
+		return nil, fmt.Errorf("SCPI address is required")
+	}
+	if terminator == "" {
+		return nil, fmt.Errorf("SCPI terminator is required")
+	}
+	const timeout = 10 * time.Second
+	conn, err := net.DialTimeout("tcp", addr, timeout)
+	if err != nil {
+		return nil, fmt.Errorf("connect to SCPI instrument %s: %w", addr, err)
+	}
+	return &SCPIConnection{addr: addr, terminator: terminator, timeout: timeout, conn: conn}, nil
+}
+
+// Send writes each newline- or semicolon-delimited command and reads query responses.
+func (c *SCPIConnection) Send(cmd string) (string, error) {
+	if c == nil || c.conn == nil {
+		return "", fmt.Errorf("SCPI connection is closed")
+	}
+
+	var responses []string
+	for _, line := range strings.FieldsFunc(cmd, func(r rune) bool { return r == ';' || r == '\n' || r == '\r' }) {
+		line = strings.TrimSpace(line)
+		if line == "" {
+			continue
+		}
+		if err := c.conn.SetDeadline(time.Now().Add(c.timeout)); err != nil {
+			return "", fmt.Errorf("set SCPI deadline: %w", err)
+		}
+		message := line + c.terminator
+		n, err := io.WriteString(c.conn, message)
+		if err != nil {
+			return "", fmt.Errorf("send SCPI command %q: %w", line, err)
+		}
+		if n != len(message) {
+			return "", fmt.Errorf("send SCPI command %q: %w", line, io.ErrShortWrite)
+		}
+		if !strings.HasSuffix(line, "?") {
+			continue
+		}
+		response, err := bufio.NewReader(c.conn).ReadString(c.terminator[len(c.terminator)-1])
+		if err != nil {
+			return "", fmt.Errorf("read SCPI response for %q: %w", line, err)
+		}
+		responses = append(responses, strings.TrimSuffix(response, c.terminator))
+	}
+	return strings.Join(responses, "\n"), nil
+}
+
+// Close closes the instrument connection.
+func (c *SCPIConnection) Close() error {
+	if c == nil || c.conn == nil {
+		return nil
+	}
+	err := c.conn.Close()
+	c.conn = nil
+	return err
 }
 
 // gatewayPV represents a single PV value from the EPICS gateway.
@@ -170,5 +238,8 @@ func (s *Service) PiezoStop() error {
 
 // PiezoSetpoint sets the setpoint value.
 func (s *Service) PiezoSetpoint(value float64) error {
+	if !(value >= piezoSetpointMin && value <= piezoSetpointMax) {
+		return fmt.Errorf("piezo setpoint must be between %.1f and %.1f", piezoSetpointMin, piezoSetpointMax)
+	}
 	return s.putPV("GasCell:Piezo:Setpoint", value)
 }

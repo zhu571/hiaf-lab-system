@@ -41,13 +41,17 @@ func SetJWTSecret(secret []byte) {
 // AuthRequired validates the Bearer token and injects UserClaims into the request context.
 func AuthRequired(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		tokenStr := ""
 		header := r.Header.Get("Authorization")
-		if header == "" || !strings.HasPrefix(header, "Bearer ") {
-			common.WriteError(w, r, http.StatusUnauthorized, "unauthorized", "缺少 Authorization header", nil)
+		if strings.HasPrefix(header, "Bearer ") {
+			tokenStr = strings.TrimPrefix(header, "Bearer ")
+		} else if cookie, err := r.Cookie("access_token"); err == nil {
+			tokenStr = cookie.Value
+		}
+		if tokenStr == "" {
+			common.WriteError(w, r, http.StatusUnauthorized, "unauthorized", "缺少认证凭据", nil)
 			return
 		}
-
-		tokenStr := strings.TrimPrefix(header, "Bearer ")
 		claims := &UserClaims{}
 		token, err := jwt.ParseWithClaims(tokenStr, claims, func(t *jwt.Token) (any, error) {
 			if _, ok := t.Method.(*jwt.SigningMethodHMAC); !ok {

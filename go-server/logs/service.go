@@ -41,7 +41,7 @@ type logRepository interface {
 	GetOrCreateTodayReport(authorID, reportDate string) (*DailyReport, error)
 	GetReportByID(id string) (*DailyReport, error)
 	GetReportByDate(authorID, reportDate string) (*DailyReport, error)
-	ListReports(authorID string, page, perPage int) ([]DailyReport, int, error)
+	ListReports(params ReportListParams) ([]DailyReport, int, error)
 	UpdateReport(id, rawText string) error
 	SubmitReport(id, qualityStatus string) (*DailyReport, error)
 	CreateLog(projectID, authorID string, req CreateLogRequest, occurredAt time.Time) (*Log, error)
@@ -88,6 +88,20 @@ func (s *Service) GetReportByDate(userID, reportDate string) (*DailyReport, erro
 	return s.withReportLogs(report)
 }
 
+func (s *Service) GetReportByID(id, userID, userRole string) (*DailyReport, error) {
+	report, err := s.repo.GetReportByID(id)
+	if err != nil {
+		return nil, err
+	}
+	if report == nil {
+		return nil, ErrReportNotFound
+	}
+	if report.AuthorID != userID && userRole != "admin" {
+		return nil, ErrNotReportOwner
+	}
+	return s.withReportLogs(report)
+}
+
 func (s *Service) UpdateReportRawText(id, userID, rawText string) (*DailyReport, error) {
 	report, err := s.repo.GetReportByID(id)
 	if err != nil {
@@ -112,11 +126,23 @@ func (s *Service) UpdateReportRawText(id, userID, rawText string) (*DailyReport,
 	return s.withReportLogs(updated)
 }
 
-func (s *Service) ListReports(userID string, page, perPage int) ([]DailyReport, int, error) {
-	if perPage > 100 {
-		perPage = 100
+func (s *Service) ListReports(params ReportListParams) ([]DailyReport, int, error) {
+	params.AuthorID = strings.TrimSpace(params.AuthorID)
+	params.Status = strings.TrimSpace(params.Status)
+	params.Keyword = strings.TrimSpace(params.Keyword)
+	params.Date = strings.TrimSpace(params.Date)
+	if params.PerPage > 100 {
+		params.PerPage = 100
 	}
-	return s.repo.ListReports(userID, page, perPage)
+	if !validOptionalReportStatus(params.Status) {
+		return nil, 0, ErrInvalidInput
+	}
+	if params.Date != "" {
+		if _, err := time.Parse(time.DateOnly, params.Date); err != nil {
+			return nil, 0, ErrInvalidInput
+		}
+	}
+	return s.repo.ListReports(params)
 }
 
 func (s *Service) CreateLog(projectID, userID, userRole string, req CreateLogRequest) (*Log, error) {
@@ -320,6 +346,9 @@ func (s *Service) UpdateLog(id, userID, userRole string, req UpdateLogRequest) (
 	if req.Content != nil && strings.TrimSpace(*req.Content) == "" {
 		return nil, ErrInvalidInput
 	}
+	if req.ContentStatus != nil && *req.ContentStatus != LogStatusConfirmed {
+		return nil, ErrInvalidInput
+	}
 
 	var occurredAt *time.Time
 	if req.OccurredAt != nil && strings.TrimSpace(*req.OccurredAt) != "" {
@@ -437,6 +466,15 @@ func validSource(v string) bool {
 func validOptionalStatus(v string) bool {
 	switch strings.TrimSpace(v) {
 	case "", LogStatusDraft, LogStatusConfirmed, LogStatusLocked, LogStatusVoided:
+		return true
+	default:
+		return false
+	}
+}
+
+func validOptionalReportStatus(v string) bool {
+	switch strings.TrimSpace(v) {
+	case "", ReportStatusDraft, ReportStatusSubmitted, ReportStatusConfirmed, ReportStatusLocked:
 		return true
 	default:
 		return false

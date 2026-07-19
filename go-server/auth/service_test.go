@@ -65,3 +65,27 @@ func TestVerifyPassword_MalformedStored(t *testing.T) {
 		t.Error("verifyPassword should reject malformed stored hash")
 	}
 }
+
+func TestRemovesActiveAdmin(t *testing.T) {
+	boolPtr := func(b bool) *bool { return &b }
+	strPtr := func(s string) *string { return &s }
+
+	cases := []struct {
+		name string
+		req  AdminUpdateUserRequest
+		want bool
+	}{
+		{"disable true triggers", AdminUpdateUserRequest{Disabled: boolPtr(true)}, true},
+		{"disable false does not", AdminUpdateUserRequest{Disabled: boolPtr(false)}, false},
+		{"role demotion triggers", AdminUpdateUserRequest{Role: strPtr(RoleMember)}, true},
+		{"role admin does not", AdminUpdateUserRequest{Role: strPtr(RoleAdmin)}, false},
+		{"display name only does not", AdminUpdateUserRequest{DisplayName: strPtr("x")}, false},
+		{"empty request does not", AdminUpdateUserRequest{}, false},
+	}
+
+	for _, c := range cases {
+		if got := removesActiveAdmin(c.req); got != c.want {
+			t.Errorf("%s: removesActiveAdmin = %v, want %v", c.name, got, c.want)
+		}
+	}
+}

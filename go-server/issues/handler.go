@@ -1,6 +1,7 @@
 package issues
 
 import (
+	"bytes"
 	"encoding/json"
 	"errors"
 	"log/slog"
@@ -34,7 +35,7 @@ func (h *Handler) Create(w http.ResponseWriter, r *http.Request) {
 		common.WriteError(w, r, http.StatusBadRequest, "bad_request", "请求体解析失败", nil)
 		return
 	}
-	issue, err := h.svc.Create(chi.URLParam(r, "id"), claims.UserID, claims.Role, req)
+	issue, err := h.svc.Create(chi.URLParam(r, "id"), middleware.EffectiveUserID(r.Context()), claims.Role, req)
 	if err != nil {
 		h.writeError(w, r, err, nil)
 		return
@@ -59,7 +60,7 @@ func (h *Handler) List(w http.ResponseWriter, r *http.Request) {
 		Sort:     r.URL.Query().Get("sort"),
 		Order:    r.URL.Query().Get("order"),
 	}
-	result, err := h.svc.List(chi.URLParam(r, "id"), claims.UserID, claims.Role, params)
+	result, err := h.svc.List(chi.URLParam(r, "id"), middleware.EffectiveUserID(r.Context()), claims.Role, params)
 	if err != nil {
 		h.writeError(w, r, err, nil)
 		return
@@ -73,7 +74,7 @@ func (h *Handler) GetByID(w http.ResponseWriter, r *http.Request) {
 		common.WriteError(w, r, http.StatusUnauthorized, "unauthorized", "未登录", nil)
 		return
 	}
-	issue, err := h.svc.GetByID(chi.URLParam(r, "id"), claims.UserID, claims.Role)
+	issue, err := h.svc.GetByID(chi.URLParam(r, "id"), middleware.EffectiveUserID(r.Context()), claims.Role)
 	if err != nil {
 		h.writeError(w, r, err, nil)
 		return
@@ -90,17 +91,37 @@ func (h *Handler) Update(w http.ResponseWriter, r *http.Request) {
 		common.WriteError(w, r, http.StatusUnauthorized, "unauthorized", "未登录", nil)
 		return
 	}
-	var req UpdateIssueRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+	req, err := decodeUpdateRequest(r)
+	if err != nil {
 		common.WriteError(w, r, http.StatusBadRequest, "bad_request", "请求体解析失败", nil)
 		return
 	}
-	issue, err := h.svc.Update(chi.URLParam(r, "id"), claims.UserID, claims.Role, req)
+	issue, err := h.svc.Update(chi.URLParam(r, "id"), middleware.EffectiveUserID(r.Context()), claims.Role, req)
 	if err != nil {
 		h.writeError(w, r, err, nil)
 		return
 	}
 	common.WriteSuccess(w, r, issue)
+}
+
+func decodeUpdateRequest(r *http.Request) (UpdateIssueRequest, error) {
+	var raw map[string]json.RawMessage
+	if err := json.NewDecoder(r.Body).Decode(&raw); err != nil {
+		return UpdateIssueRequest{}, err
+	}
+	if _, ok := raw["ai_generated"]; ok {
+		return UpdateIssueRequest{}, errors.New("ai_generated is immutable")
+	}
+	if _, ok := raw["agent_task_id"]; ok {
+		return UpdateIssueRequest{}, errors.New("agent_task_id is immutable")
+	}
+	body, err := json.Marshal(raw)
+	if err != nil {
+		return UpdateIssueRequest{}, err
+	}
+	var req UpdateIssueRequest
+	err = json.NewDecoder(bytes.NewReader(body)).Decode(&req)
+	return req, err
 }
 
 func (h *Handler) Transition(w http.ResponseWriter, r *http.Request) {
@@ -117,7 +138,7 @@ func (h *Handler) Transition(w http.ResponseWriter, r *http.Request) {
 		common.WriteError(w, r, http.StatusBadRequest, "bad_request", "请求体解析失败", nil)
 		return
 	}
-	issue, err := h.svc.Transition(chi.URLParam(r, "id"), claims.UserID, claims.Role, req)
+	issue, err := h.svc.Transition(chi.URLParam(r, "id"), middleware.EffectiveUserID(r.Context()), claims.Role, req)
 	if err != nil {
 		h.writeError(w, r, err, nil)
 		return
@@ -139,7 +160,7 @@ func (h *Handler) AddComment(w http.ResponseWriter, r *http.Request) {
 		common.WriteError(w, r, http.StatusBadRequest, "bad_request", "请求体解析失败", nil)
 		return
 	}
-	comment, err := h.svc.AddComment(chi.URLParam(r, "id"), claims.UserID, claims.Role, req)
+	comment, err := h.svc.AddComment(chi.URLParam(r, "id"), middleware.EffectiveUserID(r.Context()), claims.Role, req)
 	if err != nil {
 		h.writeError(w, r, err, nil)
 		return

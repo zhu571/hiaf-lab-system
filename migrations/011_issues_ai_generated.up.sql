@@ -1,0 +1,2 @@
+ALTER TABLE issues ADD COLUMN ai_generated BOOLEAN NOT NULL DEFAULT false;
+ALTER TABLE issues ADD COLUMN agent_task_id VARCHAR(64);

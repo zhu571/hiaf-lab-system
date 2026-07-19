@@ -63,32 +63,70 @@ func (r *Repository) GetReportByDate(authorID, reportDate string) (*DailyReport,
 	return &out, nil
 }
 
-func (r *Repository) ListReports(authorID string, page, perPage int) ([]DailyReport, int, error) {
-	page, perPage = normalizePage(page, perPage)
+func (r *Repository) ListReports(params ReportListParams) ([]DailyReport, int, error) {
+	params.Page, params.PerPage = normalizePage(params.Page, params.PerPage)
+	where, args := buildReportWhere(params)
 
 	var total int
-	if err := r.db.QueryRow(`SELECT COUNT(*) FROM daily_reports WHERE author_id = $1`, authorID).Scan(&total); err != nil {
+	if err := r.db.QueryRow(`SELECT COUNT(*) FROM daily_reports dr `+where, args...).Scan(&total); err != nil {
 		return nil, 0, fmt.Errorf("count daily reports: %w", err)
 	}
 
+	args = append(args, params.PerPage, (params.Page-1)*params.PerPage)
 	rows, err := r.db.Query(
-		`SELECT id, report_date, author_id, raw_text, summary, content_status, quality_status, created_at, updated_at
-		 FROM daily_reports
-		 WHERE author_id = $1
-		 ORDER BY report_date DESC
-		 LIMIT $2 OFFSET $3`,
-		authorID, perPage, (page-1)*perPage,
+		`SELECT dr.id, dr.report_date, dr.author_id, u.display_name, dr.raw_text, dr.summary,
+		        dr.content_status, dr.quality_status, dr.created_at, dr.updated_at
+		 FROM daily_reports dr
+		 JOIN users u ON u.id = dr.author_id `+where+fmt.Sprintf(` ORDER BY dr.report_date DESC LIMIT $%d OFFSET $%d`, len(args)-1, len(args)),
+		args...,
 	)
 	if err != nil {
 		return nil, 0, fmt.Errorf("list daily reports: %w", err)
 	}
 	defer rows.Close()
 
-	reports, err := scanDailyReports(rows)
-	if err != nil {
-		return nil, 0, err
+	items := []DailyReport{}
+	for rows.Next() {
+		var item DailyReport
+		var reportDate time.Time
+		if err := rows.Scan(
+			&item.ID, &reportDate, &item.AuthorID, &item.AuthorName, &item.RawText, &item.Summary,
+			&item.ContentStatus, &item.QualityStatus, &item.CreatedAt, &item.UpdatedAt,
+		); err != nil {
+			return nil, 0, fmt.Errorf("scan daily report: %w", err)
+		}
+		item.ReportDate = reportDate.Format(time.DateOnly)
+		items = append(items, item)
 	}
-	return reports, total, nil
+	if err := rows.Err(); err != nil {
+		return nil, 0, fmt.Errorf("iterate daily reports: %w", err)
+	}
+	return items, total, nil
+}
+
+func buildReportWhere(params ReportListParams) (string, []any) {
+	args := []any{}
+	parts := []string{}
+	if strings.TrimSpace(params.AuthorID) != "" {
+		args = append(args, strings.TrimSpace(params.AuthorID))
+		parts = append(parts, fmt.Sprintf("dr.author_id::text = $%d", len(args)))
+	}
+	if strings.TrimSpace(params.Status) != "" {
+		args = append(args, strings.TrimSpace(params.Status))
+		parts = append(parts, fmt.Sprintf("dr.content_status = $%d", len(args)))
+	}
+	if strings.TrimSpace(params.Keyword) != "" {
+		args = append(args, "%"+strings.TrimSpace(params.Keyword)+"%")
+		parts = append(parts, fmt.Sprintf("(dr.summary ILIKE $%d OR dr.raw_text ILIKE $%d)", len(args), len(args)))
+	}
+	if strings.TrimSpace(params.Date) != "" {
+		args = append(args, strings.TrimSpace(params.Date))
+		parts = append(parts, fmt.Sprintf("dr.report_date = $%d::date", len(args)))
+	}
+	if len(parts) == 0 {
+		return "", args
+	}
+	return "WHERE " + strings.Join(parts, " AND "), args
 }
 
 func (r *Repository) UpdateReport(id, rawText string) error {
@@ -222,10 +260,11 @@ func (r *Repository) UpdateLog(id string, req UpdateLogRequest, occurredAt *time
 		 SET category = COALESCE(NULLIF($2, ''), category),
 		     content = COALESCE($3, content),
 		     occurred_at = COALESCE($4, occurred_at),
+		     content_status = COALESCE($5, content_status),
 		     updated_at = now()
 		 WHERE id = $1 AND content_status = 'draft'
 		 RETURNING id, project_id, author_id, occurred_at, category, content, source, content_status, created_at, updated_at`,
-		id, repoStringPtrValue(req.Category), req.Content, occurredAt,
+		id, repoStringPtrValue(req.Category), req.Content, occurredAt, req.ContentStatus,
 	), &out)
 	if err != nil {
 		if err == sql.ErrNoRows {
