@@ -21,8 +21,6 @@ type Experience struct {
 	Status         string                  `json:"status"`
 	AuthorID       string                  `json:"author_id"`
 	ReviewerID     *string                 `json:"reviewer_id,omitempty"`
-	AiGenerated    bool                    `json:"ai_generated"`
-	AgentTaskID    *string                 `json:"agent_task_id,omitempty"`
 	PublishedAt    *time.Time              `json:"published_at,omitempty"`
 	CreatedAt      time.Time               `json:"created_at"`
 	UpdatedAt      time.Time               `json:"updated_at"`
@@ -40,8 +38,6 @@ type CreateExperienceRequest struct {
 	Content        string                  `json:"content"`
 	Tags           []string                `json:"tags,omitempty"`
 	LinkedProjects []ExperienceProjectLink `json:"linked_projects,omitempty"`
-	AiGenerated    bool                    `json:"ai_generated"`
-	AgentTaskID    *string                 `json:"agent_task_id,omitempty"`
 }
 
 type UpdateExperienceRequest struct {
