@@ -2,6 +2,9 @@
   <div class="page">
     <div class="toolbar">
       <h2>问题看板</h2>
+      <el-select v-model="selectedProjectId" class="project-select" placeholder="选择项目">
+        <el-option v-for="p in projects.projects" :key="p.id" :label="p.short_name || p.name" :value="p.id" />
+      </el-select>
       <el-button type="primary" @click="createDialog = true">新建问题</el-button>
     </div>
     <div class="board">
@@ -53,7 +56,7 @@
 
 <script setup lang="ts">
 import { computed, onMounted, reactive, ref, watch } from 'vue'
-import { useRoute } from 'vue-router'
+import { useRoute, useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import StatusBadge from '../components/StatusBadge.vue'
 import CommentSection from '../components/CommentSection.vue'
@@ -61,6 +64,7 @@ import { addIssueComment, createIssue, getIssue, listIssues, transitionIssue, ty
 import { useProjectStore } from '../stores/project'
 
 const route = useRoute()
+const router = useRouter()
 const projects = useProjectStore()
 const issues = ref<Issue[]>([])
 const selected = ref<Issue | null>(null)
@@ -73,6 +77,10 @@ const severities = ['low', 'medium', 'high', 'critical']
 const draft = reactive({ title: '', severity: 'medium', description: '' })
 
 const projectId = computed(() => String(route.params.id || projects.current?.id || ''))
+const selectedProjectId = computed({
+  get: () => projectId.value,
+  set: (id: string) => switchProject(id)
+})
 const grouped = computed(() => Object.fromEntries(statuses.map((s) => [s, issues.value.filter((item) => item.status === s)])) as Record<string, Issue[]>)
 
 onMounted(load)
@@ -81,8 +89,15 @@ watch(projectId, load)
 async function load() {
   await projects.load()
   if (!projectId.value) return
+  if (projectId.value !== projects.currentId) projects.select(projectId.value)
   const data = await listIssues(projectId.value, { per_page: 100 })
   issues.value = data.items
+}
+
+function switchProject(id: string) {
+  if (!id || id === projectId.value) return
+  projects.select(id)
+  router.replace({ path: `/projects/${id}/issues` })
 }
 
 async function open(id: string) {
@@ -119,6 +134,10 @@ async function create() {
 </script>
 
 <style scoped>
+.project-select {
+  max-width: 240px;
+}
+
 .board {
   display: grid;
   gap: 16px;

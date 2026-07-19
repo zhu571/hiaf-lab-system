@@ -2,6 +2,9 @@
   <div class="page">
     <div class="toolbar">
       <h2>经验库</h2>
+      <el-select v-model="selectedProjectId" class="project-select" placeholder="选择项目">
+        <el-option v-for="p in projects.projects" :key="p.id" :label="p.short_name || p.name" :value="p.id" />
+      </el-select>
       <el-button type="primary" @click="dialog = true">新增经验</el-button>
     </div>
     <section class="panel filters-panel">
@@ -50,11 +53,13 @@
 </template>
 
 <script setup lang="ts">
-import { computed, onMounted, reactive, ref } from 'vue'
+import { computed, onMounted, reactive, ref, watch } from 'vue'
 import { ElMessage } from 'element-plus'
 import StatusBadge from '../components/StatusBadge.vue'
 import { archiveExperience, createExperience, listExperiences, publishExperience, type Experience } from '../api/experiences'
+import { useProjectStore } from '../stores/project'
 
+const projects = useProjectStore()
 const items = ref<Experience[]>([])
 const selected = ref<Experience | null>(null)
 const drawer = ref(false)
@@ -68,16 +73,25 @@ const columns = [
   { status: 'archived', label: '已归档' }
 ]
 
+const projectId = computed(() => projects.current?.id || '')
+const selectedProjectId = computed({
+  get: () => projectId.value,
+  set: (id: string) => {
+    if (id) projects.select(id)
+  }
+})
 const grouped = computed(
   () => Object.fromEntries(columns.map((col) => [col.status, items.value.filter((item) => item.status === col.status)])) as Record<string, Experience[]>
 )
 
 onMounted(load)
+watch(projectId, load)
 
 async function load() {
   try {
+    await projects.load()
     const results = await Promise.all(
-      columns.map((col) => listExperiences({ status: col.status, keyword: keyword.value, tags: tagText.value, per_page: 100 }))
+      columns.map((col) => listExperiences({ status: col.status, keyword: keyword.value, tags: tagText.value, project_id: projectId.value, per_page: 100 }))
     )
     items.value = results.flatMap((result) => result.items)
   } catch (err) {
@@ -119,7 +133,7 @@ async function archive(id: string) {
 
 async function create() {
   try {
-    await createExperience({ title: draft.title, content: draft.content, tags: draft.tags.split(',').map((item) => item.trim()).filter(Boolean) })
+    await createExperience({ project_id: projectId.value || undefined, title: draft.title, content: draft.content, tags: draft.tags.split(',').map((item) => item.trim()).filter(Boolean) })
     dialog.value = false
     ElMessage.success('经验已保存')
     await load()
@@ -130,6 +144,10 @@ async function create() {
 </script>
 
 <style scoped>
+.project-select {
+  max-width: 240px;
+}
+
 .filters-panel {
   padding: 14px 20px;
 }
