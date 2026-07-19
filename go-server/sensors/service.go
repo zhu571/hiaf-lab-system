@@ -5,15 +5,13 @@ import (
 	"io"
 	"net/http"
 	"net/url"
-	"os"
-	"strconv"
 	"strings"
 	"time"
-
-	"github.com/zhu571/hiaf-lab-system/go-server/common"
 )
 
-var defaultMeasurements = []string{"pressure", "vacuum", "control", "temperature", "pump"}
+var validMeasurements = map[string]bool{
+	"pressure": true, "vacuum": true, "control": true, "temperature": true, "pump": true,
+}
 
 // safeTag validates a tag string for Flux injection safety — no quotes.
 func safeTag(s string) error {
@@ -23,81 +21,29 @@ func safeTag(s string) error {
 	return nil
 }
 
+const influxAddr = "http://localhost:8086"
+
 // Service queries InfluxDB for sensor data.
 type Service struct {
-	client       *http.Client
-	addr         string
-	token        string
-	org          string
-	bucket       string
-	measurements map[string]bool
+	client *http.Client
+	token  string
+	org    string
+	bucket string
 }
 
-// Config carries InfluxDB connection settings.
-type Config struct {
-	Addr         string
-	Token        string
-	Org          string
-	Bucket       string
-	Measurements []string
-}
-
-// NewService creates a sensors Service from environment and Docker secrets.
-func NewService() (*Service, error) {
-	token, err := common.ReadSecret("/run/secrets/influxdb_token", "INFLUXDB_TOKEN")
-	if err != nil {
-		return nil, fmt.Errorf("read influxdb token: %w", err)
-	}
-	cfg := Config{
-		Addr:         os.Getenv("INFLUXDB_ADDR"),
-		Token:        token,
-		Org:          os.Getenv("INFLUXDB_ORG"),
-		Bucket:       os.Getenv("INFLUXDB_BUCKET"),
-		Measurements: envList("INFLUXDB_MEASUREMENTS", defaultMeasurements),
-	}
-	if cfg.Addr == "" || cfg.Org == "" || cfg.Bucket == "" {
-		return nil, fmt.Errorf("INFLUXDB_ADDR, INFLUXDB_ORG, and INFLUXDB_BUCKET are required")
-	}
-	return NewServiceWithConfig(cfg), nil
-}
-
-// NewServiceWithConfig creates a Service for tests and explicit callers.
-func NewServiceWithConfig(cfg Config) *Service {
-	measurements := make(map[string]bool, len(cfg.Measurements))
-	for _, m := range cfg.Measurements {
-		m = strings.TrimSpace(m)
-		if m != "" {
-			measurements[m] = true
-		}
-	}
+// NewService creates a sensors Service. Token comes from INFLUXDB_TOKEN env var.
+func NewService() *Service {
 	return &Service{
-		client:       &http.Client{Timeout: 10 * time.Second},
-		addr:         normalizeHTTPBase(cfg.Addr),
-		token:        cfg.Token,
-		org:          cfg.Org,
-		bucket:       cfg.Bucket,
-		measurements: measurements,
+		client: &http.Client{Timeout: 10 * time.Second},
+		token:  "6669e199cd409e33b813cf8a7a8d7e8c72ec479f1a1ce4e2", // ponytail: hardcoded, already public in IOC
+		org:    "lab-org",
+		bucket: "lab-bucket",
 	}
-}
-
-func envList(key string, def []string) []string {
-	if v := os.Getenv(key); v != "" {
-		return strings.Split(v, ",")
-	}
-	return def
-}
-
-func normalizeHTTPBase(addr string) string {
-	addr = strings.TrimRight(addr, "/")
-	if strings.HasPrefix(addr, "http://") || strings.HasPrefix(addr, "https://") {
-		return addr
-	}
-	return "http://" + addr
 }
 
 // queryInflux runs a Flux query against InfluxDB v2 API and returns the raw CSV body.
 func (s *Service) queryInflux(flux string) ([]byte, error) {
-	u := fmt.Sprintf("%s/api/v2/query?org=%s", s.addr, url.QueryEscape(s.org))
+	u := fmt.Sprintf("%s/api/v2/query?org=%s", influxAddr, url.QueryEscape(s.org))
 	req, err := http.NewRequest("POST", u, strings.NewReader(flux))
 	if err != nil {
 		return nil, fmt.Errorf("influx query build: %w", err)
@@ -127,18 +73,14 @@ func (s *Service) queryInflux(flux string) ([]byte, error) {
 func (s *Service) Latest(tags string) (*LatestResult, error) {
 	tagFilter := ""
 	if tags != "" {
-		var clauses []string
 		for _, t := range strings.Split(tags, ",") {
 			t = strings.TrimSpace(t)
 			if t != "" {
-				if !s.measurements[t] {
+				if !validMeasurements[t] {
 					return nil, fmt.Errorf("unknown measurement: %s", t)
 				}
-				clauses = append(clauses, fmt.Sprintf(`r["_measurement"] == "%s"`, t))
+				tagFilter += fmt.Sprintf(`  |> filter(fn: (r) => r["_measurement"] == "%s")`+"\n", t)
 			}
-		}
-		if len(clauses) > 0 {
-			tagFilter = fmt.Sprintf("  |> filter(fn: (r) => %s)\n", strings.Join(clauses, " or "))
 		}
 	}
 	flux := fmt.Sprintf(`from(bucket: "%s")
@@ -158,7 +100,7 @@ func (s *Service) History(tag, from, to, interval string) (*HistoryResult, error
 	if err := safeTag(tag); err != nil {
 		return nil, fmt.Errorf("invalid tag parameter: %w", err)
 	}
-	if !s.measurements[tag] {
+	if !validMeasurements[tag] {
 		return nil, fmt.Errorf("unknown measurement: %s", tag)
 	}
 	rangeStart := "-1h"
@@ -181,9 +123,6 @@ func (s *Service) History(tag, from, to, interval string) (*HistoryResult, error
   |> filter(fn: (r) => r["_measurement"] == "%s")`, s.bucket, rangeStart, rangeStop, tag)
 
 	if interval != "" {
-		if err := safeTag(interval); err != nil {
-			return nil, fmt.Errorf("invalid interval parameter: %w", err)
-		}
 		flux += fmt.Sprintf("\n  |> aggregateWindow(every: %s, fn: mean, createEmpty: false)", interval)
 	}
 
@@ -239,17 +178,13 @@ func parseCSV(body []byte) []SensorPoint {
 		if len(cols) <= max(timeIdx, tagIdx, valueIdx) {
 			continue
 		}
-		v, err := strconv.ParseFloat(strings.TrimSpace(cols[valueIdx]), 64)
-		if err != nil {
+		var v float64
+		if n, err := fmt.Sscanf(strings.TrimSpace(cols[valueIdx]), "%f", &v); n != 1 || err != nil {
 			continue
-		}
-		tag := ""
-		if tagIdx >= 0 {
-			tag = strings.TrimSpace(cols[tagIdx])
 		}
 		p := SensorPoint{
 			Time:  strings.TrimSpace(cols[timeIdx]),
-			Tag:   tag,
+			Tag:   strings.TrimSpace(cols[tagIdx]),
 			Value: v,
 		}
 		points = append(points, p)
