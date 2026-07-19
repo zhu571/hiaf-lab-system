@@ -1,8 +1,10 @@
 package main
 
 import (
+	"embed"
 	"encoding/json"
 	"fmt"
+	"io/fs"
 	"log/slog"
 	"net/http"
 	"os"
@@ -26,6 +28,9 @@ import (
 	"github.com/zhu571/hiaf-lab-system/go-server/sensors"
 	"github.com/zhu571/hiaf-lab-system/go-server/testdata"
 )
+
+//go:embed static/*
+var frontendFiles embed.FS
 
 func main() {
 	slog.SetDefault(slog.New(slog.NewJSONHandler(os.Stdout, nil)))
@@ -345,6 +350,14 @@ func main() {
 		r.Get("/latest", sensorsHandler.Latest)
 		r.Get("/history", sensorsHandler.History)
 	})
+
+	// Serve embedded frontend (SPA fallback)
+	staticFS, fsErr := fs.Sub(frontendFiles, "static")
+	if fsErr != nil {
+		slog.Error("failed to mount embedded frontend", "error", fsErr)
+		os.Exit(1)
+	}
+	r.Handle("/*", http.FileServer(http.FS(staticFS)))
 
 	slog.Info("server starting", "port", port)
 	if err := http.ListenAndServe(":"+port, r); err != nil {
