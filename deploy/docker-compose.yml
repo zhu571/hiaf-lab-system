@@ -1,0 +1,107 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: lab-postgres
+    environment:
+      POSTGRES_USER: lab
+      POSTGRES_DB: lab
+      POSTGRES_PASSWORD_FILE: /run/secrets/db_password
+    secrets:
+      - db_password
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U lab -d lab"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 5s
+    restart: unless-stopped
+
+  migrate:
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile.migrate
+    container_name: lab-migrate
+    depends_on:
+      postgres:
+        condition: service_healthy
+    volumes:
+      - ../migrations:/migrations
+    secrets:
+      - db_password
+    entrypoint:
+      - "/bin/sh"
+      - "-c"
+      - "PASSWORD=$$(cat /run/secrets/db_password); ENCODED=$$(PASSWORD=\"$$PASSWORD\" python3 -c \"import os, urllib.parse; print(urllib.parse.quote_plus(os.environ['PASSWORD']))\"); migrate -path /migrations -database postgres://lab:$$ENCODED@postgres:5432/lab?sslmode=disable up"
+
+  server:
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile
+    container_name: lab-server
+    environment:
+      DB_HOST: postgres
+      DB_PORT: 5432
+      DB_USER: lab
+      DB_NAME: lab
+      PORT: 8000
+      EPICS_GATEWAY_ADDR: ${EPICS_GATEWAY_ADDR}
+      INFLUXDB_ADDR: ${INFLUXDB_ADDR:-http://influxdb:8086}
+      INFLUXDB_ORG: ${INFLUXDB_ORG:-lab-org}
+      INFLUXDB_BUCKET: ${INFLUXDB_BUCKET:-lab-bucket}
+      INFLUXDB_TOKEN: ${INFLUXDB_TOKEN:-placeholder}
+      INFLUXDB_MEASUREMENTS: ${INFLUXDB_MEASUREMENTS:-pressure,vacuum,control,temperature,pump}
+    secrets:
+      - db_password
+      - jwt_key
+      - influxdb_token
+    ports:
+      - "8000:8000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:8000/health || exit 1"]
+      interval: 10s
+      timeout: 3s
+      retries: 3
+      start_period: 5s
+    restart: unless-stopped
+
+  py-agent:
+    build:
+      context: ../py-agent
+      dockerfile: Dockerfile
+    container_name: lab-py-agent
+    environment:
+      GO_API_BASE: http://server:8000
+      AGENT_USERNAME: agent@system
+      AGENT_PASSWORD_FILE: /run/secrets/agent_password
+      DEEPSEEK_API_KEY: ${DEEPSEEK_API_KEY}
+    secrets:
+      - agent_password
+    depends_on:
+      server:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python", "-c", "import httpx; httpx.get('http://server:8000/health').raise_for_status()"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+    restart: unless-stopped
+
+volumes:
+  pgdata:
+
+secrets:
+  db_password:
+    file: ./secrets/db_password.txt
+  jwt_key:
+    file: ./secrets/jwt_key.txt
+  influxdb_token:
+    file: ./secrets/influxdb_token.txt
+  agent_password:
+    file: ./secrets/agent_password.txt

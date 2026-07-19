@@ -65,11 +65,17 @@ deploy/pgdata/
 *.tgz
 *.zip
 logs/
+!go-server/logs/
+!go-server/logs/**
 *.pem
 *.key
 *.crt
 *.p12
 *.pfx
-secrets/
+# Deploy secrets: keep directory, ignore generated credential files
+deploy/secrets/*.txt
+!deploy/secrets/.gitkeep
+
 tmp/
 temp/
+go-server/go-server
