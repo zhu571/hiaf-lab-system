@@ -93,8 +93,23 @@ services:
       retries: 3
     restart: unless-stopped
 
+  ntfy:
+    image: binwiederhier/ntfy:latest
+    container_name: lab-ntfy
+    command: serve
+    environment:
+      - NTFY_BEHIND_PROXY=true
+    volumes:
+      - ntfy-cache:/var/cache/ntfy
+      - ntfy-etc:/etc/ntfy
+    ports:
+      - "127.0.0.1:8085:80"
+    restart: unless-stopped
+
 volumes:
   pgdata:
+  ntfy-cache:
+  ntfy-etc:
 
 secrets:
   db_password:

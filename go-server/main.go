@@ -351,13 +351,30 @@ func main() {
 		r.Get("/history", sensorsHandler.History)
 	})
 
-	// Serve embedded frontend (SPA fallback)
+	// Serve embedded frontend with SPA fallback
 	staticFS, fsErr := fs.Sub(frontendFiles, "static")
 	if fsErr != nil {
 		slog.Error("failed to mount embedded frontend", "error", fsErr)
 		os.Exit(1)
 	}
-	r.Handle("/*", http.FileServer(http.FS(staticFS)))
+	fileServer := http.FileServer(http.FS(staticFS))
+	indexHTML, err := staticFS.Open("index.html")
+	if err != nil {
+		slog.Error("embedded frontend missing index.html", "error", err)
+		os.Exit(1)
+	}
+	indexHTML.Close()
+
+	r.NotFound(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// Don't serve frontend for API routes
+		if len(r.URL.Path) >= 5 && r.URL.Path[:5] == "/api/" {
+			http.NotFound(w, r)
+			return
+		}
+		// SPA fallback: rewrite to index.html
+		r.URL.Path = "/"
+		fileServer.ServeHTTP(w, r)
+	}))
 
 	slog.Info("server starting", "port", port)
 	if err := http.ListenAndServe(":"+port, r); err != nil {
