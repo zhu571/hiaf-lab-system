@@ -210,18 +210,27 @@ Agent 解析入口，返回候选字段，不直接入库。
 ```json
 {
   "data": {
-    "id": "att_001",
-    "path": "photos/2026-07-14/uuid.jpg",
-    "sha256": "hex",
-    "mime": "image/jpeg"
+    "attachment": {
+      "id": "att_001",
+      "original_name": "photo.jpg",
+      "sha256": "hex",
+      "description": "装配照片",
+      "mime_type": "image/jpeg",
+      "file_size": 1024
+    },
+    "links": []
   },
   "request_id": "req_001"
 }
 ```
 
+其余接口：`GET /api/v1/attachments`、`GET /api/v1/attachments/{id}`、`GET /api/v1/attachments/{id}/content`、`POST /api/v1/attachments/{id}/links`、`DELETE /api/v1/attachments/{id}/links/{link_id}`、`DELETE /api/v1/attachments/{id}`。下载接口也必须携带 `Idempotency-Key` 并写审计。
+
 ### `POST /api/v1/attachments/{attachment_id}/ocr`
 
 触发 OCR，OCR 文本标记为不可信输入，只能进入 Agent 的数据通道。
+
+附件绑定对象权限通过 `GET /api/v1/{entity_type}s/{entity_id}/permission-check?user_id=...&action=read|write` 回调目标模块。TODO：各目标模块实现该接口前，`404`/`501` 暂按允许处理；实现完成后删除兼容回退。
 
 ## 3.4 问题管理模块
 

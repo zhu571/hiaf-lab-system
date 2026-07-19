@@ -10,6 +10,7 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
 	"github.com/zhu571/hiaf-lab-system/go-server/agent"
+	"github.com/zhu571/hiaf-lab-system/go-server/attachments"
 	"github.com/zhu571/hiaf-lab-system/go-server/audit"
 	"github.com/zhu571/hiaf-lab-system/go-server/auth"
 	"github.com/zhu571/hiaf-lab-system/go-server/common"
@@ -38,6 +39,7 @@ func main() {
 		os.Exit(1)
 	}
 	defer db.Close()
+	port := commonEnv("PORT", "8000")
 
 	authRepo := auth.NewRepository(db)
 	mw.TokenVersionValidator = func(userID string, version int) bool {
@@ -66,6 +68,11 @@ func main() {
 	experiencesRepo := experiences.NewRepository(db)
 	experiencesSvc := experiences.NewService(experiencesRepo, experiences.ProjectAccessAdapter{Repo: projectsRepo}, agentSvc)
 	experiencesHandler := experiences.NewHandler(experiencesSvc)
+	attachmentsRepo := attachments.NewRepository(db)
+	attachmentsSvc := attachments.NewService(attachmentsRepo,
+		attachments.NewHTTPPermissionChecker("http://127.0.0.1:"+port),
+		commonEnv("ATTACHMENT_DIR", "./uploads/"))
+	attachmentsHandler := attachments.NewHandler(attachmentsSvc)
 	agentSvc.SetExecutor(candidateExecutor{issues: issuesSvc, experiences: experiencesSvc})
 	sensorsSvc, err := sensors.NewService()
 	if err != nil {
@@ -228,6 +235,20 @@ func main() {
 			r.Post("/archive", experiencesHandler.Archive)
 		})
 	})
+	r.Route("/api/v1/attachments", func(r chi.Router) {
+		r.Use(mw.AuthRequired)
+		r.Use(mw.AgentContext(db))
+		r.Use(mw.Audit(db))
+		r.Get("/", attachmentsHandler.List)
+		r.Post("/", attachmentsHandler.Upload)
+		r.Route("/{id}", func(r chi.Router) {
+			r.Get("/", attachmentsHandler.GetByID)
+			r.Get("/content", attachmentsHandler.Download)
+			r.Post("/links", attachmentsHandler.AddLink)
+			r.Delete("/links/{link_id}", attachmentsHandler.RemoveLink)
+			r.Delete("/", attachmentsHandler.SoftDelete)
+		})
+	})
 	r.Route("/api/v1/instruments", func(r chi.Router) {
 		r.Get("/", instrumentsHandler.ListInstruments)
 		r.Get("/whitelist", instrumentsHandler.GetWhitelist)
@@ -257,7 +278,6 @@ func main() {
 		r.Get("/history", sensorsHandler.History)
 	})
 
-	port := commonEnv("PORT", "8000")
 	slog.Info("server starting", "port", port)
 	if err := http.ListenAndServe(":"+port, r); err != nil {
 		slog.Error("server exited", "error", err)
