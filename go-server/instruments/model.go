@@ -1,9 +1,58 @@
 package instruments
 
 import (
+	"encoding/json"
 	"net"
 	"time"
 )
+
+// CommandLogEntry is an audited instrument command execution.
+type CommandLogEntry struct {
+	ID               string          `json:"id"`
+	InstrumentID     string          `json:"instrument_id"`
+	CommandName      string          `json:"command_name"`
+	RiskLevel        string          `json:"risk_level"`
+	ParamsRaw        json.RawMessage `json:"params_raw"`
+	ParamsNormalized json.RawMessage `json:"params_normalized"`
+	UserID           string          `json:"user_id"`
+	ActingUserID     *string         `json:"acting_user_id"`
+	LeaseID          *string         `json:"lease_id"`
+	ApprovalID       *string         `json:"approval_id"`
+	WhitelistVersion string          `json:"whitelist_version"`
+	BeforeSnapshot   json.RawMessage `json:"before_snapshot"`
+	ResultSummary    *string         `json:"result_summary"`
+	ErrorCode        *string         `json:"error_code"`
+	DurationMS       *int            `json:"duration_ms"`
+	RequestID        string          `json:"request_id"`
+	CreatedAt        time.Time       `json:"created_at"`
+}
+
+// Lease is an exclusive instrument usage lease.
+type Lease struct {
+	ID           string     `json:"id"`
+	InstrumentID string     `json:"instrument_id"`
+	UserID       string     `json:"user_id"`
+	Purpose      string     `json:"purpose"`
+	Status       string     `json:"status"`
+	ExpiresAt    time.Time  `json:"expires_at"`
+	CreatedAt    time.Time  `json:"created_at"`
+	RevokedAt    *time.Time `json:"revoked_at"`
+	RevokedBy    *string    `json:"revoked_by"`
+}
+
+// Approval authorizes one command and parameter hash for a lease.
+type Approval struct {
+	ID          string     `json:"id"`
+	LeaseID     *string    `json:"lease_id"`
+	CommandName string     `json:"command_name"`
+	ParamsHash  string     `json:"params_hash"`
+	RequestedBy string     `json:"requested_by"`
+	ApprovedBy  string     `json:"approved_by"`
+	Status      string     `json:"status"`
+	ApprovedAt  *time.Time `json:"approved_at"`
+	ExpiresAt   time.Time  `json:"expires_at"`
+	CreatedAt   time.Time  `json:"created_at"`
+}
 
 // PiezoStatus is the full piezo instrument state returned by the status endpoint.
 type PiezoStatus struct {
