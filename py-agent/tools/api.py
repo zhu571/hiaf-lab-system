@@ -70,11 +70,12 @@ class GoAPI:
         )
 
     def list_issues(self, project_id, status, keyword, acting_user_id, task_id):
-        return self._request(
+        data = self._request(
             "GET", f"/api/v1/projects/{project_id}/issues",
             params={"status": status, "search": keyword, "per_page": 10},
             headers=self._agent_headers(acting_user_id, task_id),
-        ).get("items", [])
+        )
+        return (data or {}).get("items") or []
 
     def complete(self, task_id, candidates, confidence=None):
         body = {

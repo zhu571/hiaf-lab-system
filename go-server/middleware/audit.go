@@ -1,6 +1,7 @@
 package middleware
 
 import (
+	"context"
 	"database/sql"
 	"log/slog"
 	"net/http"
@@ -8,6 +9,10 @@ import (
 
 	"github.com/zhu571/hiaf-lab-system/go-server/common"
 )
+
+type auditActionKeyType string
+
+const auditActionKey auditActionKeyType = "audit_action"
 
 // responseWriter wraps http.ResponseWriter to capture the written status code.
 type responseWriter struct {
@@ -20,17 +25,17 @@ func (rw *responseWriter) WriteHeader(code int) {
 	rw.ResponseWriter.WriteHeader(code)
 }
 
-// Audit logs non-read HTTP requests to the audit_log table.
+// Audit logs writes and reads that explicitly set an audit action.
 func Audit(db *sql.DB) func(next http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			if r.Method == http.MethodGet || r.Method == http.MethodHead || r.Method == http.MethodOptions {
-				next.ServeHTTP(w, r)
-				return
-			}
-
+			actionOverride := ""
+			r = r.WithContext(context.WithValue(r.Context(), auditActionKey, &actionOverride))
 			rw := &responseWriter{ResponseWriter: w, statusCode: http.StatusOK}
 			next.ServeHTTP(rw, r)
+			if (r.Method == http.MethodGet || r.Method == http.MethodHead || r.Method == http.MethodOptions) && actionOverride == "" {
+				return
+			}
 
 			claims := GetUserClaims(r.Context())
 			var userID, username, actorType string
@@ -45,6 +50,9 @@ func Audit(db *sql.DB) func(next http.Handler) http.Handler {
 
 			action := strings.TrimPrefix(r.URL.Path, "/api/v1/")
 			action = strings.ReplaceAll(action, "/", ".")
+			if actionOverride != "" {
+				action = actionOverride
+			}
 
 			clientIP := r.RemoteAddr
 			if fwd := r.Header.Get("X-Forwarded-For"); fwd != "" {
@@ -72,6 +80,12 @@ func Audit(db *sql.DB) func(next http.Handler) http.Handler {
 				slog.Error("audit log insert failed", "error", err, "request_id", common.GetRequestID(r.Context()))
 			}
 		})
+	}
+}
+
+func SetAuditAction(ctx context.Context, action string) {
+	if target, _ := ctx.Value(auditActionKey).(*string); target != nil {
+		*target = action
 	}
 }
 

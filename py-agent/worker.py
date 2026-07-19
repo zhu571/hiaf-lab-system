@@ -41,6 +41,8 @@ class Worker:
             self.api.complete(task_id, candidates, confidence)
             LOG.info("task completed", extra={"task_id": task_id, "candidate_count": len(candidates)})
         except Exception as exc:
+            import traceback
+            LOG.exception("task failed", extra={"task_id": task_id, "trace": traceback.format_exc()[:500]})
             detail = sanitize_error(exc)
             LOG.warning("task failed", extra={"task_id": task_id, "error": detail})
             try:
