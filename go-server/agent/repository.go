@@ -153,20 +153,21 @@ func (r *Repository) ListCandidates(status string, page, perPage int) ([]AgentCa
 	where := ""
 	args := []any{}
 	if status != "" {
-		where = "WHERE status = $1"
+		where = "WHERE c.status = $1"
 		args = append(args, status)
 	}
 	var total int
-	if err := r.db.QueryRow(`SELECT COUNT(*) FROM agent_candidate_actions `+where, args...).Scan(&total); err != nil {
+	if err := r.db.QueryRow(`SELECT COUNT(*) FROM agent_candidate_actions c `+where, args...).Scan(&total); err != nil {
 		return nil, 0, fmt.Errorf("count candidate actions: %w", err)
 	}
 	args = append(args, perPage, (page-1)*perPage)
 	rows, err := r.db.Query(
-		`SELECT id, task_id, action_type, project_id, pool_action_key, payload, status,
-		        agent_confidence, reviewed_by, reviewed_at, review_reason,
-		        executed_at, execution_error, created_at
-		 FROM agent_candidate_actions `+where+fmt.Sprintf(
-			" ORDER BY created_at LIMIT $%d OFFSET $%d", len(args)-1, len(args)), args...,
+		`SELECT c.id, c.task_id, c.action_type, c.project_id, c.pool_action_key, c.payload, c.status,
+		        c.agent_confidence, c.reviewed_by, c.reviewed_at, c.review_reason,
+		        c.executed_at, c.execution_error, c.created_at, t.report_id
+		 FROM agent_candidate_actions c
+		 JOIN pending_agent_tasks t ON t.id = c.task_id `+where+fmt.Sprintf(
+			" ORDER BY c.created_at LIMIT $%d OFFSET $%d", len(args)-1, len(args)), args...,
 	)
 	if err != nil {
 		return nil, 0, fmt.Errorf("list candidate actions: %w", err)
@@ -175,7 +176,7 @@ func (r *Repository) ListCandidates(status string, page, perPage int) ([]AgentCa
 	items := []AgentCandidateAction{}
 	for rows.Next() {
 		var item AgentCandidateAction
-		if err := scanCandidate(rows, &item); err != nil {
+		if err := scanCandidate(rows, &item, &item.ReportID); err != nil {
 			return nil, 0, fmt.Errorf("scan candidate action: %w", err)
 		}
 		items = append(items, item)
@@ -343,15 +344,15 @@ func scanTask(row rowScanner, task *PendingAgentTask) error {
 	return nil
 }
 
-func scanCandidate(row rowScanner, item *AgentCandidateAction) error {
-	return scanCandidateValues(row, item, nil)
+func scanCandidate(row rowScanner, item *AgentCandidateAction, extra ...any) error {
+	return scanCandidateValues(row, item, extra...)
 }
 
 func scanCandidateWithActingUser(row rowScanner, item *AgentCandidateAction, actingUserID *string) error {
 	return scanCandidateValues(row, item, actingUserID)
 }
 
-func scanCandidateValues(row rowScanner, item *AgentCandidateAction, actingUserID *string) error {
+func scanCandidateValues(row rowScanner, item *AgentCandidateAction, extra ...any) error {
 	var projectID, reviewedBy, reviewReason, executionError sql.NullString
 	var confidence sql.NullFloat64
 	var reviewedAt, executedAt sql.NullTime
@@ -361,9 +362,7 @@ func scanCandidateValues(row rowScanner, item *AgentCandidateAction, actingUserI
 		&payload, &item.Status, &confidence, &reviewedBy, &reviewedAt,
 		&reviewReason, &executedAt, &executionError, &item.CreatedAt,
 	}
-	if actingUserID != nil {
-		dest = append(dest, actingUserID)
-	}
+	dest = append(dest, extra...)
 	if err := row.Scan(dest...); err != nil {
 		return err
 	}

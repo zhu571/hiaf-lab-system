@@ -14,6 +14,7 @@ export type CandidatePayload = {
 export type AgentCandidate = {
   id: string
   task_id: string
+  report_id?: string
   action_type: string
   project_id?: string
   payload: CandidatePayload

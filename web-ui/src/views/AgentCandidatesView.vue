@@ -27,8 +27,9 @@
           <template #default="{ row }">{{ formatConfidence(row.agent_confidence) }}</template>
         </el-table-column>
         <el-table-column label="来源" width="110">
-          <template #default>
-            <RouterLink to="/daily-reports">来源日报</RouterLink>
+          <template #default="{ row }">
+            <RouterLink v-if="row.report_id" :to="`/daily-reports/${row.report_id}`">来源日报</RouterLink>
+            <span v-else>-</span>
           </template>
         </el-table-column>
         <el-table-column label="操作" width="220">

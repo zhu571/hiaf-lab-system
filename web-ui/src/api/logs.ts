@@ -44,6 +44,10 @@ export function listReports(params: Record<string, string | number> = {}) {
   return request<{ items: DailyReport[]; total: number; page: number }>({ url: '/daily-reports', params: { per_page: 20, ...params } })
 }
 
+export function getReport(id: string) {
+  return request<DailyReport>({ url: `/daily-reports/${id}` })
+}
+
 export function reportByDate(date: string) {
   return request<DailyReport>({ url: '/daily-reports/by-date', params: { date } })
 }

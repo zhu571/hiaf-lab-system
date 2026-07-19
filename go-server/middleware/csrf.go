@@ -16,6 +16,11 @@ func CSRF(next http.Handler) http.Handler {
 			next.ServeHTTP(w, r)
 			return
 		}
+		// Agent 服务账号 API 无需 CSRF（有 JWT + acting-user 认证链）
+		if len(r.URL.Path) >= 15 && r.URL.Path[:15] == "/api/v1/agent/" {
+			next.ServeHTTP(w, r)
+			return
+		}
 
 		header := r.Header.Get("X-CSRF-Token")
 		cookie, err := r.Cookie("csrf_token")

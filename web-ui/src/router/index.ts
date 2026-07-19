@@ -24,6 +24,7 @@ const router = createRouter({
     { path: '/audit', component: AuditView },
     { path: '/settings', component: SettingsView },
     { path: '/daily-reports', component: DailyHistoryView },
+    { path: '/daily-reports/:id', component: () => import('../views/DailyReportDetailView.vue') },
     { path: '/admin/users', component: AdminUsersView, meta: { admin: true } },
     { path: '/agent-candidates', component: AgentCandidatesView, meta: { reviewer: true } }
   ]

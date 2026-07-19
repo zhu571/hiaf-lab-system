@@ -18,6 +18,7 @@ class GoAPI:
         self.client = client or httpx.Client(timeout=timeout)
         self.access_token = ""
         self.refresh_token = ""
+        self.csrf_token = ""
 
     @classmethod
     def from_env(cls):
@@ -35,11 +36,15 @@ class GoAPI:
         )
 
     def login(self):
-        data = self._request("POST", "/api/v1/auth/login", json={
-            "username": self.username, "password": self.password,
-        }, authenticate=False)
+        resp = self.client.post(
+            self.base_url + "/api/v1/auth/login",
+            json={"username": self.username, "password": self.password},
+        )
+        resp.raise_for_status()
+        data = resp.json()["data"]
         self.access_token = data["access_token"]
         self.refresh_token = data["refresh_token"]
+        self.csrf_token = data.get("csrf_token", "")
 
     def refresh(self):
         data = self._request(
@@ -98,6 +103,8 @@ class GoAPI:
 
     def _request(self, method, path, authenticate=True, headers=None, **kwargs):
         headers = dict(headers or {})
+        if self.csrf_token and method.upper() not in ("GET", "HEAD", "OPTIONS"):
+            headers["X-CSRF-Token"] = self.csrf_token
         refreshed = False
         for attempt in range(3):
             if authenticate:

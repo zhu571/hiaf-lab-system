@@ -41,6 +41,7 @@ type PendingAgentTask struct {
 type AgentCandidateAction struct {
 	ID              string          `json:"id"`
 	TaskID          string          `json:"task_id"`
+	ReportID        string          `json:"report_id,omitempty"`
 	ActionType      string          `json:"action_type"`
 	ProjectID       *string         `json:"project_id,omitempty"`
 	PoolActionKey   string          `json:"pool_action_key"`

@@ -28,11 +28,11 @@ DELETE FROM users;
 
 -- ========== 1. 用户（5 个，密码均为 Test1234!） ==========
 INSERT INTO users (id, username, password_hash, display_name, role, must_change_pw, failed_attempts, locked_until, created_at, updated_at) VALUES
-('a0000000-0000-4000-8000-000000000001', 'haofan',   '36ef0c437b0ac126ad4966660b04c12e:049b292ccc5dcf766c9cc89daff385ad1a0e9c985553993f9477845ad3ecf071', '浩钒', 'admin',      FALSE, 0, NULL, '2026-06-20T10:00:00+08:00', '2026-06-20T10:00:00+08:00'),
-('a0000000-0000-4000-8000-000000000002', 'lisi',     '36ef0c437b0ac126ad4966660b04c12e:049b292ccc5dcf766c9cc89daff385ad1a0e9c985553993f9477845ad3ecf071', '李四', 'member',     FALSE, 0, NULL, '2026-06-21T10:00:00+08:00', '2026-06-21T10:00:00+08:00'),
-('a0000000-0000-4000-8000-000000000003', 'zhangsan', '36ef0c437b0ac126ad4966660b04c12e:049b292ccc5dcf766c9cc89daff385ad1a0e9c985553993f9477845ad3ecf071', '张三', 'viewer',     FALSE, 0, NULL, '2026-06-22T10:00:00+08:00', '2026-06-22T10:00:00+08:00'),
-('a0000000-0000-4000-8000-000000000004', 'wangwu',   '36ef0c437b0ac126ad4966660b04c12e:049b292ccc5dcf766c9cc89daff385ad1a0e9c985553993f9477845ad3ecf071', '王五', 'member',     FALSE, 0, NULL, '2026-06-23T10:00:00+08:00', '2026-06-23T10:00:00+08:00'),
-('a0000000-0000-4000-8000-000000000005', 'zhaoliu',  '36ef0c437b0ac126ad4966660b04c12e:049b292ccc5dcf766c9cc89daff385ad1a0e9c985553993f9477845ad3ecf071', '赵六', 'maintainer', FALSE, 0, NULL, '2026-06-24T10:00:00+08:00', '2026-06-24T10:00:00+08:00');
+('a0000000-0000-4000-8000-000000000001', 'haofan',   '$argon2id$v=19$m=65536,t=3,p=2$base64salthere$test1234hashhere', '浩钒', 'admin',      FALSE, 0, NULL, '2026-06-20T10:00:00+08:00', '2026-06-20T10:00:00+08:00'),
+('a0000000-0000-4000-8000-000000000002', 'lisi',     '$argon2id$v=19$m=65536,t=3,p=2$base64salthere$test1234hashhere', '李四', 'member',     FALSE, 0, NULL, '2026-06-21T10:00:00+08:00', '2026-06-21T10:00:00+08:00'),
+('a0000000-0000-4000-8000-000000000003', 'zhangsan', '$argon2id$v=19$m=65536,t=3,p=2$base64salthere$test1234hashhere', '张三', 'viewer',     FALSE, 0, NULL, '2026-06-22T10:00:00+08:00', '2026-06-22T10:00:00+08:00'),
+('a0000000-0000-4000-8000-000000000004', 'wangwu',   '$argon2id$v=19$m=65536,t=3,p=2$base64salthere$test1234hashhere', '王五', 'member',     FALSE, 0, NULL, '2026-06-23T10:00:00+08:00', '2026-06-23T10:00:00+08:00'),
+('a0000000-0000-4000-8000-000000000005', 'zhaoliu',  '$argon2id$v=19$m=65536,t=3,p=2$base64salthere$test1234hashhere', '赵六', 'maintainer', FALSE, 0, NULL, '2026-06-24T10:00:00+08:00', '2026-06-24T10:00:00+08:00');
 
 -- ========== 2. 项目（3 个） ==========
 -- 低温气体靶：2026-06-28 创建为 draft，2026-07-01 评审通过转为 active（见 audit_log），completed_at 保持 NULL。
