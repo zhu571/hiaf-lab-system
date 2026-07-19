@@ -20,7 +20,7 @@ function csrfFromCookie() {
     .join('=')
 }
 
-function newIdempotencyKey() {
+export function newIdempotencyKey() {
   // crypto.randomUUID 仅在安全上下文（HTTPS/localhost）可用，内网 HTTP 部署时需要兜底
   if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
     return crypto.randomUUID()
@@ -51,7 +51,9 @@ api.interceptors.response.use(
   (response) => response,
   (error) => {
     const message = error.response?.data?.error?.message || error.message || '请求失败'
-    return Promise.reject(new Error(message))
+    const err = new Error(message) as Error & { requestId?: string }
+    err.requestId = error.response?.data?.request_id
+    return Promise.reject(err)
   }
 )
 

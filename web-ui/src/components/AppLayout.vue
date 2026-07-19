@@ -30,7 +30,7 @@
 
 <script setup lang="ts">
 import { computed, onMounted } from 'vue'
-import { DataBoard, Document, FolderOpened, MagicStick, Memo, Setting, Tickets, User } from '@element-plus/icons-vue'
+import { Connection, DataBoard, Document, FolderOpened, MagicStick, Memo, Odometer, Paperclip, SetUp, Setting, Tickets, TrendCharts, User } from '@element-plus/icons-vue'
 import { useMobile } from '../composables/useMobile'
 import { useAuthStore } from '../stores/auth'
 import { useProjectStore } from '../stores/project'
@@ -49,6 +49,11 @@ const navItems = computed(() => {
     { label: '项目', path: '/projects', icon: FolderOpened },
     { label: '日报', path: '/daily-report', icon: Document },
     { label: '问题', path: projectId ? `/projects/${projectId}/issues` : '/issues', icon: Tickets },
+    { label: '批次', path: projectId ? `/projects/${projectId}/runs` : '/projects', icon: Odometer },
+    { label: '数据', path: projectId ? `/projects/${projectId}/test-data` : '/projects', icon: TrendCharts },
+    { label: 'RF匹配', path: projectId ? `/projects/${projectId}/rf-matching` : '/projects', icon: Connection },
+    { label: '装配', path: projectId ? `/projects/${projectId}/assembly` : '/projects', icon: SetUp },
+    { label: '附件', path: '/attachments', icon: Paperclip },
     { label: '经验', path: '/experiences', icon: Memo },
     { label: '历史', path: '/daily-reports', icon: DataBoard },
     { label: '审计', path: '/audit', icon: DataBoard },

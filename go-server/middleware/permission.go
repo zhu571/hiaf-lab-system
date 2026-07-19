@@ -112,6 +112,7 @@ func RequireProjectPermission(db *sql.DB, perm Permission) func(http.Handler) ht
 				return
 			}
 
+			userID := EffectiveUserID(r.Context())
 			if claims.Role == "admin" {
 				ctx := context.WithValue(r.Context(), adminProjectKey, true)
 				ctx = context.WithValue(ctx, projectRoleKey, "admin")
@@ -124,7 +125,7 @@ func RequireProjectPermission(db *sql.DB, perm Permission) func(http.Handler) ht
 				`SELECT role
 				 FROM project_members
 				 WHERE project_id = $1 AND user_id = $2 AND status = 'active'`,
-				projectID, claims.UserID,
+				projectID, userID,
 			).Scan(&role)
 			if err != nil {
 				if err == sql.ErrNoRows {
