@@ -1,1 +1,0 @@
-import{N as a}from"./index-BZu77j0v.js";function s(t,e){return a({url:`/projects/${t}/test-data`,method:"POST",data:e})}function o(t,e={}){return a({url:`/projects/${t}/test-data`,params:e})}function u(t){return a({url:`/test-data/${t}`,method:"DELETE"})}export{s as c,u as d,o as l};

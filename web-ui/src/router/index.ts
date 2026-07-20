@@ -1,27 +1,29 @@
 import { createRouter, createWebHistory } from 'vue-router'
 import { useAuthStore } from '../stores/auth'
-import LoginView from '../views/LoginView.vue'
-import ProjectsView from '../views/ProjectsView.vue'
-import DailyReportView from '../views/DailyReportView.vue'
-import IssuesView from '../views/IssuesView.vue'
-import ExperiencesView from '../views/ExperiencesView.vue'
-import AuditView from '../views/AuditView.vue'
-import SettingsView from '../views/SettingsView.vue'
-import DailyHistoryView from '../views/DailyHistoryView.vue'
-import AdminUsersView from '../views/AdminUsersView.vue'
-import AgentCandidatesView from '../views/AgentCandidatesView.vue'
-import RunListView from '../views/RunListView.vue'
-import RunDetailView from '../views/RunDetailView.vue'
-import TestDataView from '../views/TestDataView.vue'
-import RFMatchingView from '../views/RFMatchingView.vue'
-import AssemblyView from '../views/AssemblyView.vue'
-import AttachmentView from '../views/AttachmentView.vue'
-import InstrumentsView from '../views/InstrumentsView.vue'
-import SensorsView from '../views/SensorsView.vue'
-import DailyReportDetailView from '../views/DailyReportDetailView.vue'
-import DailyReportShell from '../components/DailyReportShell.vue'
-import ProjectLayout from '../components/ProjectLayout.vue'
-import ProjectDashboard from '../components/ProjectDashboard.vue'
+
+// 路由级代码分割：所有页面组件懒加载，首屏只下载当前路由需要的 chunk
+const LoginView = () => import('../views/LoginView.vue')
+const ProjectsView = () => import('../views/ProjectsView.vue')
+const DailyReportView = () => import('../views/DailyReportView.vue')
+const IssuesView = () => import('../views/IssuesView.vue')
+const ExperiencesView = () => import('../views/ExperiencesView.vue')
+const AuditView = () => import('../views/AuditView.vue')
+const SettingsView = () => import('../views/SettingsView.vue')
+const DailyHistoryView = () => import('../views/DailyHistoryView.vue')
+const AdminUsersView = () => import('../views/AdminUsersView.vue')
+const AgentCandidatesView = () => import('../views/AgentCandidatesView.vue')
+const RunListView = () => import('../views/RunListView.vue')
+const RunDetailView = () => import('../views/RunDetailView.vue')
+const TestDataView = () => import('../views/TestDataView.vue')
+const RFMatchingView = () => import('../views/RFMatchingView.vue')
+const AssemblyView = () => import('../views/AssemblyView.vue')
+const AttachmentView = () => import('../views/AttachmentView.vue')
+const InstrumentsView = () => import('../views/InstrumentsView.vue')
+const SensorsView = () => import('../views/SensorsView.vue')
+const DailyReportDetailView = () => import('../views/DailyReportDetailView.vue')
+const DailyReportShell = () => import('../components/DailyReportShell.vue')
+const ProjectLayout = () => import('../components/ProjectLayout.vue')
+const ProjectDashboard = () => import('../components/ProjectDashboard.vue')
 
 const router = createRouter({
   history: createWebHistory(),
