@@ -1,0 +1,4 @@
+DROP INDEX IF EXISTS idx_logs_run;
+DROP INDEX IF EXISTS idx_issues_run;
+ALTER TABLE logs DROP COLUMN IF EXISTS run_id;
+ALTER TABLE issues DROP COLUMN IF EXISTS run_id;

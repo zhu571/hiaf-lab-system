@@ -66,7 +66,7 @@ async function load() {
     if (status.value) params.status = status.value
     if (keyword.value.trim()) params.keyword = keyword.value.trim()
     const data = await listReports(params)
-    reports.value = data.items
+    reports.value = data.items ?? []
   } catch (err) {
     ElMessage.error(err instanceof Error ? err.message : '日报加载失败')
   } finally {

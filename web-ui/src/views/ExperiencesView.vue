@@ -93,7 +93,7 @@ async function load() {
     const results = await Promise.all(
       columns.map((col) => listExperiences({ status: col.status, keyword: keyword.value, tags: tagText.value, project_id: projectId.value, per_page: 100 }))
     )
-    items.value = results.flatMap((result) => result.items)
+    items.value = results.flatMap((result) => result.items ?? [])
   } catch (err) {
     ElMessage.error(err instanceof Error ? err.message : '经验加载失败')
   }

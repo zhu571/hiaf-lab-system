@@ -323,13 +323,13 @@ func main() {
 		})
 	})
 	r.Route("/api/v1/instruments", func(r chi.Router) {
-		r.Get("/", instrumentsHandler.ListInstruments)
-		r.Get("/whitelist", instrumentsHandler.GetWhitelist)
-		r.Get("/{id}/status", instrumentsHandler.InstrumentStatus)
 		r.Group(func(r chi.Router) {
 			r.Use(mw.AuthRequired)
 			r.Use(mw.AgentContext(db))
 			r.Use(mw.Audit(db))
+			r.Get("/", instrumentsHandler.ListInstruments)
+			r.Get("/whitelist", instrumentsHandler.GetWhitelist)
+			r.Get("/{id}/status", instrumentsHandler.InstrumentStatus)
 			r.Post("/{id}/emergency-stop", instrumentsHandler.EmergencyStop)
 			r.With(mw.RequireRole(auth.RoleMaintainer, auth.RoleAdmin)).Post("/{id}/commands", instrumentsHandler.ExecuteCommand)
 			r.Route("/piezo", func(r chi.Router) {

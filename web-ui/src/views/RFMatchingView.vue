@@ -209,7 +209,7 @@ async function load() {
     if (device.value) params.device = device.value
     if (status.value) params.status = status.value
     const data = await listRFMatching(projectId.value, params)
-    items.value = data.items
+    items.value = data.items ?? []
     total.value = data.total
   } catch (err) {
     error.value = err instanceof Error ? err.message : 'RF 匹配记录加载失败'

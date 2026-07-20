@@ -33,6 +33,7 @@
 
 <script setup lang="ts">
 import { ref } from 'vue'
+import { ElMessage } from 'element-plus'
 import { getAudit, type AuditRecord } from '../api/audit'
 
 const requestId = ref('')
@@ -40,8 +41,13 @@ const records = ref<AuditRecord[]>([])
 
 async function load() {
   if (!requestId.value) return
-  const data = await getAudit(requestId.value)
-  records.value = data.items
+  try {
+    const data = await getAudit(requestId.value)
+    records.value = data.items ?? []
+  } catch (err) {
+    records.value = []
+    ElMessage.error(err instanceof Error ? err.message : '审计记录加载失败')
+  }
 }
 </script>
 

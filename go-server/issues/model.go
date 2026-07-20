@@ -30,8 +30,9 @@ type Issue struct {
 	ResolvedAt  *time.Time `json:"resolved_at,omitempty"`
 	CreatedAt   time.Time  `json:"created_at"`
 	UpdatedAt   time.Time  `json:"updated_at"`
-	Comments    []Comment  `json:"comments,omitempty"`
-}
+			Comments    []Comment  `json:"comments,omitempty"`
+	RunID       *string    `json:"run_id,omitempty"`
+		}
 
 type Comment struct {
 	ID        string    `json:"id"`

@@ -299,7 +299,7 @@ async function loadReports() {
   reportsLoading.value = true
   try {
     const data = await listReports({ per_page: 50 })
-    reportOptions.value = data.items
+    reportOptions.value = data.items ?? []
   } catch (err) {
     showApiError(err, '日报列表加载失败')
   } finally {
@@ -312,7 +312,7 @@ async function loadTestData() {
   testDataLoading.value = true
   try {
     const data = await listTestData(run.value.project_id, { run_id: run.value.id, per_page: 5 })
-    testData.value = data.items
+    testData.value = data.items ?? []
   } catch (err) {
     showApiError(err, '测试数据加载失败')
   } finally {
