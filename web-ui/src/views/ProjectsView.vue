@@ -39,9 +39,13 @@ const draft = reactive({ code: '', name: '', short_name: '', description: '' })
 onMounted(() => store.load())
 
 async function create() {
-  await createProject(draft)
-  await store.load()
-  dialog.value = false
-  ElMessage.success('项目已创建')
+  try {
+    await createProject(draft)
+    await store.load()
+    dialog.value = false
+    ElMessage.success('项目已创建')
+  } catch (err) {
+    ElMessage.error(err instanceof Error ? err.message : '项目创建失败')
+  }
 }
 </script>

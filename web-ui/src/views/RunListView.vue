@@ -181,7 +181,7 @@ async function load() {
     if (statusFilter.value) params.status = statusFilter.value
     if (campaign.value.trim()) params.campaign = campaign.value.trim()
     const data = await listRuns(projectId.value, params)
-    runs.value = data.items
+    runs.value = data.items ?? []
     total.value = data.total
   } catch (err) {
     error.value = err instanceof Error ? err.message : '批次加载失败'

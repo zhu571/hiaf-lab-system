@@ -136,7 +136,7 @@ async function load() {
       params.entity_id = filterEntityId.value.trim()
     }
     const data = await listAttachments(params)
-    items.value = data.items
+    items.value = data.items ?? []
     total.value = data.total
     await loadThumbs()
   } catch (err) {

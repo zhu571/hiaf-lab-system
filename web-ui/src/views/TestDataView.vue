@@ -239,7 +239,7 @@ async function load() {
     if (dataType.value) params.data_type = dataType.value
     if (quality.value) params.quality = quality.value
     const data = await listTestData(projectId.value, params)
-    items.value = data.items
+    items.value = data.items ?? []
     total.value = data.total
   } catch (err) {
     error.value = err instanceof Error ? err.message : '测试数据加载失败'
@@ -257,7 +257,7 @@ async function loadRuns() {
   }
   try {
     const data = await listRuns(projectId.value, { per_page: 100 })
-    runs.value = data.items
+    runs.value = data.items ?? []
   } catch (err) {
     showApiError(err, '批次列表加载失败')
   }

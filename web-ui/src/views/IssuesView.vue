@@ -82,8 +82,14 @@ watch(projectId, load)
 
 async function load() {
   if (!projectId.value) return
-  const data = await listIssues(projectId.value, { per_page: 100 })
-  issues.value = data.items
+  try {
+    const data = await listIssues(projectId.value, { per_page: 100 })
+    // 空列表时后端返回 items: null，直接赋值会让 grouped 计算属性 filter 崩溃
+    issues.value = data.items ?? []
+  } catch (err) {
+    issues.value = []
+    ElMessage.error(err instanceof Error ? err.message : '问题加载失败')
+  }
 }
 
 async function open(id: string) {

@@ -173,8 +173,8 @@ async function load() {
   try {
     if (!projectId.value) return
     const [data, memberList] = await Promise.all([listAssemblySteps(projectId.value, { per_page: 100 }), listMembers(projectId.value)])
-    steps.value = data.items.slice().sort((a, b) => a.step_order - b.step_order)
-    members.value = memberList
+    steps.value = (data.items ?? []).slice().sort((a, b) => a.step_order - b.step_order)
+    members.value = memberList ?? []
   } catch (err) {
     loadError.value = err instanceof Error ? err.message : '装配步骤加载失败'
   } finally {
