@@ -8,6 +8,8 @@ import (
 	"log/slog"
 	"net/http"
 	"os"
+	"path"
+	"strings"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
@@ -357,7 +359,6 @@ func main() {
 		slog.Error("failed to mount embedded frontend", "error", fsErr)
 		os.Exit(1)
 	}
-	fileServer := http.FileServer(http.FS(staticFS))
 	indexHTML, err := staticFS.Open("index.html")
 	if err != nil {
 		slog.Error("embedded frontend missing index.html", "error", err)
@@ -365,21 +366,46 @@ func main() {
 	}
 	indexHTML.Close()
 
+	spa := spaHandler(staticFS)
 	r.NotFound(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		// Don't serve frontend for API routes
 		if len(r.URL.Path) >= 5 && r.URL.Path[:5] == "/api/" {
 			http.NotFound(w, r)
 			return
 		}
-		// SPA fallback: rewrite to index.html
-		r.URL.Path = "/"
-		fileServer.ServeHTTP(w, r)
+		spa.ServeHTTP(w, r)
 	}))
 
 	slog.Info("server starting", "port", port)
 	if err := http.ListenAndServe(":"+port, r); err != nil {
 		slog.Error("server exited", "error", err)
 		os.Exit(1)
+	}
+}
+
+// spaHandler serves the embedded frontend: existing files are served directly,
+// missing file-like paths (with an extension, e.g. /assets/index-xxx.js) get a
+// real 404 instead of the SPA fallback — falling back to index.html there makes
+// the browser refuse text/html as JS/CSS and renders a blank page — and every
+// other non-file path falls back to index.html for client-side routing.
+func spaHandler(staticFS fs.FS) http.HandlerFunc {
+	fileServer := http.FileServer(http.FS(staticFS))
+	return func(w http.ResponseWriter, r *http.Request) {
+		name := strings.TrimPrefix(path.Clean(r.URL.Path), "/")
+		if name == "" || name == "." {
+			name = "index.html"
+		}
+		if _, err := fs.Stat(staticFS, name); err == nil {
+			fileServer.ServeHTTP(w, r)
+			return
+		}
+		if strings.Contains(path.Base(name), ".") {
+			http.NotFound(w, r)
+			return
+		}
+		// SPA fallback: rewrite to index.html
+		r.URL.Path = "/"
+		fileServer.ServeHTTP(w, r)
 	}
 }
 

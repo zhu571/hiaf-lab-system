@@ -49,7 +49,7 @@
 | 当前存量 | Python 3 + SQLite + ELOG |
 | 后端目标 | Go 1.22+，chi 路由，标准库 `net/http` |
 | 数据库目标 | PostgreSQL 16 |
-| 前端目标 | Vue 3 + Element Plus，单文件构建（JS/CSS 内联 index.html） |
+| 前端目标 | Vue 3 + Element Plus，Vite 标准多文件构建（路由懒加载 + vendor 分包） |
 | AI Agent | Python 3.11+，LightAgent (`wanxingai/lightagent`) |
 | 部署 | Docker Compose，Rocky Linux 单机，frp + VPS |
 | 消息/告警 | ntfy（紧急），MeoW（日常） |
@@ -94,7 +94,7 @@ hiaf-lab-system/
 │   ├── middleware/         # JWT、权限、审计、日志中间件
 │   └── common/             # DB、响应、错误、request_id 等共享工具
 ├── py-agent/               # Python Agent，LightAgent 工具只调 Go REST API
-├── web-ui/                 # Vue 3 前端，构建为单文件 index.html 后同步到 go-server/static
+├── web-ui/                 # Vue 3 前端，npm run build 后把 dist 全量同步到 go-server/static（go:embed 嵌入，必须随提交更新）
 ├── migrations/             # PostgreSQL 迁移脚本
 ├── deploy/                 # Docker Compose、frp、Nginx 配置
 ├── images/                 # 运行时图片附件目录，占位可提交，实际附件不提交
@@ -252,6 +252,7 @@ python worker.py
 - [ ] `go test ./...` 通过（如有 `go-server/`）。
 - [ ] `go vet ./...` 无警告（如有 `go-server/`）。
 - [ ] 前端构建/检查通过（如有 `web-ui/`）。
+- [ ] 前端产物已全量同步到 `go-server/static/` 并随提交更新（embed 只打包仓库内文件，缺 assets 会导致白屏）。
 - [ ] 新 API 与 `api-contract.md` 一致。
 - [ ] 写接口要求 `Idempotency-Key`。
 - [ ] 权限中间件或 service 权限检查已应用。
