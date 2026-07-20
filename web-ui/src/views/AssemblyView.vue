@@ -2,9 +2,6 @@
   <div class="page">
     <div class="toolbar">
       <h2>装配步骤</h2>
-      <el-select v-model="selectedProjectId" class="project-select" placeholder="选择项目">
-        <el-option v-for="p in projects.projects" :key="p.id" :label="p.short_name || p.name" :value="p.id" />
-      </el-select>
       <el-select v-model="statusFilter" class="status-select" placeholder="全部状态" clearable>
         <el-option v-for="s in statuses" :key="s.value" :label="s.label" :value="s.value" />
       </el-select>
@@ -102,7 +99,7 @@
 
 <script setup lang="ts">
 import { computed, onMounted, reactive, ref, watch } from 'vue'
-import { useRoute, useRouter } from 'vue-router'
+import { useRoute } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { Rank } from '@element-plus/icons-vue'
 import StatusBadge from '../components/StatusBadge.vue'
@@ -115,15 +112,12 @@ import {
   type AssemblyStep
 } from '../api/assembly'
 import { listMembers, type ProjectMember } from '../api/projects'
-import { useProjectStore } from '../stores/project'
 import { useAuthStore } from '../stores/auth'
 import { showApiError } from '../composables/useNotify'
 
 type TransitionAction = { transition: string; label: string; confirm: boolean; danger?: boolean }
 
 const route = useRoute()
-const router = useRouter()
-const projects = useProjectStore()
 const auth = useAuthStore()
 const steps = ref<AssemblyStep[]>([])
 const members = ref<ProjectMember[]>([])
@@ -165,11 +159,8 @@ const transitionsByStatus: Record<string, TransitionAction[]> = {
 
 const canOperate = computed(() => ['admin', 'maintainer', 'member'].includes(auth.user?.role || ''))
 const canReorder = computed(() => ['admin', 'maintainer'].includes(auth.user?.role || ''))
-const projectId = computed(() => String(route.params.id || projects.current?.id || ''))
-const selectedProjectId = computed({
-  get: () => projectId.value,
-  set: (id: string) => switchProject(id)
-})
+// projectId 的唯一事实来源是路由参数（由 ProjectLayout 保证存在）
+const projectId = computed(() => String(route.params.id || ''))
 const filteredSteps = computed(() => (statusFilter.value ? steps.value.filter((s) => s.status === statusFilter.value) : steps.value))
 const memberMap = computed(() => Object.fromEntries(members.value.map((m) => [m.user_id, m.username || m.user_id])) as Record<string, string>)
 
@@ -180,9 +171,7 @@ async function load() {
   loading.value = true
   loadError.value = ''
   try {
-    await projects.load()
     if (!projectId.value) return
-    if (projectId.value !== projects.currentId) projects.select(projectId.value)
     const [data, memberList] = await Promise.all([listAssemblySteps(projectId.value, { per_page: 100 }), listMembers(projectId.value)])
     steps.value = data.items.slice().sort((a, b) => a.step_order - b.step_order)
     members.value = memberList
@@ -191,12 +180,6 @@ async function load() {
   } finally {
     loading.value = false
   }
-}
-
-function switchProject(id: string) {
-  if (!id || id === projectId.value) return
-  projects.select(id)
-  router.replace({ path: `/projects/${id}/assembly` })
 }
 
 function memberName(userId?: string) {
@@ -314,10 +297,6 @@ async function remove(step: AssemblyStep) {
 </script>
 
 <style scoped>
-.project-select {
-  max-width: 240px;
-}
-
 .status-select {
   max-width: 160px;
 }

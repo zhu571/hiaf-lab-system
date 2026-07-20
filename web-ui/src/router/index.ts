@@ -11,6 +11,17 @@ import DailyHistoryView from '../views/DailyHistoryView.vue'
 import AdminUsersView from '../views/AdminUsersView.vue'
 import AgentCandidatesView from '../views/AgentCandidatesView.vue'
 import RunListView from '../views/RunListView.vue'
+import RunDetailView from '../views/RunDetailView.vue'
+import TestDataView from '../views/TestDataView.vue'
+import RFMatchingView from '../views/RFMatchingView.vue'
+import AssemblyView from '../views/AssemblyView.vue'
+import AttachmentView from '../views/AttachmentView.vue'
+import InstrumentsView from '../views/InstrumentsView.vue'
+import SensorsView from '../views/SensorsView.vue'
+import DailyReportDetailView from '../views/DailyReportDetailView.vue'
+import DailyReportShell from '../components/DailyReportShell.vue'
+import ProjectLayout from '../components/ProjectLayout.vue'
+import ProjectDashboard from '../components/ProjectDashboard.vue'
 
 const router = createRouter({
   history: createWebHistory(),
@@ -18,22 +29,41 @@ const router = createRouter({
     { path: '/', redirect: '/projects' },
     { path: '/login', component: LoginView, meta: { public: true } },
     { path: '/projects', component: ProjectsView },
-    { path: '/daily-report', component: DailyReportView },
-    { path: '/projects/:id/issues', component: IssuesView },
-    { path: '/projects/:id/runs', component: RunListView },
-    { path: '/runs/:id', component: () => import('../views/RunDetailView.vue') },
-    { path: '/projects/:id/test-data', component: () => import('../views/TestDataView.vue') },
-    { path: '/projects/:id/rf-matching', component: () => import('../views/RFMatchingView.vue') },
-    { path: '/projects/:id/assembly', component: () => import('../views/AssemblyView.vue') },
-    { path: '/attachments', component: () => import('../views/AttachmentView.vue') },
-    { path: '/issues', component: () => import('../views/IssuesFallback.vue') },
+    {
+      path: '/daily-report',
+      component: DailyReportShell,
+      children: [
+        { path: '', component: DailyReportView },
+        { path: 'history', component: DailyHistoryView }
+      ]
+    },
+    {
+      path: '/projects/:id',
+      component: ProjectLayout,
+      children: [
+        { path: '', component: ProjectDashboard },
+        { path: 'issues', component: IssuesView },
+        { path: 'experiment-runs', component: RunListView },
+        { path: 'test-data', component: TestDataView },
+        { path: 'rf-matching', component: RFMatchingView },
+        { path: 'assembly', component: AssemblyView }
+      ]
+    },
+    { path: '/experiment-runs/:id', component: RunDetailView },
+    { path: '/attachments', component: AttachmentView },
+    { path: '/instruments', component: InstrumentsView },
+    { path: '/sensors', component: SensorsView },
     { path: '/experiences', component: ExperiencesView },
     { path: '/audit', component: AuditView },
     { path: '/settings', component: SettingsView },
-    { path: '/daily-reports', component: DailyHistoryView },
-    { path: '/daily-reports/:id', component: () => import('../views/DailyReportDetailView.vue') },
+    { path: '/daily-reports/:id', component: DailyReportDetailView },
     { path: '/admin/users', component: AdminUsersView, meta: { admin: true } },
-    { path: '/agent-candidates', component: AgentCandidatesView, meta: { reviewer: true } }
+    { path: '/agent-candidates', component: AgentCandidatesView, meta: { reviewer: true } },
+    // 兼容重定向：保留旧链接不 404
+    { path: '/issues', redirect: '/projects' },
+    { path: '/daily-reports', redirect: '/daily-report/history' },
+    { path: '/runs/:id', redirect: '/experiment-runs/:id' },
+    { path: '/projects/:id/runs', redirect: '/projects/:id/experiment-runs' }
   ]
 })
 

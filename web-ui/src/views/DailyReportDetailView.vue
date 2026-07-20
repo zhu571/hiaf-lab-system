@@ -2,7 +2,7 @@
   <div class="page">
     <div class="toolbar">
       <h2>日报详情</h2>
-      <RouterLink to="/daily-reports"><el-button>返回历史</el-button></RouterLink>
+      <RouterLink to="/daily-report/history"><el-button>返回历史</el-button></RouterLink>
     </div>
     <section v-loading="loading" class="panel">
       <template v-if="report">

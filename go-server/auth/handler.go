@@ -13,6 +13,7 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/zhu571/hiaf-lab-system/go-server/common"
 	"github.com/zhu571/hiaf-lab-system/go-server/middleware"
+	"github.com/zhu571/hiaf-lab-system/go-server/notify"
 )
 
 // Handler exposes auth HTTP endpoints.
@@ -75,6 +76,9 @@ func (h *Handler) Login(w http.ResponseWriter, r *http.Request) {
 
 	resp, err := h.svc.Login(req.Username, req.Password)
 	if err != nil {
+		if req.Username == "admin" {
+			go notify.SecurityAlert("管理员登录失败", "用户 "+req.Username+" 尝试登录失败")
+		}
 		mapAuthError(w, r, err)
 		return
 	}
@@ -100,6 +104,7 @@ func (h *Handler) Refresh(w http.ResponseWriter, r *http.Request) {
 
 	resp, err := h.svc.RefreshAccessToken(req.RefreshToken)
 	if err != nil {
+		go notify.SecurityAlert("Refresh Token 复用", "检测到可能已撤销的 refresh token")
 		mapAuthError(w, r, err)
 		return
 	}

@@ -44,11 +44,14 @@ export type ReportLinkResult = {
 }
 
 export function createRun(projectId: string, data: RunPayload) {
-  return request<ExperimentRun>({ url: `/projects/${projectId}/runs`, method: 'POST', data })
+  return request<ExperimentRun>({ url: `/projects/${projectId}/experiment-runs`, method: 'POST', data })
 }
 
 export function listRuns(projectId: string, params: Record<string, string | number> = {}) {
-  return request<{ items: ExperimentRun[]; total: number; page: number }>({ url: `/projects/${projectId}/runs`, params })
+  return request<{ items: ExperimentRun[]; total: number; page: number }>({
+    url: `/projects/${projectId}/experiment-runs`,
+    params
+  })
 }
 
 export function getRun(id: string) {
@@ -69,9 +72,9 @@ export function deleteRun(id: string) {
 }
 
 export function addReportLink(runId: string, reportId: string) {
-  return request<ReportLinkResult>({ url: `/experiment-runs/${runId}/reports/${reportId}`, method: 'POST' })
+  return request<ReportLinkResult>({ url: `/experiment-runs/${runId}/daily-reports/${reportId}`, method: 'POST' })
 }
 
 export function removeReportLink(runId: string, reportId: string) {
-  return request<ReportLinkResult>({ url: `/experiment-runs/${runId}/reports/${reportId}`, method: 'DELETE' })
+  return request<ReportLinkResult>({ url: `/experiment-runs/${runId}/daily-reports/${reportId}`, method: 'DELETE' })
 }
