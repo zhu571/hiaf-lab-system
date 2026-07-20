@@ -49,7 +49,7 @@
 | 当前存量 | Python 3 + SQLite + ELOG |
 | 后端目标 | Go 1.22+，chi 路由，标准库 `net/http` |
 | 数据库目标 | PostgreSQL 16 |
-| 前端目标 | Vue 3 + Element Plus，PWA |
+| 前端目标 | Vue 3 + Element Plus，单文件构建（JS/CSS 内联 index.html） |
 | AI Agent | Python 3.11+，LightAgent (`wanxingai/lightagent`) |
 | 部署 | Docker Compose，Rocky Linux 单机，frp + VPS |
 | 消息/告警 | ntfy（紧急），MeoW（日常） |
@@ -94,7 +94,7 @@ hiaf-lab-system/
 │   ├── middleware/         # JWT、权限、审计、日志中间件
 │   └── common/             # DB、响应、错误、request_id 等共享工具
 ├── py-agent/               # Python Agent，LightAgent 工具只调 Go REST API
-├── web-ui/                 # Vue 3 前端 PWA
+├── web-ui/                 # Vue 3 前端，构建为单文件 index.html 后同步到 go-server/static
 ├── migrations/             # PostgreSQL 迁移脚本
 ├── deploy/                 # Docker Compose、frp、Nginx 配置
 ├── images/                 # 运行时图片附件目录，占位可提交，实际附件不提交

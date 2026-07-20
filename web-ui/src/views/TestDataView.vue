@@ -2,151 +2,155 @@
   <div class="page">
     <div class="toolbar">
       <h2>测试数据</h2>
-      <el-select v-model="selectedProjectId" class="project-select" placeholder="选择项目">
-        <el-option v-for="p in projects.projects" :key="p.id" :label="p.short_name || p.name" :value="p.id" />
-      </el-select>
     </div>
 
-    <section v-if="!isViewer" class="panel">
-      <h3 class="panel-title">录入测试数据</h3>
-      <el-form label-position="top" @submit.prevent>
-        <div class="form-grid">
-          <el-form-item label="数据类型" required>
-            <el-select v-model="draft.data_type" placeholder="选择数据类型">
-              <el-option v-for="t in dataTypes" :key="t" :label="t" :value="t" />
-            </el-select>
-          </el-form-item>
-          <el-form-item label="测量项" required>
-            <el-input v-model="draft.measurement" placeholder="如 beam_current" />
-          </el-form-item>
-          <el-form-item label="数值" required>
-            <el-input-number v-model="draft.value" :controls="false" placeholder="数值" />
-          </el-form-item>
-          <el-form-item label="单位">
-            <el-input v-model="draft.unit" placeholder="如 K / mbar / V" />
-          </el-form-item>
-          <el-form-item label="质量">
-            <el-select v-model="draft.quality">
-              <el-option v-for="q in entryQualities" :key="q" :label="q" :value="q" />
-            </el-select>
-          </el-form-item>
-          <el-form-item label="测量时间">
-            <el-date-picker v-model="draft.measured_at" type="datetime" placeholder="选择时间（可选）" />
-          </el-form-item>
-          <el-form-item label="关联批次">
-            <el-select v-model="draft.run_id" placeholder="选择批次（可选）" clearable>
-              <el-option v-for="r in runs" :key="r.id" :label="r.name" :value="r.id" />
-            </el-select>
-          </el-form-item>
-          <el-form-item label="备注" class="span-all">
-            <el-input v-model="draft.notes" placeholder="备注（可选）" />
-          </el-form-item>
-        </div>
-        <div class="form-actions">
-          <el-button type="primary" :loading="submitting" @click="submit">提交</el-button>
-        </div>
-      </el-form>
-    </section>
+    <el-tabs v-model="activeTab" class="page-tabs">
+      <el-tab-pane v-if="!isViewer" label="录入" name="entry">
+        <section class="panel">
+          <h3 class="panel-title">录入测试数据</h3>
+          <el-form label-position="top" @submit.prevent>
+            <div class="form-grid">
+              <el-form-item label="数据类型" required>
+                <el-select v-model="draft.data_type" placeholder="选择数据类型">
+                  <el-option v-for="t in dataTypes" :key="t" :label="t" :value="t" />
+                </el-select>
+              </el-form-item>
+              <el-form-item label="测量项" required>
+                <el-input v-model="draft.measurement" placeholder="如 beam_current" />
+              </el-form-item>
+              <el-form-item label="数值" required>
+                <el-input-number v-model="draft.value" :controls="false" placeholder="数值" />
+              </el-form-item>
+              <el-form-item label="单位">
+                <el-input v-model="draft.unit" placeholder="如 K / mbar / V" />
+              </el-form-item>
+              <el-form-item label="质量">
+                <el-select v-model="draft.quality">
+                  <el-option v-for="q in entryQualities" :key="q" :label="q" :value="q" />
+                </el-select>
+              </el-form-item>
+              <el-form-item label="测量时间">
+                <el-date-picker v-model="draft.measured_at" type="datetime" placeholder="选择时间（可选）" />
+              </el-form-item>
+              <el-form-item label="关联批次">
+                <el-select v-model="draft.run_id" placeholder="选择批次（可选）" clearable>
+                  <el-option v-for="r in runs" :key="r.id" :label="r.name" :value="r.id" />
+                </el-select>
+              </el-form-item>
+              <el-form-item label="备注" class="span-all">
+                <el-input v-model="draft.notes" placeholder="备注（可选）" />
+              </el-form-item>
+            </div>
+            <div class="form-actions">
+              <el-button type="primary" :loading="submitting" @click="submit">提交</el-button>
+            </div>
+          </el-form>
+        </section>
+      </el-tab-pane>
 
-    <section class="panel filters-panel">
-      <div class="filters">
-        <el-select v-model="dataType" placeholder="数据类型" @change="onFilter">
-          <el-option label="全部类型" value="" />
-          <el-option v-for="t in dataTypes" :key="t" :label="t" :value="t" />
-        </el-select>
-        <el-select v-model="quality" placeholder="质量" @change="onFilter">
-          <el-option label="全部质量" value="" />
-          <el-option v-for="q in qualities" :key="q" :label="q" :value="q" />
-        </el-select>
-      </div>
-    </section>
+      <el-tab-pane label="数据列表" name="list">
+        <div class="tab-stack">
+          <section class="panel filters-panel">
+            <div class="filters">
+              <el-select v-model="dataType" placeholder="数据类型" @change="onFilter">
+                <el-option label="全部类型" value="" />
+                <el-option v-for="t in dataTypes" :key="t" :label="t" :value="t" />
+              </el-select>
+              <el-select v-model="quality" placeholder="质量" @change="onFilter">
+                <el-option label="全部质量" value="" />
+                <el-option v-for="q in qualities" :key="q" :label="q" :value="q" />
+              </el-select>
+            </div>
+          </section>
 
-    <section class="panel">
-      <el-alert v-if="error" :title="error" type="error" show-icon :closable="false">
-        <el-button size="small" @click="load">重试</el-button>
-      </el-alert>
-      <template v-else>
-        <el-table v-loading="loading" :data="items">
-          <el-table-column label="测量时间" width="170">
-            <template #default="{ row }">{{ formatTime(row.measured_at) }}</template>
-          </el-table-column>
-          <el-table-column prop="data_type" label="数据类型" width="110" />
-          <el-table-column prop="measurement" label="测量项" min-width="140" />
-          <el-table-column label="数值" width="130">
-            <template #default="{ row }">{{ row.value }}{{ row.unit ? ` ${row.unit}` : '' }}</template>
-          </el-table-column>
-          <el-table-column label="质量" width="100">
-            <template #default="{ row }">
-              <el-tag :type="qualityTag(row.quality)" size="small" effect="light">{{ row.quality }}</el-tag>
+          <section class="panel">
+            <el-alert v-if="error" :title="error" type="error" show-icon :closable="false">
+              <el-button size="small" @click="load">重试</el-button>
+            </el-alert>
+            <template v-else>
+              <el-table v-loading="loading" :data="items">
+                <el-table-column label="测量时间" width="170">
+                  <template #default="{ row }">{{ formatTime(row.measured_at) }}</template>
+                </el-table-column>
+                <el-table-column prop="data_type" label="数据类型" width="110" />
+                <el-table-column prop="measurement" label="测量项" min-width="140" />
+                <el-table-column label="数值" width="130">
+                  <template #default="{ row }">{{ row.value }}{{ row.unit ? ` ${row.unit}` : '' }}</template>
+                </el-table-column>
+                <el-table-column label="质量" width="100">
+                  <template #default="{ row }">
+                    <el-tag :type="qualityTag(row.quality)" size="small" effect="light">{{ row.quality }}</el-tag>
+                  </template>
+                </el-table-column>
+                <el-table-column prop="source" label="来源" width="100" />
+                <el-table-column label="备注" min-width="140" show-overflow-tooltip>
+                  <template #default="{ row }">{{ row.notes || '—' }}</template>
+                </el-table-column>
+                <el-table-column v-if="!isViewer" label="操作" width="110">
+                  <template #default="{ row }">
+                    <el-button size="small" type="danger" plain :disabled="row.quality === 'invalid'" @click="invalidate(row)">标记无效</el-button>
+                  </template>
+                </el-table-column>
+                <template #empty>
+                  <el-empty description="暂无数据" />
+                </template>
+              </el-table>
+              <el-pagination
+                v-model:current-page="page"
+                class="pager"
+                layout="total, prev, pager, next"
+                :page-size="perPage"
+                :total="total"
+                @current-change="load"
+              />
             </template>
-          </el-table-column>
-          <el-table-column prop="source" label="来源" width="100" />
-          <el-table-column label="备注" min-width="140" show-overflow-tooltip>
-            <template #default="{ row }">{{ row.notes || '—' }}</template>
-          </el-table-column>
-          <el-table-column v-if="!isViewer" label="操作" width="110">
-            <template #default="{ row }">
-              <el-button size="small" type="danger" plain :disabled="row.quality === 'invalid'" @click="invalidate(row)">标记无效</el-button>
-            </template>
-          </el-table-column>
-          <template #empty>
-            <el-empty description="暂无数据" />
+          </section>
+        </div>
+      </el-tab-pane>
+
+      <el-tab-pane label="趋势图" name="chart">
+        <section class="panel chart-panel">
+          <h3 class="panel-title">趋势图 <span class="muted hint">按测量项分组，各组独立归一化</span></h3>
+          <template v-if="chartGroups.length">
+            <svg class="trend-chart" :viewBox="`0 0 ${CHART_W} ${CHART_H}`" preserveAspectRatio="xMidYMid meet">
+              <line class="axis" :x1="PAD_X" :y1="CHART_H - PAD_Y" :x2="CHART_W - PAD_X" :y2="CHART_H - PAD_Y" />
+              <line class="axis" :x1="PAD_X" :y1="PAD_Y" :x2="PAD_X" :y2="CHART_H - PAD_Y" />
+              <g v-for="group in chartGroups" :key="group.name">
+                <polyline
+                  v-if="group.points.length >= 2"
+                  :points="polyline(group)"
+                  :stroke="group.color"
+                  fill="none"
+                  stroke-linecap="round"
+                  stroke-linejoin="round"
+                  stroke-width="2"
+                />
+                <circle v-for="(c, i) in chartCoords(group)" :key="i" :cx="c.x" :cy="c.y" :fill="group.color" r="3" />
+              </g>
+            </svg>
+            <div class="legend">
+              <span v-for="group in chartGroups" :key="group.name" class="legend-item">
+                <i class="legend-dot" :style="{ background: group.color }" />{{ group.name }}
+              </span>
+            </div>
           </template>
-        </el-table>
-        <el-pagination
-          v-model:current-page="page"
-          class="pager"
-          layout="total, prev, pager, next"
-          :page-size="perPage"
-          :total="total"
-          @current-change="load"
-        />
-      </template>
-    </section>
-
-    <section class="panel chart-panel">
-      <h3 class="panel-title">趋势图 <span class="muted hint">按测量项分组，各组独立归一化</span></h3>
-      <template v-if="chartGroups.length">
-        <svg class="trend-chart" :viewBox="`0 0 ${CHART_W} ${CHART_H}`" preserveAspectRatio="xMidYMid meet">
-          <line class="axis" :x1="PAD_X" :y1="CHART_H - PAD_Y" :x2="CHART_W - PAD_X" :y2="CHART_H - PAD_Y" />
-          <line class="axis" :x1="PAD_X" :y1="PAD_Y" :x2="PAD_X" :y2="CHART_H - PAD_Y" />
-          <g v-for="group in chartGroups" :key="group.name">
-            <polyline
-              v-if="group.points.length >= 2"
-              :points="polyline(group)"
-              :stroke="group.color"
-              fill="none"
-              stroke-linecap="round"
-              stroke-linejoin="round"
-              stroke-width="2"
-            />
-            <circle v-for="(c, i) in chartCoords(group)" :key="i" :cx="c.x" :cy="c.y" :fill="group.color" r="3" />
-          </g>
-        </svg>
-        <div class="legend">
-          <span v-for="group in chartGroups" :key="group.name" class="legend-item">
-            <i class="legend-dot" :style="{ background: group.color }" />{{ group.name }}
-          </span>
-        </div>
-      </template>
-      <el-empty v-else description="暂无数据" />
-    </section>
+          <el-empty v-else description="暂无数据" />
+        </section>
+      </el-tab-pane>
+    </el-tabs>
   </div>
 </template>
 
 <script setup lang="ts">
 import { computed, onMounted, reactive, ref, watch } from 'vue'
-import { useRoute, useRouter } from 'vue-router'
+import { useRoute } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { createTestData, deleteTestData, listTestData, type TestData, type TestDataPayload } from '../api/testdata'
 import { listRuns, type ExperimentRun } from '../api/runs'
-import { useProjectStore } from '../stores/project'
 import { useAuthStore } from '../stores/auth'
 import { showApiError } from '../composables/useNotify'
 
 const route = useRoute()
-const router = useRouter()
-const projects = useProjectStore()
 const auth = useAuthStore()
 
 const items = ref<TestData[]>([])
@@ -176,11 +180,10 @@ const draft = reactive({
 })
 
 const isViewer = computed(() => auth.user?.role === 'viewer')
-const projectId = computed(() => String(route.params.id || projects.current?.id || ''))
-const selectedProjectId = computed({
-  get: () => projectId.value,
-  set: (id: string) => switchProject(id)
-})
+// projectId 的唯一事实来源是路由参数（由 ProjectLayout 保证存在）
+const projectId = computed(() => String(route.params.id || ''))
+// viewer 无录入权限，默认落在数据列表
+const activeTab = ref(isViewer.value ? 'list' : 'entry')
 
 // 趋势图：viewBox 坐标与调色板
 const CHART_W = 640
@@ -228,9 +231,7 @@ onMounted(load)
 watch(projectId, load)
 
 async function load() {
-  await projects.load()
   if (!projectId.value) return
-  if (projectId.value !== projects.currentId) projects.select(projectId.value)
   loading.value = true
   error.value = ''
   try {
@@ -260,12 +261,6 @@ async function loadRuns() {
   } catch (err) {
     showApiError(err, '批次列表加载失败')
   }
-}
-
-function switchProject(id: string) {
-  if (!id || id === projectId.value) return
-  projects.select(id)
-  router.replace({ path: `/projects/${id}/test-data` })
 }
 
 function onFilter() {
@@ -355,8 +350,13 @@ function formatTime(v?: string) {
 </script>
 
 <style scoped>
-.project-select {
-  max-width: 240px;
+.page-tabs :deep(.el-tabs__header) {
+  margin-bottom: 16px;
+}
+
+.tab-stack {
+  display: grid;
+  gap: 20px;
 }
 
 .panel-title {

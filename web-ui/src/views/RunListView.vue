@@ -3,9 +3,6 @@
     <div class="toolbar">
       <h2>实验批次</h2>
       <div class="controls">
-        <el-select v-model="selectedProjectId" class="project-select" placeholder="选择项目">
-          <el-option v-for="p in projects.projects" :key="p.id" :label="p.short_name || p.name" :value="p.id" />
-        </el-select>
         <el-select v-model="statusFilter" class="status-select" placeholder="状态" @change="search">
           <el-option label="全部" value="" />
           <el-option v-for="s in statuses" :key="s.value" :label="s.label" :value="s.value" />
@@ -95,13 +92,11 @@ import { useRoute, useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import StatusBadge from '../components/StatusBadge.vue'
 import { createRun, listRuns, type ExperimentRun, type RunPayload } from '../api/runs'
-import { useProjectStore } from '../stores/project'
 import { useAuthStore } from '../stores/auth'
 import { showApiError } from '../composables/useNotify'
 
 const route = useRoute()
 const router = useRouter()
-const projects = useProjectStore()
 const auth = useAuthStore()
 
 const runs = ref<ExperimentRun[]>([])
@@ -164,11 +159,8 @@ const draft = reactive<RunForm>(emptyDraft())
 
 // viewer 只读，隐藏所有写操作入口（后端仍强校验）
 const canEdit = computed(() => !!auth.user && auth.user.role !== 'viewer')
-const projectId = computed(() => String(route.params.id || projects.current?.id || ''))
-const selectedProjectId = computed({
-  get: () => projectId.value,
-  set: (id: string) => switchProject(id)
-})
+// projectId 的唯一事实来源是路由参数（由 ProjectLayout 保证存在）
+const projectId = computed(() => String(route.params.id || ''))
 
 onMounted(load)
 watch(projectId, () => {
@@ -180,13 +172,11 @@ async function load() {
   loading.value = true
   error.value = ''
   try {
-    await projects.load()
     if (!projectId.value) {
       runs.value = []
       total.value = 0
       return
     }
-    if (projectId.value !== projects.currentId) projects.select(projectId.value)
     const params: Record<string, string | number> = { page: page.value, per_page: perPage }
     if (statusFilter.value) params.status = statusFilter.value
     if (campaign.value.trim()) params.campaign = campaign.value.trim()
@@ -206,14 +196,8 @@ function search() {
   load()
 }
 
-function switchProject(id: string) {
-  if (!id || id === projectId.value) return
-  projects.select(id)
-  router.replace({ path: `/projects/${id}/runs` })
-}
-
 function open(run: ExperimentRun) {
-  router.push(`/runs/${run.id}`)
+  router.push(`/experiment-runs/${run.id}`)
 }
 
 function runTypeLabel(value: string) {
@@ -269,10 +253,6 @@ async function create() {
   display: flex;
   flex-wrap: wrap;
   gap: 12px;
-}
-
-.project-select {
-  max-width: 240px;
 }
 
 .status-select {

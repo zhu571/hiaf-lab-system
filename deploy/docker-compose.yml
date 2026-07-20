@@ -33,7 +33,7 @@ services:
     entrypoint:
       - "/bin/sh"
       - "-c"
-      - "PASSWORD=$$(cat /run/secrets/db_password); ENCODED=$$(PASSWORD=\"$$PASSWORD\" python3 -c \"import os, urllib.parse; print(urllib.parse.quote_plus(os.environ['PASSWORD']))\"); migrate -path /migrations -database postgres://lab:$$ENCODED@postgres:5432/lab?sslmode=disable up"
+      - "PASSWORD=$$(cat /run/secrets/db_password); ENCODED=$$(PASSWORD=\"$$PASSWORD\" python3 -c \"import os, urllib.parse; print(urllib.parse.quote_plus(os.environ['PASSWORD']))\"); migrate -path /migrations -database postgres://lab:$$ENCODED@postgres:5432/lab?sslmode=disable up || { curl -s -X POST http://ntfy:80/lab-system -H 'Title: 数据库迁移失败' -H 'Priority: urgent' -H 'Tags: warning' -d 'migration failed' >/dev/null 2>&1; exit 1; }"
 
   server:
     build:
@@ -104,6 +104,7 @@ services:
       - ntfy-etc:/etc/ntfy
     ports:
       - "127.0.0.1:8085:80"
+      - "10.144.144.12:8087:80"
     restart: unless-stopped
 
 volumes:

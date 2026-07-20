@@ -1,6 +1,6 @@
 # HIAF Lab System 前端代码阅读指南
 
-本文面向有 Vue 3 基础、但第一次接触本项目的开发者。当前前端使用 Vue 3（Composition API + `<script setup>`）、TypeScript、Element Plus、Pinia、Vue Router、Vite 和 PWA。建议按“入口 → 路由 → 布局 → store → API → 页面”的顺序阅读。
+本文面向有 Vue 3 基础、但第一次接触本项目的开发者。当前前端使用 Vue 3（Composition API + `<script setup>`）、TypeScript、Element Plus、Pinia、Vue Router 和 Vite（单文件构建，JS/CSS 全部内联进 index.html）。建议按“入口 → 路由 → 布局 → store → API → 页面”的顺序阅读。
 
 > 本文以当前 Phase 2.6 代码为准。项目权限由路由守卫和后端共同校验；不要使用已经废弃的 `RequireProjectAccess` 写法。
 
@@ -12,7 +12,7 @@ web-ui/
 ├── package.json                  # 依赖和 dev/build/preview 脚本。
 ├── package-lock.json             # npm 锁文件，保证依赖安装可复现。
 ├── tsconfig.json                 # TypeScript 严格模式和 Vue 文件检查范围。
-├── vite.config.ts                # Vue 插件、PWA manifest、开发服务器及 API 代理。
+├── vite.config.ts                # Vue 插件、单文件构建（内联 JS/CSS）、开发服务器及 API 代理。
 └── src/
     ├── main.ts                   # 创建 Vue 应用并注册 Pinia、Router、Element Plus。
     ├── App.vue                   # 根组件；公开页直接渲染，业务页进入 AppLayout。
@@ -523,34 +523,30 @@ const mobileItems = computed(() =>
 
 最后运行 `npm run build`，同时手工检查登录保护、直接输入 URL、桌面侧栏和 768px 以下布局。
 
-## 8. PWA 配置
+## 8. 单文件构建与部署
 
-PWA 由 [`vite.config.ts`](vite.config.ts) 中的 `vite-plugin-pwa` 生成：
+生产环境由 Go 服务器 `//go:embed static` 嵌入前端并通过 `r.NotFound` 提供 SPA fallback：所有非 `/api` 路径（包括 `/assets/*.js`）都返回 `index.html`，没有任何静态文件路由。因此构建产物必须是完全自包含的单文件 `index.html`，否则浏览器拿到 `text/html` 的“JS”会拒绝执行，页面空白。
+
+[`vite.config.ts`](vite.config.ts) 据此做了三件事：
+
+1. `inlineDynamicImports: true` + `cssCodeSplit: false`：所有动态 import 合并为单个 JS chunk，样式合并为单个 CSS 文件。
+2. `assetsInlineLimit: 100000000`：少量静态资源全部 base64 内联。
+3. 自定义 `singleFile` 插件在 `generateBundle` 阶段把入口 JS 和 CSS 直接内联进 `index.html`，产物只剩一个文件（约 1.6 MB）。
 
 ```ts
 // vite.config.ts
-VitePWA({
-  registerType: 'autoUpdate',
-  manifest: {
-    name: 'HIAF Lab System',
-    short_name: 'HIAF Lab',
-    theme_color: '#1f6f8b',
-    background_color: '#f6f8fb',
-    display: 'standalone',
-    icons: [
-      { src: '/pwa-192.png', sizes: '192x192', type: 'image/png' }
-    ]
-  }
-})
+build: {
+  cssCodeSplit: false,
+  assetsInlineLimit: 100000000,
+  rollupOptions: { output: { inlineDynamicImports: true } }
+}
 ```
 
-- `registerType: 'autoUpdate'`：发现新 service worker 后自动更新。
-- `display: 'standalone'`：安装到主屏幕后以接近原生应用的独立窗口运行。
-- 当前未配置 `strategies`，插件默认使用 Workbox `generateSW`。
-- 当前未配置 `runtimeCaching`，因此只预缓存 Vite 构建产物（HTML、JS、CSS、manifest 和注册脚本），导航请求回退到 `index.html`；`/api` 响应不会离线缓存。
-- manifest 已引用 `/pwa-192.png`，但当前仓库尚无 `web-ui/public/pwa-192.png`；正式安装测试前需要补齐该静态图标。
+路由保持 HTML5 history 模式：直接访问 `/projects/:id/issues` 这类深层链接时，fallback 同样返回 `index.html`，前端路由正常接管。
 
-不要缓存带用户身份或实验数据的 API，除非先明确离线数据、过期、登出清理和多用户共用设备策略。
+部署流程：`npm run build` 后把 `web-ui/dist/` 同步到 `go-server/static/`（`rm -rf go-server/static && cp -r web-ui/dist go-server/static`），再构建 Go 镜像嵌入。
+
+项目曾使用 `vite-plugin-pwa`，现已移除：Service Worker 在内网 HTTP 非 localhost 环境本就不可用，且 `sw.js`、`registerSW.js`、`manifest.webmanifest` 等文件无法被上述后端正确提供。如果将来恢复 HTTPS 部署并修复静态文件路由，再评估是否重新引入 PWA。
 
 ## 9. 移动端适配
 

@@ -2,9 +2,6 @@
   <div class="page">
     <div class="toolbar">
       <h2>RF 匹配</h2>
-      <el-select v-model="selectedProjectId" class="project-select" placeholder="选择项目">
-        <el-option v-for="p in projects.projects" :key="p.id" :label="p.short_name || p.name" :value="p.id" />
-      </el-select>
       <el-select v-model="device" class="filter-select" placeholder="设备" @change="onFilter">
         <el-option label="全部设备" value="" />
         <el-option v-for="d in devices" :key="d" :label="d" :value="d" />
@@ -147,16 +144,13 @@
 
 <script setup lang="ts">
 import { computed, onMounted, reactive, ref, watch } from 'vue'
-import { useRoute, useRouter } from 'vue-router'
+import { useRoute } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { createRFMatching, deleteRFMatching, listRFMatching, type RFMatchingPayload, type RFMatchingRecord } from '../api/rfmatch'
-import { useProjectStore } from '../stores/project'
 import { useAuthStore } from '../stores/auth'
 import { showApiError } from '../composables/useNotify'
 
 const route = useRoute()
-const router = useRouter()
-const projects = useProjectStore()
 const auth = useAuthStore()
 
 const items = ref<RFMatchingRecord[]>([])
@@ -200,19 +194,14 @@ const numericKeys = ['s11', 'input_freq', 'input_voltage', 'input_power', 'outpu
 const textKeys = ['input_desc', 'output_desc', 'transformer_turns', 'capacitance_text', 'transformer_material', 'shunt_inductance', 'series_capacitor'] as const
 
 const isViewer = computed(() => auth.user?.role === 'viewer')
-const projectId = computed(() => String(route.params.id || projects.current?.id || ''))
-const selectedProjectId = computed({
-  get: () => projectId.value,
-  set: (id: string) => switchProject(id)
-})
+// projectId 的唯一事实来源是路由参数（由 ProjectLayout 保证存在）
+const projectId = computed(() => String(route.params.id || ''))
 
 onMounted(load)
 watch(projectId, load)
 
 async function load() {
-  await projects.load()
   if (!projectId.value) return
-  if (projectId.value !== projects.currentId) projects.select(projectId.value)
   loading.value = true
   error.value = ''
   try {
@@ -228,12 +217,6 @@ async function load() {
   } finally {
     loading.value = false
   }
-}
-
-function switchProject(id: string) {
-  if (!id || id === projectId.value) return
-  projects.select(id)
-  router.replace({ path: `/projects/${id}/rf-matching` })
 }
 
 function onFilter() {
@@ -339,10 +322,6 @@ function formatTime(v?: string) {
 </script>
 
 <style scoped>
-.project-select {
-  max-width: 240px;
-}
-
 .filter-select {
   width: 150px;
 }

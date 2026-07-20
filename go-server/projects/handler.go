@@ -3,12 +3,14 @@ package projects
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"log/slog"
 	"net/http"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/zhu571/hiaf-lab-system/go-server/common"
 	"github.com/zhu571/hiaf-lab-system/go-server/middleware"
+	"github.com/zhu571/hiaf-lab-system/go-server/notify"
 )
 
 type Handler struct {
@@ -97,7 +99,13 @@ func (h *Handler) TransitionStatus(w http.ResponseWriter, r *http.Request) {
 		common.WriteError(w, r, http.StatusBadRequest, "bad_request", "请求体解析失败", nil)
 		return
 	}
-	project, warnings, err := h.svc.TransitionStatus(chi.URLParam(r, "id"), req, middleware.EffectiveUserID(r.Context()), claims.Role)
+	id := chi.URLParam(r, "id")
+	oldProject, err := h.svc.GetByID(id)
+	if err != nil {
+		h.writeError(w, r, err, nil)
+		return
+	}
+	project, warnings, err := h.svc.TransitionStatus(id, req, middleware.EffectiveUserID(r.Context()), claims.Role)
 	if err != nil {
 		details := map[string]any{}
 		if len(warnings) > 0 {
@@ -109,6 +117,7 @@ func (h *Handler) TransitionStatus(w http.ResponseWriter, r *http.Request) {
 		h.writeError(w, r, err, details)
 		return
 	}
+	go notify.Send("lab-alerts", fmt.Sprintf("项目: %s→%s", oldProject.Status, project.Status), project.Name+" ("+claims.Username+")", notify.WebURL+"/projects/"+project.ID, "default", nil)
 	common.WriteSuccess(w, r, map[string]any{"project": project, "warnings": warnings})
 }
 

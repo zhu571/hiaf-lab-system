@@ -8,6 +8,8 @@ import (
 
 	"github.com/go-chi/chi/v5"
 	"github.com/zhu571/hiaf-lab-system/go-server/common"
+	"github.com/zhu571/hiaf-lab-system/go-server/middleware"
+	"github.com/zhu571/hiaf-lab-system/go-server/notify"
 )
 
 // Handler holds the instruments service and implements HTTP handlers.
@@ -88,7 +90,8 @@ func (h *Handler) EmergencyStop(w http.ResponseWriter, r *http.Request) {
 	if !requireIdempotencyKey(w, r) {
 		return
 	}
-	worker, ok := h.workers[chi.URLParam(r, "id")]
+	id := chi.URLParam(r, "id")
+	worker, ok := h.workers[id]
 	if !ok {
 		common.WriteError(w, r, http.StatusNotFound, "instrument_not_found", "仪器不存在", nil)
 		return
@@ -97,6 +100,7 @@ func (h *Handler) EmergencyStop(w http.ResponseWriter, r *http.Request) {
 		common.WriteError(w, r, http.StatusServiceUnavailable, "instrument_unavailable", err.Error(), nil)
 		return
 	}
+	go notify.InstrumentEmergency(id, middleware.GetUserClaims(r.Context()).Username)
 	common.WriteSuccess(w, r, map[string]string{"status": "emergency_stop_queued"})
 }
 

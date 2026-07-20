@@ -5,6 +5,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/zhu571/hiaf-lab-system/go-server/notify"
 )
 
 const (
@@ -172,6 +174,7 @@ func (w *InstrumentWorker) execute(cmd *QueueCommand) {
 	}
 	if w.connection() == nil {
 		if err = w.reconnect(); err != nil {
+			go notify.Send("lab-instruments", "仪器断开: "+w.cfg.InstrumentID, err.Error(), notify.WebURL, "default", []string{"warning"})
 			w.setState(WorkerStateNeedsReconnect)
 			w.respond(cmd, CommandResult{Command: cmd.Name, Duration: time.Since(started), Error: err})
 			return
@@ -180,6 +183,7 @@ func (w *InstrumentWorker) execute(cmd *QueueCommand) {
 	response, err := w.connection().Send(scpi)
 	if err != nil {
 		w.closeConnection()
+		go notify.InstrumentRestoreFailed(w.cfg.InstrumentID, err.Error())
 		w.setState(WorkerStateNeedsReconnect)
 	} else {
 		w.setState(WorkerStateRunning)
@@ -225,6 +229,9 @@ func (w *InstrumentWorker) rateLimitExceeded(now time.Time) bool {
 	if len(w.lastCmdTimes) < w.cfg.RateLimit {
 		w.rateLimited = false
 		return false
+	}
+	if !w.rateLimited {
+		go notify.Send("lab-instruments", "仪器限流: "+w.cfg.InstrumentID, "命令频率过高", notify.WebURL, "default", []string{"warning"})
 	}
 	w.rateLimited = true
 	w.rateLimitedAt = now

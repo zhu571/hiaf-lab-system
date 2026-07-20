@@ -22,79 +22,87 @@
           </div>
         </div>
       </section>
-      <section class="panel">
-        <h3 class="panel-title">元信息</h3>
-        <el-descriptions :column="2" border>
-          <el-descriptions-item label="Campaign">{{ run.campaign || '—' }}</el-descriptions-item>
-          <el-descriptions-item label="类型">{{ runTypeLabel(run.run_type) }}</el-descriptions-item>
-          <el-descriptions-item label="气体">{{ run.gas_type || '—' }}</el-descriptions-item>
-          <el-descriptions-item label="束流">{{ run.has_beam ? '有' : '无' }}</el-descriptions-item>
-          <el-descriptions-item label="目标温度">{{ numText(run.target_temp) }}</el-descriptions-item>
-          <el-descriptions-item label="最低温度">{{ numText(run.min_temp) }}</el-descriptions-item>
-          <el-descriptions-item label="压力范围">{{ pressureText }}</el-descriptions-item>
-          <el-descriptions-item label="设备">
-            <template v-if="run.devices?.length">
-              <el-tag v-for="d in run.devices" :key="d" size="small" effect="plain" class="dev-tag">{{ d }}</el-tag>
-            </template>
-            <span v-else>—</span>
-          </el-descriptions-item>
-          <el-descriptions-item label="创建时间">{{ fmtTime(run.created_at) }}</el-descriptions-item>
-          <el-descriptions-item label="开始时间">{{ fmtTime(run.started_at) }}</el-descriptions-item>
-          <el-descriptions-item label="结束时间">{{ fmtTime(run.ended_at) }}</el-descriptions-item>
-          <el-descriptions-item label="描述" :span="2">
-            <p class="desc">{{ run.description || '—' }}</p>
-          </el-descriptions-item>
-        </el-descriptions>
-      </section>
-      <div class="two-col">
-        <section class="panel">
-          <h3 class="panel-title">状态时间线</h3>
-          <!-- 后端暂无状态历史接口，时间线仅由已知时间戳（created/started/ended）+ 当前状态构建 -->
-          <el-timeline>
-            <el-timeline-item
-              v-for="(item, i) in timeline"
-              :key="i"
-              :timestamp="item.time ? fmtTime(item.time) : ''"
-              :type="item.type"
-              :hollow="!item.time"
-            >
-              {{ item.label }}
-            </el-timeline-item>
-          </el-timeline>
-        </section>
-        <section class="panel">
-          <h3 class="panel-title">关联日报</h3>
-          <!-- 后端暂无查询既有关联的端点，下列列表仅反映本次会话中的关联/解绑操作结果 -->
-          <div v-if="canEdit" class="link-row">
-            <el-select v-model="selectedReportId" class="report-select" filterable placeholder="选择日报" :loading="reportsLoading">
-              <el-option v-for="r in reportOptions" :key="r.id" :label="reportLabel(r)" :value="r.id" />
-            </el-select>
-            <el-button type="primary" :disabled="!selectedReportId" :loading="linking" @click="link">关联</el-button>
+      <el-tabs v-model="activeTab" class="page-tabs">
+        <el-tab-pane label="概览" name="overview">
+          <div class="tab-stack">
+            <section class="panel">
+              <h3 class="panel-title">元信息</h3>
+              <el-descriptions :column="2" border>
+                <el-descriptions-item label="Campaign">{{ run.campaign || '—' }}</el-descriptions-item>
+                <el-descriptions-item label="类型">{{ runTypeLabel(run.run_type) }}</el-descriptions-item>
+                <el-descriptions-item label="气体">{{ run.gas_type || '—' }}</el-descriptions-item>
+                <el-descriptions-item label="束流">{{ run.has_beam ? '有' : '无' }}</el-descriptions-item>
+                <el-descriptions-item label="目标温度">{{ numText(run.target_temp) }}</el-descriptions-item>
+                <el-descriptions-item label="最低温度">{{ numText(run.min_temp) }}</el-descriptions-item>
+                <el-descriptions-item label="压力范围">{{ pressureText }}</el-descriptions-item>
+                <el-descriptions-item label="设备">
+                  <template v-if="run.devices?.length">
+                    <el-tag v-for="d in run.devices" :key="d" size="small" effect="plain" class="dev-tag">{{ d }}</el-tag>
+                  </template>
+                  <span v-else>—</span>
+                </el-descriptions-item>
+                <el-descriptions-item label="创建时间">{{ fmtTime(run.created_at) }}</el-descriptions-item>
+                <el-descriptions-item label="开始时间">{{ fmtTime(run.started_at) }}</el-descriptions-item>
+                <el-descriptions-item label="结束时间">{{ fmtTime(run.ended_at) }}</el-descriptions-item>
+                <el-descriptions-item label="描述" :span="2">
+                  <p class="desc">{{ run.description || '—' }}</p>
+                </el-descriptions-item>
+              </el-descriptions>
+            </section>
+            <section class="panel">
+              <h3 class="panel-title">状态时间线</h3>
+              <!-- 后端暂无状态历史接口，时间线仅由已知时间戳（created/started/ended）+ 当前状态构建 -->
+              <el-timeline>
+                <el-timeline-item
+                  v-for="(item, i) in timeline"
+                  :key="i"
+                  :timestamp="item.time ? fmtTime(item.time) : ''"
+                  :type="item.type"
+                  :hollow="!item.time"
+                >
+                  {{ item.label }}
+                </el-timeline-item>
+              </el-timeline>
+            </section>
           </div>
-          <el-empty v-if="!linkedReportIds.length" description="暂无关联日报" :image-size="60" />
-          <ul v-else class="link-list">
-            <li v-for="id in linkedReportIds" :key="id">
-              <span class="report-id">{{ id }}</span>
-              <el-button v-if="canEdit" size="small" type="danger" plain @click="unlink(id)">解绑</el-button>
-            </li>
-          </ul>
-        </section>
-      </div>
-      <section class="panel">
-        <h3 class="panel-title">关联测试数据</h3>
-        <el-table v-loading="testDataLoading" :data="testData" size="small">
-          <el-table-column prop="measurement" label="测量项" />
-          <el-table-column prop="value" label="值" width="120" />
-          <el-table-column prop="unit" label="单位" width="100" />
-          <el-table-column prop="quality" label="质量" width="100" />
-          <el-table-column label="测量时间" width="180">
-            <template #default="{ row }">{{ row.measured_at ? fmtTime(row.measured_at) : '—' }}</template>
-          </el-table-column>
-          <template #empty>
-            <el-empty description="暂无关联测试数据" :image-size="60" />
-          </template>
-        </el-table>
-      </section>
+        </el-tab-pane>
+        <el-tab-pane label="关联日报" name="reports">
+          <section class="panel">
+            <h3 class="panel-title">关联日报</h3>
+            <!-- 后端暂无查询既有关联的端点，下列列表仅反映本次会话中的关联/解绑操作结果 -->
+            <div v-if="canEdit" class="link-row">
+              <el-select v-model="selectedReportId" class="report-select" filterable placeholder="选择日报" :loading="reportsLoading">
+                <el-option v-for="r in reportOptions" :key="r.id" :label="reportLabel(r)" :value="r.id" />
+              </el-select>
+              <el-button type="primary" :disabled="!selectedReportId" :loading="linking" @click="link">关联</el-button>
+            </div>
+            <el-empty v-if="!linkedReportIds.length" description="暂无关联日报" :image-size="60" />
+            <ul v-else class="link-list">
+              <li v-for="id in linkedReportIds" :key="id">
+                <span class="report-id">{{ id }}</span>
+                <el-button v-if="canEdit" size="small" type="danger" plain @click="unlink(id)">解绑</el-button>
+              </li>
+            </ul>
+          </section>
+        </el-tab-pane>
+        <el-tab-pane label="测试数据" name="testdata">
+          <section class="panel">
+            <h3 class="panel-title">关联测试数据</h3>
+            <el-table v-loading="testDataLoading" :data="testData" size="small">
+              <el-table-column prop="measurement" label="测量项" />
+              <el-table-column prop="value" label="值" width="120" />
+              <el-table-column prop="unit" label="单位" width="100" />
+              <el-table-column prop="quality" label="质量" width="100" />
+              <el-table-column label="测量时间" width="180">
+                <template #default="{ row }">{{ row.measured_at ? fmtTime(row.measured_at) : '—' }}</template>
+              </el-table-column>
+              <template #empty>
+                <el-empty description="暂无关联测试数据" :image-size="60" />
+              </template>
+            </el-table>
+          </section>
+        </el-tab-pane>
+      </el-tabs>
     </template>
     <el-dialog v-model="editDialog" title="编辑元数据" width="620">
       <el-form label-position="top">
@@ -168,6 +176,7 @@ const error = ref('')
 const transitioning = ref(false)
 const editDialog = ref(false)
 const saving = ref(false)
+const activeTab = ref('overview')
 
 const reportOptions = ref<DailyReport[]>([])
 const reportsLoading = ref(false)
@@ -412,7 +421,7 @@ async function remove() {
   try {
     await deleteRun(target.id)
     ElMessage.success('批次已删除')
-    router.push(`/projects/${target.project_id}/runs`)
+    router.push(`/projects/${target.project_id}/experiment-runs`)
   } catch (err) {
     showApiError(err, '删除失败')
   }
@@ -501,15 +510,18 @@ function fmtTime(x?: string) {
   margin-left: auto;
 }
 
+.page-tabs :deep(.el-tabs__header) {
+  margin-bottom: 16px;
+}
+
+.tab-stack {
+  display: grid;
+  gap: 20px;
+}
+
 .panel-title {
   font-size: 15px;
   margin-bottom: 14px;
-}
-
-.two-col {
-  display: grid;
-  gap: 20px;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
 }
 
 .dev-tag {
@@ -575,10 +587,6 @@ function fmtTime(x?: string) {
 }
 
 @media (max-width: 768px) {
-  .two-col {
-    grid-template-columns: 1fr;
-  }
-
   .actions {
     margin-left: 0;
   }

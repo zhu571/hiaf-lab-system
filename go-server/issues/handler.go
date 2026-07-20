@@ -11,6 +11,7 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/zhu571/hiaf-lab-system/go-server/common"
 	"github.com/zhu571/hiaf-lab-system/go-server/middleware"
+	"github.com/zhu571/hiaf-lab-system/go-server/notify"
 )
 
 type Handler struct {
@@ -40,6 +41,7 @@ func (h *Handler) Create(w http.ResponseWriter, r *http.Request) {
 		h.writeError(w, r, err, nil)
 		return
 	}
+	go notify.Send("lab-alerts", "新Issue: "+issue.Title, issue.ProjectID+": "+issue.Title+" ("+claims.Username+")", notify.WebURL+"/projects/"+issue.ProjectID+"/issues/"+issue.ID, "default", nil)
 	common.WriteCreated(w, r, issue)
 }
 
@@ -142,6 +144,12 @@ func (h *Handler) Transition(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		h.writeError(w, r, err, nil)
 		return
+	}
+	switch issue.Status {
+	case StatusResolved:
+		go notify.Send("lab-alerts", "Issue已解决: "+issue.Title, issue.ProjectID+": "+issue.Title+" ("+claims.Username+")", notify.WebURL+"/projects/"+issue.ProjectID+"/issues/"+issue.ID, "default", nil)
+	case StatusOpen:
+		go notify.Send("lab-alerts", "Issue重新打开: "+issue.Title, issue.ProjectID+": "+issue.Title+" ("+claims.Username+")", notify.WebURL+"/projects/"+issue.ProjectID+"/issues/"+issue.ID, "default", nil)
 	}
 	common.WriteSuccess(w, r, issue)
 }

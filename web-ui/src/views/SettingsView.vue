@@ -19,19 +19,38 @@
         </div>
       </el-form>
     </section>
+
+    <section v-if="quickLinks.length" class="panel quick-links">
+      <h3 class="section-title">快捷入口</h3>
+      <el-link v-for="link in quickLinks" :key="link.path" :underline="false" @click="router.push(link.path)">
+        <el-icon style="margin-right:6px"><component :is="link.icon" /></el-icon>
+        {{ link.label }}
+      </el-link>
+    </section>
   </div>
 </template>
 
 <script setup lang="ts">
-import { reactive } from 'vue'
+import { computed, reactive } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
+import { User, DataBoard, Tickets } from '@element-plus/icons-vue'
 import { changePassword } from '../api/auth'
 import { useAuthStore } from '../stores/auth'
 
 const router = useRouter()
 const auth = useAuthStore()
 const form = reactive({ oldPassword: '', newPassword: '', confirm: '' })
+
+interface QuickLink { label: string; path: string; icon: any }
+
+const quickLinks = computed<QuickLink[]>(() => {
+  const links: QuickLink[] = []
+  if (auth.canReviewAgent) links.push({ label: 'AI 审核', path: '/agent-candidates', icon: Tickets })
+  if (auth.isAdmin) links.push({ label: '用户管理', path: '/admin/users', icon: User })
+  links.push({ label: '审计', path: '/audit', icon: DataBoard })
+  return links
+})
 
 async function submit() {
   if (form.newPassword !== form.confirm) {
@@ -89,5 +108,31 @@ async function doLogout() {
 .form-actions {
   display: flex;
   gap: 12px;
+}
+
+.quick-links {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 16px;
+  margin-top: 20px;
+}
+
+.section-title {
+  color: var(--text-secondary, #6b7280);
+  font-size: 13px;
+  font-weight: 600;
+  letter-spacing: 0.5px;
+  margin: 0;
+  text-transform: uppercase;
+  width: 100%;
+}
+
+.quick-links .el-link {
+  align-items: center;
+  background: var(--bg-panel, #fff);
+  border: 1px solid var(--border-light, #e5e7eb);
+  border-radius: 8px;
+  display: flex;
+  padding: 10px 16px;
 }
 </style>

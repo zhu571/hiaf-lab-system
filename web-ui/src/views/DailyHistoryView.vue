@@ -13,7 +13,7 @@
       </div>
     </section>
     <section class="panel">
-      <el-table v-loading="loading" :data="reports">
+      <el-table v-loading="loading" :data="reports" class="clickable-table" @row-click="openDetail">
         <el-table-column prop="report_date" label="日期" width="120" />
         <el-table-column label="作者" width="140">
           <template #default="{ row }">{{ row.author_name || row.author_id }}</template>
@@ -34,10 +34,12 @@
 
 <script setup lang="ts">
 import { onMounted, ref } from 'vue'
+import { useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import StatusBadge from '../components/StatusBadge.vue'
 import { listReports, type DailyReport } from '../api/logs'
 
+const router = useRouter()
 const date = ref('')
 const status = ref('')
 const keyword = ref('')
@@ -51,6 +53,10 @@ const statuses = [
 ]
 
 onMounted(load)
+
+function openDetail(row: DailyReport) {
+  router.push(`/daily-reports/${row.id}`)
+}
 
 async function load() {
   loading.value = true
@@ -78,6 +84,10 @@ async function load() {
   display: flex;
   flex-wrap: wrap;
   gap: 10px;
+}
+
+.clickable-table :deep(.el-table__row) {
+  cursor: pointer;
 }
 
 .filters .el-input {

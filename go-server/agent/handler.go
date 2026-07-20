@@ -3,6 +3,7 @@ package agent
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"log/slog"
 	"net/http"
@@ -11,6 +12,7 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/zhu571/hiaf-lab-system/go-server/common"
 	"github.com/zhu571/hiaf-lab-system/go-server/middleware"
+	"github.com/zhu571/hiaf-lab-system/go-server/notify"
 )
 
 type Handler struct{ svc *Service }
@@ -47,6 +49,9 @@ func (h *Handler) Complete(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		h.writeError(w, r, err)
 		return
+	}
+	if len(req.Candidates) > 0 {
+		go notify.Send("lab-system", "Agent 待审核", fmt.Sprintf("%d 条候选需人工确认", len(req.Candidates)), notify.WebURL+"/agent-candidates", "default", nil)
 	}
 	common.WriteSuccess(w, r, task)
 }
