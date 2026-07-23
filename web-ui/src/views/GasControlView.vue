@@ -32,6 +32,50 @@
       </div>
     </section>
 
+    <section class="param-panel">
+      <div class="section-title">
+        <div><h2>PI 算法参数</h2><p>控制回路固参，修改需经审核确认</p></div>
+      </div>
+      <div class="pi-grid">
+        <div class="pi-item">
+          <span class="param-label">死区</span>
+          <span class="param-value">3 Pa</span>
+        </div>
+        <div class="pi-item">
+          <span class="param-label">TRIM_MAX</span>
+          <span class="param-value">30</span>
+        </div>
+        <div class="pi-item">
+          <span class="param-label">VALVE_RATE_MAX</span>
+          <span class="param-value">5</span>
+        </div>
+        <div class="pi-item">
+          <span class="param-label">压力速率上限</span>
+          <span class="param-value">10 Pa/s</span>
+        </div>
+        <div class="pi-item">
+          <span class="param-label">速率阻尼</span>
+          <span class="param-value">0.15</span>
+        </div>
+        <div class="pi-item">
+          <span class="param-label">D 低通 α</span>
+          <span class="param-value">0.1</span>
+        </div>
+        <div class="pi-item">
+          <span class="param-label">积分死区</span>
+          <span class="param-value">5 / 15 / 30 s（分级）</span>
+        </div>
+        <div class="pi-item">
+          <span class="param-label">抗积分饱和阀限</span>
+          <span class="param-value">+Trim 限</span>
+        </div>
+        <div class="pi-item">
+          <span class="param-label">前馈</span>
+          <span class="param-value">ff_valve(sp)</span>
+        </div>
+      </div>
+    </section>
+
     <section class="chart-card">
       <div class="section-title">
         <div>
@@ -311,6 +355,8 @@ async function clearA5() {
 .control-grid :deep(.el-input-number) { width: 100%; }
 .control-actions :deep(.el-form-item__content) { align-items: flex-end; }
 .button-row { align-items: center; border-top: 1px solid var(--border); display: flex; flex-wrap: wrap; gap: 10px; padding-top: 16px; }
+.pi-grid { display: grid; gap: 12px; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); margin-top: 14px; }
+.pi-item { align-items: center; background: var(--bg-subtle); border-radius: 10px; display: flex; flex-direction: column; gap: 4px; padding: 14px 12px; }
 @media (max-width: 700px) { .chart-card { height: 400px; padding: 14px; } .chart-card canvas { height: 325px !important; } }
 @media (max-width: 900px) { .control-grid { grid-template-columns: 1fr 1fr; } }
 </style>
