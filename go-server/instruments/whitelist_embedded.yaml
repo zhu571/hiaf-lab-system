@@ -1,0 +1,440 @@
+# 仪器控制白名单
+version: "2026-07-21-v3"
+policy:
+  module_boundary: "instrument service only accepts command names from this whitelist; raw SCPI is forbidden"
+  yellow_requires:
+    - object_level_permission
+    - active_lease
+    - audit_before_after
+    - mutex_lock
+    - timeout_ms
+
+# ====================
+# Keysight E5063A — 台式网络分析仪
+# ====================
+e5063a:
+  name: "Keysight E5063A"
+  type: "network_analyzer"
+  interface: "lan_scpi"
+  ip: "10.51.12.157"
+  port: 5025
+  terminator: "\n"
+
+  commands:
+    # --- 🟢 只读：直接放行 ---
+    - name: identify
+      description: "读取仪器标识"
+      risk: green
+      scpi: "*IDN?"
+
+    - name: read_frequencies
+      description: "读取频率轴数据"
+      risk: green
+      scpi: "SENS1:FREQ:DATA?"
+
+    - name: read_error
+      description: "读取错误寄存器"
+      risk: green
+      scpi: "SYST:ERR?"
+
+    - name: read_sweep_status
+      description: "查询扫频是否完成"
+      risk: green
+      scpi: "STAT:OPER:COND?"
+
+    - name: read_sweep_time
+      description: "读取扫频时间"
+      risk: green
+      scpi: "SENS1:SWE:TIME?"
+
+    - name: read_marker_value
+      description: "读取 Marker 值"
+      risk: green
+      scpi: "CALC1:MARK1:Y?"
+
+    # --- 🟡 安全写入：范围校验 ---
+    - name: set_sweep_range
+      description: "设置扫频范围"
+      risk: yellow
+      lock: "instrument:e5063a:write"
+      timeout_ms: 60000
+      build: |
+        SENS1:FREQ:STAR {start_freq};
+        SENS1:FREQ:STOP {stop_freq};
+        SENS1:SWE:POIN {points};
+        SENS1:BWID {if_bandwidth}
+      params:
+        start_freq:    { type: float, min: 100e3, max: 4.5e9, unit: Hz, default: 1e6 }
+        stop_freq:     { type: float, min: 100e3, max: 4.5e9, unit: Hz, default: 10e6 }
+        points:        { type: int,   min: 2,     max: 1601,              default: 401 }
+        if_bandwidth:  { type: float, min: 10,    max: 1e5,   unit: Hz,  default: 10000 }
+        object_type:   { enum: [rf_matching_network, passive_lc_component, gas_cell_electrode, unknown], default: unknown }
+      constraints:
+        - expression: "start_freq < stop_freq"
+          reject_reason: "扫频起点必须小于终点"
+        - expression: "(stop_freq - start_freq) <= 100e6"
+          reject_reason: "单次扫频跨度不得超过 100 MHz"
+        - expression: "estimated_sweep_time_ms(points, if_bandwidth) <= timeout_ms"
+          reject_reason: "预计扫频时间超过命令超时"
+      object_constraints:
+        rf_matching_network:
+          start_freq: { min: 1e6, max: 30e6 }
+          stop_freq:  { min: 1e6, max: 30e6 }
+          max_span_hz: 20e6
+        passive_lc_component:
+          start_freq: { min: 100e3, max: 100e6 }
+          stop_freq:  { min: 100e3, max: 100e6 }
+          max_span_hz: 50e6
+        gas_cell_electrode:
+          start_freq: { min: 100e3, max: 20e6 }
+          stop_freq:  { min: 100e3, max: 20e6 }
+          max_span_hz: 10e6
+        unknown:
+          start_freq: { min: 1e6, max: 10e6 }
+          stop_freq:  { min: 1e6, max: 10e6 }
+          max_span_hz: 5e6
+
+    - name: set_power
+      description: "设置源功率"
+      risk: yellow
+      lock: "instrument:e5063a:write"
+      timeout_ms: 5000
+      scpi: "SOUR1:POW {power_dbm}"
+      params:
+        power_dbm: { type: float, min: -45, max: 0, unit: dBm, default: -30 }
+        object_type: { enum: [rf_matching_network, passive_lc_component, gas_cell_electrode, unknown], default: unknown }
+      object_constraints:
+        rf_matching_network:  { power_dbm: { min: -35, max: 0, default: -20 } }
+        passive_lc_component: { power_dbm: { min: -45, max: -10, default: -30 } }
+        gas_cell_electrode:   { power_dbm: { min: -40, max: -20, default: -30 } }
+        unknown:              { power_dbm: { min: -45, max: -30, default: -40 } }
+
+    - name: set_format
+      description: "设置迹线显示格式"
+      risk: yellow
+      lock: "instrument:e5063a:write"
+      timeout_ms: 5000
+      scpi: "CALC1:FORM {format}"
+      params:
+        format: { enum: [MLOG, PHAS, SMITH, POL, SWR, REAL, IMAG], default: MLOG }
+
+    - name: set_marker_search
+      description: "Marker 搜索最大值或最小值"
+      risk: yellow
+      lock: "instrument:e5063a:write"
+      timeout_ms: 10000
+      build: |
+        CALC1:MARK1:STAT ON;
+        CALC1:MARK1:FUNC:TRAC {search_mode}
+      params:
+        search_mode: { enum: [MAX, MIN] }
+
+    - name: trigger_single
+      description: "触发单次扫频并读取数据"
+      risk: yellow
+      lock: "instrument:e5063a:write"
+      timeout_ms: 90000
+      state_snapshot:
+        before:
+          trigger_source: "TRIG1:SOUR?"
+          continuous: "INIT1:CONT?"
+          points: "SENS1:SWE:POIN?"
+          if_bandwidth: "SENS1:BWID?"
+          start_freq: "SENS1:FREQ:STAR?"
+          stop_freq: "SENS1:FREQ:STOP?"
+      build: |
+        TRIG1:SOUR BUS;
+        INIT1:CONT OFF;
+        INIT1:IMM;
+        CALC1:DATA:SDATA?;
+        SENS1:FREQ:DATA?
+      wait_for_complete: "STAT:OPER:COND?"
+      restore:
+        always: true
+        on_timeout: true
+        commands: |
+          TRIG1:SOUR {snapshot.trigger_source};
+          INIT1:CONT {snapshot.continuous}
+        verify:
+          trigger_source: "TRIG1:SOUR?"
+          continuous: "INIT1:CONT?"
+        failure_action: "mark_instrument_needs_check_and_alert"
+      returns: "complex_s11"
+
+    - name: take_screenshot
+      description: "保存仪器屏幕截图"
+      risk: yellow
+      lock: "instrument:e5063a:write"
+      timeout_ms: 15000
+      scpi: "MMEM:STOR:SCREEN \"D:/screenshots/{label}.png\""
+      params:
+        label:
+          type: string
+          max_len: 64
+          deny_patterns: ["..", "\\", "\u0000", "\r", "\n"]
+          regex: "^[A-Za-z0-9_-]+$"
+          default: "capture"
+
+    # --- 🔴 危险操作：拒绝 ---
+    - name: reset
+      description: "复位到出厂默认"
+      risk: red
+      scpi: "*RST"
+      reject_reason: "会清除所有校准数据和设置，需人工确认"
+
+    - name: preset
+      description: "Preset"
+      risk: red
+      scpi: "SYST:PRES"
+      reject_reason: "会重置迹线和格式，需人工确认"
+
+    - name: calibrate_any
+      description: "执行任何校准操作"
+      risk: red
+      pattern: "SENS1:CORR:COLL"
+      reject_reason: "校准需连接标准件人工操作，不能远程执行"
+
+# ====================
+# Hioki IM3536 — LCR 表
+# ====================
+hioki_im3536:
+  name: "Hioki IM3536"
+  type: "lcr_meter"
+  interface: "lan_scpi"
+  ip: "10.51.12.101"
+  port: 3500
+  terminator: "\r\n"
+
+  commands:
+    # --- 🟢 只读 ---
+    - name: identify
+      description: "读取仪器标识"
+      risk: green
+      scpi: "*IDN?"
+
+    - name: measure_single
+      description: "读取当前测量值 (Z, θ, 参数3, 参数4)"
+      risk: green
+      scpi: "MEASure?"
+      returns: [Z_ohm, theta_deg, param3, param4]
+
+    - name: self_test
+      description: "自检"
+      risk: green
+      scpi: "*TST?"
+
+    - name: read_frequency
+      description: "查询当前频率设置"
+      risk: green
+      scpi: "FREQuency?"
+
+    - name: read_level
+      description: "查询当前信号电平设置"
+      risk: green
+      scpi: "LEVel:VOLTage?"
+
+    - name: read_range
+      description: "查询当前量程"
+      risk: green
+      scpi: "RANGe?"
+
+    - name: read_speed
+      description: "查询测量速度"
+      risk: green
+      scpi: "SPEEd?"
+
+    - name: read_dcbias
+      description: "查询 DC 偏置"
+      risk: green
+      scpi: "DCBias:LEVel?"
+
+    # --- 🟡 安全写入：范围校验 ---
+    - name: set_frequency
+      description: "设置测量频率"
+      risk: yellow
+      lock: "instrument:hioki_im3536:write"
+      timeout_ms: 5000
+      scpi: "FREQuency {hz}"
+      params:
+        hz: { type: float, min: 4, max: 8_000_000, unit: Hz, default: 1000 }
+
+    - name: set_voltage_level
+      description: "设置开路电压"
+      risk: yellow
+      lock: "instrument:hioki_im3536:write"
+      timeout_ms: 5000
+      scpi: "LEVel:VOLTage {voltage}"
+      params:
+        voltage: { type: float, min: 0.01, max: 2.0, unit: V, default: 0.5 }
+
+    - name: set_auto_range
+      description: "自动量程开关"
+      risk: yellow
+      lock: "instrument:hioki_im3536:write"
+      timeout_ms: 5000
+      scpi: "RANGe:AUTO {on_off}"
+      params:
+        on_off: { enum: ["ON", "OFF"] }
+
+    - name: set_range
+      description: "设置固定量程"
+      risk: yellow
+      lock: "instrument:hioki_im3536:write"
+      timeout_ms: 5000
+      scpi: "RANGe {range_num}"
+      params:
+        range_num: { type: int, min: 1, max: 10 }
+
+    - name: set_speed
+      description: "设置测量速度"
+      risk: yellow
+      lock: "instrument:hioki_im3536:write"
+      timeout_ms: 5000
+      scpi: "SPEEd {speed}"
+      params:
+        speed: { enum: [FAST, MEDium, SLOW, SLOW2] }
+
+    - name: set_averaging
+      description: "设置平均次数"
+      risk: yellow
+      lock: "instrument:hioki_im3536:write"
+      timeout_ms: 5000
+      scpi: "AVERaging {n}"
+      params:
+        n: { type: int, min: 1, max: 256 }
+
+    - name: set_measure_item
+      description: "配置 MR0/MR1/MR2 测量参数"
+      risk: yellow
+      lock: "instrument:hioki_im3536:write"
+      timeout_ms: 5000
+      scpi: "MEASure:ITEM {mr0},{mr1},{mr2}"
+      params:
+        mr0: { type: int, min: 0, max: 12, description: "参数索引: 0=Z 7=Ls 9=Cs 10=Cp 11=D 12=Q …" }
+        mr1: { type: int, min: 0, max: 12 }
+        mr2: { type: int, min: 0, max: 12 }
+
+    - name: set_dc_bias
+      description: "设置 DC 偏置电压"
+      risk: yellow
+      lock: "instrument:hioki_im3536:write"
+      timeout_ms: 5000
+      build: |
+        DCBias ON;
+        DCBias:LEVel {voltage}
+      params:
+        voltage: { type: float, min: 0, max: 1.0, unit: V, default: 0 }
+        object_type: { enum: [rf_matching_network, passive_lc_component, gas_cell_electrode, unknown], default: unknown }
+      object_constraints:
+        rf_matching_network:
+          dc_bias: { enabled: false, reject_reason: "RF 匹配网络默认禁止 DC bias" }
+        passive_lc_component:
+          voltage: { min: 0, max: 0.5, default: 0 }
+        gas_cell_electrode:
+          voltage: { min: 0, max: 1.0, default: 0 }
+        unknown:
+          dc_bias: { enabled: false, reject_reason: "未声明被测对象类型时禁止 DC bias" }
+
+    - name: single_trigger
+      description: "手动触发一次测量"
+      risk: yellow
+      lock: "instrument:hioki_im3536:write"
+      timeout_ms: 10000
+      scpi: "*TRG"
+
+    # --- 🔴 危险操作：拒绝 ---
+    - name: reset
+      description: "复位到出厂设置"
+      risk: red
+      scpi: "*RST"
+      reject_reason: "会清除所有配置和补偿数据，需人工确认"
+
+    - name: calibrate_open
+      description: "开路补偿"
+      risk: red
+      scpi: "CORRection:OPEN ALL"
+      reject_reason: "需人工断开探头，不能远程执行"
+
+    - name: calibrate_short
+      description: "短路补偿"
+      risk: red
+      scpi: "CORRection:SHORt ALL"
+      reject_reason: "需人工短接探头，不能远程执行"
+
+    - name: calibrate_load
+      description: "负载补偿"
+      risk: red
+      scpi: "CORRection:LOAD"
+      reject_reason: "需人工连接标准负载，不能远程执行"
+
+# ====================
+# Keysight 33210A — 函数/任意波形发生器
+# 地址由 KEYSIGHT_33210A_ADDR 在部署环境显式启用；未配置时不会创建 worker。
+# ====================
+keysight_33210a:
+  name: "Keysight 33210A"
+  type: "function_generator"
+  interface: "lan_scpi"
+  optional: true
+  terminator: "\n"
+
+  commands:
+    - name: identify
+      description: "读取仪器标识"
+      risk: green
+      scpi: "*IDN?"
+
+    - name: read_frequency
+      description: "读取输出频率"
+      risk: green
+      scpi: "FREQuency?"
+
+    - name: read_output_voltage
+      description: "读取输出幅度"
+      risk: green
+      scpi: "VOLTage?"
+
+    - name: read_output_state
+      description: "读取输出开关状态"
+      risk: green
+      scpi: "OUTPut?"
+
+    - name: set_output_frequency
+      description: "设置输出频率"
+      risk: yellow
+      lock: "instrument:keysight_33210a:write"
+      timeout_ms: 5000
+      scpi: "FREQuency {frequency_hz}"
+      params:
+        frequency_hz: { type: float, min: 1, max: 10_000_000, unit: Hz, default: 1000 }
+
+    - name: set_output_voltage
+      description: "设置输出幅度（Vpp，保守上限 5 Vpp）"
+      risk: yellow
+      lock: "instrument:keysight_33210a:write"
+      timeout_ms: 5000
+      build: |
+        VOLTage:UNIT VPP;
+        VOLTage {voltage_vpp}
+      params:
+        voltage_vpp: { type: float, min: 0.01, max: 5.0, unit: Vpp, default: 0.1 }
+
+    - name: output_on
+      description: "开启信号输出"
+      risk: yellow
+      lock: "instrument:keysight_33210a:write"
+      timeout_ms: 5000
+      scpi: "OUTPut ON"
+
+    - name: output_off
+      description: "关闭信号输出"
+      risk: yellow
+      lock: "instrument:keysight_33210a:write"
+      timeout_ms: 5000
+      scpi: "OUTPut OFF"
+
+    - name: reset
+      description: "复位到出厂默认"
+      risk: red
+      scpi: "*RST"
+      reject_reason: "会改变波形、频率、幅度和输出状态，需人工现场操作"
