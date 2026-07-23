@@ -30,11 +30,12 @@ func (r *Repository) Create(authorID string, req CreateExperienceRequest) (*Expe
 
 	var out Experience
 	err = scanExperience(tx.QueryRow(
-		`INSERT INTO experiences (project_id, title, content, tags_json, author_id)
-		 VALUES ($1, $2, $3, $4::jsonb, $5)
+		`INSERT INTO experiences (project_id, title, content, tags_json, author_id, ai_generated, agent_task_id)
+		 VALUES ($1, $2, $3, $4::jsonb, $5, $6, $7)
 		 RETURNING id, project_id, title, content, tags_json, status, author_id, reviewer_id,
-		           published_at, created_at, updated_at`,
+		           ai_generated, agent_task_id, published_at, created_at, updated_at`,
 		nullableStringPtr(req.ProjectID), req.Title, req.Content, string(tagsJSON), authorID,
+		req.AiGenerated, nullableStringPtr(req.AgentTaskID),
 	), &out)
 	if err != nil {
 		return nil, fmt.Errorf("create experience: %w", err)
@@ -55,7 +56,7 @@ func (r *Repository) GetByID(id string) (*Experience, error) {
 	var out Experience
 	err := scanExperience(r.db.QueryRow(
 		`SELECT id, project_id, title, content, tags_json, status, author_id, reviewer_id,
-		        published_at, created_at, updated_at
+		        ai_generated, agent_task_id, published_at, created_at, updated_at
 		 FROM experiences
 		 WHERE id = $1`,
 		id,
@@ -92,7 +93,7 @@ func (r *Repository) List(params ExperienceListParams) ([]Experience, int, error
 	args = append(args, params.PerPage, (params.Page-1)*params.PerPage)
 	rows, err := r.db.Query(
 		`SELECT id, project_id, title, content, tags_json, status, author_id, reviewer_id,
-		        published_at, created_at, updated_at
+		        ai_generated, agent_task_id, published_at, created_at, updated_at
 		 FROM experiences `+where+fmt.Sprintf(
 			` ORDER BY CASE WHEN status = 'published' THEN published_at ELSE created_at END DESC
 			   LIMIT $%d OFFSET $%d`, len(args)-1, len(args)),
@@ -135,7 +136,7 @@ func (r *Repository) Update(id string, req UpdateExperienceRequest) (*Experience
 		     updated_at = now()
 		 WHERE id = $1 AND status = 'candidate'
 		 RETURNING id, project_id, title, content, tags_json, status, author_id, reviewer_id,
-		           published_at, created_at, updated_at`,
+		           ai_generated, agent_task_id, published_at, created_at, updated_at`,
 		id, stringPtrValue(req.Title), req.Content, tags,
 	), &out)
 	if err != nil {
@@ -172,7 +173,7 @@ func (r *Repository) Publish(id, reviewerID string) (*Experience, error) {
 		     updated_at = now()
 		 WHERE id = $1 AND status = 'candidate'
 		 RETURNING id, project_id, title, content, tags_json, status, author_id, reviewer_id,
-		           published_at, created_at, updated_at`,
+		           ai_generated, agent_task_id, published_at, created_at, updated_at`,
 		id, reviewerID,
 	), &out)
 	if err != nil {
@@ -197,7 +198,7 @@ func (r *Repository) Archive(id string) (*Experience, error) {
 		     updated_at = now()
 		 WHERE id = $1 AND status = 'published'
 		 RETURNING id, project_id, title, content, tags_json, status, author_id, reviewer_id,
-		           published_at, created_at, updated_at`,
+		           ai_generated, agent_task_id, published_at, created_at, updated_at`,
 		id,
 	), &out)
 	if err != nil {
@@ -306,12 +307,12 @@ type rowScanner interface {
 }
 
 func scanExperience(row rowScanner, item *Experience) error {
-	var projectID, reviewerID sql.NullString
+	var projectID, reviewerID, agentTaskID sql.NullString
 	var publishedAt sql.NullTime
 	var tagsJSON []byte
 	if err := row.Scan(
 		&item.ID, &projectID, &item.Title, &item.Content, &tagsJSON, &item.Status,
-		&item.AuthorID, &reviewerID, &publishedAt, &item.CreatedAt, &item.UpdatedAt,
+		&item.AuthorID, &reviewerID, &item.AiGenerated, &agentTaskID, &publishedAt, &item.CreatedAt, &item.UpdatedAt,
 	); err != nil {
 		return err
 	}
@@ -320,6 +321,9 @@ func scanExperience(row rowScanner, item *Experience) error {
 	}
 	if reviewerID.Valid {
 		item.ReviewerID = &reviewerID.String
+	}
+	if agentTaskID.Valid {
+		item.AgentTaskID = &agentTaskID.String
 	}
 	if publishedAt.Valid {
 		item.PublishedAt = &publishedAt.Time
