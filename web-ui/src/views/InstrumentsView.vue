@@ -120,6 +120,42 @@
       <el-empty v-if="!loading && !instruments.length && !error" description="暂无仪器" class="grid-empty" />
     </div>
 
+    <!-- AI 自然语言控制 -->
+    <section class="panel" v-if="!isMobile">
+      <div class="panel-head">
+        <h3 class="panel-title">AI 对话控制</h3>
+        <span class="muted hint">用自然语言控制仪器，例如"读取仪器标识"、"设置频率1M到8M"</span>
+      </div>
+      <div class="nl-chat">
+        <div class="nl-messages" ref="nlMessagesRef">
+          <div v-for="(msg, i) in nlHistory" :key="i" class="nl-msg" :class="msg.role">
+            <div class="nl-msg-content">
+              <p>{{ msg.content }}</p>
+              <div v-if="msg.command" class="nl-cmd-card">
+                <code>{{ msg.scpi }}</code>
+                <span class="muted">{{ msg.explanation }}</span>
+              </div>
+              <el-button v-if="msg.command && !msg.executed && !msg.executing" type="primary" size="small" @click="executeNLCommand(i)">执行</el-button>
+              <el-button v-if="msg.executing" type="primary" size="small" loading>执行中...</el-button>
+              <div v-if="msg.result" class="nl-result">
+                <pre v-if="msg.result.response" class="cmd-response">{{ msg.result.response }}</pre>
+                <p class="muted">耗时 {{ msg.result.duration_ms }} ms</p>
+                <div v-if="msg.result.parsed_points && msg.result.parsed_points.length > 0" class="nl-chart">
+                  <v-chart :option="buildChartOption(msg.result.parsed_points)" autoresize style="height: 300px" />
+                </div>
+              </div>
+              <p v-if="msg.error" class="stat-error">{{ msg.error }}</p>
+            </div>
+          </div>
+          <el-empty v-if="!nlHistory.length" description="输入自然语言指令，AI 帮你翻译为仪器命令" :image-size="60" />
+        </div>
+        <div class="nl-input-row">
+          <el-input v-model="nlInput" placeholder="如：帮我看一下S11数据" @keyup.enter="sendNL" :disabled="nlBusy" />
+          <el-button type="primary" :loading="nlBusy" @click="sendNL">发送</el-button>
+        </div>
+      </div>
+    </section>
+
     <!-- 命令白名单 -->
     <section class="panel">
       <div class="panel-head">
@@ -151,14 +187,21 @@
 </template>
 
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, reactive, ref } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { Refresh } from '@element-plus/icons-vue'
+import { use } from 'echarts/core'
+import { LineChart } from 'echarts/charts'
+import { GridComponent, TooltipComponent } from 'echarts/components'
+import { CanvasRenderer } from 'echarts/renderers'
+import VChart from 'vue-echarts'
 import {
   emergencyStop,
   executeCommand,
+  executeNL,
   getStatus,
   getWhitelist,
+  interpretNL,
   listInstruments,
   piezoSetpoint,
   piezoStart,
@@ -168,11 +211,15 @@ import {
   type CommandResult,
   type InstrumentStatus,
   type InstrumentSummary,
+  type NLExecuteResult,
   type PiezoStatus,
   type WhitelistCommand
 } from '../api/instruments'
 import { useAuthStore } from '../stores/auth'
+import { useMobile } from '../composables/useMobile'
 import { showApiError } from '../composables/useNotify'
+
+use([LineChart, GridComponent, TooltipComponent, CanvasRenderer])
 
 const auth = useAuthStore()
 // 与后端 RequireRole(maintainer, admin) 对应，前端隐藏只是 UX，后端仍强校验
@@ -198,6 +245,98 @@ const piezoError = ref('')
 const piezoBusy = ref(false)
 const setpoint = ref<number>()
 let piezoTimer: number | undefined
+
+interface NLMessage {
+  role: 'user' | 'assistant'
+  content: string
+  command?: string
+  scpi?: string
+  explanation?: string
+  executed?: boolean
+  executing?: boolean
+  result?: NLExecuteResult
+  error?: string
+}
+
+const nlInput = ref('')
+const nlBusy = ref(false)
+const nlHistory = ref<NLMessage[]>([])
+const nlMessagesRef = ref<HTMLElement>()
+const isMobile = useMobile()
+
+function scrollNLToBottom() {
+  nextTick(() => {
+    const el = nlMessagesRef.value
+    if (el) el.scrollTop = el.scrollHeight
+  })
+}
+
+async function sendNL() {
+  const input = nlInput.value.trim()
+  if (!input || nlBusy.value) return
+  nlInput.value = ''
+  nlHistory.value.push({ role: 'user', content: input })
+  nlBusy.value = true
+  scrollNLToBottom()
+
+  try {
+    const candidate = await interpretNL(expandedId.value, input, [])
+    const msg: NLMessage = { role: 'assistant', content: '' }
+
+    if (candidate.status === 'ok' && candidate.command) {
+      msg.content = `理解：${candidate.explanation || candidate.command}`
+      msg.command = candidate.command
+      msg.scpi = candidate.scpi_preview || ''
+      msg.explanation = candidate.explanation || ''
+    } else if (candidate.status === 'clarify') {
+      msg.content = candidate.explanation || candidate.question || '需要更多信息'
+    } else if (candidate.status === 'rejected') {
+      msg.content = candidate.reason || '无法执行该指令'
+    } else {
+      msg.content = 'AI 翻译失败'
+    }
+    nlHistory.value.push(msg)
+  } catch (err) {
+    nlHistory.value.push({ role: 'assistant', content: 'AI 翻译失败', error: err instanceof Error ? err.message : '未知错误' })
+  } finally {
+    nlBusy.value = false
+    scrollNLToBottom()
+  }
+}
+
+async function executeNLCommand(index: number) {
+  const msg = nlHistory.value[index]
+  if (!msg.command || msg.executing) return
+  msg.executing = true
+  try {
+    const result = await executeNL(expandedId.value, '', [])
+    msg.result = result
+    msg.executed = true
+    if (result.error) {
+      msg.error = result.error
+    }
+  } catch (err) {
+    msg.error = err instanceof Error ? err.message : '执行失败'
+  } finally {
+    msg.executing = false
+  }
+}
+
+function buildChartOption(points: Array<{ x: number, y: number }>) {
+  return {
+    grid: { top: 20, right: 20, bottom: 40, left: 50 },
+    tooltip: { trigger: 'axis' },
+    xAxis: { type: 'value', name: 'Frequency (Hz)' },
+    yAxis: { type: 'value', name: 'Value' },
+    series: [{
+      data: points.map(p => [p.x, p.y]),
+      type: 'line',
+      smooth: true,
+      symbol: 'none',
+      sampling: points.length > 2000 ? 'lttb' : undefined
+    }]
+  } as Record<string, unknown>
+}
 
 // red 命令后端拒绝（command_not_allowed），同名命令多台仪器复用，按名称去重
 const executableCommands = computed(() => {
@@ -630,5 +769,84 @@ function fmtValue(v: number) {
 .scpi-code {
   font-size: 12px;
   white-space: pre-wrap;
+}
+
+.nl-chat {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.nl-messages {
+  max-height: 420px;
+  overflow-y: auto;
+  padding-right: 4px;
+}
+
+.nl-msg {
+  margin-bottom: 12px;
+}
+
+.nl-msg.user .nl-msg-content {
+  background: var(--brand-light, #ecf5ff);
+}
+
+.nl-msg.assistant .nl-msg-content {
+  background: var(--surface-1);
+  border: 1px solid var(--border);
+}
+
+.nl-msg-content {
+  border-radius: var(--radius-sm);
+  font-size: 13px;
+  padding: 10px 12px;
+}
+
+.nl-msg-content p {
+  margin: 0 0 6px;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.nl-msg-content p:last-child {
+  margin-bottom: 0;
+}
+
+.nl-cmd-card {
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin: 8px 0;
+  padding: 8px 10px;
+}
+
+.nl-cmd-card code {
+  font-size: 12px;
+  white-space: pre-wrap;
+  word-break: break-all;
+}
+
+.nl-cmd-card .muted {
+  font-size: 11px;
+}
+
+.nl-result {
+  margin-top: 8px;
+}
+
+.nl-chart {
+  margin-top: 10px;
+}
+
+.nl-input-row {
+  display: flex;
+  gap: 10px;
+}
+
+.nl-input-row .el-input {
+  flex: 1;
 }
 </style>

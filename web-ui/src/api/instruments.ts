@@ -42,6 +42,29 @@ export type CommandResult = {
   duration: number // Go time.Duration，单位纳秒
 }
 
+export interface NLCommandCandidate {
+  status: string           // "ok" | "clarify" | "rejected"
+  command?: string
+  risk?: string
+  scpi_preview?: string
+  explanation?: string
+  question?: string
+  reason?: string
+}
+
+export interface NLExecuteResult {
+  status: string
+  command: string
+  scpi: string
+  explanation: string
+  response: string
+  parsed_value?: number
+  parsed_points?: Array<{ x: number, y: number }>
+  plot_type?: string
+  duration_ms: number
+  error: string
+}
+
 export type PiezoStatus = {
   a1: number
   valve_sp: number
@@ -83,4 +106,12 @@ export function piezoStop() {
 
 export function piezoSetpoint(value: number) {
   return request<{ setpoint: number }>({ url: '/instruments/piezo/setpoint', method: 'POST', data: { value } })
+}
+
+export function interpretNL(instrumentId: string, input: string, history: Array<{ role: string, content: string }>) {
+  return request<NLCommandCandidate>({ url: `/instruments/${instrumentId}/nl-commands`, method: 'POST', data: { input, history } })
+}
+
+export function executeNL(instrumentId: string, input: string, history: Array<{ role: string, content: string }>) {
+  return request<NLExecuteResult>({ url: `/instruments/${instrumentId}/nl-execute`, method: 'POST', data: { input, history } })
 }
