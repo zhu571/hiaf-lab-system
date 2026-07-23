@@ -6,7 +6,6 @@ import (
 	"time"
 
 	"github.com/zhu571/hiaf-lab-system/go-server/auth"
-	"github.com/zhu571/hiaf-lab-system/go-server/middleware"
 	"github.com/zhu571/hiaf-lab-system/go-server/projects"
 )
 
@@ -36,6 +35,15 @@ func TestCreateNormalizesTagsAndRequiresAdminForGlobal(t *testing.T) {
 	want := []string{"rf", "matching"}
 	if len(exp.Tags) != len(want) || exp.Tags[0] != want[0] || exp.Tags[1] != want[1] {
 		t.Fatalf("tags = %#v, want %#v", exp.Tags, want)
+	}
+}
+
+func TestCreateRejectsAiGeneratedFromNonAgent(t *testing.T) {
+	svc := NewService(newFakeExperienceRepo(), fakeProjectAccess{})
+
+	_, err := svc.Create("usr_1", auth.RoleMember, CreateExperienceRequest{AiGenerated: true})
+	if !errors.Is(err, ErrInvalidInput) {
+		t.Fatalf("Create error = %v, want %v", err, ErrInvalidInput)
 	}
 }
 
@@ -126,39 +134,36 @@ func (f fakeProjectAccess) ProjectExists(projectID string) (bool, error) {
 	return projectID == "prj_1" || projectID == "prj_2", nil
 }
 
-func (f fakeProjectAccess) HasProjectPermission(projectID, userID string, perm middleware.Permission) (bool, error) {
-	if userID == "usr_admin" {
+func (f fakeProjectAccess) CanAccessProject(projectID, userID, userRole, minRole string) (bool, error) {
+	if userRole == auth.RoleAdmin {
 		return true, nil
 	}
 	role, ok := f.roles[userID]
 	if !ok {
 		return false, nil
 	}
-	return fakeRoleHasPermission(role, perm), nil
+	return projectRoleRank(role) >= projectRoleRank(minRole), nil
 }
 
-func fakeRoleHasPermission(role string, perm middleware.Permission) bool {
+func (f fakeProjectAccess) ProjectRole(projectID, userID, userRole string) (string, error) {
+	if userRole == auth.RoleAdmin {
+		return projects.RoleOwner, nil
+	}
+	return f.roles[userID], nil
+}
+
+func projectRoleRank(role string) int {
 	switch role {
 	case projects.RoleOwner:
-		return true
+		return 40
 	case projects.RoleMaintainer:
-		return perm != middleware.PermManageMembers
+		return 30
 	case projects.RoleMember:
-		switch perm {
-		case middleware.PermRead,
-			middleware.PermCreateLog,
-			middleware.PermUpdateOwnLog,
-			middleware.PermCreateIssue,
-			middleware.PermUpdateIssue,
-			middleware.PermCreateExperience:
-			return true
-		default:
-			return false
-		}
+		return 20
 	case projects.RoleViewer:
-		return perm == middleware.PermRead
+		return 10
 	default:
-		return false
+		return 0
 	}
 }
 
@@ -173,15 +178,17 @@ func newFakeExperienceRepo() *fakeExperienceRepo {
 
 func (f *fakeExperienceRepo) Create(authorID string, req CreateExperienceRequest) (*Experience, error) {
 	exp := Experience{
-		ID:        "exp_new",
-		ProjectID: req.ProjectID,
-		Title:     req.Title,
-		Content:   req.Content,
-		Tags:      append([]string(nil), req.Tags...),
-		Status:    StatusCandidate,
-		AuthorID:  authorID,
-		CreatedAt: time.Now(),
-		UpdatedAt: time.Now(),
+		ID:          "exp_new",
+		ProjectID:   req.ProjectID,
+		Title:       req.Title,
+		Content:     req.Content,
+		Tags:        append([]string(nil), req.Tags...),
+		Status:      StatusCandidate,
+		AuthorID:    authorID,
+		AiGenerated: req.AiGenerated,
+		AgentTaskID: req.AgentTaskID,
+		CreatedAt:   time.Now(),
+		UpdatedAt:   time.Now(),
 	}
 	f.experiences[exp.ID] = cloneExperience(exp)
 	return cloneExperience(exp), nil
