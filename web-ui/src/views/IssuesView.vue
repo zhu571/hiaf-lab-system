@@ -53,7 +53,7 @@
 
 <script setup lang="ts">
 import { computed, onMounted, reactive, ref, watch } from 'vue'
-import { useRoute } from 'vue-router'
+import { useRoute, useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import StatusBadge from '../components/StatusBadge.vue'
 import CommentSection from '../components/CommentSection.vue'
@@ -61,6 +61,7 @@ import { addIssueComment, createIssue, getIssue, listIssues, transitionIssue, ty
 import { useProjectStore } from '../stores/project'
 
 const route = useRoute()
+const router = useRouter()
 const projects = useProjectStore()
 const issues = ref<Issue[]>([])
 const selected = ref<Issue | null>(null)
