@@ -67,7 +67,7 @@
 <script setup lang="ts">
 import { computed, onMounted, type Component } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { ArrowUp, Connection, DataBoard, Document, FolderOpened, MagicStick, Memo, Monitor, Paperclip, Setting, User } from '@element-plus/icons-vue'
+import { ArrowUp, Connection, DataBoard, Document, FolderOpened, MagicStick, Memo, Monitor, Odometer, Paperclip, Setting, User } from '@element-plus/icons-vue'
 import { useMobile } from '../composables/useMobile'
 import { useAuthStore } from '../stores/auth'
 import { useProjectStore } from '../stores/project'
@@ -97,7 +97,8 @@ const navItems = computed<NavItem[]>(() => {
 
 const systemItems = computed<NavItem[]>(() => {
   const items: NavItem[] = [
-    { label: '仪器', path: '/instruments', icon: Monitor },
+    { label: '气压控制', path: '/gas-control', icon: Monitor },
+    { label: '测量仪器', path: '/instrument-measure', icon: Odometer },
     { label: '传感器', path: '/sensors', icon: Connection }
   ]
   if (auth.isAdmin) items.push({ label: '用户管理', path: '/admin/users', icon: User })
