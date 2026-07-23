@@ -39,7 +39,7 @@ services:
     build:
       context: ../go-server/epics-gateway
     environment:
-      EPICS_CA_ADDR_LIST: ${EPICS_CA_ADDR_LIST:-10.144.144.12}
+      EPICS_CA_ADDR_LIST: ioc
       EPICS_CA_AUTO_ADDR_LIST: "NO"
     expose:
       - "5070"
