@@ -4,9 +4,7 @@
 
 ## 1. 仓库状态
 
-当前仓库仍处于“设计完成、Phase 1 待启动/过渡期”。`go-server/`、`web-ui/`、`py-agent/`、`migrations/`、`deploy/` 等目录可能只有 `.gitkeep` 占位文件。
-
-不要因为目标目录存在就假设模块已经实现；写代码前先确认实际文件状态。
+`go-server/`、`web-ui/`、`py-agent/`、`migrations/`、`deploy/` 已全部落地运行。系统采用 Docker Compose 单机全栈部署，包含 Go API 后端、Vue 3 前端、Python Agent、PostgreSQL、InfluxDB、Grafana、EPICS 网关、虚拟 IOC、ntfy 通知等模块。写代码前先确认实际文件状态。
 
 ## 2. Clone 后第一步
 
@@ -180,12 +178,32 @@ rg --files
 
 ```text
 hiaf-lab-system/
-├── go-server/          # Go 后端，各子目录对应模块
-├── py-agent/           # Python Agent，LightAgent 工具只调 Go REST API
+├── go-server/          # Go 后端
+│   ├── auth/           # 认证鉴权
+│   ├── logs/           # 日志管理
+│   ├── issues/         # 问题管理
+│   ├── experiences/    # 经验库
+│   ├── projects/       # 项目管理
+│   ├── instruments/    # 仪器控制 (含白名单校验)
+│   ├── sensors/        # 传感器数据
+│   ├── assembly/       # 装配/组装
+│   ├── runs/           # 实验运行
+│   ├── rfmatch/        # RF 匹配
+│   ├── agent/          # Agent 交互
+│   ├── audit/          # 审计日志
+│   ├── attachments/    # 附件管理
+│   ├── notify/         # 消息通知
+│   ├── epics-gateway/  # EPICS 通道访问网关
+│   ├── middleware/     # JWT、权限、审计中间件
+│   └── common/          # 共享工具
+├── py-agent/           # Python Agent
+│   ├── tools/          # LightAgent 工具函数 (调 Go REST API)
+│   ├── prompts/        # Prompt 模板
+│   └── ioc/            # EPICS 虚拟 IOC
 ├── web-ui/             # Vue 3 前端 PWA
 ├── migrations/         # PostgreSQL 迁移脚本
 ├── deploy/             # Docker Compose、frp、Nginx 配置
-├── images/             # 运行时图片附件目录，只提交 .gitkeep
+├── images/             # 运行时图片附件目录
 ├── docs/               # 设计和协作文档
 ├── AGENTS.md           # AI 编程助手入口
 ├── CONTRIBUTING.md     # 本文件
@@ -195,9 +213,9 @@ hiaf-lab-system/
 
 ## 8. PR 前检查
 
-根据本次改动范围运行对应检查。当前设计期没有落地的模块可以跳过，但不要伪造检查结果。
+根据本次改动范围运行对应检查。
 
-Go 后端已实现时：
+Go 后端：
 
 ```bash
 cd go-server
@@ -205,7 +223,7 @@ go test ./...
 go vet ./...
 ```
 
-前端已实现时：
+前端：
 
 ```bash
 cd web-ui
@@ -214,7 +232,7 @@ npm test --if-present
 npm run build --if-present
 ```
 
-Python Agent 已实现时：
+Python Agent：
 
 ```bash
 cd py-agent

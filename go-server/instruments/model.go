@@ -184,3 +184,26 @@ const (
 	WorkerStateNeedsReconnect WorkerState = "needs_reconnect"
 	WorkerStateError          WorkerState = "error"
 )
+
+// InstrumentResult records one instrument command execution result.
+type InstrumentResult struct {
+	ID           string    `json:"id"`
+	InstrumentID string    `json:"instrument_id"`
+	CommandName  string    `json:"command_name"`
+	SCPI         string    `json:"scpi"`
+	RawResponse  string    `json:"raw_response"`
+	ParsedValue  *float64  `json:"parsed_value,omitempty"`
+	ParsedPoints []Point   `json:"parsed_points,omitempty"`
+	PlotType     string    `json:"plot_type,omitempty"`
+	ErrorCode    string    `json:"error_code,omitempty"`
+	DurationMS   int       `json:"duration_ms"`
+	UserID       string    `json:"user_id"`
+	RequestID    string    `json:"request_id"`
+	CreatedAt    time.Time `json:"created_at"`
+}
+
+// Point is an (x, y) data point for scan plots.
+type Point struct {
+	X float64 `json:"x"`
+	Y float64 `json:"y"`
+}

@@ -7,7 +7,7 @@ import (
 )
 
 func TestGasCellSSEFrame(t *testing.T) {
-	h := NewHandler(NewServiceWithGateway("http://unused"))
+	h := NewHandler(NewServiceWithGateway("http://unused"), nil)
 	recorder := httptest.NewRecorder()
 	if !h.writeSSE(recorder, 1, "snapshot", map[string]PVPoint{"GasCell:Piezo:A1": {Value: 1.2, Quality: "good"}}) {
 		t.Fatal("writeSSE failed")
