@@ -102,7 +102,6 @@ async function load() {
     ElMessage.error(err instanceof Error ? err.message : '问题加载失败')
   }
 }
-}
 
 function switchProject(id: string) {
   if (!id || id === projectId.value) return
