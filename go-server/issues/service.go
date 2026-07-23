@@ -6,7 +6,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/zhu571/hiaf-lab-system/go-server/auth"
 	"github.com/zhu571/hiaf-lab-system/go-server/middleware"
 	"github.com/zhu571/hiaf-lab-system/go-server/projects"
 )
@@ -33,10 +32,6 @@ type ProjectAccessChecker interface {
 	HasProjectPermission(projectID, userID string, perm middleware.Permission) (bool, error)
 }
 
-type AgentTaskValidator interface {
-	ValidateAgentTask(taskID, actingUserID string) (bool, error)
-}
-
 type issueRepository interface {
 	Create(projectID, authorID string, req CreateIssueRequest, occurredAt time.Time, reportDate string) (*Issue, error)
 	GetByID(id string) (*Issue, error)
@@ -50,23 +45,15 @@ type issueRepository interface {
 }
 
 type Service struct {
-	repo      issueRepository
-	access    ProjectAccessChecker
-	validator AgentTaskValidator
+	repo   issueRepository
+	access ProjectAccessChecker
 }
 
-func NewService(repo issueRepository, access ProjectAccessChecker, validators ...AgentTaskValidator) *Service {
-	s := &Service{repo: repo, access: access}
-	if len(validators) > 0 {
-		s.validator = validators[0]
-	}
-	return s
+func NewService(repo issueRepository, access ProjectAccessChecker) *Service {
+	return &Service{repo: repo, access: access}
 }
 
 func (s *Service) Create(projectID, userID, userRole string, req CreateIssueRequest) (*Issue, error) {
-	if err := s.validateAgentFields(userID, userRole, req.AiGenerated, req.AgentTaskID); err != nil {
-		return nil, ErrInvalidInput
-	}
 	req.Title = strings.TrimSpace(req.Title)
 	req.Severity = defaultSeverity(req.Severity)
 	if req.Title == "" || len(req.Title) > 256 || !validSeverity(req.Severity) {
@@ -133,26 +120,6 @@ func (s *Service) Create(projectID, userID, userRole string, req CreateIssueRequ
 		}
 	}
 	return s.repo.Create(projectID, userID, req, occurredAt, reportDate)
-}
-
-func (s *Service) validateAgentFields(userID, userRole string, aiGenerated bool, taskID *string) error {
-	if userRole != auth.RoleAgent {
-		if aiGenerated || taskID != nil {
-			return ErrInvalidInput
-		}
-		return nil
-	}
-	if !aiGenerated || taskID == nil || strings.TrimSpace(*taskID) == "" || s.validator == nil {
-		return ErrInvalidInput
-	}
-	valid, err := s.validator.ValidateAgentTask(strings.TrimSpace(*taskID), userID)
-	if err != nil {
-		return err
-	}
-	if !valid {
-		return ErrInvalidInput
-	}
-	return nil
 }
 
 func (s *Service) List(projectID, userID, userRole string, params IssueListParams) (*IssueListResult, error) {

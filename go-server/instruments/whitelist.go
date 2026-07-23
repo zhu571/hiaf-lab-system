@@ -20,6 +20,7 @@ type instrumentDef struct {
 	Name       string       `yaml:"name"`
 	Type       string       `yaml:"type"`
 	Interface  string       `yaml:"interface"`
+	Optional   bool         `yaml:"optional"`
 	IP         string       `yaml:"ip"`
 	Port       int          `yaml:"port"`
 	Terminator string       `yaml:"terminator"`
@@ -27,6 +28,7 @@ type instrumentDef struct {
 }
 
 var whitelist = loadWhitelist()
+var whitelistVersion string
 
 func loadWhitelist() map[string]instrumentDef {
 	var file whitelistFile
@@ -36,8 +38,9 @@ func loadWhitelist() map[string]instrumentDef {
 	if file.Version == "" || len(file.Policy) == 0 || len(file.Instruments) == 0 {
 		panic("instrument whitelist requires version, policy, and instruments")
 	}
+	whitelistVersion = file.Version
 	for id, instrument := range file.Instruments {
-		if id == "" || instrument.Name == "" || instrument.Type == "" || instrument.Interface == "" || instrument.IP == "" || instrument.Port <= 0 || instrument.Terminator == "" || len(instrument.Commands) == 0 {
+		if id == "" || instrument.Name == "" || instrument.Type == "" || instrument.Interface == "" || (!instrument.Optional && (instrument.IP == "" || instrument.Port <= 0)) || instrument.Terminator == "" || len(instrument.Commands) == 0 {
 			panic(fmt.Sprintf("instrument whitelist entry %q has incomplete fields", id))
 		}
 		seen := make(map[string]bool, len(instrument.Commands))
@@ -53,6 +56,8 @@ func loadWhitelist() map[string]instrumentDef {
 	}
 	return file.Instruments
 }
+
+func InstrumentName(id string) string { return whitelist[id].Name }
 
 // GetCommand returns a copy of a named command definition.
 func GetCommand(instrumentID, commandName string) (*CommandDef, error) {

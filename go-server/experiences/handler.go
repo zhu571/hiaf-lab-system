@@ -1,7 +1,6 @@
 package experiences
 
 import (
-	"bytes"
 	"encoding/json"
 	"errors"
 	"log/slog"
@@ -36,7 +35,7 @@ func (h *Handler) Create(w http.ResponseWriter, r *http.Request) {
 		common.WriteError(w, r, http.StatusBadRequest, "bad_request", "请求体解析失败", nil)
 		return
 	}
-	exp, err := h.svc.Create(middleware.EffectiveUserID(r.Context()), claims.Role, req)
+	exp, err := h.svc.Create(claims.UserID, claims.Role, req)
 	if err != nil {
 		h.writeError(w, r, err, nil)
 		return
@@ -58,7 +57,7 @@ func (h *Handler) List(w http.ResponseWriter, r *http.Request) {
 		Page:      queryInt(r, "page", 1),
 		PerPage:   queryInt(r, "per_page", 20),
 	}
-	result, err := h.svc.List(middleware.EffectiveUserID(r.Context()), claims.Role, params)
+	result, err := h.svc.List(claims.UserID, claims.Role, params)
 	if err != nil {
 		h.writeError(w, r, err, nil)
 		return
@@ -72,7 +71,7 @@ func (h *Handler) GetByID(w http.ResponseWriter, r *http.Request) {
 		common.WriteError(w, r, http.StatusUnauthorized, "unauthorized", "未登录", nil)
 		return
 	}
-	exp, err := h.svc.GetByID(chi.URLParam(r, "id"), middleware.EffectiveUserID(r.Context()), claims.Role)
+	exp, err := h.svc.GetByID(chi.URLParam(r, "id"), claims.UserID, claims.Role)
 	if err != nil {
 		h.writeError(w, r, err, nil)
 		return
@@ -89,37 +88,17 @@ func (h *Handler) Update(w http.ResponseWriter, r *http.Request) {
 		common.WriteError(w, r, http.StatusUnauthorized, "unauthorized", "未登录", nil)
 		return
 	}
-	req, err := decodeUpdateRequest(r)
-	if err != nil {
+	var req UpdateExperienceRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		common.WriteError(w, r, http.StatusBadRequest, "bad_request", "请求体解析失败", nil)
 		return
 	}
-	exp, err := h.svc.Update(chi.URLParam(r, "id"), middleware.EffectiveUserID(r.Context()), claims.Role, req)
+	exp, err := h.svc.Update(chi.URLParam(r, "id"), claims.UserID, claims.Role, req)
 	if err != nil {
 		h.writeError(w, r, err, nil)
 		return
 	}
 	common.WriteSuccess(w, r, exp)
-}
-
-func decodeUpdateRequest(r *http.Request) (UpdateExperienceRequest, error) {
-	var raw map[string]json.RawMessage
-	if err := json.NewDecoder(r.Body).Decode(&raw); err != nil {
-		return UpdateExperienceRequest{}, err
-	}
-	if _, ok := raw["ai_generated"]; ok {
-		return UpdateExperienceRequest{}, errors.New("ai_generated is immutable")
-	}
-	if _, ok := raw["agent_task_id"]; ok {
-		return UpdateExperienceRequest{}, errors.New("agent_task_id is immutable")
-	}
-	body, err := json.Marshal(raw)
-	if err != nil {
-		return UpdateExperienceRequest{}, err
-	}
-	var req UpdateExperienceRequest
-	err = json.NewDecoder(bytes.NewReader(body)).Decode(&req)
-	return req, err
 }
 
 func (h *Handler) Publish(w http.ResponseWriter, r *http.Request) {
@@ -131,7 +110,7 @@ func (h *Handler) Publish(w http.ResponseWriter, r *http.Request) {
 		common.WriteError(w, r, http.StatusUnauthorized, "unauthorized", "未登录", nil)
 		return
 	}
-	exp, err := h.svc.Publish(chi.URLParam(r, "id"), middleware.EffectiveUserID(r.Context()), claims.Role)
+	exp, err := h.svc.Publish(chi.URLParam(r, "id"), claims.UserID, claims.Role)
 	if err != nil {
 		h.writeError(w, r, err, nil)
 		return
@@ -148,7 +127,7 @@ func (h *Handler) Archive(w http.ResponseWriter, r *http.Request) {
 		common.WriteError(w, r, http.StatusUnauthorized, "unauthorized", "未登录", nil)
 		return
 	}
-	exp, err := h.svc.Archive(chi.URLParam(r, "id"), middleware.EffectiveUserID(r.Context()), claims.Role)
+	exp, err := h.svc.Archive(chi.URLParam(r, "id"), claims.UserID, claims.Role)
 	if err != nil {
 		h.writeError(w, r, err, nil)
 		return

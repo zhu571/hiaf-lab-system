@@ -2,6 +2,9 @@
   <div class="page">
     <div class="toolbar">
       <h2>问题看板</h2>
+      <el-select v-model="selectedProjectId" class="project-select" placeholder="选择项目">
+        <el-option v-for="p in projects.projects" :key="p.id" :label="p.short_name || p.name" :value="p.id" />
+      </el-select>
       <el-button v-if="canCreate" type="primary" @click="createDialog = true">新建问题</el-button>
     </div>
     <div class="board">
@@ -53,15 +56,18 @@
 
 <script setup lang="ts">
 import { computed, onMounted, reactive, ref, watch } from 'vue'
-import { useRoute } from 'vue-router'
+import { useRoute, useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import StatusBadge from '../components/StatusBadge.vue'
 import CommentSection from '../components/CommentSection.vue'
 import { addIssueComment, createIssue, getIssue, listIssues, transitionIssue, type Issue } from '../api/issues'
 import { useAuthStore } from '../stores/auth'
+import { useProjectStore } from '../stores/projects'
 
 const route = useRoute()
 const auth = useAuthStore()
+const router = useRouter()
+const projects = useProjectStore()
 const canCreate = computed(() => auth.user?.role !== 'viewer')
 const issues = ref<Issue[]>([])
 const selected = ref<Issue | null>(null)
@@ -74,7 +80,11 @@ const severities = ['low', 'medium', 'high', 'critical']
 const draft = reactive({ title: '', severity: 'medium', description: '' })
 
 // projectId 的唯一事实来源是路由参数（由 ProjectLayout 保证存在）
-const projectId = computed(() => String(route.params.id || ''))
+const projectId = computed(() => String(route.params.id || projects.current?.id || ''))
+const selectedProjectId = computed({
+  get: () => projectId.value,
+  set: (id: string) => switchProject(id)
+})
 const grouped = computed(() => Object.fromEntries(statuses.map((s) => [s, issues.value.filter((item) => item.status === s)])) as Record<string, Issue[]>)
 
 onMounted(load)
@@ -82,6 +92,7 @@ watch(projectId, load)
 
 async function load() {
   if (!projectId.value) return
+  if (projectId.value !== projects.currentId) projects.select(projectId.value)
   try {
     const data = await listIssues(projectId.value, { per_page: 100 })
     // 空列表时后端返回 items: null，直接赋值会让 grouped 计算属性 filter 崩溃
@@ -90,6 +101,13 @@ async function load() {
     issues.value = []
     ElMessage.error(err instanceof Error ? err.message : '问题加载失败')
   }
+}
+}
+
+function switchProject(id: string) {
+  if (!id || id === projectId.value) return
+  projects.select(id)
+  router.replace({ path: `/projects/${id}/issues` })
 }
 
 async function open(id: string) {
@@ -126,6 +144,10 @@ async function create() {
 </script>
 
 <style scoped>
+.project-select {
+  max-width: 240px;
+}
+
 .board {
   display: grid;
   gap: 16px;
