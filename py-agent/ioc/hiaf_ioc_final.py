@@ -200,11 +200,6 @@ class HiafGasCellIOC(PVGroup):
         name="Piezo:Cycle", value=0, dtype=int, read_only=True,
         doc="控制周期计数",
     )
-    Piezo_Mode = pvproperty(
-        name="Piezo:Mode", value=0, dtype=int, read_only=True,
-        doc="控制模式: 0=HYST, 1=PI",
-    )
-
     # ═══════════════════════════════════════════════
     # Group 5: Safety — A5 overpressure protection
     # ═══════════════════════════════════════════════
@@ -261,11 +256,6 @@ class HiafGasCellIOC(PVGroup):
         self._cycle = 0
         self._running = False
         self._valve_rate_max = hiaf_config.VALVE_RATE_MAX  # adjustable per-instance
-
-        # HYST/PI state machine
-        self._ctrl_mode = 'HYST'          # 'HYST' or 'PI'
-        self._hyst_timer = 0.0            # seconds of continuous in-band
-        self._last_hyst_step = 0.0        # monotonic time of last step
 
         # PI parameter cache (updated by putters)
         self._sp_val = hiaf_config.DEFAULT_SETPOINT
@@ -471,9 +461,9 @@ class HiafGasCellIOC(PVGroup):
             if remaining > 0:
                 await asyncio.sleep(remaining)
 
-    # ── Background task 2: HYST+PI control loop ~10Hz ──
+    # ── Background task 2: PI control loop ~10Hz ──
     async def _pi_control_loop(self, sleep) -> None:
-        """HYST拉入 + PI精细维持，only active when Running=1."""
+        """PI精细维持，only active when Running=1."""
         while True:
             loop_start = time.monotonic()
 
@@ -503,31 +493,7 @@ class HiafGasCellIOC(PVGroup):
 
                 sp_val = self._sp_val
                 error = sp_val - a1
-
-                # 计时：连续在区间内的秒数
-                if abs(error) < hiaf_config.HYST_TARGET_BAND:
-                    self._hyst_timer += hiaf_config.PI_POLL_SEC
-                else:
-                    self._hyst_timer = 0.0
-
-                # ── 状态机 ──
-                if self._ctrl_mode == 'HYST':
-                    await self._hyst_cycle(error)
-                    if self._hyst_timer >= hiaf_config.HYST_SWITCH_TIME:
-                        self._ctrl_mode = 'PI'
-                        self._last_error = 0.0
-                        self._last_error_sign = 0
-                        self._last_sign_change = 0.0
-                        LOGGER.info('HYST → PI (stable %gs)', self._hyst_timer)
-                else:  # PI
-                    if abs(error) > hiaf_config.HYST_OUT_BAND:
-                        self._ctrl_mode = 'HYST'
-                        self._hyst_timer = 0.0
-                        LOGGER.info('PI → HYST (|error|=%.1f > %.0f)', abs(error), hiaf_config.HYST_OUT_BAND)
-                    else:
-                        await self._pi_cycle(sp_val, a1, error)
-
-                await self.Piezo_Mode.write(0 if self._ctrl_mode == 'HYST' else 1)
+                await self._pi_cycle(sp_val, a1, error)
 
             except Exception as e:
                 self._fail_count += 1
@@ -546,36 +512,6 @@ class HiafGasCellIOC(PVGroup):
             remaining = hiaf_config.PI_POLL_SEC - elapsed
             if remaining > 0:
                 await sleep(remaining)
-
-    # ── HYST cycle: fixed-step control ──
-    async def _hyst_cycle(self, error: float) -> None:
-        """固定步进：仅当|error|>HYST_OUT_BAND时动作，1s一次."""
-        now = time.monotonic()
-        if now - self._last_hyst_step < 1.0:
-            return  # throttle to ~1Hz
-
-        ae = abs(error)
-        if ae <= hiaf_config.HYST_OUT_BAND:
-            self._last_error = error
-            await self.Piezo_Error.write(error)
-            await self.Piezo_Delta.write(0.0)
-            return
-
-        try:
-            current_v = float(await self._valve_node.read_value())
-        except Exception:
-            current_v = float(self.Piezo_ValveSP.value)
-
-        direction = 1 if error > 0 else -1       # +:开阀抽气, -:关阀
-        step = hiaf_config.HYST_STEP_BIG if ae > 50 else hiaf_config.HYST_STEP_SMALL
-        new_valve = current_v + direction * step
-        new_valve = max(hiaf_config.VALVE_MIN, min(hiaf_config.VALVE_MAX, new_valve))
-
-        await self.Piezo_ValveSP.write(new_valve)
-        self._last_error = error
-        self._last_hyst_step = now
-        await self.Piezo_Error.write(error)
-        await self.Piezo_Delta.write(direction * step)
 
     # ── PI cycle: existing velocity-form PI ──
     async def _pi_cycle(self, sp_val, a1, error) -> None:
@@ -703,12 +639,8 @@ class HiafGasCellIOC(PVGroup):
             self._last_error = 0.0
             self._last_error_sign = 0
             self._last_sign_change = 0.0
-            self._ctrl_mode = 'HYST'
-            self._hyst_timer = 0.0
-            self._last_hyst_step = 0.0
             self._cycle = 0
             await self.Piezo_Cycle.write(0)
-            await self.Piezo_Mode.write(0)
             ff_valve = hiaf_config.feedforward_valve(self._sp_val)
             await self.Piezo_ValveSP.write(ff_valve)
             LOGGER.info("PI control STARTED (target=%dPa ff_valve=%.1f)", self._sp_val, ff_valve)
