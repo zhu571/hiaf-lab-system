@@ -2,7 +2,7 @@
 
 本文面向有 Vue 3 基础、但第一次接触本项目的开发者。当前前端使用 Vue 3（Composition API + `<script setup>`）、TypeScript、Element Plus、Pinia、Vue Router 和 Vite（单文件构建，JS/CSS 全部内联进 index.html）。建议按“入口 → 路由 → 布局 → store → API → 页面”的顺序阅读。
 
-> 本文以当前 Phase 2.6 代码为准。项目权限由路由守卫和后端共同校验；不要使用已经废弃的 `RequireProjectAccess` 写法。
+> 本文以当前落地代码为准。项目权限由路由守卫和后端共同校验；不要使用已经废弃的 `RequireProjectAccess` 写法。
 
 ## 1. 项目结构概览
 
@@ -440,6 +440,24 @@ async function submit() {
 
 其他页面沿用同一分工：模板负责展示，script 组合 API/store/router，局部 CSS 负责页面特有布局。列表页应明确处理加载中、空和错误状态；当前早期页面并非都已完整覆盖，新增页面不要继续省略。
 
+### 对应后端模块
+
+前端 9 个页面对应 Go 后端的核心业务模块：
+
+| 页面 | 后端模块 | 说明 |
+|------|----------|------|
+| LoginView | `go-server/auth/` | 登录、Cookie 认证、刷新 |
+| ProjectsView | `go-server/projects/` | 项目 CRUD、仪表盘、项目成员 |
+| DailyReportView | `go-server/logs/` | 日报创建、保存、提交 |
+| DailyHistoryView | `go-server/logs/` | 日报历史查询 |
+| IssuesView | `go-server/issues/` | Issue 看板、评论、状态流转 |
+| ExperiencesView | `go-server/experiences/` | 经验检索、发布、归档 |
+| AuditView | `go-server/audit/` | 审计日志查询 |
+| SettingsView | `go-server/auth/` | 改密、登出 |
+| AdminUsersView | `go-server/auth/` | 用户管理、角色分配 |
+
+其他后端模块（`instruments/` `sensors/` `assembly/` `runs/` `rfmatch/` `attachments/` `notify/`）通过 API 为前端和 Agent 提供服务，暂无独立前端页面。
+
 ## 7. 如何新增一个页面
 
 以下以新增“设备”页 `/instruments` 为例。只创建实际需要的文件，不新增一层 service、hook 或包装器。
@@ -616,7 +634,7 @@ export function useMobile() {
 在 `web-ui/` 目录执行：
 
 ```bash
-cd /home/zhuhaofan/hiaf-lab-system/web-ui
+cd web-ui
 
 # 按 package-lock.json 全新安装依赖，CI 和首次拉取代码时使用
 npm ci
