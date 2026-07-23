@@ -50,17 +50,18 @@ class Worker:
             except Exception:
                 LOG.exception("could not mark task failed", extra={"task_id": task_id})
                 try:
-                    import urllib.request, urllib.parse
-                    title = urllib.parse.quote("Agent 死信告警", safe="")
+                    from urllib.parse import quote
+                    from urllib.request import Request, urlopen
+                    title = quote("Agent 死信告警", safe="")
                     body = f"任务 {task_id}: {detail}".encode("utf-8")
-                    req = urllib.request.Request(f"http://ntfy:80/lab-alerts", data=body, method="POST")
+                    req = Request("http://ntfy:80/lab-alerts", data=body, method="POST")
                     req.add_header("Title", title)
                     req.add_header("Priority", "high")
                     req.add_header("Tags", "robot_face,warning")
                     req.add_header("Click", "http://10.144.144.12:8000/agent-candidates")
-                    urllib.request.urlopen(req, timeout=5)
+                    urlopen(req, timeout=5)
                 except Exception:
-                    pass
+                    LOG.exception("dead letter ntfy alert failed")
         return True
 
     def run_forever(self):

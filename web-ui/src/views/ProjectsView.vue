@@ -25,6 +25,7 @@
 <script setup lang="ts">
 import { computed, onMounted, reactive, ref } from 'vue'
 import { ElMessage } from 'element-plus'
+import { showApiError } from '../composables/useNotify'
 import ProjectSidebar from '../components/ProjectSidebar.vue'
 import { useProjectStore } from '../stores/project'
 import { useAuthStore } from '../stores/auth'
@@ -45,7 +46,7 @@ async function create() {
     dialog.value = false
     ElMessage.success('项目已创建')
   } catch (err) {
-    ElMessage.error(err instanceof Error ? err.message : '项目创建失败')
+    showApiError(err, '项目创建失败')
   }
 }
 </script>

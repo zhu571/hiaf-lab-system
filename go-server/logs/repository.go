@@ -345,6 +345,18 @@ func (r *Repository) GetReportsByLog(logID string) ([]DailyReport, error) {
 	return scanDailyReports(rows)
 }
 
+func (r *Repository) CountByProject(projectID string) (int, error) {
+	var count int
+	err := r.db.QueryRow(
+		`SELECT COUNT(*) FROM logs WHERE project_id = $1`,
+		projectID,
+	).Scan(&count)
+	if err != nil {
+		return 0, fmt.Errorf("count logs by project: %w", err)
+	}
+	return count, nil
+}
+
 func (r *Repository) CountLogsByReport(reportID string) (int, error) {
 	var count int
 	if err := r.db.QueryRow(`SELECT COUNT(*) FROM daily_report_log_links WHERE daily_report_id = $1`, reportID).Scan(&count); err != nil {

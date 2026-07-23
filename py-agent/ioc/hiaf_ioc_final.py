@@ -320,8 +320,7 @@ class HiafGasCellIOC(PVGroup):
                 try:
                     await self._opc.disconnect()
                 except Exception:
-                    pass
-                self._opc = None
+                    LOGGER.debug("disconnect ignored during reconnect")
                 self._valve_node = None
                 self._sensor_nodes.clear()
 
@@ -364,7 +363,10 @@ class HiafGasCellIOC(PVGroup):
     async def _read_pump_tags(self) -> None:
         if not self._pump_nodes:
             return
-        active_keys = [k for k in self._pump_nodes if any(s in k for s in ['DP3','DP4','循环泵','压缩机','低温循环泵'])]
+        active_keys = [
+            k for k in self._pump_nodes
+            if any(s in k for s in ['DP3', 'DP4', '循环泵', '压缩机', '低温循环泵'])
+        ]
         if not active_keys:
             return
         try:
@@ -374,7 +376,7 @@ class HiafGasCellIOC(PVGroup):
                 if not isinstance(v, Exception) and v is not None:
                     self._pump_values[k] = float(v)
         except Exception:
-            pass
+            LOGGER.debug("pump read failed")
 
     # ── Background task 1: Sensor poll loop ~1Hz ──
     async def _sensor_poll_loop(self) -> None:
@@ -404,7 +406,7 @@ class HiafGasCellIOC(PVGroup):
                         try:
                             await pv.write(float(val_or_err))
                         except Exception:
-                            pass
+                            LOGGER.debug("sensor PV write failed for tag %s", tag)
 
                 # Also update Piezo:A1 with the Vac:A1 reading
                 a1_val = self._sensor_values.get("直采数据_A1", 0.0)
@@ -412,7 +414,7 @@ class HiafGasCellIOC(PVGroup):
                 try:
                     await self.Vac_A1.write(a1_val)
                 except Exception:
-                    pass
+                    LOGGER.debug("Vac_A1 write failed")
 
                 await self._set_connected(True)
 
@@ -456,7 +458,7 @@ class HiafGasCellIOC(PVGroup):
                                 timeout=5,
                             )
                         except Exception:
-                            pass
+                            LOGGER.debug("A5 notification failed")
 
             except Exception as e:
                 LOGGER.warning("Sensor poll cycle error: %s", e)
@@ -477,7 +479,7 @@ class HiafGasCellIOC(PVGroup):
                 try:
                     await self.Piezo_A1.write(self._a1_from_opc)
                 except Exception:
-                    pass
+                    LOGGER.debug("Piezo_A1 write failed during idle")
                 await self._set_connected(self._opc is not None)
                 await sleep(hiaf_config.PI_POLL_SEC)
                 continue
@@ -527,8 +529,11 @@ class HiafGasCellIOC(PVGroup):
 
             except Exception as e:
                 self._fail_count += 1
-                LOGGER.warning("PI cycle %d failed (%d/%d): %s",
-                    self._cycle, self._fail_count, hiaf_config.MAX_CONSECUTIVE_FAILURES, e)
+                LOGGER.warning(
+                    "PI cycle %d failed (%d/%d): %s",
+                    self._cycle, self._fail_count,
+                    hiaf_config.MAX_CONSECUTIVE_FAILURES, e,
+                )
                 if self._fail_count >= hiaf_config.MAX_CONSECUTIVE_FAILURES:
                     LOGGER.error("Max consecutive failures — auto-stop")
                     self._running = False
@@ -587,8 +592,7 @@ class HiafGasCellIOC(PVGroup):
         now = time.monotonic()
 
         error_sign = 1 if error > 0 else -1 if error < 0 else 0
-        if (error_sign != 0 and self._last_error_sign != 0
-                and error_sign != self._last_error_sign):
+        if error_sign != 0 and self._last_error_sign != 0 and error_sign != self._last_error_sign:
             self._last_sign_change = now
         if error_sign != 0:
             self._last_error_sign = error_sign
@@ -615,9 +619,12 @@ class HiafGasCellIOC(PVGroup):
 
         # 分级积分死区（反向：误差越大死区越短）
         ae = abs(error)
-        if ae > 30: dz = 5.0
-        elif ae > 10: dz = 15.0
-        else: dz = 30.0
+        if ae > 30:
+            dz = 5.0
+        elif ae > 10:
+            dz = 15.0
+        else:
+            dz = 30.0
         if now - self._last_sign_change < dz:
             i_term = 0.0
 
@@ -632,8 +639,8 @@ class HiafGasCellIOC(PVGroup):
         delta = p_term + i_term + d_term
         if self._last_a1 is not None:
             a1_rate = (a1 - self._last_a1) / hiaf_config.PI_POLL_SEC
-            if ((a1_rate > hiaf_config.PRESSURE_RATE_MAX and delta > 0)
-                    or (a1_rate < -hiaf_config.PRESSURE_RATE_MAX and delta < 0)):
+            if (a1_rate > hiaf_config.PRESSURE_RATE_MAX and delta > 0) or \
+               (a1_rate < -hiaf_config.PRESSURE_RATE_MAX and delta < 0):
                 delta *= hiaf_config.PRESSURE_RATE_DAMP
         self._last_a1 = a1
         delta = max(-hiaf_config.VALVE_RATE_MAX, min(hiaf_config.VALVE_RATE_MAX, delta))
@@ -772,7 +779,7 @@ class HiafGasCellIOC(PVGroup):
                 await self._opc.disconnect()
                 LOGGER.info("OPC UA disconnected")
             except Exception:
-                pass
+                LOGGER.debug("OPC UA disconnect ignored during shutdown")
         await self._storage.close()
 
 

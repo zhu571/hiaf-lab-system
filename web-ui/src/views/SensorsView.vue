@@ -81,7 +81,7 @@
             <span v-for="group in chartGroups" :key="group.name" class="legend-item">
               <i class="legend-dot" :style="{ background: group.color }" />
               {{ group.name }}
-              <span class="muted">{{ fmtValue(group.points[group.points.length - 1].value) }}</span>
+              <span class="muted">{{ group.points.length ? fmtValue(group.points[group.points.length - 1].value) : '—' }}</span>
             </span>
           </div>
         </template>

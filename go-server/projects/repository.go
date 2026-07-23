@@ -248,31 +248,16 @@ func (r *Repository) UserExists(userID string) (bool, error) {
 	return exists, nil
 }
 
-func (r *Repository) GetStats(projectID string) (memberCount, openIssueCount, logCount int, err error) {
-	err = r.db.QueryRow(
+func (r *Repository) CountActiveMembers(projectID string) (int, error) {
+	var count int
+	err := r.db.QueryRow(
 		`SELECT COUNT(*) FROM project_members WHERE project_id = $1 AND status = 'active'`,
 		projectID,
-	).Scan(&memberCount)
+	).Scan(&count)
 	if err != nil {
-		return 0, 0, 0, fmt.Errorf("count project members: %w", err)
+		return 0, fmt.Errorf("count active members: %w", err)
 	}
-	// TODO: Phase 2 issues 模块实现后替换为 issues repository 调用。
-	err = r.db.QueryRow(
-		`SELECT COUNT(*) FROM issues WHERE project_id = $1 AND status NOT IN ('resolved', 'closed')`,
-		projectID,
-	).Scan(&openIssueCount)
-	if err != nil {
-		return 0, 0, 0, fmt.Errorf("count project issues: %w", err)
-	}
-	// TODO: Phase 2 logs 模块实现后替换为 logs repository 调用。
-	err = r.db.QueryRow(
-		`SELECT COUNT(*) FROM logs WHERE project_id = $1`,
-		projectID,
-	).Scan(&logCount)
-	if err != nil {
-		return 0, 0, 0, fmt.Errorf("count project logs: %w", err)
-	}
-	return memberCount, openIssueCount, logCount, nil
+	return count, nil
 }
 
 func (r *Repository) CountOwners(projectID string) (int, error) {

@@ -19,12 +19,22 @@ var (
 	ErrTransitionWarning = errors.New("状态流转存在警告")
 )
 
-type Service struct {
-	repo *Repository
+type IssueCounter interface {
+	CountOpenByProject(projectID string) (int, error)
 }
 
-func NewService(repo *Repository) *Service {
-	return &Service{repo: repo}
+type LogCounter interface {
+	CountByProject(projectID string) (int, error)
+}
+
+type Service struct {
+	repo        *Repository
+	issueCounter IssueCounter
+	logCounter   LogCounter
+}
+
+func NewService(repo *Repository, issueCounter IssueCounter, logCounter LogCounter) *Service {
+	return &Service{repo: repo, issueCounter: issueCounter, logCounter: logCounter}
 }
 
 func (s *Service) Create(req CreateProjectRequest, userID string) (*Project, error) {
@@ -196,9 +206,12 @@ func (s *Service) TransitionStatus(id string, req StatusTransitionRequest, userI
 
 	var warnings []TransitionWarning
 	if project.Status == StatusActive && target == StatusCompleted {
-		_, openIssues, _, err := s.repo.GetStats(project.ID)
-		if err != nil {
-			return nil, nil, err
+		openIssues := 0
+		if s.issueCounter != nil {
+			openIssues, err = s.issueCounter.CountOpenByProject(project.ID)
+			if err != nil {
+				return nil, nil, err
+			}
 		}
 		if openIssues > 0 {
 			warnings = append(warnings, TransitionWarning{
@@ -308,10 +321,27 @@ func (s *Service) mustGetProject(id string) (*Project, error) {
 }
 
 func (s *Service) withStats(project *Project) (*ProjectWithStats, error) {
-	memberCount, openIssueCount, logCount, err := s.repo.GetStats(project.ID)
+	memberCount, err := s.repo.CountActiveMembers(project.ID)
 	if err != nil {
 		return nil, err
 	}
+
+	openIssueCount := 0
+	if s.issueCounter != nil {
+		openIssueCount, err = s.issueCounter.CountOpenByProject(project.ID)
+		if err != nil {
+			return nil, err
+		}
+	}
+
+	logCount := 0
+	if s.logCounter != nil {
+		logCount, err = s.logCounter.CountByProject(project.ID)
+		if err != nil {
+			return nil, err
+		}
+	}
+
 	return &ProjectWithStats{
 		Project:        *project,
 		MemberCount:    memberCount,

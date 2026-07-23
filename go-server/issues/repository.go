@@ -205,6 +205,18 @@ func (r *Repository) GetComments(issueID string, page, perPage int) ([]Comment, 
 	return r.getComments(issueID, page, perPage)
 }
 
+func (r *Repository) CountOpenByProject(projectID string) (int, error) {
+	var count int
+	err := r.db.QueryRow(
+		`SELECT COUNT(*) FROM issues WHERE project_id = $1 AND status NOT IN ('resolved', 'closed')`,
+		projectID,
+	).Scan(&count)
+	if err != nil {
+		return 0, fmt.Errorf("count open issues by project: %w", err)
+	}
+	return count, nil
+}
+
 func (r *Repository) CountRelatedLogs(projectID string, logIDs []string) (int, error) {
 	if len(logIDs) == 0 {
 		return 0, nil
