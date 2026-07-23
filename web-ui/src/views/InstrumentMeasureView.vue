@@ -1,49 +1,9 @@
 <template>
   <div class="page">
     <div class="toolbar">
-      <h2>仪器控制</h2>
+      <h2>测量仪器</h2>
       <el-button :icon="Refresh" circle title="刷新" @click="loadAll" />
     </div>
-
-    <!-- Piezo 控制面板 -->
-    <section class="panel">
-      <div class="panel-head">
-        <h3 class="panel-title">Piezo 压电控制</h3>
-        <span class="muted hint">状态每 3 秒自动刷新</span>
-      </div>
-      <el-alert v-if="piezoError" :title="piezoError" type="error" show-icon :closable="false" class="piezo-alert">
-        <el-button size="small" @click="refreshPiezo">重试</el-button>
-      </el-alert>
-      <template v-if="piezo">
-        <div class="piezo-stats">
-          <div class="piezo-stat">
-            <span class="stat-label">A1 读数</span>
-            <strong class="stat-value">{{ fmtValue(piezo.a1) }}</strong>
-          </div>
-          <div class="piezo-stat">
-            <span class="stat-label">阀门设定</span>
-            <strong class="stat-value">{{ fmtValue(piezo.valve_sp) }}</strong>
-          </div>
-          <div class="piezo-stat">
-            <span class="stat-label">运行状态</span>
-            <el-tag :type="piezo.running ? 'success' : 'info'" size="small" round effect="light">
-              {{ piezo.running ? '运行中' : '已停止' }}
-            </el-tag>
-          </div>
-          <div v-if="piezo.error" class="piezo-stat">
-            <span class="stat-label">错误</span>
-            <span class="stat-error">{{ piezo.error }}</span>
-          </div>
-        </div>
-        <div v-if="canOperate" class="piezo-controls">
-          <el-input-number v-model="setpoint" :controls="false" placeholder="设定值" class="setpoint-input" />
-          <el-button type="primary" plain :loading="piezoBusy" @click="applySetpoint">设定</el-button>
-          <el-button v-if="!piezo.running" type="success" :loading="piezoBusy" @click="onPiezoStart">启动</el-button>
-          <el-button v-else type="warning" :loading="piezoBusy" @click="onPiezoStop">停止</el-button>
-        </div>
-      </template>
-      <el-skeleton v-else-if="!piezoError" :rows="2" animated />
-    </section>
 
     <!-- 仪器卡片 -->
     <el-alert v-if="error" :title="error" type="error" show-icon :closable="false">
@@ -63,6 +23,7 @@
           <el-button size="small" :type="expandedId === ins.id ? 'primary' : 'default'" plain @click="toggleExpand(ins)">
             {{ expandedId === ins.id ? '收起' : '详情' }}
           </el-button>
+          <el-button size="small" type="primary" plain @click="openAI(ins)">AI 对话</el-button>
           <el-button size="small" type="danger" class="estop-btn" @click="onEmergencyStop(ins)">紧急停机</el-button>
         </div>
 
@@ -147,36 +108,113 @@
         </template>
       </el-table>
     </section>
+
+    <el-drawer v-model="aiOpen" :title="`${aiInstrument?.name || ''} · AI 对话`" :size="isMobile ? '100%' : '440px'">
+      <div class="chat-shell">
+        <div class="chat-list">
+          <el-empty v-if="!aiMessages.length" description="描述想执行的操作，例如“读取仪器标识”" :image-size="72" />
+          <div v-for="(message, index) in aiMessages" :key="index" class="chat-message" :class="message.role">
+            <div class="chat-bubble">
+              <p v-if="message.content">{{ message.content }}</p>
+              <div v-if="message.candidate" class="candidate-card">
+                <template v-if="message.candidate.status === 'ok'">
+                  <div class="candidate-title">
+                    <code>{{ message.candidate.command }}</code>
+                    <el-tag :type="riskTag(message.candidate.risk || '')" size="small">{{ message.candidate.risk }}</el-tag>
+                  </div>
+                  <p v-if="message.candidate.explanation">{{ message.candidate.explanation }}</p>
+                  <pre class="candidate-json">{{ JSON.stringify(message.candidate.params || {}, null, 2) }}</pre>
+                  <pre v-if="message.candidate.scpi_preview" class="candidate-scpi">{{ message.candidate.scpi_preview }}</pre>
+                  <el-alert
+                    v-if="!message.candidate.validation?.ok"
+                    :title="message.candidate.validation?.reasons?.join('；') || '参数校验未通过'"
+                    type="error"
+                    :closable="false"
+                  />
+                  <div class="candidate-actions">
+                    <el-button
+                      size="small"
+                      type="primary"
+                      :loading="message.running"
+                      :disabled="!canOperate || !message.candidate.validation?.ok || message.done"
+                      @click="runAICandidate(message)"
+                    >执行</el-button>
+                    <el-button size="small" :disabled="message.done" @click="message.done = true">放弃</el-button>
+                  </div>
+                </template>
+                <el-alert
+                  v-else
+                  :title="message.candidate.question || message.candidate.reason || '无法生成候选命令'"
+                  :type="message.candidate.status === 'rejected' ? 'error' : 'info'"
+                  :closable="false"
+                />
+                <p v-if="message.requestId" class="request-id">request_id: {{ message.requestId }}</p>
+              </div>
+            </div>
+          </div>
+          <p v-if="aiLoading" class="muted chat-loading">正在翻译并校验…</p>
+        </div>
+        <el-alert v-if="aiError" :title="aiError" type="error" :closable="false" show-icon />
+        <div class="chat-input">
+          <el-input
+            v-model="aiInput"
+            type="textarea"
+            :rows="3"
+            maxlength="1000"
+            show-word-limit
+            placeholder="输入自然语言命令"
+            @keydown.ctrl.enter.prevent="sendAI"
+          />
+          <el-button type="primary" :loading="aiLoading" :disabled="!aiInput.trim()" @click="sendAI">发送</el-button>
+        </div>
+      </div>
+    </el-drawer>
   </div>
 </template>
 
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, reactive, ref } from 'vue'
+import { computed, onMounted, reactive, ref } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { Refresh } from '@element-plus/icons-vue'
 import {
   emergencyStop,
   executeCommand,
+  executeCommandWithMeta,
   getStatus,
   getWhitelist,
+  interpretCommand,
   listInstruments,
-  piezoSetpoint,
-  piezoStart,
-  piezoStatus,
-  piezoStop,
   type CommandParamDef,
   type CommandResult,
   type InstrumentStatus,
   type InstrumentSummary,
-  type PiezoStatus,
+  type NLCommandCandidate,
   type WhitelistCommand
 } from '../api/instruments'
 import { useAuthStore } from '../stores/auth'
 import { showApiError } from '../composables/useNotify'
+import { useMobile } from '../composables/useMobile'
 
 const auth = useAuthStore()
 // 与后端 RequireRole(maintainer, admin) 对应，前端隐藏只是 UX，后端仍强校验
 const canOperate = computed(() => ['maintainer', 'admin'].includes(auth.user?.role || ''))
+const isMobile = useMobile()
+
+type ChatMessage = {
+  role: 'user' | 'assistant'
+  content: string
+  candidate?: NLCommandCandidate
+  requestId?: string
+  running?: boolean
+  done?: boolean
+}
+
+const aiOpen = ref(false)
+const aiInstrument = ref<InstrumentSummary | null>(null)
+const aiInput = ref('')
+const aiLoading = ref(false)
+const aiError = ref('')
+const aiMessages = ref<ChatMessage[]>([])
 
 const instruments = ref<InstrumentSummary[]>([])
 const whitelist = ref<WhitelistCommand[]>([])
@@ -192,12 +230,6 @@ const cmdName = ref('')
 const cmdParams = reactive<Record<string, any>>({})
 const cmdRunning = ref(false)
 const cmdResult = ref<CommandResult | null>(null)
-
-const piezo = ref<PiezoStatus | null>(null)
-const piezoError = ref('')
-const piezoBusy = ref(false)
-const setpoint = ref<number>()
-let piezoTimer: number | undefined
 
 // red 命令后端拒绝（command_not_allowed），同名命令多台仪器复用，按名称去重
 const executableCommands = computed(() => {
@@ -215,12 +247,6 @@ const cmdDef = computed(() => executableCommands.value.find((c) => c.name === cm
 
 onMounted(() => {
   loadAll()
-  refreshPiezo()
-  piezoTimer = window.setInterval(refreshPiezo, 3000)
-})
-
-onBeforeUnmount(() => {
-  window.clearInterval(piezoTimer)
 })
 
 function loadAll() {
@@ -282,7 +308,7 @@ function onCommandPick() {
   if (!cmdDef.value) return
   for (const [name, def] of paramEntries(cmdDef.value)) {
     if (def.default === undefined || def.default === null) continue
-    cmdParams[name] = def.enum || def.type === 'string' ? String(def.default) : Number(def.default)
+    cmdParams[name] = (def.enum || def.type === 'string') ? String(def.default) : Number(def.default)
   }
 }
 
@@ -297,6 +323,68 @@ function paramLabel(name: string, def: CommandParamDef) {
 function numOrUndef(v: unknown) {
   const n = Number(v)
   return Number.isFinite(n) ? n : undefined
+}
+
+function openAI(ins: InstrumentSummary) {
+  aiInstrument.value = ins
+  aiMessages.value = []
+  aiInput.value = ''
+  aiError.value = ''
+  aiOpen.value = true
+}
+
+async function sendAI() {
+  const ins = aiInstrument.value
+  const input = aiInput.value.trim()
+  if (!ins || !input || aiLoading.value) return
+  const history = aiMessages.value
+    .filter((message) => message.content)
+    .map((message) => ({ role: message.role, content: message.content }))
+  aiMessages.value.push({ role: 'user', content: input })
+  aiInput.value = ''
+  aiError.value = ''
+  aiLoading.value = true
+  try {
+    const response = await interpretCommand(ins.id, input, history)
+    aiMessages.value.push({
+      role: 'assistant',
+      content: response.data.explanation || response.data.question || response.data.reason || '',
+      candidate: response.data,
+      requestId: response.requestId
+    })
+  } catch (err) {
+    aiError.value = err instanceof Error ? err.message : 'AI 翻译失败'
+  } finally {
+    aiLoading.value = false
+  }
+}
+
+async function runAICandidate(message: ChatMessage) {
+  const ins = aiInstrument.value
+  const candidate = message.candidate
+  if (!ins || !candidate?.command || !candidate.validation?.ok || message.done) return
+  if (candidate.risk === 'yellow') {
+    try {
+      await ElMessageBox.confirm(`「${candidate.command}」将改变仪器状态，确认执行候选参数吗？`, '人工确认', {
+        confirmButtonText: '执行', cancelButtonText: '取消', type: 'warning'
+      })
+    } catch {
+      return
+    }
+  }
+  message.running = true
+  try {
+    const response = await executeCommandWithMeta(ins.id, candidate.command, candidate.params || {})
+    message.done = true
+    aiMessages.value.push({
+      role: 'assistant',
+      content: `${response.data.response || '命令执行完成'}\nrequest_id: ${response.requestId}`
+    })
+  } catch (err) {
+    aiError.value = err instanceof Error ? err.message : '命令执行失败'
+  } finally {
+    message.running = false
+  }
 }
 
 async function runCommand(ins: InstrumentSummary) {
@@ -349,59 +437,6 @@ async function onEmergencyStop(ins: InstrumentSummary) {
   }
 }
 
-async function refreshPiezo() {
-  try {
-    piezo.value = await piezoStatus()
-    piezoError.value = ''
-  } catch (err) {
-    // 轮询失败只内联提示，不打 toast 刷屏
-    piezoError.value = err instanceof Error ? err.message : 'Piezo 状态获取失败'
-  }
-}
-
-async function applySetpoint() {
-  if (setpoint.value === undefined || Number.isNaN(setpoint.value)) {
-    ElMessage.warning('请填写设定值')
-    return
-  }
-  piezoBusy.value = true
-  try {
-    await piezoSetpoint(setpoint.value)
-    ElMessage.success('设定值已下发')
-    await refreshPiezo()
-  } catch (err) {
-    showApiError(err, '设定失败')
-  } finally {
-    piezoBusy.value = false
-  }
-}
-
-async function onPiezoStart() {
-  piezoBusy.value = true
-  try {
-    await piezoStart()
-    ElMessage.success('Piezo 已启动')
-    await refreshPiezo()
-  } catch (err) {
-    showApiError(err, '启动失败')
-  } finally {
-    piezoBusy.value = false
-  }
-}
-
-async function onPiezoStop() {
-  piezoBusy.value = true
-  try {
-    await piezoStop()
-    ElMessage.success('Piezo 已停止')
-    await refreshPiezo()
-  } catch (err) {
-    showApiError(err, '停止失败')
-  } finally {
-    piezoBusy.value = false
-  }
-}
-
 const STATE_META: Record<string, { label: string; color: string; tag: 'success' | 'warning' | 'danger' | 'info' }> = {
   running: { label: '运行中', color: 'var(--ok)', tag: 'success' },
   rate_limited: { label: '限流中', color: 'var(--warn)', tag: 'warning' },
@@ -428,12 +463,6 @@ function riskTag(risk: string): 'success' | 'warning' | 'danger' | 'info' {
   return 'info'
 }
 
-function fmtValue(v: number) {
-  if (v === 0) return '0'
-  const abs = Math.abs(v)
-  if (abs >= 10000 || abs < 0.01) return v.toExponential(3)
-  return String(Number(v.toPrecision(4)))
-}
 </script>
 
 <style scoped>
@@ -451,51 +480,6 @@ function fmtValue(v: number) {
 
 .hint {
   font-size: 12px;
-}
-
-.piezo-alert {
-  margin-bottom: 12px;
-}
-
-.piezo-stats {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 12px 32px;
-}
-
-.piezo-stat {
-  align-items: center;
-  display: flex;
-  gap: 10px;
-}
-
-.stat-label {
-  color: var(--text-3);
-  font-size: 13px;
-}
-
-.stat-value {
-  color: var(--text-1);
-  font-size: 20px;
-  font-variant-numeric: tabular-nums;
-}
-
-.stat-error {
-  color: var(--danger);
-  font-size: 13px;
-}
-
-.piezo-controls {
-  border-top: 1px solid var(--border);
-  display: flex;
-  flex-wrap: wrap;
-  gap: 10px;
-  margin-top: 16px;
-  padding-top: 16px;
-}
-
-.setpoint-input {
-  width: 160px;
 }
 
 .card-grid {
@@ -630,5 +614,76 @@ function fmtValue(v: number) {
 .scpi-code {
   font-size: 12px;
   white-space: pre-wrap;
+}
+
+.chat-shell {
+  display: grid;
+  gap: 12px;
+  height: 100%;
+  grid-template-rows: minmax(0, 1fr) auto auto;
+}
+
+.chat-list {
+  overflow-y: auto;
+}
+
+.chat-message {
+  display: flex;
+  margin-bottom: 12px;
+}
+
+.chat-message.user {
+  justify-content: flex-end;
+}
+
+.chat-bubble {
+  background: var(--surface-2);
+  border-radius: var(--radius-sm);
+  max-width: 92%;
+  padding: 10px 12px;
+  white-space: pre-wrap;
+}
+
+.chat-message.user .chat-bubble {
+  background: var(--brand-100);
+}
+
+.candidate-card,
+.candidate-actions,
+.candidate-title,
+.chat-input {
+  display: flex;
+  gap: 8px;
+}
+
+.candidate-card {
+  flex-direction: column;
+}
+
+.candidate-title,
+.chat-input {
+  align-items: center;
+  justify-content: space-between;
+}
+
+.candidate-json,
+.candidate-scpi {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  margin: 0;
+  overflow-x: auto;
+  padding: 8px;
+  white-space: pre-wrap;
+}
+
+.request-id,
+.chat-loading {
+  color: var(--text-3);
+  font-size: 11px;
+}
+
+.chat-input .el-textarea {
+  flex: 1;
 }
 </style>

@@ -18,7 +18,8 @@ const TestDataView = () => import('../views/TestDataView.vue')
 const RFMatchingView = () => import('../views/RFMatchingView.vue')
 const AssemblyView = () => import('../views/AssemblyView.vue')
 const AttachmentView = () => import('../views/AttachmentView.vue')
-const InstrumentsView = () => import('../views/InstrumentsView.vue')
+const InstrumentMeasureView = () => import('../views/InstrumentMeasureView.vue')
+const GasControlView = () => import('../views/GasControlView.vue')
 const SensorsView = () => import('../views/SensorsView.vue')
 const DailyReportDetailView = () => import('../views/DailyReportDetailView.vue')
 const DailyReportShell = () => import('../components/DailyReportShell.vue')
@@ -53,7 +54,8 @@ const router = createRouter({
     },
     { path: '/experiment-runs/:id', component: RunDetailView },
     { path: '/attachments', component: AttachmentView },
-    { path: '/instruments', component: InstrumentsView },
+    { path: '/instrument-measure', component: InstrumentMeasureView },
+    { path: '/gas-control', component: GasControlView },
     { path: '/sensors', component: SensorsView },
     { path: '/experiences', component: ExperiencesView },
     { path: '/audit', component: AuditView },
@@ -65,7 +67,8 @@ const router = createRouter({
     { path: '/issues', redirect: '/projects' },
     { path: '/daily-reports', redirect: '/daily-report/history' },
     { path: '/runs/:id', redirect: '/experiment-runs/:id' },
-    { path: '/projects/:id/runs', redirect: '/projects/:id/experiment-runs' }
+    { path: '/projects/:id/runs', redirect: '/projects/:id/experiment-runs' },
+    { path: '/instruments', redirect: '/instrument-measure' }
   ]
 })
 

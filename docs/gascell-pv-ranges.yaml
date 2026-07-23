@@ -1,0 +1,49 @@
+version: "2.0"
+
+# GasCell EPICS PV safety contract. The IOC remains the control/safety authority;
+# these limits are an additional API trust-boundary check.
+pvs:
+  GasCell:Piezo:A1: {type: float, min: 0, max: 100000, unit: Pa, readback_tolerance: 0.01, risk: green, writable: false}
+  GasCell:Piezo:ValveSP: {type: float, min: 0, max: 100, unit: percent, readback_tolerance: 0.1, risk: yellow, writable: true}
+  GasCell:Piezo:Running: {type: int, min: 0, max: 1, unit: bool, readback_tolerance: 0, risk: yellow, writable: true}
+  GasCell:Piezo:Setpoint: {type: float, min: 0, max: 10000, unit: Pa, readback_tolerance: 0.01, risk: yellow, writable: true}
+  GasCell:Piezo:Kp: {type: float, min: 0, max: 1, unit: percent_per_Pa, readback_tolerance: 0.0001, risk: yellow, writable: true}
+  GasCell:Piezo:Ki: {type: float, min: 0, max: 1, unit: percent_per_Pa_second, readback_tolerance: 0.0001, risk: yellow, writable: true}
+  GasCell:Piezo:Error: {type: string, min: 0, max: 256, unit: text, readback_tolerance: 0, risk: green, writable: false}
+  GasCell:Piezo:Delta: {type: float, min: -100, max: 100, unit: Pa, readback_tolerance: 0.01, risk: green, writable: false}
+  GasCell:Piezo:Cycle: {type: int, min: 0, max: 2147483647, unit: count, readback_tolerance: 0, risk: green, writable: false}
+  GasCell:Safety:A5Max: {type: float, min: 0.01, max: 1000, unit: Pa, readback_tolerance: 0.001, risk: red, writable: true}
+  GasCell:Safety:A5Trip: {type: int, min: 0, max: 2, unit: code, readback_tolerance: 0, risk: green, writable: false}
+  GasCell:Safety:A5TripPV: {type: string, min: 0, max: 64, unit: waveform, readback_tolerance: 0, risk: green, writable: false}
+  GasCell:Safety:A5TripTime: {type: string, min: 0, max: 64, unit: RFC3339, readback_tolerance: 0, risk: green, writable: false}
+  GasCell:Safety:A5Clear: {type: int, min: 1, max: 1, unit: trigger, readback_tolerance: 0, risk: red, writable: true}
+
+  GasCell:Temp:T1: {type: float, min: -273.15, max: 500, unit: degC, readback_tolerance: 0.1, risk: green, writable: false}
+  GasCell:Temp:T2: {type: float, min: -273.15, max: 500, unit: degC, readback_tolerance: 0.1, risk: green, writable: false}
+  GasCell:Temp:T3: {type: float, min: -273.15, max: 500, unit: degC, readback_tolerance: 0.1, risk: green, writable: false}
+  GasCell:Temp:T4: {type: float, min: -273.15, max: 500, unit: degC, readback_tolerance: 0.1, risk: green, writable: false}
+  GasCell:Temp:T5: {type: float, min: -273.15, max: 500, unit: degC, readback_tolerance: 0.1, risk: green, writable: false}
+  GasCell:Temp:T6: {type: float, min: -273.15, max: 500, unit: degC, readback_tolerance: 0.1, risk: green, writable: false}
+  GasCell:Temp:T7: {type: float, min: -273.15, max: 500, unit: degC, readback_tolerance: 0.1, risk: green, writable: false}
+  GasCell:Temp:T8: {type: float, min: -273.15, max: 500, unit: degC, readback_tolerance: 0.1, risk: green, writable: false}
+  GasCell:Temp:T9: {type: float, min: -273.15, max: 500, unit: degC, readback_tolerance: 0.1, risk: green, writable: false}
+  GasCell:Temp:T10: {type: float, min: -273.15, max: 500, unit: degC, readback_tolerance: 0.1, risk: green, writable: false}
+  GasCell:Temp:PT1000-1: {type: float, min: -273.15, max: 500, unit: degC, readback_tolerance: 0.1, risk: green, writable: false}
+  GasCell:Temp:PT1000-2: {type: float, min: -273.15, max: 500, unit: degC, readback_tolerance: 0.1, risk: green, writable: false}
+  GasCell:Temp:PT1000-3: {type: float, min: -273.15, max: 500, unit: degC, readback_tolerance: 0.1, risk: green, writable: false}
+  GasCell:Temp:PT1000-4: {type: float, min: -273.15, max: 500, unit: degC, readback_tolerance: 0.1, risk: green, writable: false}
+
+  GasCell:Press:P1: {type: float, min: 0, max: 100000000, unit: Pa, readback_tolerance: 1, risk: green, writable: false}
+  GasCell:Press:P2: {type: float, min: 0, max: 100000000, unit: Pa, readback_tolerance: 1, risk: green, writable: false}
+  GasCell:Press:P3: {type: float, min: 0, max: 100000000, unit: Pa, readback_tolerance: 1, risk: green, writable: false}
+  GasCell:Press:P4: {type: float, min: 0, max: 100000000, unit: Pa, readback_tolerance: 1, risk: green, writable: false}
+  GasCell:Press:P6: {type: float, min: 0, max: 100000000, unit: Pa, readback_tolerance: 1, risk: green, writable: false}
+  GasCell:Press:P8: {type: float, min: 0, max: 100000000, unit: Pa, readback_tolerance: 1, risk: green, writable: false}
+
+  GasCell:Vac:A1: {type: float, min: 0, max: 100000, unit: Pa, readback_tolerance: 0.001, risk: green, writable: false}
+  GasCell:Vac:A2: {type: float, min: 0, max: 100000, unit: Pa, readback_tolerance: 0.001, risk: green, writable: false}
+  GasCell:Vac:A4: {type: float, min: 0, max: 100000, unit: Pa, readback_tolerance: 0.001, risk: green, writable: false}
+  GasCell:Vac:A5: {type: float, min: 0, max: 100000, unit: Pa, readback_tolerance: 0.001, risk: green, writable: false}
+  GasCell:Vac:A6: {type: float, min: 0, max: 100000, unit: Pa, readback_tolerance: 0.001, risk: green, writable: false}
+  GasCell:Vac:A7: {type: float, min: 0, max: 100000, unit: Pa, readback_tolerance: 0.001, risk: green, writable: false}
+  GasCell:Vac:A8: {type: float, min: 0, max: 100000, unit: Pa, readback_tolerance: 0.001, risk: green, writable: false}
