@@ -116,6 +116,12 @@ function switchProject(id: string) {
   router.replace({ path: `/projects/${id}/issues` })
 }
 
+function switchProject(id: string) {
+  if (!id || id === projectId.value) return
+  projects.select(id)
+  router.replace({ path: `/projects/${id}/issues` })
+}
+
 async function open(id: string) {
   selected.value = await getIssue(id)
   targetStatus.value = selected.value.status
