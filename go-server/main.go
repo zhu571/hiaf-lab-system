@@ -132,7 +132,7 @@ func main() {
 			slog.Warn("instrument worker unavailable", "instrument_id", id, "error", err)
 		}
 	}
-	instrumentsHandler := instruments.NewHandler(instrumentsSvc, workers)
+	instrumentsHandler := instruments.NewHandler(instrumentsSvc, db, workers)
 	sensorsHandler := sensors.NewHandler(sensorsSvc)
 
 	r := chi.NewRouter()
@@ -350,6 +350,7 @@ func main() {
 			})
 			r.Get("/{id}/status", instrumentsHandler.InstrumentStatus)
 			r.Post("/{id}/nl-commands", instrumentsHandler.InterpretCommand)
+			r.Post("/{id}/nl-execute", instrumentsHandler.NLExecute)
 			r.Post("/{id}/emergency-stop", instrumentsHandler.EmergencyStop)
 			r.With(mw.RequireRole(auth.RoleMaintainer, auth.RoleAdmin)).Post("/{id}/commands", instrumentsHandler.ExecuteCommand)
 			r.Route("/piezo", func(r chi.Router) {
