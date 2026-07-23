@@ -1,4 +1,4 @@
-import { request } from './client'
+import { request, requestWithMeta } from './client'
 
 // 与 go-server/instruments/handler.go 的响应结构保持一致
 
@@ -42,27 +42,20 @@ export type CommandResult = {
   duration: number // Go time.Duration，单位纳秒
 }
 
-export interface NLCommandCandidate {
-  status: string           // "ok" | "clarify" | "rejected"
+export type NLCommandCandidate = {
+  status: 'ok' | 'clarify' | 'rejected'
   command?: string
-  risk?: string
+  risk?: 'green' | 'yellow'
+  params?: Record<string, unknown>
   scpi_preview?: string
   explanation?: string
   question?: string
   reason?: string
-}
-
-export interface NLExecuteResult {
-  status: string
-  command: string
-  scpi: string
-  explanation: string
-  response: string
-  parsed_value?: number
-  parsed_points?: Array<{ x: number, y: number }>
-  plot_type?: string
-  duration_ms: number
-  error: string
+  confidence?: number
+  validation?: { ok: boolean; reasons?: string[] }
+  prompt_version?: string
+  model?: string
+  whitelist_version?: string
 }
 
 export type PiezoStatus = {
@@ -70,6 +63,28 @@ export type PiezoStatus = {
   valve_sp: number
   running: boolean
   error?: string
+}
+
+export type GasCellPoint = {
+  v?: string | number | null
+  q: 'good' | 'stale' | 'invalid' | 'disconnected'
+}
+
+export type GasCellSnapshot = {
+  data: Record<string, GasCellPoint>
+}
+
+export type GasCellFrame = GasCellSnapshot & {
+  type: 'snapshot' | 'update'
+  seq: number
+  epoch: number
+}
+
+export type PVWriteResult = {
+  pv: string
+  requested: string | number
+  readback?: string | number
+  warning?: string
 }
 
 export function listInstruments() {
@@ -92,6 +107,16 @@ export function executeCommand(id: string, command: string, params: Record<strin
   return request<CommandResult>({ url: `/instruments/${id}/commands`, method: 'POST', data: { command, params } })
 }
 
+export function executeCommandWithMeta(id: string, command: string, params: Record<string, unknown> = {}) {
+  return requestWithMeta<CommandResult>({ url: `/instruments/${id}/commands`, method: 'POST', data: { command, params } })
+}
+
+export function interpretCommand(id: string, input: string, history: { role: 'user' | 'assistant'; content: string }[]) {
+  return requestWithMeta<NLCommandCandidate>({
+    url: `/instruments/${id}/nl-commands`, method: 'POST', data: { input, history: history.slice(-10) }
+  })
+}
+
 export function piezoStatus() {
   return request<PiezoStatus>({ url: '/instruments/piezo/status' })
 }
@@ -108,10 +133,30 @@ export function piezoSetpoint(value: number) {
   return request<{ setpoint: number }>({ url: '/instruments/piezo/setpoint', method: 'POST', data: { value } })
 }
 
-export function interpretNL(instrumentId: string, input: string, history: Array<{ role: string, content: string }>) {
-  return request<NLCommandCandidate>({ url: `/instruments/${instrumentId}/nl-commands`, method: 'POST', data: { input, history } })
+export function gasCellStatus() {
+  return request<GasCellSnapshot>({ url: '/instruments/gascell/status' })
 }
 
-export function executeNL(instrumentId: string, input: string, history: Array<{ role: string, content: string }>) {
-  return request<NLExecuteResult>({ url: `/instruments/${instrumentId}/nl-execute`, method: 'POST', data: { input, history } })
+export function gasCellParams(params: { setpoint?: number; kp?: number; ki?: number }) {
+  return request<PVWriteResult[]>({ url: '/instruments/gascell/params', method: 'POST', data: params })
+}
+
+export function gasCellStart() {
+  return request<PVWriteResult[]>({ url: '/instruments/gascell/start', method: 'POST' })
+}
+
+export function gasCellStop() {
+  return request<PVWriteResult[]>({ url: '/instruments/gascell/stop', method: 'POST' })
+}
+
+export function gasCellValve(value: number) {
+  return request<PVWriteResult>({ url: '/instruments/gascell/valve', method: 'POST', data: { value } })
+}
+
+export function gasCellA5Max(value: number) {
+  return request<PVWriteResult>({ url: '/instruments/gascell/safety/a5-max', method: 'PUT', data: { value } })
+}
+
+export function gasCellA5Clear() {
+  return request<PVWriteResult>({ url: '/instruments/gascell/safety/a5-clear', method: 'POST' })
 }

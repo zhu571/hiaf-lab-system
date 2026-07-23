@@ -2,8 +2,6 @@ import json
 import re
 from pathlib import Path
 
-from LightAgent import HookDecision, LightAgent, ToolRegistry
-
 
 MODEL = "deepseek-v4-pro"
 BASE_URL = "https://api.deepseek.com"
@@ -23,17 +21,18 @@ def ensure_safe(raw_text):
         raise ParseError("prompt injection rejected")
 
 
-class NoToolHook:
-    def __call__(self, context):
-        if context.phase == "before_model_request":
-            params = context.payload["params"]
-            if params.get("tools") or params.get("extra_body", {}).get("thinking", {}).get("type") != "disabled":
-                return HookDecision.block("model request escaped the no-tool non-thinking boundary")
-        return HookDecision.continue_()
-
-
 class Parser:
     def __init__(self, api_key, prompt_path=None):
+        from LightAgent import HookDecision, LightAgent, ToolRegistry
+
+        class NoToolHook:
+            def __call__(self, context):
+                if context.phase == "before_model_request":
+                    params = context.payload["params"]
+                    if params.get("tools") or params.get("extra_body", {}).get("thinking", {}).get("type") != "disabled":
+                        return HookDecision.block("model request escaped the no-tool non-thinking boundary")
+                return HookDecision.continue_()
+
         prompt_path = prompt_path or Path(__file__).parents[1] / "prompts" / "parse.txt"
         self.instructions = Path(prompt_path).read_text()
         self.agent = LightAgent(
@@ -80,6 +79,88 @@ def _json_array(text):
     if not isinstance(value, list):
         raise ParseError("model output must be a JSON array")
     return value
+
+
+def _json_object(text):
+    failure = re.search(r"\[(LA-[A-Z0-9]+)]", text)
+    if failure:
+        raise ParseError(f"model request failed ({failure.group(1)})")
+    start, end = text.find("{"), text.rfind("}")
+    if start < 0 or end < start:
+        raise ParseError("model did not return a JSON object")
+    try:
+        value = json.loads(text[start:end + 1])
+    except json.JSONDecodeError as exc:
+        raise ParseError("model returned invalid JSON") from exc
+    if not isinstance(value, dict):
+        raise ParseError("model output must be a JSON object")
+    return value
+
+
+class InstrumentInterpreter:
+    def __init__(self, api_key, prompt_path=None):
+        from LightAgent import HookDecision, LightAgent, ToolRegistry
+
+        class NoToolHook:
+            def __call__(self, context):
+                if context.phase == "before_model_request":
+                    params = context.payload["params"]
+                    if params.get("tools") or params.get("extra_body", {}).get("thinking", {}).get("type") != "disabled":
+                        return HookDecision.block("model request escaped the no-tool non-thinking boundary")
+                return HookDecision.continue_()
+
+        prompt_path = prompt_path or Path(__file__).parents[1] / "prompts" / "instrument_interpret.txt"
+        self.agent = LightAgent(
+            name="instrument-command-interpreter", model=MODEL, base_url=BASE_URL, api_key=api_key,
+            instructions=Path(prompt_path).read_text(), tools=[], filter_tools=True, tree_of_thought=False,
+            memory=None, self_learning=False, auto_discover_skills=False,
+            hooks=[NoToolHook()], debug=False,
+        )
+        self.agent.tool_registry = ToolRegistry()
+        self.agent.loaded_tools = {}
+
+    def interpret(self, instrument_id, instrument_name, whitelist_commands, user_input, history):
+        ensure_safe(user_input)
+        for item in history:
+            ensure_safe(item["content"])
+        allowed = {item["name"] for item in whitelist_commands}
+        query = json.dumps({
+            "trusted_context": {
+                "instrument_id": instrument_id, "instrument_name": instrument_name,
+                "whitelist_commands": whitelist_commands,
+            },
+            "untrusted_inputs": {"user_input": user_input, "history": history},
+        }, ensure_ascii=False)
+        result = self.agent.run(
+            query, tools=[], use_skills=False, max_retry=2, result_format="str",
+            metadata={"extra_body": {"thinking": {"type": "disabled"}}},
+        )
+        return validate_interpretation(_json_object(str(result)), allowed)
+
+
+def validate_interpretation(item, allowed_commands):
+    status = item.get("status")
+    if status not in {"ok", "clarify", "rejected"}:
+        raise ParseError("interpretation status is invalid")
+    confidence = item.get("confidence", 0)
+    if not isinstance(confidence, (int, float)) or isinstance(confidence, bool) or not 0 <= confidence <= 1:
+        raise ParseError("interpretation confidence is invalid")
+    command = item.get("command")
+    params = item.get("params", {})
+    if status == "ok" and (command not in allowed_commands or not isinstance(params, dict)):
+        raise ParseError("interpretation command or params are invalid")
+    if status == "clarify" and not str(item.get("question", "")).strip():
+        raise ParseError("clarification question is required")
+    if status == "rejected" and not str(item.get("reason", "")).strip():
+        raise ParseError("rejection reason is required")
+    return {
+        "status": status, "command": command if status == "ok" else None,
+        "params": params if status == "ok" else {}, "confidence": float(confidence),
+        "explanation": str(item.get("explanation", "")).strip(),
+        "question": str(item.get("question", "")).strip() or None,
+        "reason": str(item.get("reason", "")).strip() or None,
+        "prompt_version": "1.0", "model": MODEL,
+    }
 
 
 def validate_candidates(items, existing_issues, project_ids):
