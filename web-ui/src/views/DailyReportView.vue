@@ -2,12 +2,17 @@
   <div class="page">
     <div class="toolbar">
       <h2>日报录入</h2>
-      <el-button type="primary" :disabled="!report" @click="submit(false)">提交日报</el-button>
+      <el-button v-if="canSubmit" type="primary" :disabled="!report" @click="submit(false)">提交日报</el-button>
     </div>
     <section class="panel editor-panel">
       <div class="toolbar">
         <h3>今日记录</h3>
-        <el-button @click="saveRaw">保存原文</el-button>
+        <div class="toolbar-actions">
+          <el-upload :auto-upload="false" :show-file-list="false" :on-change="onFileSelect" accept="image/*,.pdf">
+            <el-button>📎 添加附件</el-button>
+          </el-upload>
+          <el-button @click="saveRaw">保存原文</el-button>
+        </div>
       </div>
       <el-input v-model="rawText" type="textarea" :rows="8" placeholder="记录今天的实验、装配、测试、问题和结论" />
     </section>
@@ -57,17 +62,76 @@
         <el-button type="warning" @click="submit(true)">忽略并提交</el-button>
       </template>
     </el-dialog>
+
+    <section v-if="pendingFiles.length" class="panel">
+      <h3>附件 ({{ pendingFiles.length }})</h3>
+      <div class="file-list">
+        <div v-for="f in pendingFiles" :key="f.name" class="file-item">
+          <el-icon><Paperclip /></el-icon>
+          <span>{{ f.name }}</span>
+          <span class="muted">({{ formatSize(f.size) }})</span>
+          <span v-if="f.uploaded" style="color:var(--success,#67c23a)">✓</span>
+          <el-button v-else size="small" @click="uploadPendingFile(f)">上传</el-button>
+        </div>
+      </div>
+    </section>
   </div>
 </template>
 
 <script setup lang="ts">
-import { onMounted, reactive, ref } from 'vue'
+import { computed, onMounted, reactive, ref } from 'vue'
 import { ElMessage } from 'element-plus'
+import { Paperclip } from '@element-plus/icons-vue'
 import StatusBadge from '../components/StatusBadge.vue'
 import { createLog, submitReport, todayReport, updateLog, updateReportRawText, type DailyReport, type LogItem } from '../api/logs'
 import { useProjectStore } from '../stores/project'
+import { useAuthStore } from '../stores/auth'
+import { uploadAttachment } from '../api/attachments'
 
-const projects = useProjectStore()
+const projectStore = useProjectStore()
+const auth = useAuthStore()
+const canSubmit = computed(() => auth.user?.role !== 'viewer')
+const projects = projectStore
+
+// 附件
+type PendingFile = { file: File; name: string; size: number; uploaded: boolean }
+const pendingFiles = ref<PendingFile[]>([])
+
+function formatSize(bytes: number) {
+  if (bytes < 1024) return bytes + 'B'
+  if (bytes < 1048576) return (bytes / 1024).toFixed(1) + 'KB'
+  return (bytes / 1048576).toFixed(1) + 'MB'
+}
+
+async function onFileSelect(uploadFile: any) {
+  const file = uploadFile.raw as File
+  const entry: PendingFile = { file, name: file.name, size: file.size, uploaded: false }
+  pendingFiles.value.push(entry)
+
+  // 如果日报已存在（已创建今日日报），立即上传
+  if (report.value?.id) {
+    await uploadPendingFile(entry)
+  } else {
+    ElMessage.info(`${file.name} 将在日报创建后自动上传`)
+  }
+}
+
+async function uploadPendingFile(pf: PendingFile) {
+  if (!report.value?.id) return
+  try {
+    await uploadAttachment(pf.file, 'daily_report', report.value.id)
+    pf.uploaded = true
+  } catch {
+    ElMessage.warning(`${pf.name} 上传失败`)
+  }
+}
+
+async function uploadAllPending() {
+  if (!report.value?.id) return
+  for (const pf of pendingFiles.value) {
+    if (!pf.uploaded) await uploadPendingFile(pf)
+  }
+}
 const report = ref<DailyReport | null>(null)
 const rawText = ref('')
 const logDialog = ref(false)
@@ -152,5 +216,28 @@ async function submit(force: boolean) {
 .warning-list {
   display: grid;
   gap: 10px;
+}
+
+.toolbar-actions {
+  display: flex;
+  gap: 10px;
+}
+
+.file-list {
+  display: grid;
+  gap: 8px;
+}
+
+.file-item {
+  align-items: center;
+  border: 1px solid var(--border-light, #e5e7eb);
+  border-radius: 6px;
+  display: flex;
+  gap: 8px;
+  padding: 8px 12px;
+}
+
+.muted {
+  color: var(--text-secondary, #9ca3af);
 }
 </style>

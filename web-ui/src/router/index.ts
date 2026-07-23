@@ -1,15 +1,29 @@
 import { createRouter, createWebHistory } from 'vue-router'
 import { useAuthStore } from '../stores/auth'
-import LoginView from '../views/LoginView.vue'
-import ProjectsView from '../views/ProjectsView.vue'
-import DailyReportView from '../views/DailyReportView.vue'
-import IssuesView from '../views/IssuesView.vue'
-import ExperiencesView from '../views/ExperiencesView.vue'
-import AuditView from '../views/AuditView.vue'
-import SettingsView from '../views/SettingsView.vue'
-import DailyHistoryView from '../views/DailyHistoryView.vue'
-import AdminUsersView from '../views/AdminUsersView.vue'
-import AgentCandidatesView from '../views/AgentCandidatesView.vue'
+
+// 路由级代码分割：所有页面组件懒加载，首屏只下载当前路由需要的 chunk
+const LoginView = () => import('../views/LoginView.vue')
+const ProjectsView = () => import('../views/ProjectsView.vue')
+const DailyReportView = () => import('../views/DailyReportView.vue')
+const IssuesView = () => import('../views/IssuesView.vue')
+const ExperiencesView = () => import('../views/ExperiencesView.vue')
+const AuditView = () => import('../views/AuditView.vue')
+const SettingsView = () => import('../views/SettingsView.vue')
+const DailyHistoryView = () => import('../views/DailyHistoryView.vue')
+const AdminUsersView = () => import('../views/AdminUsersView.vue')
+const AgentCandidatesView = () => import('../views/AgentCandidatesView.vue')
+const RunListView = () => import('../views/RunListView.vue')
+const RunDetailView = () => import('../views/RunDetailView.vue')
+const TestDataView = () => import('../views/TestDataView.vue')
+const RFMatchingView = () => import('../views/RFMatchingView.vue')
+const AssemblyView = () => import('../views/AssemblyView.vue')
+const AttachmentView = () => import('../views/AttachmentView.vue')
+const InstrumentsView = () => import('../views/InstrumentsView.vue')
+const SensorsView = () => import('../views/SensorsView.vue')
+const DailyReportDetailView = () => import('../views/DailyReportDetailView.vue')
+const DailyReportShell = () => import('../components/DailyReportShell.vue')
+const ProjectLayout = () => import('../components/ProjectLayout.vue')
+const ProjectDashboard = () => import('../components/ProjectDashboard.vue')
 
 const router = createRouter({
   history: createWebHistory(),
@@ -17,16 +31,41 @@ const router = createRouter({
     { path: '/', redirect: '/projects' },
     { path: '/login', component: LoginView, meta: { public: true } },
     { path: '/projects', component: ProjectsView },
-    { path: '/daily-report', component: DailyReportView },
-    { path: '/projects/:id/issues', component: IssuesView },
-    { path: '/issues', component: () => import('../views/IssuesFallback.vue') },
+    {
+      path: '/daily-report',
+      component: DailyReportShell,
+      children: [
+        { path: '', component: DailyReportView },
+        { path: 'history', component: DailyHistoryView }
+      ]
+    },
+    {
+      path: '/projects/:id',
+      component: ProjectLayout,
+      children: [
+        { path: '', component: ProjectDashboard },
+        { path: 'issues', component: IssuesView },
+        { path: 'experiment-runs', component: RunListView },
+        { path: 'test-data', component: TestDataView },
+        { path: 'rf-matching', component: RFMatchingView },
+        { path: 'assembly', component: AssemblyView }
+      ]
+    },
+    { path: '/experiment-runs/:id', component: RunDetailView },
+    { path: '/attachments', component: AttachmentView },
+    { path: '/instruments', component: InstrumentsView },
+    { path: '/sensors', component: SensorsView },
     { path: '/experiences', component: ExperiencesView },
     { path: '/audit', component: AuditView },
     { path: '/settings', component: SettingsView },
-    { path: '/daily-reports', component: DailyHistoryView },
-    { path: '/daily-reports/:id', component: () => import('../views/DailyReportDetailView.vue') },
+    { path: '/daily-reports/:id', component: DailyReportDetailView },
     { path: '/admin/users', component: AdminUsersView, meta: { admin: true } },
-    { path: '/agent-candidates', component: AgentCandidatesView, meta: { reviewer: true } }
+    { path: '/agent-candidates', component: AgentCandidatesView, meta: { reviewer: true } },
+    // 兼容重定向：保留旧链接不 404
+    { path: '/issues', redirect: '/projects' },
+    { path: '/daily-reports', redirect: '/daily-report/history' },
+    { path: '/runs/:id', redirect: '/experiment-runs/:id' },
+    { path: '/projects/:id/runs', redirect: '/projects/:id/experiment-runs' }
   ]
 })
 

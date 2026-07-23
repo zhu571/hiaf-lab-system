@@ -56,7 +56,7 @@
         <section class="overview-card">
           <div class="toolbar overview-head">
             <h3>项目成员</h3>
-            <el-button link type="primary" @click="go('/admin/users')">管理成员</el-button>
+            <el-button v-if="auth.isAdmin" link type="primary" @click="go('/admin/users')">用户管理</el-button>
           </div>
           <div v-if="members.length" class="member-list">
             <div v-for="member in members" :key="member.user_id" class="member-row">

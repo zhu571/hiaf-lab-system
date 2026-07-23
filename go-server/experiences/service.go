@@ -1,10 +1,12 @@
 package experiences
 
 import (
+	"database/sql"
 	"errors"
 	"strings"
 
 	"github.com/zhu571/hiaf-lab-system/go-server/auth"
+	"github.com/zhu571/hiaf-lab-system/go-server/middleware"
 	"github.com/zhu571/hiaf-lab-system/go-server/projects"
 )
 
@@ -21,12 +23,7 @@ var (
 
 type ProjectAccessChecker interface {
 	ProjectExists(projectID string) (bool, error)
-	CanAccessProject(projectID, userID, userRole, minRole string) (bool, error)
-	ProjectRole(projectID, userID, userRole string) (string, error)
-}
-
-type AgentTaskValidator interface {
-	ValidateAgentTask(taskID, actingUserID string) (bool, error)
+	HasProjectPermission(projectID, userID string, perm middleware.Permission) (bool, error)
 }
 
 type experienceRepository interface {
@@ -39,23 +36,15 @@ type experienceRepository interface {
 }
 
 type Service struct {
-	repo      experienceRepository
-	access    ProjectAccessChecker
-	validator AgentTaskValidator
+	repo   experienceRepository
+	access ProjectAccessChecker
 }
 
-func NewService(repo experienceRepository, access ProjectAccessChecker, validators ...AgentTaskValidator) *Service {
-	s := &Service{repo: repo, access: access}
-	if len(validators) > 0 {
-		s.validator = validators[0]
-	}
-	return s
+func NewService(repo experienceRepository, access ProjectAccessChecker) *Service {
+	return &Service{repo: repo, access: access}
 }
 
 func (s *Service) Create(userID, userRole string, req CreateExperienceRequest) (*Experience, error) {
-	if err := s.validateAgentFields(userID, userRole, req.AiGenerated, req.AgentTaskID); err != nil {
-		return nil, ErrInvalidInput
-	}
 	req.Title = strings.TrimSpace(req.Title)
 	req.Content = strings.TrimSpace(req.Content)
 	if req.Title == "" || len(req.Title) > 256 || req.Content == "" {
@@ -86,7 +75,7 @@ func (s *Service) Create(userID, userRole string, req CreateExperienceRequest) (
 	if err := s.requireProject(*req.ProjectID); err != nil {
 		return nil, err
 	}
-	ok, err := s.access.CanAccessProject(*req.ProjectID, userID, userRole, projects.RoleMember)
+	ok, err := s.access.HasProjectPermission(*req.ProjectID, userID, middleware.PermCreateExperience)
 	if err != nil {
 		return nil, err
 	}
@@ -94,26 +83,6 @@ func (s *Service) Create(userID, userRole string, req CreateExperienceRequest) (
 		return nil, ErrForbidden
 	}
 	return s.repo.Create(userID, req)
-}
-
-func (s *Service) validateAgentFields(userID, userRole string, aiGenerated bool, taskID *string) error {
-	if userRole != auth.RoleAgent {
-		if aiGenerated || taskID != nil {
-			return ErrInvalidInput
-		}
-		return nil
-	}
-	if !aiGenerated || taskID == nil || strings.TrimSpace(*taskID) == "" || s.validator == nil {
-		return ErrInvalidInput
-	}
-	valid, err := s.validator.ValidateAgentTask(strings.TrimSpace(*taskID), userID)
-	if err != nil {
-		return err
-	}
-	if !valid {
-		return ErrInvalidInput
-	}
-	return nil
 }
 
 func (s *Service) List(userID, userRole string, params ExperienceListParams) (*ExperienceListResult, error) {
@@ -132,20 +101,22 @@ func (s *Service) List(userID, userRole string, params ExperienceListParams) (*E
 	}
 	if strings.TrimSpace(params.ProjectID) != "" {
 		params.ProjectID = strings.TrimSpace(params.ProjectID)
-		ok, err := s.access.CanAccessProject(params.ProjectID, userID, userRole, projects.RoleViewer)
+		ok, err := s.access.HasProjectPermission(params.ProjectID, userID, middleware.PermRead)
 		if err != nil {
 			return nil, err
 		}
 		if !ok {
 			return nil, ErrForbidden
 		}
-		role, err := s.access.ProjectRole(params.ProjectID, userID, userRole)
+		canReview, err := s.access.HasProjectPermission(params.ProjectID, userID, middleware.PermReviewExperience)
 		if err != nil {
 			return nil, err
 		}
-		params.ProjectRole = role
+		if canReview {
+			params.ProjectRole = projects.RoleMaintainer
+		}
 	}
-	if params.Status == StatusCandidate && userRole != auth.RoleAdmin && !canReviewProjectRole(params.ProjectRole) {
+	if params.Status == StatusCandidate && userRole != auth.RoleAdmin && params.ProjectRole == "" {
 		params.CandidateAuthorID = userID
 	}
 
@@ -236,7 +207,7 @@ func (s *Service) Publish(id, userID, userRole string) (*Experience, error) {
 		}
 		return s.repo.Publish(id, userID)
 	}
-	ok, err := s.access.CanAccessProject(*exp.ProjectID, userID, userRole, projects.RoleMaintainer)
+	ok, err := s.access.HasProjectPermission(*exp.ProjectID, userID, middleware.PermReviewExperience)
 	if err != nil {
 		return nil, err
 	}
@@ -263,7 +234,7 @@ func (s *Service) Archive(id, userID, userRole string) (*Experience, error) {
 		}
 		return s.repo.Archive(id)
 	}
-	ok, err := s.access.CanAccessProject(*exp.ProjectID, userID, userRole, projects.RoleOwner)
+	ok, err := s.access.HasProjectPermission(*exp.ProjectID, userID, middleware.PermManageExperience)
 	if err != nil {
 		return nil, err
 	}
@@ -284,12 +255,12 @@ func (s *Service) canRead(exp Experience, userID, userRole string) bool {
 		if exp.ProjectID == nil {
 			return false
 		}
-		return s.canAccess(*exp.ProjectID, userID, userRole, projects.RoleMaintainer)
+		return s.hasPermission(*exp.ProjectID, userID, middleware.PermReviewExperience)
 	}
 	if exp.ProjectID == nil {
 		return true
 	}
-	return s.canAccess(*exp.ProjectID, userID, userRole, projects.RoleViewer)
+	return s.hasPermission(*exp.ProjectID, userID, middleware.PermRead)
 }
 
 func (s *Service) canUpdate(exp Experience, userID, userRole string) bool {
@@ -299,11 +270,11 @@ func (s *Service) canUpdate(exp Experience, userID, userRole string) bool {
 	if exp.ProjectID == nil {
 		return false
 	}
-	return s.canAccess(*exp.ProjectID, userID, userRole, projects.RoleMaintainer)
+	return s.hasPermission(*exp.ProjectID, userID, middleware.PermReviewExperience)
 }
 
-func (s *Service) canAccess(projectID, userID, userRole, minRole string) bool {
-	ok, err := s.access.CanAccessProject(projectID, userID, userRole, minRole)
+func (s *Service) hasPermission(projectID, userID string, perm middleware.Permission) bool {
+	ok, err := s.access.HasProjectPermission(projectID, userID, perm)
 	return err == nil && ok
 }
 
@@ -374,19 +345,10 @@ func validRelation(relation string) bool {
 	}
 }
 
-func canReviewProjectRole(role string) bool {
-	switch role {
-	case "maintainer", "owner":
-		return true
-	default:
-		return false
-	}
-}
-
 type ProjectAccessAdapter struct {
+	DB   *sql.DB
 	Repo interface {
 		GetByID(id string) (*projects.Project, error)
-		GetMember(projectID, userID string) (*projects.ProjectMember, error)
 	}
 }
 
@@ -395,25 +357,6 @@ func (a ProjectAccessAdapter) ProjectExists(projectID string) (bool, error) {
 	return project != nil, err
 }
 
-func (a ProjectAccessAdapter) CanAccessProject(projectID, userID, userRole, minRole string) (bool, error) {
-	if userRole == auth.RoleAdmin {
-		return true, nil
-	}
-	member, err := a.Repo.GetMember(projectID, userID)
-	if err != nil {
-		return false, err
-	}
-	roleRank := map[string]int{"viewer": 1, "member": 2, "maintainer": 3, "owner": 4}
-	return member != nil && member.Status == projects.MemberStatusActive && roleRank[member.Role] >= roleRank[minRole], nil
-}
-
-func (a ProjectAccessAdapter) ProjectRole(projectID, userID, userRole string) (string, error) {
-	if userRole == auth.RoleAdmin {
-		return projects.RoleOwner, nil
-	}
-	member, err := a.Repo.GetMember(projectID, userID)
-	if err != nil || member == nil || member.Status != projects.MemberStatusActive {
-		return "", err
-	}
-	return member.Role, nil
+func (a ProjectAccessAdapter) HasProjectPermission(projectID, userID string, perm middleware.Permission) (bool, error) {
+	return middleware.HasPermission(a.DB, projectID, userID, perm)
 }

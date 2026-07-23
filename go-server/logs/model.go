@@ -57,6 +57,7 @@ type Log struct {
 	ContentStatus string    `json:"content_status"`
 	CreatedAt     time.Time `json:"created_at"`
 	UpdatedAt     time.Time `json:"updated_at"`
+	RunID       *string    `json:"run_id,omitempty"`
 }
 
 type CreateDailyReportRequest struct {

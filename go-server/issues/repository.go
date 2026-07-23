@@ -25,10 +25,10 @@ func (r *Repository) Create(projectID, authorID string, req CreateIssueRequest, 
 	var out Issue
 	err = scanIssue(tx.QueryRow(
 		`INSERT INTO issues
-		 (project_id, title, description, severity, author_id, assignee_id, report_date, occurred_at, ai_generated, agent_task_id)
+		 (project_id, title, description, severity, author_id, assignee_id, run_id, report_date, occurred_at, ai_generated, agent_task_id)
 		 VALUES ($1, $2, $3, $4, $5, $6, $7::date, $8, $9, $10)
 		 RETURNING id, project_id, title, description, status, severity, author_id, assignee_id,
-		           ai_generated, agent_task_id, report_date, occurred_at, resolved_at, created_at, updated_at`,
+		           ai_generated, agent_task_id, run_id, report_date, occurred_at, resolved_at, created_at, updated_at`,
 		projectID, strings.TrimSpace(req.Title), req.Description, defaultSeverity(req.Severity),
 		authorID, nullableStringPtr(req.AssigneeID), reportDate, occurredAt, req.AiGenerated, nullableStringPtr(req.AgentTaskID),
 	), &out)
@@ -62,7 +62,7 @@ func (r *Repository) GetByID(id string) (*Issue, error) {
 	var out Issue
 	err := scanIssue(r.db.QueryRow(
 		`SELECT id, project_id, title, description, status, severity, author_id, assignee_id,
-		        ai_generated, agent_task_id, report_date, occurred_at, resolved_at, created_at, updated_at
+		        ai_generated, agent_task_id, run_id, report_date, occurred_at, resolved_at, created_at, updated_at
 		 FROM issues
 		 WHERE id = $1`,
 		id,
@@ -94,7 +94,7 @@ func (r *Repository) List(projectID string, params IssueListParams) ([]Issue, in
 	args = append(args, params.PerPage, (params.Page-1)*params.PerPage)
 	rows, err := r.db.Query(
 		`SELECT id, project_id, title, description, status, severity, author_id, assignee_id,
-		        ai_generated, agent_task_id, report_date, occurred_at, resolved_at, created_at, updated_at
+		        ai_generated, agent_task_id, run_id, report_date, occurred_at, resolved_at, created_at, updated_at
 		 FROM issues `+where+fmt.Sprintf(" ORDER BY %s LIMIT $%d OFFSET $%d", issueOrderBy(params), len(args)-1, len(args)),
 		args...,
 	)
@@ -121,7 +121,7 @@ func (r *Repository) Update(id string, req UpdateIssueRequest) (*Issue, error) {
 		     updated_at = now()
 		 WHERE id = $1
 		 RETURNING id, project_id, title, description, status, severity, author_id, assignee_id,
-		           ai_generated, agent_task_id, report_date, occurred_at, resolved_at, created_at, updated_at`,
+		           ai_generated, agent_task_id, run_id, report_date, occurred_at, resolved_at, created_at, updated_at`,
 		id, stringPtrValue(req.Title), req.Description, stringPtrValue(req.Severity), nullableStringPtr(req.AssigneeID),
 	), &out)
 	if err != nil {
@@ -152,7 +152,7 @@ func (r *Repository) TransitionStatus(id, targetStatus, userID, comment string, 
 		     updated_at = now()
 		 WHERE id = $1
 		 RETURNING id, project_id, title, description, status, severity, author_id, assignee_id,
-		           ai_generated, agent_task_id, report_date, occurred_at, resolved_at, created_at, updated_at`,
+		           ai_generated, agent_task_id, run_id, report_date, occurred_at, resolved_at, created_at, updated_at`,
 		id, targetStatus, targetStatus,
 	), &out)
 	if err != nil {
@@ -322,20 +322,23 @@ type rowScanner interface {
 
 func scanIssue(row rowScanner, item *Issue) error {
 	var reportDate time.Time
-	var assigneeID, agentTaskID sql.NullString
+		var assigneeID, agentTaskID, runID sql.NullString
 	var resolvedAt sql.NullTime
 	if err := row.Scan(
 		&item.ID, &item.ProjectID, &item.Title, &item.Description, &item.Status, &item.Severity,
-		&item.AuthorID, &assigneeID, &item.AiGenerated, &agentTaskID, &reportDate, &item.OccurredAt, &resolvedAt, &item.CreatedAt, &item.UpdatedAt,
+		&item.AuthorID, &assigneeID, &item.AiGenerated, &agentTaskID, &runID, &reportDate, &item.OccurredAt, &resolvedAt, &item.CreatedAt, &item.UpdatedAt,
 	); err != nil {
 		return err
 	}
 	if assigneeID.Valid {
 		item.AssigneeID = &assigneeID.String
 	}
-	if agentTaskID.Valid {
-		item.AgentTaskID = &agentTaskID.String
-	}
+		if agentTaskID.Valid {
+			item.AgentTaskID = &agentTaskID.String
+		}
+		if runID.Valid {
+			item.RunID = &runID.String
+		}
 	item.ReportDate = reportDate.Format(time.DateOnly)
 	if resolvedAt.Valid {
 		item.ResolvedAt = &resolvedAt.Time

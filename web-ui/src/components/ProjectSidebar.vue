@@ -6,7 +6,7 @@
         v-for="project in filtered"
         :key="project.id"
         :class="['project-item', { active: project.id === store.currentId }]"
-        @click="store.select(project.id)"
+        @click="open(project.id)"
       >
         <strong>{{ project.short_name || project.name }}</strong>
         <span>{{ project.code }}</span>
@@ -17,11 +17,18 @@
 
 <script setup lang="ts">
 import { computed, ref } from 'vue'
+import { useRouter } from 'vue-router'
 import { useProjectStore } from '../stores/project'
 
+const router = useRouter()
 const store = useProjectStore()
 const keyword = ref('')
 const filtered = computed(() => store.projects.filter((item) => `${item.name} ${item.code}`.toLowerCase().includes(keyword.value.toLowerCase())))
+
+function open(id: string) {
+  store.select(id)
+  router.push(`/projects/${id}`)
+}
 </script>
 
 <style scoped>

@@ -336,20 +336,20 @@ func main() {
 			r.Use(mw.Audit(db))
 			r.Get("/", instrumentsHandler.ListInstruments)
 			r.Get("/whitelist", instrumentsHandler.GetWhitelist)
-			r.Get("/gascell/status", instrumentsHandler.GasCellStatus)
-			r.Route("/gascell", func(r chi.Router) {
-				r.Group(func(r chi.Router) {
-					r.Use(mw.RequireRole(auth.RoleMaintainer, auth.RoleAdmin))
-					r.Post("/params", instrumentsHandler.GasCellParams)
-					r.Post("/start", instrumentsHandler.GasCellStart)
-					r.Post("/stop", instrumentsHandler.GasCellStop)
-					r.Post("/valve", instrumentsHandler.GasCellValve)
-					r.Put("/safety/a5-max", instrumentsHandler.GasCellA5Max)
-					r.Post("/safety/a5-clear", instrumentsHandler.GasCellA5Clear)
-				})
+		r.Get("/{id}/status", instrumentsHandler.InstrumentStatus)
+		r.Post("/{id}/nl-commands", instrumentsHandler.InterpretCommand)
+		r.Get("/gascell/status", instrumentsHandler.GasCellStatus)
+		r.Route("/gascell", func(r chi.Router) {
+			r.Group(func(r chi.Router) {
+				r.Use(mw.RequireRole(auth.RoleMaintainer, auth.RoleAdmin))
+				r.Post("/params", instrumentsHandler.GasCellParams)
+				r.Post("/start", instrumentsHandler.GasCellStart)
+				r.Post("/stop", instrumentsHandler.GasCellStop)
+				r.Post("/valve", instrumentsHandler.GasCellValve)
+				r.Put("/safety/a5-max", instrumentsHandler.GasCellA5Max)
+				r.Post("/safety/a5-clear", instrumentsHandler.GasCellA5Clear)
 			})
-			r.Get("/{id}/status", instrumentsHandler.InstrumentStatus)
-			r.Post("/{id}/nl-commands", instrumentsHandler.InterpretCommand)
+		})
 			r.Post("/{id}/emergency-stop", instrumentsHandler.EmergencyStop)
 			r.With(mw.RequireRole(auth.RoleMaintainer, auth.RoleAdmin)).Post("/{id}/commands", instrumentsHandler.ExecuteCommand)
 			r.Route("/piezo", func(r chi.Router) {

@@ -136,7 +136,7 @@ async function load() {
   loading.value = true
   try {
     const data = await listAgentCandidates({ status: status.value, page: page.value, per_page: perPage })
-    candidates.value = data.items
+    candidates.value = data.items ?? []
     total.value = data.total
   } catch (err) {
     ElMessage.error(err instanceof Error ? err.message : '候选列表加载失败')
