@@ -8,51 +8,44 @@
 
 ## 1. 项目全貌
 
-本项目正在把现有的单人 SQLite + ELOG 实验室日志系统，逐步扩展为多人协作的模块化实验室日志平台。
+HIAF 低温气体靶实验室的多人协作日志管理平台。系统已完成从单机 SQLite/ELOG 到全栈模块化架构的过渡。
 
-目标部署环境是 IMP/HIAF 内网 Rocky Linux 物理机，采用 Docker Compose 单机全栈；外网访问通过 frp + VPS + Nginx HTTPS。
+部署环境是 IMP/HIAF 内网 Rocky Linux 物理机，采用 Docker Compose 单机全栈；外网访问通过 frp + VPS + Nginx HTTPS。
 
-核心目标：
+核心能力：
 
-- 多人日志录入、Issue、经验库、计划、项目维度管理。
+- 多人日志录入、Issue、经验库、项目维度管理。
 - AI Agent 辅助解析、分类、生成候选内容，但不得绕过权限、审计和人工审批边界。
-- 传感器/EPICS/PLC 数据接入和仪器控制能力逐步加入。
-- 从当前 SQLite/ELOG 过渡到 PostgreSQL，不破坏现有可用数据链路。
+- 传感器/EPICS/PLC 数据接入和仪器控制。
+- InfluxDB 时序数据存储 + Grafana 监控仪表盘。
+- EPICS 通道访问网关 + 虚拟 IOC（pyEpics 模拟硬件 PV）。
+- ntfy 消息通知。
 
 ## 2. 当前仓库状态
 
-当前仓库仍处在“设计完成、Phase 1 待启动/过渡期”状态，不是目标目录结构已经全部落地的成品项目。
-
-当前 GitHub 仓库已有：
+系统已全部落地运行。当前 GitHub 仓库：
 
 - `docs/`：API、权限审计、仪器安全、项目设计、Agent 策略、维护策略等设计文档。
-- `AGENTS.md`：AI 编程助手入口。
+- `go-server/`：Go 后端，14+ 业务模块。
+- `web-ui/`：Vue 3 + Element Plus 前端，9 个页面。
+- `py-agent/`：Python LightAgent 服务 + EPICS 虚拟 IOC。
+- `migrations/`：PostgreSQL 迁移脚本（21 个版本）。
+- `deploy/`：Docker Compose（10 个服务）、Dockerfile、secrets。
 - `.github/workflows/ci.yml`：Go、前端、Python Agent 三个 CI job。
-- 目标目录的占位文件：`go-server/`、`web-ui/`、`py-agent/`、`migrations/`、`deploy/`。
-
-历史单机 SQLite/ELOG 链路可能存在于迁移前的本地工作目录或备份中，但不应直接提交数据库、附件、备份或含凭据配置到 GitHub。
-
-目标但未必已存在：
-
-- `go-server/`：Go 后端。
-- `web-ui/`：Vue 3 前端。
-- `py-agent/`：LightAgent 服务。
-- `migrations/`：PostgreSQL 迁移。
-- `deploy/`：Docker Compose、frp、Nginx 配置。
-
-如果这些目录不存在，不要假设它们已经实现；按设计文档创建最小可运行版本。
 
 ## 3. 技术栈
 
 | 层 | 技术 |
 |----|------|
-| 当前存量 | Python 3 + SQLite + ELOG |
-| 后端目标 | Go 1.22+，chi 路由，标准库 `net/http` |
-| 数据库目标 | PostgreSQL 16 |
-| 前端目标 | Vue 3 + Element Plus，Vite 标准多文件构建（路由懒加载 + vendor 分包） |
+| 后端 | Go 1.22+，chi 路由，标准库 `net/http` |
+| 数据库 | PostgreSQL 16，golang-migrate/migrate |
+| 前端 | Vue 3 + Element Plus，Vite 单文件构建（JS/CSS 全部内联进 index.html，go:embed 嵌入） |
 | AI Agent | Python 3.11+，LightAgent (`wanxingai/lightagent`) |
-| 部署 | Docker Compose，Rocky Linux 单机，frp + VPS |
+| 时序库 | InfluxDB 2.x |
+| 监控 | Grafana |
+| EPICS | EPICS CA 网关 + pyEpics 虚拟 IOC |
 | 消息/告警 | ntfy（紧急），MeoW（日常） |
+| 部署 | Docker Compose，Rocky Linux 单机，frp + VPS |
 
 ## 4. 开发前必须阅读
 
@@ -74,9 +67,7 @@
 
 如果文档名和实际文件不一致，先用 `rg --files` 查找，不要凭记忆创建重复文档。
 
-## 5. 目标目录结构
-
-新功能按下列目标结构推进；不存在的目录由对应任务创建。
+## 5. 目录结构
 
 ```text
 hiaf-lab-system/
@@ -86,18 +77,28 @@ hiaf-lab-system/
 │   ├── logs/               # 日志管理模块
 │   ├── issues/             # 问题管理模块
 │   ├── experiences/        # 经验库模块
-│   ├── plans/              # 计划管理模块
 │   ├── projects/           # 项目管理模块
+│   ├── instruments/        # 仪器控制模块 (含白名单校验)
 │   ├── sensors/            # 传感器数据模块
-│   ├── instruments/        # 仪器控制模块
-│   ├── qa/                 # AI 问答模块
+│   ├── assembly/           # 装配/组装模块
+│   ├── runs/               # 实验运行模块
+│   ├── rfmatch/            # RF 匹配模块
+│   ├── agent/              # Agent 交互模块
+│   ├── audit/              # 审计日志模块
+│   ├── attachments/        # 附件管理模块
+│   ├── notify/             # 消息通知模块
+│   ├── epics-gateway/      # EPICS 通道访问网关
 │   ├── middleware/         # JWT、权限、审计、日志中间件
 │   └── common/             # DB、响应、错误、request_id 等共享工具
-├── py-agent/               # Python Agent，LightAgent 工具只调 Go REST API
-├── web-ui/                 # Vue 3 前端，npm run build 后把 dist 全量同步到 go-server/static（go:embed 嵌入，必须随提交更新）
+├── py-agent/               # Python Agent
+│   ├── tools/              # LightAgent 工具函数 (只调 Go REST API)
+│   ├── prompts/            # Prompt 模板
+│   ├── ioc/                # EPICS 虚拟 IOC (pyEpics 模拟硬件 PV)
+│   └── tests/              # 测试
+├── web-ui/                 # Vue 3 前端
 ├── migrations/             # PostgreSQL 迁移脚本
 ├── deploy/                 # Docker Compose、frp、Nginx 配置
-├── images/                 # 运行时图片附件目录，占位可提交，实际附件不提交
+├── images/                 # 运行时图片附件目录
 └── AGENTS.md               # 本文件
 ```
 
@@ -157,7 +158,7 @@ go-server/<module>/
 - 权限按钮隐藏只是 UX，后端仍必须强校验。
 - 列表页必须处理加载中、空、错误三种状态。
 - 表单提交要显示后端返回的 `request_id`，便于追审计日志。
-- 不把 access token 放入 `localStorage`。
+- 不把 access token 放入 `localStorage`（使用 HttpOnly Cookie）。
 
 ### Python / Agent
 
@@ -179,35 +180,21 @@ go-server/<module>/
 
 ## 7. 本地快速启动
 
-### 当前 SQLite/Python 链路
-
-这条链路只适用于迁移前的历史本地副本。如果当前仓库没有 `lab_db.py` 和对应 schema，不要为验证而临时重建旧链路。
+### Docker Compose（推荐）
 
 ```bash
-python3 - <<'PY'
-from lab_db import LabDB
-db = LabDB()
-print("lab_env.db and gas_cell.db ready")
-PY
+# 1. 配置环境变量
+cp deploy/.env.example deploy/.env
+# 编辑 .env，填入 DEEPSEEK_API_KEY 和其他必要配置
+
+# 2. 一键启动全部服务
+docker compose -f deploy/docker-compose.yml up -d
 ```
 
-可选：验证 ELOG 配置是否存在。
+### 单独开发 Go 后端
 
 ```bash
-python3 - <<'PY'
-import json
-from pathlib import Path
-p = Path("elog_config.json")
-print(json.loads(p.read_text()) if p.exists() else "elog_config.json not found")
-PY
-```
-
-### 目标 PostgreSQL 链路
-
-只有在已经创建 `migrations/` 和 Go 后端后才运行这组命令。
-
-```bash
-# 1. 启动 PostgreSQL
+# 需要本地 PostgreSQL
 docker rm -f lab-pg 2>/dev/null || true
 docker run -d --name lab-pg \
   -e POSTGRES_DB=lab \
@@ -216,19 +203,19 @@ docker run -d --name lab-pg \
   -p 5432:5432 \
   postgres:16
 
-# 2. 运行迁移
+# 运行迁移
 for f in migrations/*.sql; do
   [ -e "$f" ] || { echo "no migrations/*.sql"; break; }
   PGPASSWORD=lab psql -h 127.0.0.1 -U lab -d lab -v ON_ERROR_STOP=1 -f "$f"
 done
 
-# 3. 启动 Go 后端
+# 启动 Go 后端
 cd go-server
 go test ./...
 go run .
 ```
 
-### 目标前端链路
+### 单独开发前端
 
 ```bash
 cd web-ui
@@ -236,7 +223,7 @@ npm ci
 npm run dev
 ```
 
-### 目标 Agent 链路
+### 单独开发 Agent
 
 ```bash
 cd py-agent
@@ -249,9 +236,9 @@ python worker.py
 ## 8. PR 前检查清单
 
 - [ ] 已阅读本次任务对应的设计文档。
-- [ ] `go test ./...` 通过（如有 `go-server/`）。
-- [ ] `go vet ./...` 无警告（如有 `go-server/`）。
-- [ ] 前端构建/检查通过（如有 `web-ui/`）。
+- [ ] `go test ./...` 通过。
+- [ ] `go vet ./...` 无警告。
+- [ ] 前端构建/检查通过。
 - [ ] 前端产物已全量同步到 `go-server/static/` 并随提交更新（embed 只打包仓库内文件，缺 assets 会导致白屏）。
 - [ ] 新 API 与 `api-contract.md` 一致。
 - [ ] 写接口要求 `Idempotency-Key`。
@@ -264,8 +251,7 @@ python worker.py
 
 ## 9. 对 AI 编程助手的工作要求
 
-- 先确认当前仓库实际状态，再决定是修改存量 Python/SQLite，还是创建目标 Go/Vue/PostgreSQL 模块。
-- 不要因为目标架构存在，就重写当前可用链路；过渡期改动要保持 SQLite/ELOG 可回滚。
+- 先确认当前仓库实际状态再动手。
 - 代码改动尽量小，优先复用已有设计和本仓库已有代码。
 - 涉及仪器控制、权限、审计、Agent 自动操作时，宁可多读文档，不要靠猜。
 - 发现文档与代码不一致时，在改动中同步修正文档或在提交说明里明确指出。
