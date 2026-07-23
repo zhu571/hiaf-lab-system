@@ -41,7 +41,7 @@ api.interceptors.request.use((config) => {
   const method = (config.method || 'get').toUpperCase()
   if (!['GET', 'HEAD', 'OPTIONS'].includes(method)) {
     config.headers.set('Idempotency-Key', newIdempotencyKey())
-    csrfToken ||= decodeURIComponent(csrfFromCookie() || '')
+    csrfToken = decodeURIComponent(csrfFromCookie() || '')
     if (csrfToken) config.headers.set('X-CSRF-Token', csrfToken)
   }
   return config
@@ -95,4 +95,9 @@ api.interceptors.response.use(
 export async function request<T>(config: AxiosRequestConfig) {
   const response = await api.request<Envelope<T>>(config)
   return response.data.data
+}
+
+export async function requestWithMeta<T>(config: AxiosRequestConfig) {
+  const response = await api.request<Envelope<T>>(config)
+  return { data: response.data.data, requestId: response.data.request_id }
 }

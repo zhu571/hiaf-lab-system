@@ -427,6 +427,37 @@ IOC 心跳上报。
 
 紧急停止。任何已登录成员可触发，必须写审计。
 
+### `POST /api/v1/instruments/{instrument_id}/nl-commands`
+
+把自然语言翻译为白名单候选命令，不执行仪器操作。登录用户可调用，仍需
+`Idempotency-Key`；每用户最多 10 次/分钟。响应包含 `command`、规范化
+`params`、`risk`、`scpi_preview` 和确定性 `validation`。只有后续显式调用
+`/commands` 才会执行，yellow 命令仍要求人工确认和 maintainer/admin 权限。
+
+### GasCell 控制对象（v2 MVP）
+
+对象权限契约：`object_type=instrument`、`object_id=gascell`、写动作
+`control_yellow`。P3 MVP 先将对象授权映射到 `maintainer/admin` 角色并在
+middleware 与 instruments service 双重校验；租约与独立 ACL 后续接入时保持 API
+路径和动作名不变。所有写接口要求 `Idempotency-Key` 并经过审计中间件。
+
+| 方法 | 路径 | 说明 |
+|---|---|---|
+| GET | `/api/v1/instruments/gascell/status` | 聚合 PV 快照 |
+| GET | `/api/v1/ws/gascell` | SSE，帧为 `snapshot/update + seq + epoch + data` |
+| POST | `/api/v1/instruments/gascell/params` | 写入 `setpoint/kp/ki` 子集 |
+| POST | `/api/v1/instruments/gascell/start` / `stop` | 启停 IOC PI |
+| POST | `/api/v1/instruments/gascell/valve` | PI 停止时写手动阀位 |
+| PUT | `/api/v1/instruments/gascell/safety/a5-max` | 修改 A5 上限 |
+| POST | `/api/v1/instruments/gascell/safety/a5-clear` | 清除 A5 锁存 |
+
+每次写入后立即 GET 回读，并按 `gascell-pv-ranges.yaml` 的
+`readback_tolerance` 比对。写入已发送但回读失败或不一致时响应仍成功，同时返回
+`warning`，供页面醒目提示并由审计记录。
+
+旧 `/api/v1/instruments/piezo/*` 已废弃，响应携带 `Deprecation: true`、
+`Sunset` 与 successor `Link`；替代接口为上述 GasCell API。
+
 ## 3.9 Agent 模块
 
 ### `POST /api/v1/agent/tasks`

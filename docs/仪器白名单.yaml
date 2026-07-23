@@ -1,5 +1,5 @@
 # 仪器控制白名单
-version: "2026-07-14-v2"
+version: "2026-07-21-v3"
 policy:
   module_boundary: "instrument service only accepts command names from this whitelist; raw SCPI is forbidden"
   yellow_requires:
@@ -166,16 +166,14 @@ e5063a:
       risk: yellow
       lock: "instrument:e5063a:write"
       timeout_ms: 15000
-      scpi: "MMEM:STOR:SCREEN \"{path}\""
+      scpi: "MMEM:STOR:SCREEN \"D:/screenshots/{label}.png\""
       params:
-        path:
+        label:
           type: string
-          max_len: 128
-          allow_prefixes: ["D:/screenshots/"]
-          allow_extensions: [".png", ".jpg", ".bmp"]
+          max_len: 64
           deny_patterns: ["..", "\\", "\u0000", "\r", "\n"]
-          regex: "^D:/screenshots/[A-Za-z0-9._-]+\\.(png|jpg|bmp)$"
-          default_dir: "D:/screenshots/"
+          regex: "^[A-Za-z0-9_-]+$"
+          default: "capture"
 
     # --- 🔴 危险操作：拒绝 ---
     - name: reset
@@ -368,3 +366,75 @@ hioki_im3536:
       risk: red
       scpi: "CORRection:LOAD"
       reject_reason: "需人工连接标准负载，不能远程执行"
+
+# ====================
+# Keysight 33210A — 函数/任意波形发生器
+# 地址由 KEYSIGHT_33210A_ADDR 在部署环境显式启用；未配置时不会创建 worker。
+# ====================
+keysight_33210a:
+  name: "Keysight 33210A"
+  type: "function_generator"
+  interface: "lan_scpi"
+  optional: true
+  terminator: "\n"
+
+  commands:
+    - name: identify
+      description: "读取仪器标识"
+      risk: green
+      scpi: "*IDN?"
+
+    - name: read_frequency
+      description: "读取输出频率"
+      risk: green
+      scpi: "FREQuency?"
+
+    - name: read_output_voltage
+      description: "读取输出幅度"
+      risk: green
+      scpi: "VOLTage?"
+
+    - name: read_output_state
+      description: "读取输出开关状态"
+      risk: green
+      scpi: "OUTPut?"
+
+    - name: set_output_frequency
+      description: "设置输出频率"
+      risk: yellow
+      lock: "instrument:keysight_33210a:write"
+      timeout_ms: 5000
+      scpi: "FREQuency {frequency_hz}"
+      params:
+        frequency_hz: { type: float, min: 1, max: 10_000_000, unit: Hz, default: 1000 }
+
+    - name: set_output_voltage
+      description: "设置输出幅度（Vpp，保守上限 5 Vpp）"
+      risk: yellow
+      lock: "instrument:keysight_33210a:write"
+      timeout_ms: 5000
+      build: |
+        VOLTage:UNIT VPP;
+        VOLTage {voltage_vpp}
+      params:
+        voltage_vpp: { type: float, min: 0.01, max: 5.0, unit: Vpp, default: 0.1 }
+
+    - name: output_on
+      description: "开启信号输出"
+      risk: yellow
+      lock: "instrument:keysight_33210a:write"
+      timeout_ms: 5000
+      scpi: "OUTPut ON"
+
+    - name: output_off
+      description: "关闭信号输出"
+      risk: yellow
+      lock: "instrument:keysight_33210a:write"
+      timeout_ms: 5000
+      scpi: "OUTPut OFF"
+
+    - name: reset
+      description: "复位到出厂默认"
+      risk: red
+      scpi: "*RST"
+      reject_reason: "会改变波形、频率、幅度和输出状态，需人工现场操作"
