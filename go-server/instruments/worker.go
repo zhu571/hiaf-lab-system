@@ -2,7 +2,6 @@ package instruments
 
 import (
 	"fmt"
-	"strings"
 	"sync"
 	"time"
 
@@ -203,18 +202,9 @@ func (w *InstrumentWorker) buildSCPI(cmd *QueueCommand) (string, error) {
 		}
 	}
 
-	def, err := GetCommand(w.cfg.InstrumentID, cmd.Name)
-	if err != nil {
-		return "", err
-	}
-	template := def.Build
-	if template == "" {
-		template = def.SCPI
-	}
-	for name, value := range cmd.Params {
-		template = strings.ReplaceAll(template, "{"+name+"}", fmt.Sprint(value))
-	}
-	return template, nil
+	scpi, normalized, err := RenderSCPI(w.cfg.InstrumentID, cmd.Name, cmd.Params)
+	cmd.Params = normalized
+	return scpi, err
 }
 
 func (w *InstrumentWorker) rateLimitExceeded(now time.Time) bool {

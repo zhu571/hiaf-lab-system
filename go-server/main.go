@@ -122,6 +122,11 @@ func main() {
 		"e5063a":       e5063aWorker,
 		"hioki_im3536": hiokiWorker,
 	}
+	if addr := os.Getenv("KEYSIGHT_33210A_ADDR"); addr != "" {
+		workers["keysight_33210a"] = instruments.NewInstrumentWorker(instruments.WorkerConfig{
+			InstrumentID: "keysight_33210a", Addr: addr, Terminator: "\n",
+		})
+	}
 	for id, worker := range workers {
 		if err := worker.Start(); err != nil {
 			slog.Warn("instrument worker unavailable", "instrument_id", id, "error", err)
@@ -331,7 +336,20 @@ func main() {
 			r.Use(mw.Audit(db))
 			r.Get("/", instrumentsHandler.ListInstruments)
 			r.Get("/whitelist", instrumentsHandler.GetWhitelist)
-			r.Get("/{id}/status", instrumentsHandler.InstrumentStatus)
+		r.Get("/{id}/status", instrumentsHandler.InstrumentStatus)
+		r.Post("/{id}/nl-commands", instrumentsHandler.InterpretCommand)
+		r.Get("/gascell/status", instrumentsHandler.GasCellStatus)
+		r.Route("/gascell", func(r chi.Router) {
+			r.Group(func(r chi.Router) {
+				r.Use(mw.RequireRole(auth.RoleMaintainer, auth.RoleAdmin))
+				r.Post("/params", instrumentsHandler.GasCellParams)
+				r.Post("/start", instrumentsHandler.GasCellStart)
+				r.Post("/stop", instrumentsHandler.GasCellStop)
+				r.Post("/valve", instrumentsHandler.GasCellValve)
+				r.Put("/safety/a5-max", instrumentsHandler.GasCellA5Max)
+				r.Post("/safety/a5-clear", instrumentsHandler.GasCellA5Clear)
+			})
+		})
 			r.Post("/{id}/emergency-stop", instrumentsHandler.EmergencyStop)
 			r.With(mw.RequireRole(auth.RoleMaintainer, auth.RoleAdmin)).Post("/{id}/commands", instrumentsHandler.ExecuteCommand)
 			r.Route("/piezo", func(r chi.Router) {
@@ -344,6 +362,10 @@ func main() {
 				})
 			})
 		})
+	})
+	r.Route("/api/v1/ws", func(r chi.Router) {
+		r.Use(mw.AuthRequired)
+		r.Get("/gascell", instrumentsHandler.GasCellStream)
 	})
 	r.Route("/api/v1/sensors", func(r chi.Router) {
 		r.Use(mw.AuthRequired)
