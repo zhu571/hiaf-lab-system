@@ -101,6 +101,7 @@
 <script setup lang="ts">
 import { onMounted, ref } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
+import { showApiError } from '../composables/useNotify'
 import StatusBadge from '../components/StatusBadge.vue'
 import { approveCandidate, listAgentCandidates, rejectCandidate, type AgentCandidate } from '../api/agent'
 
@@ -139,7 +140,7 @@ async function load() {
     candidates.value = data.items ?? []
     total.value = data.total
   } catch (err) {
-    ElMessage.error(err instanceof Error ? err.message : '候选列表加载失败')
+    showApiError(err, '候选列表加载失败')
   } finally {
     loading.value = false
   }
@@ -191,7 +192,7 @@ async function approve(row: AgentCandidate) {
     drawer.value = false
     await load()
   } catch (err) {
-    ElMessage.error(err instanceof Error ? err.message : '批准失败')
+    showApiError(err, '批准失败')
   }
 }
 
@@ -210,7 +211,7 @@ async function reject() {
     drawer.value = false
     await load()
   } catch (err) {
-    ElMessage.error(err instanceof Error ? err.message : '拒绝失败')
+    showApiError(err, '拒绝失败')
   }
 }
 </script>

@@ -37,6 +37,7 @@
 import { onMounted, ref } from 'vue'
 import { useRoute } from 'vue-router'
 import { ElMessage } from 'element-plus'
+import { showApiError } from '../composables/useNotify'
 import StatusBadge from '../components/StatusBadge.vue'
 import { getReport, type DailyReport } from '../api/logs'
 
@@ -49,7 +50,7 @@ onMounted(async () => {
   try {
     report.value = await getReport(route.params.id as string)
   } catch (err) {
-    ElMessage.error(err instanceof Error ? err.message : '日报加载失败')
+    showApiError(err, '日报加载失败')
   } finally {
     loading.value = false
   }

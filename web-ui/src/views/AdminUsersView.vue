@@ -127,6 +127,7 @@
 <script setup lang="ts">
 import { computed, onMounted, reactive, ref } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
+import { showApiError } from '../composables/useNotify'
 import { Search } from '@element-plus/icons-vue'
 import { createUser, listUsers, resetPassword, updateUser, type UserInfo } from '../api/auth'
 import { useAuthStore } from '../stores/auth'
@@ -215,7 +216,7 @@ async function confirmRoleChange() {
     roleDialog.value = false
     await load()
   } catch (err) {
-    ElMessage.error(err instanceof Error ? err.message : '角色更新失败')
+    showApiError(err, '角色更新失败')
   } finally {
     saving.value = false
   }
@@ -235,7 +236,7 @@ async function reset(row: UserInfo) {
     passwordDialog.value = true
     await load()
   } catch (err) {
-    ElMessage.error(err instanceof Error ? err.message : '重置密码失败')
+    showApiError(err, '重置密码失败')
   }
 }
 
@@ -254,7 +255,7 @@ async function toggleDisabled(row: UserInfo) {
     ElMessage.success(`已${action}`)
     await load()
   } catch (err) {
-    ElMessage.error(err instanceof Error ? err.message : `${action}失败`)
+    showApiError(err, `${action}失败`)
   }
 }
 
@@ -276,7 +277,7 @@ async function create() {
     draft.password = ''
     await load()
   } catch (err) {
-    ElMessage.error(err instanceof Error ? err.message : '创建用户失败')
+    showApiError(err, '创建用户失败')
   } finally {
     saving.value = false
   }

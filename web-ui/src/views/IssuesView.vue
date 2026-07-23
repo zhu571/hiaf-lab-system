@@ -55,6 +55,7 @@
 import { computed, onMounted, reactive, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
+import { showApiError } from '../composables/useNotify'
 import StatusBadge from '../components/StatusBadge.vue'
 import CommentSection from '../components/CommentSection.vue'
 import { addIssueComment, createIssue, getIssue, listIssues, transitionIssue, type Issue } from '../api/issues'
@@ -108,7 +109,7 @@ async function transition() {
     await load()
     await open(id)
   } catch (err) {
-    ElMessage.error(err instanceof Error ? err.message : '状态更新失败')
+    showApiError(err, '状态更新失败')
   }
 }
 

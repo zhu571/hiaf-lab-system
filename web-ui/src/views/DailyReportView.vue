@@ -81,6 +81,7 @@
 <script setup lang="ts">
 import { computed, onMounted, reactive, ref } from 'vue'
 import { ElMessage } from 'element-plus'
+import { showApiError } from '../composables/useNotify'
 import { Paperclip } from '@element-plus/icons-vue'
 import StatusBadge from '../components/StatusBadge.vue'
 import { createLog, submitReport, todayReport, updateLog, updateReportRawText, type DailyReport, type LogItem } from '../api/logs'
@@ -178,7 +179,7 @@ async function saveLog() {
     report.value = await todayReport()
     logDialog.value = false
   } catch (err) {
-    ElMessage.error(err instanceof Error ? err.message : '保存日志失败')
+    showApiError(err, '保存日志失败')
   }
 }
 
@@ -188,7 +189,7 @@ async function confirmLog(id: string) {
     report.value = await todayReport()
     ElMessage.success('日志已确认')
   } catch (err) {
-    ElMessage.error(err instanceof Error ? err.message : '确认日志失败')
+    showApiError(err, '确认日志失败')
   }
 }
 

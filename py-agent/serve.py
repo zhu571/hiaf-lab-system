@@ -12,6 +12,10 @@ from starlette.routing import Route
 from tools.parse import InstrumentInterpreter, ParseError
 
 
+HOST_DEFAULT = os.getenv("PY_AGENT_HOST", "127.0.0.1")
+PORT_DEFAULT = int(os.getenv("PY_AGENT_PORT", "8001"))
+
+
 def read_token():
     path = os.getenv("PY_AGENT_INTERNAL_TOKEN_FILE")
     if path:
@@ -21,6 +25,16 @@ def read_token():
             import sys
             print(f"WARNING: PY_AGENT_INTERNAL_TOKEN_FILE not found: {path}", file=sys.stderr)
     return os.getenv("PY_AGENT_INTERNAL_TOKEN", "")
+
+
+def _is_valid_history_item(item):
+    if not isinstance(item, dict):
+        return False
+    if item.get("role") not in {"user", "assistant"}:
+        return False
+    if not isinstance(item.get("content"), str):
+        return False
+    return len(item["content"]) <= 1000
 
 
 def validate_request(data):
@@ -34,7 +48,7 @@ def validate_request(data):
     if not isinstance(history, list) or len(history) > 10:
         raise ValueError("history is invalid")
     for item in history:
-        if not isinstance(item, dict) or item.get("role") not in {"user", "assistant"} or not isinstance(item.get("content"), str) or len(item["content"]) > 1000:
+        if not _is_valid_history_item(item):
             raise ValueError("history item is invalid")
     if not isinstance(commands, list) or not commands or len(commands) > 100:
         raise ValueError("whitelist_commands is invalid")
@@ -75,4 +89,4 @@ if __name__ == "__main__":
     if not api_key:
         raise RuntimeError("DEEPSEEK_API_KEY environment variable is not set")
     app = create_app(InstrumentInterpreter(api_key), read_token())
-    uvicorn.run(app, host="0.0.0.0", port=8001)
+    uvicorn.run(app, host=HOST_DEFAULT, port=PORT_DEFAULT)

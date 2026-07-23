@@ -69,6 +69,7 @@ import {
   type ChartDataset
 } from 'chart.js'
 import { ElMessage, ElMessageBox } from 'element-plus'
+import { showApiError } from '../composables/useNotify'
 import {
   gasCellA5Clear,
   gasCellA5Max,
@@ -224,7 +225,7 @@ async function write(action: () => Promise<PVWriteResult | PVWriteResult[]>, suc
     warnings.length ? ElMessage.warning(warnings.join('；')) : ElMessage.success(success)
     await refreshSnapshot()
   } catch (err) {
-    ElMessage.error(err instanceof Error ? err.message : '写入失败')
+    showApiError(err, '写入失败')
   } finally {
     writeBusy.value = false
   }
