@@ -6,6 +6,7 @@ pvs:
   GasCell:Piezo:Setpoint: {type: float, min: 0, max: 10000, unit: Pa, readback_tolerance: 0.01, risk: yellow, writable: true}
   GasCell:Piezo:Kp: {type: float, min: 0, max: 1, unit: percent_per_Pa, readback_tolerance: 0.0001, risk: yellow, writable: true}
   GasCell:Piezo:Ki: {type: float, min: 0, max: 1, unit: percent_per_Pa_second, readback_tolerance: 0.0001, risk: yellow, writable: true}
+  GasCell:Piezo:Kd: {type: float, min: 0, max: 1, unit: percent_per_Pa, readback_tolerance: 0.0001, risk: yellow, writable: true}
   GasCell:Piezo:Error: {type: string, min: 0, max: 256, unit: text, readback_tolerance: 0, risk: green, writable: false}
   GasCell:Piezo:Delta: {type: float, min: -100, max: 100, unit: Pa, readback_tolerance: 0.01, risk: green, writable: false}
   GasCell:Piezo:Cycle: {type: int, min: 0, max: 2147483647, unit: count, readback_tolerance: 0, risk: green, writable: false}
