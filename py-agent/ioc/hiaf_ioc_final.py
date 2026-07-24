@@ -383,8 +383,10 @@ class HiafGasCellIOC(PVGroup):
             loop_start = time.monotonic()
             try:
                 if self._opc is None or self._valve_node is None:
-                    await asyncio.sleep(hiaf_config.SENSOR_POLL_SEC)
-                    continue
+                    await self._ensure_connected()
+                    if self._opc is None or self._valve_node is None:
+                        await asyncio.sleep(hiaf_config.SENSOR_POLL_SEC)
+                        continue
 
                 # Read all 27 sensors in parallel
                 tasks = [
