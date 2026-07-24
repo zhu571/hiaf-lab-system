@@ -4,6 +4,7 @@
 
 import json, sys, time
 from http.server import HTTPServer, BaseHTTPRequestHandler
+from urllib.parse import urlparse, parse_qs
 from epics import caget, caput
 
 HOST, PORT = "0.0.0.0", 5070
@@ -52,7 +53,10 @@ class Handler(BaseHTTPRequestHandler):
         return val, False
 
     def do_GET(self):
-        pv = self.path.strip("/")
+        parsed = urlparse(self.path)
+        if parsed.path.strip("/") == "batch":
+            return self._get_batch(parsed)
+        pv = parsed.path.strip("/")
         if not pv:
             return self._ok({"status": "ok"})
         if pv not in WL or not WL[pv][0]:
@@ -62,6 +66,19 @@ class Handler(BaseHTTPRequestHandler):
             self._ok({"pv": pv, "value": val if val is not None else None, "cached": cached})
         except Exception as e:
             self._err(502, str(e))
+
+    def _get_batch(self, parsed):
+        names = [n for n in parse_qs(parsed.query).get("pvs", [""])[0].split(",") if n]
+        if not names:
+            return self._err(400, "missing pvs query parameter")
+        for pv in names:
+            if pv not in WL or not WL[pv][0]:
+                return self._err(403, f"PV not in read whitelist: {pv}")
+        try:
+            values = caget(names, timeout=3)
+        except Exception as e:
+            return self._err(502, str(e))
+        self._ok({"values": {pv: val for pv, val in zip(names, values)}})
 
     def do_POST(self):
         pv = self.path.strip("/")
