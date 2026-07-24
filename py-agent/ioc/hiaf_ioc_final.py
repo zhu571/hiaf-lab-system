@@ -359,12 +359,8 @@ class HiafGasCellIOC(PVGroup):
         self._last_callback_ts: list[float] = [0.0]
         self._data_loss_cnt: int = 0
         self._subscription_healthy: bool = False
-        # nodeid → tag lookup (built once)
+        # nodeid → tag lookup (built at subscription time, not __init__)
         self._nodeid_to_tag: dict[str, str] = {}
-        for tag, pv in self._sensor_pvs.items():
-            src = pv.source_node
-            if src is not None and hasattr(src, "nodeid"):
-                self._nodeid_to_tag[str(src.nodeid)] = tag
 
         # R5: ntfy alert dedup
         self._last_ntfy_disconnect_warn = 0.0
@@ -796,6 +792,12 @@ class HiafGasCellIOC(PVGroup):
         if self._opc is None or not self._sensor_nodes:
             return
         try:
+            # Rebuild nodeid→tag mapping (source_node only valid at IOC runtime)
+            self._nodeid_to_tag.clear()
+            for tag, pv in self._sensor_pvs.items():
+                src = pv.source_node
+                if src is not None and hasattr(src, "nodeid"):
+                    self._nodeid_to_tag[str(src.nodeid)] = tag
             self._sub_handler = _SensorSubHandler(self._nodeid_to_tag, self._sub_queue, self._last_callback_ts)
             sub_obj = await self._opc.create_subscription(100, self._sub_handler)
             node_ids = []
