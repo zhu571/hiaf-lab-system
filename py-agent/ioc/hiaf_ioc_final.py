@@ -32,7 +32,6 @@ from caproto import AlarmSeverity, AlarmStatus
 from caproto.server import PVGroup, pvproperty, run
 
 from asyncua import Client, ua
-from asyncua.common.subscription import SubHandler
 from hiaf_storage import HiafStorage
 import hiaf_config
 
