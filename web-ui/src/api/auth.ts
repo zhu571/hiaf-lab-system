@@ -16,6 +16,10 @@ type LoginResponse = {
   user: UserInfo
 }
 
+export function register(username: string, password: string): Promise<UserInfo> {
+  return request({ method: 'POST', url: '/auth/register', data: { username, password } })
+}
+
 export async function login(username: string, password: string) {
   const data = await request<LoginResponse>({ url: '/auth/login', method: 'POST', data: { username, password } })
   setCSRFToken(data.csrf_token)
