@@ -85,6 +85,7 @@ services:
     restart: unless-stopped
     ports:
       - "5064:5064"
+      - "5080:5080"
     environment:
       EPICS_CAS_INTF_ADDR_LIST: 0.0.0.0
       EPICS_CAS_SERVER_PORT: "5064"
@@ -94,8 +95,22 @@ services:
       INFLUX_TOKEN_FILE: /run/secrets/influxdb_token
       INFLUX_ORG: ${INFLUXDB_ORG:-lab-org}
       INFLUX_BUCKET: ${INFLUXDB_BUCKET:-lab-bucket}
+      SENSOR_DB_PATH: /data/sensor_history.db
     secrets:
       - influxdb_token
+    volumes:
+      - /opt/lab-monitor/sqlite:/data
+    deploy:
+      resources:
+        limits:
+          cpus: "1.0"
+          memory: "256M"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:5080/health', timeout=3)"]
+      interval: 10s
+      timeout: 3s
+      retries: 3
+      start_period: 5s
     depends_on:
       influxdb:
         condition: service_healthy

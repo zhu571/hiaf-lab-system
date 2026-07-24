@@ -18,6 +18,7 @@ from __future__ import annotations
 import argparse
 import asyncio
 import logging
+import random
 import time
 from datetime import datetime
 from typing import Any
@@ -229,6 +230,12 @@ class HiafGasCellIOC(PVGroup):
         self._valve_node = None
         self._connected: bool | None = None
 
+        # Reconnect backoff state (R1)
+        self._reconnect_backoff = 0.0
+        self._reconnect_base = 1.0
+        self._reconnect_max = 60.0
+        self._reconnect_jitter = 2.0
+
         # Tag → OPC UA node mapping (built after connect)
         self._sensor_nodes: dict[str, Any] = {}
 
@@ -262,6 +269,9 @@ class HiafGasCellIOC(PVGroup):
         # A1 value cache (from OPC UA, shared between sensor poll and PI)
         self._a1_from_opc = 0.0
 
+        # Background task tracking (for graceful shutdown)
+        self._tasks: list[asyncio.Task] = []
+
         # ── Storage (InfluxDB + SQLite) ──
         self._storage = HiafStorage(
             influx_url=hiaf_config.INFLUX_URL,
@@ -289,11 +299,13 @@ class HiafGasCellIOC(PVGroup):
 
     # ── OPC UA connection management ──────────────
     async def _ensure_connected(self) -> bool:
-        """Verify OPC UA connection is alive; reconnect + rebuild nodes if dead."""
+        """Verify OPC UA connection is alive; reconnect + rebuild nodes if dead.
+        Uses exponential backoff with jitter (R1)."""
         if self._opc is not None:
             try:
                 test_node = self._opc.get_node("i=2258")
                 await asyncio.wait_for(test_node.read_value(), timeout=5.0)
+                self._reconnect_backoff = 0.0
                 return True
             except Exception:
                 LOGGER.warning("OPC UA connection lost — reconnecting...")
@@ -303,6 +315,11 @@ class HiafGasCellIOC(PVGroup):
                     LOGGER.debug("disconnect ignored during reconnect")
                 self._valve_node = None
                 self._sensor_nodes.clear()
+
+        # Backoff: exponential with jitter (R1)
+        if self._reconnect_backoff > 0:
+            sleep_sec = self._reconnect_backoff + random.random() * self._reconnect_jitter
+            await asyncio.sleep(sleep_sec)
 
         # (Re)connect
         try:
@@ -319,10 +336,15 @@ class HiafGasCellIOC(PVGroup):
                 node_id = f"ns=1;s=t|{opc_tag}"
                 self._pump_nodes[opc_tag] = self._opc.get_node(node_id)
             self._active_pump_tags = [tag for tag in list(self._pump_nodes.keys())[:20]]
+            self._reconnect_backoff = 0.0
             LOGGER.info("OPC UA connected — %d sensor nodes cached", len(self._sensor_nodes))
             return True
         except Exception as e:
-            LOGGER.error("OPC UA connect failed: %s", e)
+            self._reconnect_backoff = min(
+                self._reconnect_max,
+                max(self._reconnect_base, self._reconnect_backoff * 2) if self._reconnect_backoff > 0 else self._reconnect_base,
+            )
+            LOGGER.error("OPC UA connect failed (backoff=%.1fs): %s", self._reconnect_backoff, e)
             self._opc = None
             return False
 
@@ -339,6 +361,42 @@ class HiafGasCellIOC(PVGroup):
             severity = AlarmSeverity.INVALID_ALARM
         for prop in self._alarm_pvs:
             await prop.alarm.write(status=status, severity=severity)
+
+    # ── Health HTTP server (R2) ──
+    async def _run_health_server(self) -> None:
+        """Minimal HTTP /health endpoint on port 5080."""
+        import asyncio as aio
+
+        async def handle(reader: aio.StreamReader, writer: aio.StreamWriter) -> None:
+            try:
+                request_line = (await reader.readline()).decode("utf-8", errors="replace").strip()
+                while True:
+                    line = await reader.readline()
+                    if line in (b"\r\n", b"\n", b""):
+                        break
+                if "GET /health" in request_line or "GET /" in request_line:
+                    opc_ok = self._opc is not None
+                    caproto_alive = True
+                    status_code = 200 if (opc_ok and caproto_alive) else 503
+                    status_text = "ok" if status_code == 200 else "degraded"
+                    body = '{"status":"' + status_text + '","opc_ua":' + str(opc_ok).lower() + ',"caproto":true}'
+                    resp_text = "OK" if status_code == 200 else "Service Unavailable"
+                    resp = f"HTTP/1.1 {status_code} {resp_text}\r\nContent-Type: application/json\r\nContent-Length: {len(body.encode())}\r\nConnection: close\r\n\r\n{body}"
+                else:
+                    resp = "HTTP/1.1 404 Not Found\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"
+                writer.write(resp.encode())
+            except Exception:
+                pass
+            finally:
+                try:
+                    writer.close()
+                except Exception:
+                    pass
+
+        server = await aio.start_server(handle, "0.0.0.0", 5080)
+        LOGGER.info("Health HTTP server started on port 5080")
+        async with server:
+            await server.serve_forever()
 
     async def _read_pump_tags(self) -> None:
         if not self._pump_nodes:
@@ -475,9 +533,8 @@ class HiafGasCellIOC(PVGroup):
                 continue
 
             try:
-                a1 = await self._safe_read_a1()
+                a1 = self._a1_from_opc
                 self._fail_count = 0
-                self._a1_from_opc = a1
                 await self.Piezo_A1.write(a1)
                 await self._set_connected(True)
 
@@ -563,8 +620,14 @@ class HiafGasCellIOC(PVGroup):
         await self._storage.init_db()
 
         # Launch sensor poll background task
-        asyncio.create_task(self._sensor_poll_loop())
+        task = asyncio.create_task(self._sensor_poll_loop())
+        self._tasks.append(task)
         LOGGER.info("Sensor poll loop started (~%g Hz)", 1.0 / hiaf_config.SENSOR_POLL_SEC)
+
+        # Launch health HTTP server (R2)
+        task = asyncio.create_task(self._run_health_server())
+        self._tasks.append(task)
+        LOGGER.info("Health HTTP server started on port 5080")
 
         # Run PI control loop in the caproto async context
         await self._pi_control_loop(sleep)
@@ -641,6 +704,11 @@ class HiafGasCellIOC(PVGroup):
     @Piezo_Running.shutdown
     async def Piezo_Running(self, instance, async_lib):
         self._running = False
+        for t in self._tasks:
+            t.cancel()
+        if self._tasks:
+            await asyncio.gather(*self._tasks, return_exceptions=True)
+            self._tasks.clear()
         if self._opc is not None:
             try:
                 await self._opc.disconnect()

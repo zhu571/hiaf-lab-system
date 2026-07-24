@@ -42,6 +42,9 @@ class HiafStorage:
 
         self._influx_write_api = None
         self._last_influx_write = 0.0
+        self._pending_influx_points: list = []
+        self._pending_influx_batches = 0
+        self._MAX_PENDING_BATCHES = 2
         try:
             client = InfluxDBClient(
                 url=influx_url, token=influx_token, org=influx_org)
@@ -150,13 +153,8 @@ class HiafStorage:
     ) -> None:
         if self._influx_write_api is None:
             return
-        now = time.monotonic()
-        if now - self._last_influx_write < INFLUX_WRITE_SEC:
-            return
 
-        loop = asyncio.get_event_loop()
         points = []
-
         for tag, pv_name in self._sensor_tags:
             val = sensor_values.get(tag, 0)
             if val != val:
@@ -203,8 +201,20 @@ class HiafStorage:
                     .field("value", float(val))
                 )
 
+        self._pending_influx_points.extend(points)
+        self._pending_influx_batches += 1
+
+        now = time.monotonic()
+        if now - self._last_influx_write < INFLUX_WRITE_SEC and self._pending_influx_batches < self._MAX_PENDING_BATCHES:
+            return
+
+        to_flush = self._pending_influx_points
+        self._pending_influx_points = []
+        self._pending_influx_batches = 0
+
+        loop = asyncio.get_event_loop()
         try:
-            ok = await loop.run_in_executor(None, self._flush_influx, points)
+            ok = await loop.run_in_executor(None, self._flush_influx, to_flush)
             if ok:
                 self._last_influx_write = now
         except Exception as e:
