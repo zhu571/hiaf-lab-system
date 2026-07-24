@@ -24,7 +24,7 @@
       <div class="section-title">
         <div>
           <h2>A1 / 阀位 / Setpoint</h2>
-          <p>最近 120 个有效采样点</p>
+          <p>最近 1200 个有效采样点</p>
         </div>
       </div>
       <div v-if="error" class="state-panel"><el-result icon="error" title="数据加载失败" :sub-title="error" /></div>
@@ -214,7 +214,7 @@ function appendChartPoint() {
   })
   chart.data.labels?.push(new Date().toLocaleTimeString())
   chart.data.datasets.forEach((dataset, index) => dataset.data.push(values[index]))
-  if ((chart.data.labels?.length || 0) > 120) {
+  if ((chart.data.labels?.length || 0) > 1200) {
     chart.data.labels?.shift()
     chart.data.datasets.forEach((dataset) => dataset.data.shift())
   }
