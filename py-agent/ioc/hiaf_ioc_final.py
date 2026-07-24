@@ -410,6 +410,7 @@ class HiafGasCellIOC(PVGroup):
                 self._valve_node = None
                 self._sensor_nodes.clear()
                 self._subscription = None
+                self._subscription_healthy = False
 
         # R5: ntfy alert on prolonged disconnection
         if self._reconnect_backoff >= 30.0 and not self._disconnect_warned:
@@ -592,7 +593,7 @@ class HiafGasCellIOC(PVGroup):
                             await self._send_ntfy(
                                 f"传感器读取失败率 {fail_rate:.0%} ({failed_count}/{total_count})"
                             )
-                            self._last_ntfy_disconnect_warn = now_w
+                            self._last_ntfy_failrate_warn = now_w
 
                 # Also update Piezo:A1 with the Vac:A1 reading
                 a1_val = self._sensor_values.get("直采数据_A1", 0.0)
@@ -731,24 +732,27 @@ class HiafGasCellIOC(PVGroup):
         new_valve = max(hiaf_config.VALVE_MIN, min(hiaf_config.VALVE_MAX, new_valve))
         await self.Piezo_ValveSP.write(new_valve)
 
-    # ── OPC UA safe reads ──
     # ── P1: OPC UA subscription consumer + heartbeat ──
     def _drop_stale(self) -> None:
         items: list[tuple[str, float]] = []
         drained = 0
-        while not self._sub_queue.empty():
+        while True:
             try:
                 items.append(self._sub_queue.get_nowait())
             except asyncio.QueueEmpty:
                 break
             drained += 1
+        if drained == 0:
+            return
         latest: dict[str, tuple[str, float]] = {}
         for tag, val in items:
             latest[tag] = (tag, val)
         for t, v in latest.values():
-            self._sub_queue.put_nowait((t, v))
-        if drained > 0:
-            LOGGER.debug("_drop_stale: merged %d items -> %d", drained, len(latest))
+            try:
+                self._sub_queue.put_nowait((t, v))
+            except asyncio.QueueFull:
+                pass
+        LOGGER.debug("_drop_stale: merged %d items -> %d", drained, len(latest))
 
     async def _consume_sub_queue(self) -> None:
         while True:
@@ -776,7 +780,8 @@ class HiafGasCellIOC(PVGroup):
             if now > 0 and (time.monotonic() - now) > HEARTBEAT_STALL_SEC and self._subscription_healthy:
                 LOGGER.warning("订阅断流30s，触发poll fallback")
                 self._subscription_healthy = False
-                asyncio.create_task(self._maybe_recover_subscription())
+                task = asyncio.create_task(self._maybe_recover_subscription())
+                self._tasks.append(task)
 
     async def _maybe_recover_subscription(self) -> None:
         while not self._subscription_healthy:
@@ -791,8 +796,13 @@ class HiafGasCellIOC(PVGroup):
     async def _setup_subscription(self) -> None:
         if self._opc is None or not self._sensor_nodes:
             return
+        if self._subscription is not None:
+            try:
+                await self._subscription.delete()
+            except Exception:
+                LOGGER.debug("old subscription delete ignored during setup")
+        self._subscription_healthy = False
         try:
-            # Rebuild nodeid→tag mapping from OPC UA sensor nodes
             self._nodeid_to_tag.clear()
             for tag, node in self._sensor_nodes.items():
                 if node is not None:
