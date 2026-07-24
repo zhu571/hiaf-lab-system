@@ -64,16 +64,16 @@ func main() {
 	authSvc := auth.NewService(authRepo, []byte(jwtSecret))
 	authHandler := auth.NewHandler(authSvc)
 	projectsRepo := projects.NewRepository(db)
-	projectsSvc := projects.NewService(projectsRepo)
-	projectsHandler := projects.NewHandler(projectsSvc)
+	issuesRepo := issues.NewRepository(db)
 	logsRepo := logs.NewRepository(db)
+	projectsSvc := projects.NewService(projectsRepo, issuesRepo, logsRepo)
+	projectsHandler := projects.NewHandler(projectsSvc)
 	logsSvc := logs.NewService(logsRepo, "Asia/Shanghai", logs.ProjectAccessAdapter{DB: db, Repo: projectsRepo})
 	logsHandler := logs.NewHandler(logsSvc)
 	auditHandler := audit.NewHandler(db)
 	agentRepo := agent.NewRepository(db)
 	agentSvc := agent.NewService(agentRepo)
 	agentHandler := agent.NewHandler(agentSvc)
-	issuesRepo := issues.NewRepository(db)
 	issuesSvc := issues.NewService(issuesRepo, issues.ProjectAccessAdapter{DB: db, Repo: projectsRepo}, agentSvc)
 	issuesHandler := issues.NewHandler(issuesSvc)
 	experiencesRepo := experiences.NewRepository(db)
@@ -86,15 +86,16 @@ func main() {
 	assemblySvc := assembly.NewService(assemblyRepo, assembly.ProjectAccessAdapter{Repo: projectsRepo})
 	assemblyHandler := assembly.NewHandler(assemblySvc)
 	testDataRepo := testdata.NewRepository(db)
+	selfBase := commonEnv("SELF_BASE_URL", "http://127.0.0.1:"+port)
 	testDataSvc := testdata.NewService(testDataRepo, testdata.ProjectAccessAdapter{Repo: projectsRepo},
-		testdata.NewHTTPRunValidator("http://127.0.0.1:"+port))
+		testdata.NewHTTPRunValidator(selfBase))
 	testDataHandler := testdata.NewHandler(testDataSvc)
 	rfMatchingRepo := rfmatch.NewRepository(db)
 	rfMatchingSvc := rfmatch.NewService(rfMatchingRepo, rfmatch.ProjectAccessAdapter{Repo: projectsRepo})
 	rfMatchingHandler := rfmatch.NewHandler(rfMatchingSvc)
 	attachmentsRepo := attachments.NewRepository(db)
 	attachmentsSvc := attachments.NewService(attachmentsRepo,
-		attachments.NewHTTPPermissionChecker("http://127.0.0.1:"+port),
+		attachments.NewHTTPPermissionChecker(selfBase),
 		commonEnv("ATTACHMENT_DIR", "./uploads/"))
 	attachmentsHandler := attachments.NewHandler(attachmentsSvc)
 	agentSvc.SetExecutor(candidateExecutor{issues: issuesSvc, experiences: experiencesSvc})
@@ -108,14 +109,16 @@ func main() {
 		slog.Error("failed to create instruments service", "error", err)
 		os.Exit(1)
 	}
+	e5063aAddr := commonEnv("E5063A_ADDR", "10.51.12.157:5025")
+	hiokiAddr := commonEnv("HIOKI_IM3536_ADDR", "10.51.12.101:3500")
 	e5063aWorker := instruments.NewInstrumentWorker(instruments.WorkerConfig{
 		InstrumentID: "e5063a",
-		Addr:         "10.51.12.157:5025",
+		Addr:         e5063aAddr,
 		Terminator:   "\n",
 	})
 	hiokiWorker := instruments.NewInstrumentWorker(instruments.WorkerConfig{
 		InstrumentID: "hioki_im3536",
-		Addr:         "10.51.12.101:3500",
+		Addr:         hiokiAddr,
 		Terminator:   "\r\n",
 	})
 	workers := map[string]*instruments.InstrumentWorker{
@@ -183,6 +186,7 @@ func main() {
 		r.Use(mw.AuthRequired)
 		r.Use(mw.AgentContext(db))
 		r.Use(mw.Audit(db))
+		r.Use(mw.RequireIdempotencyKey(db))
 		r.Get("/", logsHandler.ListReports)
 		r.Post("/today", logsHandler.GetOrCreateTodayReport)
 		r.Get("/by-date", logsHandler.GetReportByDate)
@@ -196,6 +200,7 @@ func main() {
 		r.Use(mw.AuthRequired)
 		r.Use(mw.AgentContext(db))
 		r.Use(mw.Audit(db))
+		r.Use(mw.RequireIdempotencyKey(db))
 		r.Get("/", projectsHandler.List)
 		r.Post("/", projectsHandler.Create)
 
@@ -242,6 +247,7 @@ func main() {
 		r.Use(mw.AuthRequired)
 		r.Use(mw.AgentContext(db))
 		r.Use(mw.Audit(db))
+		r.Use(mw.RequireIdempotencyKey(db))
 		r.Route("/{id}", func(r chi.Router) {
 			r.Get("/", runsHandler.GetByID)
 			r.Patch("/", runsHandler.Update)
@@ -254,6 +260,7 @@ func main() {
 		r.Use(mw.AuthRequired)
 		r.Use(mw.AgentContext(db))
 		r.Use(mw.Audit(db))
+		r.Use(mw.RequireIdempotencyKey(db))
 		r.Post("/reorder", assemblyHandler.Reorder)
 		r.Route("/{id}", func(r chi.Router) {
 			r.Get("/", assemblyHandler.GetByID)
@@ -265,6 +272,7 @@ func main() {
 		r.Use(mw.AuthRequired)
 		r.Use(mw.AgentContext(db))
 		r.Use(mw.Audit(db))
+		r.Use(mw.RequireIdempotencyKey(db))
 		r.Route("/{id}", func(r chi.Router) {
 			r.Get("/", testDataHandler.GetByID)
 			r.Patch("/", testDataHandler.Update)
@@ -275,6 +283,7 @@ func main() {
 		r.Use(mw.AuthRequired)
 		r.Use(mw.AgentContext(db))
 		r.Use(mw.Audit(db))
+		r.Use(mw.RequireIdempotencyKey(db))
 		r.Route("/{id}", func(r chi.Router) {
 			r.Get("/", rfMatchingHandler.GetByID)
 			r.Patch("/", rfMatchingHandler.Update)
@@ -285,6 +294,7 @@ func main() {
 		r.Use(mw.AuthRequired)
 		r.Use(mw.AgentContext(db))
 		r.Use(mw.Audit(db))
+		r.Use(mw.RequireIdempotencyKey(db))
 		r.Route("/{id}", func(r chi.Router) {
 			r.Get("/", logsHandler.GetLog)
 			r.Patch("/", logsHandler.UpdateLog)
@@ -294,6 +304,7 @@ func main() {
 		r.Use(mw.AuthRequired)
 		r.Use(mw.AgentContext(db))
 		r.Use(mw.Audit(db))
+		r.Use(mw.RequireIdempotencyKey(db))
 		r.Route("/{id}", func(r chi.Router) {
 			r.Get("/", issuesHandler.GetByID)
 			r.Patch("/", issuesHandler.Update)
@@ -305,6 +316,7 @@ func main() {
 		r.Use(mw.AuthRequired)
 		r.Use(mw.AgentContext(db))
 		r.Use(mw.Audit(db))
+		r.Use(mw.RequireIdempotencyKey(db))
 		r.Get("/", experiencesHandler.List)
 		r.Post("/", experiencesHandler.Create)
 		r.Post("/candidates", experiencesHandler.Create)
@@ -319,6 +331,7 @@ func main() {
 		r.Use(mw.AuthRequired)
 		r.Use(mw.AgentContext(db))
 		r.Use(mw.Audit(db))
+		r.Use(mw.RequireIdempotencyKey(db))
 		r.Get("/", attachmentsHandler.List)
 		r.Post("/", attachmentsHandler.Upload)
 		r.Route("/{id}", func(r chi.Router) {
@@ -334,6 +347,7 @@ func main() {
 			r.Use(mw.AuthRequired)
 			r.Use(mw.AgentContext(db))
 			r.Use(mw.Audit(db))
+			r.Use(mw.RequireIdempotencyKey(db))
 			r.Get("/", instrumentsHandler.ListInstruments)
 			r.Get("/whitelist", instrumentsHandler.GetWhitelist)
 			r.Get("/gascell/status", instrumentsHandler.GasCellStatus)

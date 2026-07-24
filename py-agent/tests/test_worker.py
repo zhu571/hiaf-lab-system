@@ -3,14 +3,12 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-import httpx
-
-
 sys.path.insert(0, str(Path(__file__).parents[1]))
 
-from tools.api import APIError, GoAPI
-from tools.parse import ParseError, _json_array, ensure_safe
-from worker import Worker, to_candidate
+import httpx  # noqa: E402
+from tools.api import APIError, GoAPI  # noqa: E402
+from tools.parse import ParseError, _json_array, ensure_safe  # noqa: E402
+from worker import Worker, to_candidate  # noqa: E402
 
 
 TASK = {"id": "task-1", "report_id": "report-1", "acting_user_id": "user-1"}
@@ -108,7 +106,7 @@ class WorkerTests(unittest.TestCase):
         api = FakeAPI()
         Worker(api, FakeParser()).run_once()
         self.assertTrue(api.completed)
-        self.assertFalse(hasattr(api, "create_issue"))
+        self.assertFalse(getattr(api, "create_issue", None))
 
     def test_complete_uses_stable_idempotency_key(self):
         keys = []
@@ -118,7 +116,7 @@ class WorkerTests(unittest.TestCase):
             return httpx.Response(200, json={"data": {"status": "done"}})
 
         api = GoAPI("http://test", "agent", "secret", client=httpx.Client(transport=httpx.MockTransport(handler)))
-        api.access_token = "access"
+        api.access_token = "access"  # nosec B105
         api.complete("task-1", [to_candidate(CREATE)], 0.9)
         api.complete("task-1", [to_candidate(CREATE)], 0.9)
         self.assertEqual(keys, ["agent-complete-task-1", "agent-complete-task-1"])
@@ -132,7 +130,7 @@ class WorkerTests(unittest.TestCase):
             return httpx.Response(503, json={"error": {"code": "unavailable"}})
 
         api = GoAPI("http://test", "agent", "secret", client=httpx.Client(transport=httpx.MockTransport(handler)))
-        api.access_token = "access"
+        api.access_token = "access"  # nosec B105
         with patch("tools.api.time.sleep"), self.assertRaises(APIError):
             api.claim()
         self.assertEqual(calls, 3)

@@ -67,7 +67,7 @@
 <script setup lang="ts">
 import { computed, onMounted, type Component } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { ArrowUp, Connection, DataBoard, Document, FolderOpened, MagicStick, Memo, Monitor, Odometer, Paperclip, Setting, User } from '@element-plus/icons-vue'
+import { ArrowUp, Connection, DataBoard, Document, FolderOpened, HomeFilled, MagicStick, Memo, Monitor, Odometer, Paperclip, Setting, User } from '@element-plus/icons-vue'
 import { useMobile } from '../composables/useMobile'
 import { useAuthStore } from '../stores/auth'
 import { useProjectStore } from '../stores/project'
@@ -86,6 +86,7 @@ onMounted(() => {
 
 const navItems = computed<NavItem[]>(() => {
   const items: NavItem[] = [
+    { label: '首页', path: '/', icon: HomeFilled },
     { label: '项目', path: '/projects', icon: FolderOpened },
     { label: '日报', path: '/daily-report', icon: Document },
     { label: '经验库', path: '/experiences', icon: Memo },
@@ -120,7 +121,8 @@ const mobileItems = computed<NavItem[]>(() => {
 // RouterLink 的自动高亮只匹配同一条路由记录，/projects/:id/* 与 /projects 是兄弟记录，
 // 因此按路径前缀手动判断（其余一级路径也统一走这个规则）
 function navActive(path: string) {
-  return route.path === path || route.path.startsWith(`${path}/`)
+  if (path === '/') return route.path === '/'
+  return route.path === path || route.path.startsWith(path + '/')
 }
 
 const displayName = computed(() => auth.user?.display_name || auth.user?.username || '')

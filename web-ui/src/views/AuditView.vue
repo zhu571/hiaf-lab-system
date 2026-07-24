@@ -34,6 +34,7 @@
 <script setup lang="ts">
 import { ref } from 'vue'
 import { ElMessage } from 'element-plus'
+import { showApiError } from '../composables/useNotify'
 import { getAudit, type AuditRecord } from '../api/audit'
 
 const requestId = ref('')
@@ -46,7 +47,7 @@ async function load() {
     records.value = data.items ?? []
   } catch (err) {
     records.value = []
-    ElMessage.error(err instanceof Error ? err.message : '审计记录加载失败')
+    showApiError(err, '审计记录加载失败')
   }
 }
 </script>

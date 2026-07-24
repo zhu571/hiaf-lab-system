@@ -121,6 +121,7 @@
 import { computed, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
+import { showApiError } from '../composables/useNotify'
 import { useProjectStore } from '../stores/project'
 import { useAuthStore } from '../stores/auth'
 import { getMembers, transitionProject, type ProjectMember } from '../api/projects'
@@ -286,7 +287,7 @@ async function confirmTransition() {
     confirmVisible.value = false
     await store.load()
   } catch (err) {
-    ElMessage.error(err instanceof Error ? err.message : '项目状态切换失败')
+    showApiError(err, '项目状态切换失败')
   } finally {
     transitioning.value = false
   }

@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"regexp"
 	"strconv"
 	"strings"
 	"time"
@@ -15,9 +16,24 @@ import (
 
 var defaultMeasurements = []string{"pressure", "vacuum", "control", "temperature", "pump"}
 
-// safeTag validates a tag string for Flux injection safety — no quotes.
+// safeFluxValue validates a Flux value against injection.
+// Only allow durations (like -1h, 30m, 1d), now(), or positive integers.
+func safeFluxValue(s string) error {
+	if s == "now()" {
+		return nil
+	}
+	if matched, _ := regexp.MatchString(`^-?\d+(ns|us|ms|s|m|h|d|w|mo|y)$`, s); matched {
+		return nil
+	}
+	if matched, _ := regexp.MatchString(`^\d+$`, s); matched {
+		return nil
+	}
+	return fmt.Errorf("invalid flux value: %s", s)
+}
+
+// safeTag validates a tag string for Flux injection safety.
 func safeTag(s string) error {
-	if strings.Contains(s, `"`) || strings.Contains(s, `\`) {
+	if strings.Contains(s, `"`) || strings.Contains(s, `\`) || strings.Contains(s, `\n`) || strings.Contains(s, `\r`) {
 		return fmt.Errorf("invalid tag: %s", s)
 	}
 	return nil
@@ -134,6 +150,9 @@ func (s *Service) Latest(tags string) (*LatestResult, error) {
 				if !s.measurements[t] {
 					return nil, fmt.Errorf("unknown measurement: %s", t)
 				}
+				if err := safeTag(t); err != nil {
+					return nil, fmt.Errorf("invalid measurement: %w", err)
+				}
 				clauses = append(clauses, fmt.Sprintf(`r["_measurement"] == "%s"`, t))
 			}
 		}
@@ -163,14 +182,14 @@ func (s *Service) History(tag, from, to, interval string) (*HistoryResult, error
 	}
 	rangeStart := "-1h"
 	if from != "" {
-		if err := safeTag(from); err != nil {
+		if err := safeFluxValue(from); err != nil {
 			return nil, fmt.Errorf("invalid from parameter: %w", err)
 		}
 		rangeStart = from
 	}
 	rangeStop := "now()"
 	if to != "" {
-		if err := safeTag(to); err != nil {
+		if err := safeFluxValue(to); err != nil {
 			return nil, fmt.Errorf("invalid to parameter: %w", err)
 		}
 		rangeStop = to
@@ -181,7 +200,7 @@ func (s *Service) History(tag, from, to, interval string) (*HistoryResult, error
   |> filter(fn: (r) => r["_measurement"] == "%s")`, s.bucket, rangeStart, rangeStop, tag)
 
 	if interval != "" {
-		if err := safeTag(interval); err != nil {
+		if err := safeFluxValue(interval); err != nil {
 			return nil, fmt.Errorf("invalid interval parameter: %w", err)
 		}
 		flux += fmt.Sprintf("\n  |> aggregateWindow(every: %s, fn: mean, createEmpty: false)", interval)

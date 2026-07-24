@@ -55,6 +55,7 @@
 <script setup lang="ts">
 import { computed, onMounted, reactive, ref, watch } from 'vue'
 import { ElMessage } from 'element-plus'
+import { showApiError } from '../composables/useNotify'
 import StatusBadge from '../components/StatusBadge.vue'
 import { archiveExperience, createExperience, listExperiences, publishExperience, type Experience } from '../api/experiences'
 import { useProjectStore } from '../stores/project'
@@ -95,7 +96,7 @@ async function load() {
     )
     items.value = results.flatMap((result) => result.items ?? [])
   } catch (err) {
-    ElMessage.error(err instanceof Error ? err.message : '经验加载失败')
+    showApiError(err, '经验加载失败')
   }
 }
 
@@ -117,7 +118,7 @@ async function publish(id: string) {
     ElMessage.success('经验已发布')
     await load()
   } catch (err) {
-    ElMessage.error(err instanceof Error ? err.message : '发布失败')
+    showApiError(err, '发布失败')
   }
 }
 
@@ -127,7 +128,7 @@ async function archive(id: string) {
     ElMessage.success('经验已归档')
     await load()
   } catch (err) {
-    ElMessage.error(err instanceof Error ? err.message : '归档失败')
+    showApiError(err, '归档失败')
   }
 }
 
@@ -138,7 +139,7 @@ async function create() {
     ElMessage.success('经验已保存')
     await load()
   } catch (err) {
-    ElMessage.error(err instanceof Error ? err.message : '保存失败')
+    showApiError(err, '保存失败')
   }
 }
 </script>
