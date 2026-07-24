@@ -2,11 +2,14 @@
 """EPICS Gateway — thin HTTP proxy for IOC PV access. Run as systemd service on gascell.
    Only allows whitelisted PVs. Zero new dependencies (stdlib http.server + pyepics)."""
 
-import json, sys
+import json, sys, time
 from http.server import HTTPServer, BaseHTTPRequestHandler
 from epics import caget, caput
 
 HOST, PORT = "0.0.0.0", 5070
+CACHE_TTL = 0.05  # 50 ms
+
+_cache = {}  # pv -> (value, timestamp)
 
 WL = {  # PV → read? write?
     "GasCell:Piezo:A1":        (True, False),
@@ -35,6 +38,19 @@ class Handler(BaseHTTPRequestHandler):
         self.send_response(code); self.send_header("Content-Type", "application/json")
         self.end_headers(); self.wfile.write(json.dumps({"error": msg}).encode())
 
+    def _get_cached_or_fetch(self, pv):
+        now = time.time()
+        if pv in _cache:
+            val, ts = _cache[pv]
+            if now - ts < CACHE_TTL:
+                return val, True
+        try:
+            val = caget(pv, timeout=3)
+        except Exception:
+            raise
+        _cache[pv] = (val, now)
+        return val, False
+
     def do_GET(self):
         pv = self.path.strip("/")
         if not pv:
@@ -42,8 +58,8 @@ class Handler(BaseHTTPRequestHandler):
         if pv not in WL or not WL[pv][0]:
             return self._err(403, f"PV not in read whitelist: {pv}")
         try:
-            val = caget(pv, timeout=3)
-            self._ok({"pv": pv, "value": val if val is not None else None})
+            val, cached = self._get_cached_or_fetch(pv)
+            self._ok({"pv": pv, "value": val if val is not None else None, "cached": cached})
         except Exception as e:
             self._err(502, str(e))
 
