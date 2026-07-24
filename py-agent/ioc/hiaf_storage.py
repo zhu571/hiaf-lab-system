@@ -216,4 +216,4 @@ class HiafStorage:
                 await self._db.close()
                 LOGGER.info("SQLite DB closed")
             except Exception:
-                LOGGER.debug("SQLite close ignored during shutdown")
+                pass
