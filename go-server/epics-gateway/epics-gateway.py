@@ -15,7 +15,6 @@ WL = {  # PV → read? write?
     "GasCell:Piezo:Setpoint":  (True, True),
     "GasCell:Piezo:Kp":         (True, True),
     "GasCell:Piezo:Ki":         (True, True),
-    "GasCell:Piezo:Kd":         (True, True),
     "GasCell:Piezo:Error":     (True, False),
     "GasCell:Piezo:Delta":     (True, False),
     "GasCell:Piezo:Cycle":     (True, False),
