@@ -31,15 +31,15 @@ func TestInterpretValidatesAgentCandidate(t *testing.T) {
 }
 
 func TestPiezoStatusReadsGatewayPVs(t *testing.T) {
-	mux := http.NewServeMux()
-	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
-		values := map[string]any{
-			"/GasCell:Piezo:A1": 1.25, "/GasCell:Piezo:ValveSP": 2.5,
-			"/GasCell:Piezo:Running": 1, "/GasCell:Piezo:Error": "",
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/batch" {
+			t.Fatalf("unexpected gateway call path=%q", r.URL.Path)
 		}
-		writePV(t, values[r.URL.Path])(w, r)
-	})
-	server := httptest.NewServer(mux)
+		writeBatch(t, map[string]any{
+			"GasCell:Piezo:A1": 1.25, "GasCell:Piezo:ValveSP": 2.5,
+			"GasCell:Piezo:Running": 1, "GasCell:Piezo:Error": "",
+		})(w, r)
+	}))
 	defer server.Close()
 
 	status, err := NewServiceWithGateway(server.URL).PiezoStatus()
@@ -52,19 +52,15 @@ func TestPiezoStatusReadsGatewayPVs(t *testing.T) {
 }
 
 func TestPiezoStatusIgnoresMissingErrorPV(t *testing.T) {
-	mux := http.NewServeMux()
-	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
-		values := map[string]any{
-			"/GasCell:Piezo:A1": 1.25, "/GasCell:Piezo:ValveSP": 2.5,
-			"/GasCell:Piezo:Running": 0,
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/batch" {
+			t.Fatalf("unexpected gateway call path=%q", r.URL.Path)
 		}
-		if value, ok := values[r.URL.Path]; ok {
-			writePV(t, value)(w, r)
-			return
-		}
-		http.Error(w, "missing", http.StatusNotFound)
-	})
-	server := httptest.NewServer(mux)
+		writeBatch(t, map[string]any{
+			"GasCell:Piezo:A1": 1.25, "GasCell:Piezo:ValveSP": 2.5,
+			"GasCell:Piezo:Running": 0, "GasCell:Piezo:Error": nil,
+		})(w, r)
+	}))
 	defer server.Close()
 
 	status, err := NewServiceWithGateway(server.URL).PiezoStatus()
@@ -78,11 +74,13 @@ func TestPiezoStatusIgnoresMissingErrorPV(t *testing.T) {
 
 func TestGasCellStatusKeepsPartialSnapshot(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path == "/GasCell:Piezo:A1" {
-			writePV(t, 4.2)(w, r)
-			return
+		if r.URL.Path != "/batch" {
+			t.Fatalf("unexpected gateway call path=%q", r.URL.Path)
 		}
-		http.Error(w, "offline", http.StatusBadGateway)
+		writeBatch(t, map[string]any{
+			"GasCell:Piezo:A1":       4.2,
+			"GasCell:Piezo:Setpoint": nil,
+		})(w, r)
 	}))
 	defer server.Close()
 
@@ -167,6 +165,15 @@ func writePV(t *testing.T, value any) http.HandlerFunc {
 	t.Helper()
 	return func(w http.ResponseWriter, _ *http.Request) {
 		if err := json.NewEncoder(w).Encode(map[string]any{"pv": "test", "value": value}); err != nil {
+			t.Fatalf("encode response: %v", err)
+		}
+	}
+}
+
+func writeBatch(t *testing.T, values map[string]any) http.HandlerFunc {
+	t.Helper()
+	return func(w http.ResponseWriter, _ *http.Request) {
+		if err := json.NewEncoder(w).Encode(map[string]any{"values": values}); err != nil {
 			t.Fatalf("encode response: %v", err)
 		}
 	}

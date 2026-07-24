@@ -32,7 +32,6 @@ from caproto import AlarmSeverity, AlarmStatus
 from caproto.server import PVGroup, pvproperty, run
 
 from asyncua import Client, ua
-from asyncua.common.subscription import SubHandler
 from hiaf_storage import HiafStorage
 import hiaf_config
 
@@ -74,7 +73,7 @@ HEARTBEAT_STALL_SEC = 30
 HEARTBEAT_RETRY_SEC = 60
 
 
-class _SensorSubHandler(SubHandler):
+class _SensorSubHandler:
     """OPC UA subscription callback — pure enqueue, no PV write (P1)."""
     def __init__(self, nodeid_to_tag: dict[str, str], queue: asyncio.Queue,
                  last_callback_ts: list[float]) -> None:
@@ -410,6 +409,7 @@ class HiafGasCellIOC(PVGroup):
                 self._valve_node = None
                 self._sensor_nodes.clear()
                 self._subscription = None
+                self._subscription_healthy = False
 
         # R5: ntfy alert on prolonged disconnection
         if self._reconnect_backoff >= 30.0 and not self._disconnect_warned:
@@ -539,6 +539,9 @@ class HiafGasCellIOC(PVGroup):
                         await asyncio.sleep(hiaf_config.SENSOR_POLL_SEC)
                         continue
 
+                # When subscription is healthy, skip PV writes (only storage + safety)
+                sub_healthy = self._subscription_healthy
+
                 # R4: skip dead nodes + cooled-off nodes
                 active_nodes = []
                 active_tag_map = []
@@ -577,11 +580,12 @@ class HiafGasCellIOC(PVGroup):
                     self._sensor_error_count[tag] = 0
                     if val_or_err is not None:
                         self._sensor_values[tag] = float(val_or_err)
-                        pv = self._sensor_pvs[tag]
-                        try:
-                            await pv.write(float(val_or_err))
-                        except Exception:
-                            LOGGER.debug("sensor PV write failed for tag %s", tag)
+                        if not sub_healthy:
+                            pv = self._sensor_pvs[tag]
+                            try:
+                                await pv.write(float(val_or_err))
+                            except Exception:
+                                LOGGER.debug("sensor PV write failed for tag %s", tag)
 
                 # R5: ntfy alert if >50% sensors failed
                 if total_count > 0:
@@ -592,15 +596,16 @@ class HiafGasCellIOC(PVGroup):
                             await self._send_ntfy(
                                 f"传感器读取失败率 {fail_rate:.0%} ({failed_count}/{total_count})"
                             )
-                            self._last_ntfy_disconnect_warn = now_w
+                            self._last_ntfy_failrate_warn = now_w
 
                 # Also update Piezo:A1 with the Vac:A1 reading
                 a1_val = self._sensor_values.get("直采数据_A1", 0.0)
                 self._a1_from_opc = a1_val
-                try:
-                    await self.Vac_A1.write(a1_val)
-                except Exception:
-                    LOGGER.debug("Vac_A1 write failed")
+                if not sub_healthy:
+                    try:
+                        await self.Vac_A1.write(a1_val)
+                    except Exception:
+                        LOGGER.debug("Vac_A1 write failed")
 
                 await self._set_connected(True)
 
@@ -731,24 +736,27 @@ class HiafGasCellIOC(PVGroup):
         new_valve = max(hiaf_config.VALVE_MIN, min(hiaf_config.VALVE_MAX, new_valve))
         await self.Piezo_ValveSP.write(new_valve)
 
-    # ── OPC UA safe reads ──
     # ── P1: OPC UA subscription consumer + heartbeat ──
     def _drop_stale(self) -> None:
         items: list[tuple[str, float]] = []
         drained = 0
-        while not self._sub_queue.empty():
+        while True:
             try:
                 items.append(self._sub_queue.get_nowait())
             except asyncio.QueueEmpty:
                 break
             drained += 1
+        if drained == 0:
+            return
         latest: dict[str, tuple[str, float]] = {}
         for tag, val in items:
             latest[tag] = (tag, val)
         for t, v in latest.values():
-            self._sub_queue.put_nowait((t, v))
-        if drained > 0:
-            LOGGER.debug("_drop_stale: merged %d items -> %d", drained, len(latest))
+            try:
+                self._sub_queue.put_nowait((t, v))
+            except asyncio.QueueFull:
+                pass
+        LOGGER.debug("_drop_stale: merged %d items -> %d", drained, len(latest))
 
     async def _consume_sub_queue(self) -> None:
         while True:
@@ -768,6 +776,12 @@ class HiafGasCellIOC(PVGroup):
                     await pv.write(val)
                 except Exception:
                     LOGGER.debug("sub consumer PV write failed for tag %s", tag)
+            if tag == "直采数据_A1":
+                self._a1_from_opc = val
+                try:
+                    await self.Piezo_A1.write(val)
+                except Exception:
+                    LOGGER.debug("Piezo_A1 write failed in sub consumer")
 
     async def _heartbeat_check(self) -> None:
         while True:
@@ -776,7 +790,8 @@ class HiafGasCellIOC(PVGroup):
             if now > 0 and (time.monotonic() - now) > HEARTBEAT_STALL_SEC and self._subscription_healthy:
                 LOGGER.warning("订阅断流30s，触发poll fallback")
                 self._subscription_healthy = False
-                asyncio.create_task(self._maybe_recover_subscription())
+                task = asyncio.create_task(self._maybe_recover_subscription())
+                self._tasks.append(task)
 
     async def _maybe_recover_subscription(self) -> None:
         while not self._subscription_healthy:
@@ -791,13 +806,17 @@ class HiafGasCellIOC(PVGroup):
     async def _setup_subscription(self) -> None:
         if self._opc is None or not self._sensor_nodes:
             return
+        if self._subscription is not None:
+            try:
+                await self._subscription.delete()
+            except Exception:
+                LOGGER.debug("old subscription delete ignored during setup")
+        self._subscription_healthy = False
         try:
-            # Rebuild nodeid→tag mapping (source_node only valid at IOC runtime)
             self._nodeid_to_tag.clear()
-            for tag, pv in self._sensor_pvs.items():
-                src = pv.source_node
-                if src is not None and hasattr(src, "nodeid"):
-                    self._nodeid_to_tag[str(src.nodeid)] = tag
+            for tag, node in self._sensor_nodes.items():
+                if node is not None:
+                    self._nodeid_to_tag[str(node.nodeid)] = tag
             self._sub_handler = _SensorSubHandler(self._nodeid_to_tag, self._sub_queue, self._last_callback_ts)
             sub_obj = await self._opc.create_subscription(100, self._sub_handler)
             node_ids = []

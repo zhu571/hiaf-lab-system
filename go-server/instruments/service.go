@@ -10,10 +10,10 @@ import (
 	"math"
 	"net"
 	"net/http"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
-	"sync"
 	"time"
 )
 
@@ -321,26 +321,28 @@ func (s *Service) getPVValue(name string) (any, error) {
 	return pv.Value, nil
 }
 
-// GasCellStatus returns a best-effort aggregate; one unavailable PV does not hide the others.
+// GasCellStatus returns a best-effort aggregate via one batch gateway request;
+// one unavailable PV does not hide the others.
 func (s *Service) GasCellStatus() *GasCellSnapshot {
 	snapshot := &GasCellSnapshot{Data: make(map[string]PVPoint, len(gasCellStatusPVs))}
-	var mu sync.Mutex
-	var wg sync.WaitGroup
-	for _, name := range gasCellStatusPVs {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
-			value, err := s.getPVValue(name)
-			point := PVPoint{Value: value, Quality: "good"}
-			if err != nil || value == nil {
-				point = PVPoint{Quality: "disconnected"}
-			}
-			mu.Lock()
-			snapshot.Data[name] = point
-			mu.Unlock()
-		}()
+	var values map[string]any
+	body, err := s.getPVRaw("batch?pvs=" + url.QueryEscape(strings.Join(gasCellStatusPVs, ",")))
+	if err == nil {
+		var resp struct {
+			Values map[string]any `json:"values"`
+		}
+		if err = json.Unmarshal(body, &resp); err == nil {
+			values = resp.Values
+		}
 	}
-	wg.Wait()
+	for _, name := range gasCellStatusPVs {
+		value, ok := values[name]
+		if err != nil || !ok || value == nil {
+			snapshot.Data[name] = PVPoint{Quality: "disconnected"}
+			continue
+		}
+		snapshot.Data[name] = PVPoint{Value: value, Quality: "good"}
+	}
 	return snapshot
 }
 

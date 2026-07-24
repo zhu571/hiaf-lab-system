@@ -2,11 +2,25 @@
 """EPICS Gateway — thin HTTP proxy for IOC PV access. Run as systemd service on gascell.
    Only allows whitelisted PVs. Zero new dependencies (stdlib http.server + pyepics)."""
 
-import json, sys
+import json, sys, time
 from http.server import HTTPServer, BaseHTTPRequestHandler
+from urllib.parse import urlparse, parse_qs
 from epics import caget, caput
 
 HOST, PORT = "0.0.0.0", 5070
+CACHE_TTL = 0.05  # 50 ms
+
+_cache = {}  # pv -> (value, timestamp)
+
+def _json_default(o):
+    """Make numpy values JSON-serializable; char waveforms become strings."""
+    if isinstance(o, bytes):
+        return o.decode(errors="replace")
+    if hasattr(o, "dtype") and hasattr(o, "tolist"):
+        if o.dtype.kind in "iu" and o.dtype.itemsize == 1:
+            return bytes(o.tolist()).decode(errors="replace")
+        return o.tolist()
+    return str(o)
 
 WL = {  # PV → read? write?
     "GasCell:Piezo:A1":        (True, False),
@@ -29,23 +43,57 @@ WL = {  # PV → read? write?
 class Handler(BaseHTTPRequestHandler):
     def _ok(self, data):
         self.send_response(200); self.send_header("Content-Type", "application/json")
-        self.end_headers(); self.wfile.write(json.dumps(data).encode())
+        self.end_headers(); self.wfile.write(json.dumps(data, default=_json_default).encode())
 
     def _err(self, code, msg):
         self.send_response(code); self.send_header("Content-Type", "application/json")
         self.end_headers(); self.wfile.write(json.dumps({"error": msg}).encode())
 
+    def _get_cached_or_fetch(self, pv):
+        now = time.time()
+        if pv in _cache:
+            val, ts = _cache[pv]
+            if now - ts < CACHE_TTL:
+                return val, True
+        try:
+            val = caget(pv, timeout=3)
+        except Exception:
+            raise
+        _cache[pv] = (val, now)
+        return val, False
+
     def do_GET(self):
-        pv = self.path.strip("/")
+        parsed = urlparse(self.path)
+        if parsed.path.strip("/") == "batch":
+            return self._get_batch(parsed)
+        pv = parsed.path.strip("/")
         if not pv:
             return self._ok({"status": "ok"})
         if pv not in WL or not WL[pv][0]:
             return self._err(403, f"PV not in read whitelist: {pv}")
         try:
-            val = caget(pv, timeout=3)
-            self._ok({"pv": pv, "value": val if val is not None else None})
+            val, cached = self._get_cached_or_fetch(pv)
+            self._ok({"pv": pv, "value": val if val is not None else None, "cached": cached})
         except Exception as e:
             self._err(502, str(e))
+
+    def _get_batch(self, parsed):
+        names = [n for n in parse_qs(parsed.query).get("pvs", [""])[0].split(",") if n]
+        if not names:
+            return self._err(400, "missing pvs query parameter")
+        for pv in names:
+            if pv not in WL or not WL[pv][0]:
+                return self._err(403, f"PV not in read whitelist: {pv}")
+        # pyepics caget() does not accept a list of PV names; fetch each PV
+        # individually. A single failing PV is reported as None (disconnected)
+        # instead of failing the whole batch.
+        values = {}
+        for pv in names:
+            try:
+                values[pv] = caget(pv, timeout=1)
+            except Exception:
+                values[pv] = None
+        self._ok({"values": values})
 
     def do_POST(self):
         pv = self.path.strip("/")
