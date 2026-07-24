@@ -771,6 +771,12 @@ class HiafGasCellIOC(PVGroup):
                     await pv.write(val)
                 except Exception:
                     LOGGER.debug("sub consumer PV write failed for tag %s", tag)
+            if tag == "直采数据_A1":
+                self._a1_from_opc = val
+                try:
+                    await self.Piezo_A1.write(val)
+                except Exception:
+                    LOGGER.debug("Piezo_A1 write failed in sub consumer")
 
     async def _heartbeat_check(self) -> None:
         while True:

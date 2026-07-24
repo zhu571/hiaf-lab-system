@@ -120,6 +120,7 @@ let chart: Chart | undefined
 let source: EventSource | undefined
 let epoch: number | undefined
 let lastSeq: number | undefined
+let pendingChart = false
 
 const tripCode = computed(() => Number(point(TRIP).v || 0))
 const isRunning = computed(() => Number(point(RUNNING).v || 0) !== 0)
@@ -217,7 +218,13 @@ function appendChartPoint() {
     chart.data.labels?.shift()
     chart.data.datasets.forEach((dataset) => dataset.data.shift())
   }
-  chart.update('none')
+  if (!pendingChart) {
+    pendingChart = true
+    requestAnimationFrame(() => {
+      pendingChart = false
+      chart?.update('none')
+    })
+  }
 }
 
 async function write(action: () => Promise<PVWriteResult | PVWriteResult[]>, success: string) {

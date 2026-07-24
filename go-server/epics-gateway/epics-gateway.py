@@ -3,7 +3,7 @@
    Only allows whitelisted PVs. Zero new dependencies (stdlib http.server + pyepics)."""
 
 import json, sys
-from http.server import HTTPServer, BaseHTTPRequestHandler
+from http.server import ThreadingHTTPServer, BaseHTTPRequestHandler
 from epics import caget, caput
 
 HOST, PORT = "0.0.0.0", 5070
@@ -59,4 +59,4 @@ class Handler(BaseHTTPRequestHandler):
             self._err(502, str(e))
 
 if __name__ == "__main__":
-    HTTPServer((HOST, PORT), Handler).serve_forever()
+    ThreadingHTTPServer((HOST, PORT), Handler).serve_forever()
