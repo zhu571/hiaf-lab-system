@@ -12,6 +12,16 @@ CACHE_TTL = 0.05  # 50 ms
 
 _cache = {}  # pv -> (value, timestamp)
 
+def _json_default(o):
+    """Make numpy values JSON-serializable; char waveforms become strings."""
+    if isinstance(o, bytes):
+        return o.decode(errors="replace")
+    if hasattr(o, "dtype") and hasattr(o, "tolist"):
+        if o.dtype.kind in "iu" and o.dtype.itemsize == 1:
+            return bytes(o.tolist()).decode(errors="replace")
+        return o.tolist()
+    return str(o)
+
 WL = {  # PV → read? write?
     "GasCell:Piezo:A1":        (True, False),
     "GasCell:Piezo:ValveSP":   (True, True),
@@ -33,7 +43,7 @@ WL = {  # PV → read? write?
 class Handler(BaseHTTPRequestHandler):
     def _ok(self, data):
         self.send_response(200); self.send_header("Content-Type", "application/json")
-        self.end_headers(); self.wfile.write(json.dumps(data).encode())
+        self.end_headers(); self.wfile.write(json.dumps(data, default=_json_default).encode())
 
     def _err(self, code, msg):
         self.send_response(code); self.send_header("Content-Type", "application/json")
@@ -74,11 +84,16 @@ class Handler(BaseHTTPRequestHandler):
         for pv in names:
             if pv not in WL or not WL[pv][0]:
                 return self._err(403, f"PV not in read whitelist: {pv}")
-        try:
-            values = caget(names, timeout=3)
-        except Exception as e:
-            return self._err(502, str(e))
-        self._ok({"values": {pv: val for pv, val in zip(names, values)}})
+        # pyepics caget() does not accept a list of PV names; fetch each PV
+        # individually. A single failing PV is reported as None (disconnected)
+        # instead of failing the whole batch.
+        values = {}
+        for pv in names:
+            try:
+                values[pv] = caget(pv, timeout=1)
+            except Exception:
+                values[pv] = None
+        self._ok({"values": values})
 
     def do_POST(self):
         pv = self.path.strip("/")
