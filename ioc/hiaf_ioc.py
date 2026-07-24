@@ -441,6 +441,9 @@ class HiafGasCellIOC(PVGroup):
         # Sensor poll cache (for fast readout)
         self._sensor_values: dict[str, float] = {tag: 0.0 for tag, _ in ALL_SENSOR_TAGS}
 
+        # Subscription health (not used in poll-only mode; False = always write)
+        self._subscription_healthy: bool = False
+
         # Safety state
         self._a5_tripped = False
         self._a5_max = 10.0
@@ -703,6 +706,9 @@ class HiafGasCellIOC(PVGroup):
                         await asyncio.sleep(SENSOR_POLL_SEC)
                         continue
 
+                # When subscription is healthy, skip PV writes (only storage + safety)
+                sub_healthy = self._subscription_healthy
+
                 # Read all 27 sensors in parallel
                 tasks = [
                     asyncio.wait_for(self._safe_read_node(node), timeout=2.0)
@@ -713,24 +719,25 @@ class HiafGasCellIOC(PVGroup):
                 # Update PVs
                 for (tag, _), val_or_err in zip(ALL_SENSOR_TAGS, results):
                     if isinstance(val_or_err, Exception):
-                        # Read failed — mark value as NaN so InfluxDB skips it
                         self._sensor_values[tag] = float('nan')
                         continue
                     if val_or_err is not None:
                         self._sensor_values[tag] = float(val_or_err)
-                        pv = self._sensor_pvs[tag]
-                        try:
-                            await pv.write(float(val_or_err))
-                        except Exception:
-                            pass
+                        if not sub_healthy:
+                            pv = self._sensor_pvs[tag]
+                            try:
+                                await pv.write(float(val_or_err))
+                            except Exception:
+                                pass
 
                 # Also update Piezo:A1 with the Vac:A1 reading
                 a1_val = self._sensor_values.get("直采数据_A1", 0.0)
                 self._a1_from_opc = a1_val
-                try:
-                    await self.Vac_A1.write(a1_val)
-                except Exception:
-                    pass
+                if not sub_healthy:
+                    try:
+                        await self.Vac_A1.write(a1_val)
+                    except Exception:
+                        pass
 
                 # SQLite batch-write (threshold-based or every 60s)
                 await self._maybe_write_sensors()
