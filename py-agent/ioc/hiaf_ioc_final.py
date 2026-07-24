@@ -32,7 +32,6 @@ from caproto import AlarmSeverity, AlarmStatus
 from caproto.server import PVGroup, pvproperty, run
 
 from asyncua import Client, ua
-from asyncua.common.subscription import SubHandler
 from hiaf_storage import HiafStorage
 import hiaf_config
 
@@ -74,7 +73,7 @@ HEARTBEAT_STALL_SEC = 30
 HEARTBEAT_RETRY_SEC = 60
 
 
-class _SensorSubHandler(SubHandler):
+class _SensorSubHandler:
     """OPC UA subscription callback — pure enqueue, no PV write (P1)."""
     def __init__(self, nodeid_to_tag: dict[str, str], queue: asyncio.Queue,
                  last_callback_ts: list[float]) -> None:
