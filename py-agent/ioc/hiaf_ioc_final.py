@@ -539,6 +539,9 @@ class HiafGasCellIOC(PVGroup):
                         await asyncio.sleep(hiaf_config.SENSOR_POLL_SEC)
                         continue
 
+                # When subscription is healthy, skip PV writes (only storage + safety)
+                sub_healthy = self._subscription_healthy
+
                 # R4: skip dead nodes + cooled-off nodes
                 active_nodes = []
                 active_tag_map = []
@@ -577,11 +580,12 @@ class HiafGasCellIOC(PVGroup):
                     self._sensor_error_count[tag] = 0
                     if val_or_err is not None:
                         self._sensor_values[tag] = float(val_or_err)
-                        pv = self._sensor_pvs[tag]
-                        try:
-                            await pv.write(float(val_or_err))
-                        except Exception:
-                            LOGGER.debug("sensor PV write failed for tag %s", tag)
+                        if not sub_healthy:
+                            pv = self._sensor_pvs[tag]
+                            try:
+                                await pv.write(float(val_or_err))
+                            except Exception:
+                                LOGGER.debug("sensor PV write failed for tag %s", tag)
 
                 # R5: ntfy alert if >50% sensors failed
                 if total_count > 0:
@@ -597,10 +601,11 @@ class HiafGasCellIOC(PVGroup):
                 # Also update Piezo:A1 with the Vac:A1 reading
                 a1_val = self._sensor_values.get("直采数据_A1", 0.0)
                 self._a1_from_opc = a1_val
-                try:
-                    await self.Vac_A1.write(a1_val)
-                except Exception:
-                    LOGGER.debug("Vac_A1 write failed")
+                if not sub_healthy:
+                    try:
+                        await self.Vac_A1.write(a1_val)
+                    except Exception:
+                        LOGGER.debug("Vac_A1 write failed")
 
                 await self._set_connected(True)
 
