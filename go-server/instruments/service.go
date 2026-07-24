@@ -232,7 +232,6 @@ var gasCellStatusPVs = []string{
 	"GasCell:Piezo:Setpoint",
 	"GasCell:Piezo:Kp",
 	"GasCell:Piezo:Ki",
-	"GasCell:Piezo:Kd",
 	"GasCell:Piezo:Error",
 	"GasCell:Piezo:Delta",
 	"GasCell:Piezo:Cycle",

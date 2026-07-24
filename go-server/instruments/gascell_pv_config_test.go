@@ -3,7 +3,7 @@ package instruments
 import "testing"
 
 func TestPVConfig(t *testing.T) {
-	if len(gasCellPVConfig) != 42 {
+	if len(gasCellPVConfig) != 41 {
 		t.Fatalf("expected 41 GasCell PVs, got %d", len(gasCellPVConfig))
 	}
 	for _, test := range []struct {
