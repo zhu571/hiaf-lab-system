@@ -792,12 +792,11 @@ class HiafGasCellIOC(PVGroup):
         if self._opc is None or not self._sensor_nodes:
             return
         try:
-            # Rebuild nodeid→tag mapping (source_node only valid at IOC runtime)
+            # Rebuild nodeid→tag mapping from OPC UA sensor nodes
             self._nodeid_to_tag.clear()
-            for tag, pv in self._sensor_pvs.items():
-                src = pv.source_node
-                if src is not None and hasattr(src, "nodeid"):
-                    self._nodeid_to_tag[str(src.nodeid)] = tag
+            for tag, node in self._sensor_nodes.items():
+                if node is not None:
+                    self._nodeid_to_tag[str(node.nodeid)] = tag
             self._sub_handler = _SensorSubHandler(self._nodeid_to_tag, self._sub_queue, self._last_callback_ts)
             sub_obj = await self._opc.create_subscription(100, self._sub_handler)
             node_ids = []
