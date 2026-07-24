@@ -2,7 +2,7 @@ import os
 from pathlib import Path
 
 # ── OPC UA ──
-OPC_URL = "opc.tcp://10.51.12.158:4862"
+OPC_URL = os.getenv("OPC_URL", "opc.tcp://10.51.12.158:4862")
 VALVE_NODE_ID = "ns=1;s=t|控制及设定_压电阀开度设定"
 
 
