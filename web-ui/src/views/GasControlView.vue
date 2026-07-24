@@ -41,6 +41,10 @@
         <el-form-item label="Kp"><el-input-number v-model="form.kp" :min="0" :max="1" :controls="false" /></el-form-item>
         <el-form-item label="Ki"><el-input-number v-model="form.ki" :min="0" :max="1" :controls="false" /></el-form-item>
         <el-form-item class="control-actions"><el-button type="primary" :loading="writeBusy" @click="applyParams">应用参数</el-button></el-form-item>
+        <div class="param-display">
+          <span>Kp = <strong>{{ point('GasCell:Piezo:Kp').v ?? '—' }}</strong></span>
+          <span>Ki = <strong>{{ point('GasCell:Piezo:Ki').v ?? '—' }}</strong></span>
+        </div>
       </el-form>
       <div class="button-row">
         <el-button v-if="!isRunning" type="success" :loading="writeBusy" @click="start">启动</el-button>

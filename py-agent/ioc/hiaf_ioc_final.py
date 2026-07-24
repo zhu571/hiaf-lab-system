@@ -68,48 +68,28 @@ _LOGGING_CONFIG: dict = {
 logging.config.dictConfig(_LOGGING_CONFIG)
 
 
+QUEUE_HIGH_WATERMARK = 800
+QUEUE_CRITICAL_WATERMARK = 950
+HEARTBEAT_STALL_SEC = 30
+HEARTBEAT_RETRY_SEC = 60
+
+
 class _SensorSubHandler(SubHandler):
-    """OPC UA subscription callback — updates PVs and cache on data change (P1)."""
-    def __init__(self, sensor_pvs: dict[str, Any], sensor_values: dict[str, float]) -> None:
-        self._sensor_pvs = sensor_pvs
-        self._sensor_values = sensor_values
-        self._loop: asyncio.AbstractEventLoop | None = None
-        try:
-            self._loop = asyncio.get_running_loop()
-        except RuntimeError:
-            pass
-        # P5: nodeid → tag lookup index
-        self._nodeid_to_tag: dict[str, str] = {}
-        for tag, pv in self._sensor_pvs.items():
-            src = pv.source_node
-            if src is not None and hasattr(src, "nodeid"):
-                self._nodeid_to_tag[str(src.nodeid)] = tag
-        # P4: rate limit — skip if last callback was <50ms ago
-        self._last_cb_time: float = 0.0
-        self._min_cb_interval: float = 0.05
+    """OPC UA subscription callback — pure enqueue, no PV write (P1)."""
+    def __init__(self, nodeid_to_tag: dict[str, str], queue: asyncio.Queue,
+                 last_callback_ts: list[float]) -> None:
+        self._nodeid_to_tag = nodeid_to_tag
+        self._queue = queue
+        self._last_callback_ts = last_callback_ts
 
     def datachange_notification(self, node, val, data) -> None:
-        # P4: rate throttle
-        now_t = time.monotonic()
-        if now_t - self._last_cb_time < self._min_cb_interval:
-            return
-        self._last_cb_time = now_t
-
-        # P5: O(1) nodeid lookup
         tag = self._nodeid_to_tag.get(str(node.nodeid))
         if tag is None or val is None:
             return
-        pv = self._sensor_pvs.get(tag)
-        if pv is None:
-            return
+        self._last_callback_ts[0] = time.monotonic()
         try:
-            self._sensor_values[tag] = float(val)
-            # P3: use run_coroutine_threadsafe to schedule onto the correct loop
-            if self._loop is not None and self._loop.is_running():
-                asyncio.run_coroutine_threadsafe(pv.write(float(val)), self._loop)
-            else:
-                asyncio.ensure_future(pv.write(float(val)))
-        except Exception:
+            self._queue.put_nowait((tag, float(val)))
+        except asyncio.QueueFull:
             pass
 
 
@@ -372,9 +352,15 @@ class HiafGasCellIOC(PVGroup):
         self._sensor_cooloff_cycles = 2
         self._dead_nodes: set[str] = set()
 
-        # P1: OPC UA subscription
+        # P1: OPC UA subscription — async queue + heartbeat
         self._subscription = None
         self._sub_handler = None
+        self._sub_queue: asyncio.Queue = asyncio.Queue(maxsize=1000)
+        self._last_callback_ts: list[float] = [0.0]
+        self._data_loss_cnt: int = 0
+        self._subscription_healthy: bool = False
+        # nodeid → tag lookup (built at subscription time, not __init__)
+        self._nodeid_to_tag: dict[str, str] = {}
 
         # R5: ntfy alert dedup
         self._last_ntfy_disconnect_warn = 0.0
@@ -669,11 +655,11 @@ class HiafGasCellIOC(PVGroup):
             if remaining > 0:
                 await asyncio.sleep(remaining)
 
-    # ── Background task 2: PI control loop ~10Hz ──
-    async def _pi_control_loop(self, sleep) -> None:
-        """PI fine pressure control, only active when Running=1."""
+    # ── Background task 2: PI control loop 10Hz ──
+    async def _pi_control_loop(self) -> None:
+        """PI fine pressure control at fixed 10Hz, only active when Running=1."""
         while True:
-            loop_start = time.monotonic()
+            await asyncio.sleep(0.1)
 
             if not self._running:
                 try:
@@ -681,7 +667,6 @@ class HiafGasCellIOC(PVGroup):
                 except Exception:
                     LOGGER.debug("Piezo_A1 write failed during idle")
                 await self._set_connected(self._opc is not None)
-                await sleep(hiaf_config.PI_POLL_SEC)
                 continue
 
             self._cycle += 1
@@ -689,7 +674,6 @@ class HiafGasCellIOC(PVGroup):
 
             if self._opc is None:
                 LOGGER.warning('OPC UA disconnected, skipping cycle')
-                await sleep(hiaf_config.PI_POLL_SEC)
                 continue
 
             try:
@@ -714,11 +698,6 @@ class HiafGasCellIOC(PVGroup):
                     self._running = False
                     await self.Piezo_Running.write(0)
                     await self._set_connected(False)
-
-            elapsed = time.monotonic() - loop_start
-            remaining = hiaf_config.PI_POLL_SEC - elapsed
-            if remaining > 0:
-                await sleep(remaining)
 
     # ── PI cycle: pure velocity-form PI ──
     async def _pi_cycle(self, sp_val, a1, error) -> None:
@@ -753,24 +732,87 @@ class HiafGasCellIOC(PVGroup):
         await self.Piezo_ValveSP.write(new_valve)
 
     # ── OPC UA safe reads ──
-    # ── P1: OPC UA subscription ──
+    # ── P1: OPC UA subscription consumer + heartbeat ──
+    def _drop_stale(self) -> None:
+        items: list[tuple[str, float]] = []
+        drained = 0
+        while not self._sub_queue.empty():
+            try:
+                items.append(self._sub_queue.get_nowait())
+            except asyncio.QueueEmpty:
+                break
+            drained += 1
+        latest: dict[str, tuple[str, float]] = {}
+        for tag, val in items:
+            latest[tag] = (tag, val)
+        for t, v in latest.values():
+            self._sub_queue.put_nowait((t, v))
+        if drained > 0:
+            LOGGER.debug("_drop_stale: merged %d items -> %d", drained, len(latest))
+
+    async def _consume_sub_queue(self) -> None:
+        while True:
+            tag, val = await self._sub_queue.get()
+            qsize = self._sub_queue.qsize()
+            if qsize > QUEUE_HIGH_WATERMARK:
+                self._drop_stale()
+            if qsize > QUEUE_CRITICAL_WATERMARK:
+                self._data_loss_cnt += 1
+                if self._data_loss_cnt % 10 == 1:
+                    LOGGER.warning("data_loss_cnt=%d queue_depth=%d", self._data_loss_cnt, qsize)
+                    await self._send_ntfy(f"订阅数据丢失 {self._data_loss_cnt} 次")
+            self._sensor_values[tag] = val
+            pv = self._sensor_pvs.get(tag)
+            if pv is not None:
+                try:
+                    await pv.write(val)
+                except Exception:
+                    LOGGER.debug("sub consumer PV write failed for tag %s", tag)
+
+    async def _heartbeat_check(self) -> None:
+        while True:
+            await asyncio.sleep(1)
+            now = self._last_callback_ts[0]
+            if now > 0 and (time.monotonic() - now) > HEARTBEAT_STALL_SEC and self._subscription_healthy:
+                LOGGER.warning("订阅断流30s，触发poll fallback")
+                self._subscription_healthy = False
+                asyncio.create_task(self._maybe_recover_subscription())
+
+    async def _maybe_recover_subscription(self) -> None:
+        while not self._subscription_healthy:
+            await asyncio.sleep(HEARTBEAT_RETRY_SEC)
+            LOGGER.info("尝试恢复OPC UA订阅...")
+            await self._setup_subscription()
+            if self._subscription_healthy:
+                LOGGER.info("OPC UA订阅已恢复")
+            else:
+                LOGGER.warning("OPC UA订阅恢复失败，60s后重试")
+
     async def _setup_subscription(self) -> None:
         if self._opc is None or not self._sensor_nodes:
             return
         try:
-            self._sub_handler = _SensorSubHandler(self._sensor_pvs, self._sensor_values)
-            sub_obj = await self._opc.create_subscription(1000, self._sub_handler)
+            # Rebuild nodeid→tag mapping (source_node only valid at IOC runtime)
+            self._nodeid_to_tag.clear()
+            for tag, pv in self._sensor_pvs.items():
+                src = pv.source_node
+                if src is not None and hasattr(src, "nodeid"):
+                    self._nodeid_to_tag[str(src.nodeid)] = tag
+            self._sub_handler = _SensorSubHandler(self._nodeid_to_tag, self._sub_queue, self._last_callback_ts)
+            sub_obj = await self._opc.create_subscription(100, self._sub_handler)
             node_ids = []
             for tag, node in self._sensor_nodes.items():
                 if tag not in self._dead_nodes:
                     node_ids.append(node)
             if node_ids:
-                await sub_obj.subscribe_data_change(node_ids, queuesize=2)
+                await sub_obj.subscribe_data_change(node_ids, queuesize=1000)
             self._subscription = sub_obj
-            LOGGER.info("OPC UA subscription created — %d sensor nodes subscribed", len(node_ids))
+            self._subscription_healthy = True
+            LOGGER.info("OPC UA subscription created — publishing=100ms queuesize=1000 %d nodes", len(node_ids))
         except Exception as e:
             LOGGER.warning("OPC UA subscription failed — falling back to poll: %s", e)
             self._subscription = None
+            self._subscription_healthy = False
 
     # ── R5: ntfy alert helper ──
     async def _send_ntfy(self, message: str) -> None:
@@ -814,8 +856,7 @@ class HiafGasCellIOC(PVGroup):
     # ── Startup hook (launches both background tasks) ──
     @Piezo_Running.startup
     async def Piezo_Running(self, instance, async_lib):
-        """Startup: connect OPC UA, launch sensor poll + PI control loops."""
-        sleep = async_lib.library.sleep
+        """Startup: connect OPC UA, launch all background tasks."""
         LOGGER.info("HiafGasCellIOC starting up...")
 
         # Initialize SQLite database via storage
@@ -826,13 +867,29 @@ class HiafGasCellIOC(PVGroup):
         self._tasks.append(task)
         LOGGER.info("Sensor poll loop started (~%g Hz)", 1.0 / hiaf_config.SENSOR_POLL_SEC)
 
+        # Launch OPC UA subscription consumer
+        task = asyncio.create_task(self._consume_sub_queue())
+        self._tasks.append(task)
+        LOGGER.info("Subscription consumer started")
+
+        # Launch heartbeat check
+        task = asyncio.create_task(self._heartbeat_check())
+        self._tasks.append(task)
+        LOGGER.info("Heartbeat check started (stall=%ds retry=%ds)", HEARTBEAT_STALL_SEC, HEARTBEAT_RETRY_SEC)
+
         # Launch health HTTP server (R2)
         task = asyncio.create_task(self._run_health_server())
         self._tasks.append(task)
         LOGGER.info("Health HTTP server started on port 5080")
 
-        # Run PI control loop in the caproto async context
-        await self._pi_control_loop(sleep)
+        # Launch PI control loop as independent task
+        task = asyncio.create_task(self._pi_control_loop())
+        self._tasks.append(task)
+        LOGGER.info("PI control loop started (10Hz)")
+
+        # Keep startup alive
+        while True:
+            await asyncio.sleep(3600)
 
     # ── PV putter handlers (cache to instance vars — NO .read() calls) ──
 
