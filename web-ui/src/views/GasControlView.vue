@@ -20,62 +20,6 @@
       </article>
     </section>
 
-    <section class="param-panel">
-      <div class="section-title">
-        <div><h2>当前控制参数</h2><p>PID 参数与目标值实时显示</p></div>
-      </div>
-      <div class="param-grid">
-        <div v-for="p in params" :key="p.pv" class="param-item">
-          <span class="param-label">{{ p.label }}</span>
-          <span class="param-value" :class="{ stale: point(p.pv).q !== 'good' }">{{ display(p.pv, p.unit) }}</span>
-        </div>
-      </div>
-    </section>
-
-    <section class="param-panel">
-      <div class="section-title">
-        <div><h2>PI 算法参数</h2><p>控制回路固参，修改需经审核确认</p></div>
-      </div>
-      <div class="pi-grid">
-        <div class="pi-item">
-          <span class="param-label">死区</span>
-          <span class="param-value">3 Pa</span>
-        </div>
-        <div class="pi-item">
-          <span class="param-label">TRIM_MAX</span>
-          <span class="param-value">30</span>
-        </div>
-        <div class="pi-item">
-          <span class="param-label">VALVE_RATE_MAX</span>
-          <span class="param-value">5</span>
-        </div>
-        <div class="pi-item">
-          <span class="param-label">压力速率上限</span>
-          <span class="param-value">10 Pa/s</span>
-        </div>
-        <div class="pi-item">
-          <span class="param-label">速率阻尼</span>
-          <span class="param-value">0.15</span>
-        </div>
-        <div class="pi-item">
-          <span class="param-label">D 低通 α</span>
-          <span class="param-value">0.1</span>
-        </div>
-        <div class="pi-item">
-          <span class="param-label">积分死区</span>
-          <span class="param-value">5 / 15 / 30 s（分级）</span>
-        </div>
-        <div class="pi-item">
-          <span class="param-label">抗积分饱和阀限</span>
-          <span class="param-value">+Trim 限</span>
-        </div>
-        <div class="pi-item">
-          <span class="param-label">前馈</span>
-          <span class="param-value">ff_valve(sp)</span>
-        </div>
-      </div>
-    </section>
-
     <section class="chart-card">
       <div class="section-title">
         <div>
@@ -125,7 +69,6 @@ import {
   type ChartDataset
 } from 'chart.js'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { showApiError } from '../composables/useNotify'
 import {
   gasCellA5Clear,
   gasCellA5Max,
@@ -146,9 +89,6 @@ const A1 = 'GasCell:Piezo:A1'
 const VALVE = 'GasCell:Piezo:ValveSP'
 const SETPOINT = 'GasCell:Piezo:Setpoint'
 const RUNNING = 'GasCell:Piezo:Running'
-const Kp = 'GasCell:Piezo:Kp'
-const Ki = 'GasCell:Piezo:Ki'
-const KdPV = 'GasCell:Piezo:Kd'
 const ERROR = 'GasCell:Piezo:Error'
 const CYCLE = 'GasCell:Piezo:Cycle'
 const TRIP = 'GasCell:Safety:A5Trip'
@@ -160,15 +100,6 @@ const cards = [
   { label: '控制误差', pv: ERROR, unit: '' },
   { label: '运行状态', pv: RUNNING, unit: '' },
   { label: 'Cycle', pv: CYCLE, unit: '' }
-]
-
-const params = [
-  { label: 'Kp', pv: Kp, unit: '' },
-  { label: 'Ki', pv: Ki, unit: '' },
-  { label: 'Kd', pv: KdPV, unit: '' },
-  { label: 'Setpoint', pv: SETPOINT, unit: 'Pa' },
-  { label: 'ValveSP', pv: VALVE, unit: '%' },
-  { label: 'Error', pv: ERROR, unit: '' }
 ]
 
 const data = reactive<Record<string, GasCellPoint>>({})
@@ -293,7 +224,7 @@ async function write(action: () => Promise<PVWriteResult | PVWriteResult[]>, suc
     warnings.length ? ElMessage.warning(warnings.join('；')) : ElMessage.success(success)
     await refreshSnapshot()
   } catch (err) {
-    showApiError(err, '写入失败')
+    ElMessage.error(err instanceof Error ? err.message : '写入失败')
   } finally {
     writeBusy.value = false
   }
@@ -344,19 +275,11 @@ async function clearA5() {
 .chart-card { height: 460px; padding: 20px; }
 .chart-card canvas { height: 385px !important; width: 100% !important; }
 .state-panel { min-height: 340px; }
-.param-panel { background: #fff; border: 1px solid var(--border-color); border-radius: 14px; box-shadow: var(--shadow-sm); padding: 20px; }
-.param-grid { display: grid; gap: 12px; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); margin-top: 14px; }
-.param-item { align-items: center; background: var(--bg-subtle); border-radius: 10px; display: flex; flex-direction: column; gap: 4px; padding: 14px 12px; }
-.param-label { color: var(--text-secondary); font-size: 13px; font-weight: 600; }
-.param-value { color: var(--navy-800); font-family: var(--font-mono); font-size: 22px; font-weight: 700; }
-.param-value.stale { color: var(--text-secondary); }
 .control-card { background: #fff; border: 1px solid var(--border); border-radius: 14px; padding: 20px; }
 .control-grid { align-items: end; display: grid; gap: 14px; grid-template-columns: repeat(4, minmax(130px, 1fr)); margin-top: 18px; }
 .control-grid :deep(.el-input-number) { width: 100%; }
 .control-actions :deep(.el-form-item__content) { align-items: flex-end; }
 .button-row { align-items: center; border-top: 1px solid var(--border); display: flex; flex-wrap: wrap; gap: 10px; padding-top: 16px; }
-.pi-grid { display: grid; gap: 12px; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); margin-top: 14px; }
-.pi-item { align-items: center; background: var(--bg-subtle); border-radius: 10px; display: flex; flex-direction: column; gap: 4px; padding: 14px 12px; }
 @media (max-width: 700px) { .chart-card { height: 400px; padding: 14px; } .chart-card canvas { height: 325px !important; } }
 @media (max-width: 900px) { .control-grid { grid-template-columns: 1fr 1fr; } }
 </style>

@@ -5,9 +5,11 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"log/slog"
 	"net/http"
 	"os"
+	"sync"
 	"time"
 
 	"github.com/go-chi/chi/v5"
@@ -20,6 +22,8 @@ import (
 type Handler struct {
 	svc          *Service
 	cookieSecure bool
+	regIPMu      sync.Mutex
+	regIPCalls   sync.Map // IP string -> []time.Time
 }
 
 // NewHandler creates a new auth handler.
@@ -51,6 +55,12 @@ func (h *Handler) Routes(audit ...func(http.Handler) http.Handler) chi.Router {
 
 // Register creates a new user account.
 func (h *Handler) Register(w http.ResponseWriter, r *http.Request) {
+	ip := getClientIP(r)
+	if !h.allowRegisterIP(ip) {
+		common.WriteError(w, r, http.StatusTooManyRequests, "rate_limit_exceeded", "注册请求过于频繁，请稍后再试", nil)
+		return
+	}
+
 	var req RegisterRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		common.WriteError(w, r, http.StatusBadRequest, "bad_request", "请求体解析失败", nil)
@@ -62,6 +72,8 @@ func (h *Handler) Register(w http.ResponseWriter, r *http.Request) {
 		mapAuthError(w, r, err)
 		return
 	}
+
+	go notify.Send("lab-alerts", "新用户注册", fmt.Sprintf("新用户注册: %s", user.Username), "", "default", []string{"partying_face"})
 
 	common.WriteCreated(w, r, toUserInfo(user))
 }
@@ -234,6 +246,38 @@ func (h *Handler) AdminResetPassword(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	common.WriteSuccess(w, r, resp)
+}
+
+func getClientIP(r *http.Request) string {
+	ip := r.RemoteAddr
+	if fwd := r.Header.Get("X-Forwarded-For"); fwd != "" {
+		ip = fwd
+	}
+	return ip
+}
+
+func (h *Handler) allowRegisterIP(ip string) bool {
+	now, cutoff := time.Now(), time.Now().Add(-time.Hour)
+	h.regIPMu.Lock()
+	defer h.regIPMu.Unlock()
+
+	val, _ := h.regIPCalls.Load(ip)
+	var calls []time.Time
+	if val != nil {
+		calls = val.([]time.Time)[:0]
+		for _, call := range val.([]time.Time) {
+			if call.After(cutoff) {
+				calls = append(calls, call)
+			}
+		}
+	}
+
+	if len(calls) >= 10 {
+		h.regIPCalls.Store(ip, calls)
+		return false
+	}
+	h.regIPCalls.Store(ip, append(calls, now))
+	return true
 }
 
 func toUserInfo(user *User) UserInfo {

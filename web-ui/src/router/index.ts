@@ -29,7 +29,7 @@ const ProjectDashboard = () => import('../components/ProjectDashboard.vue')
 const router = createRouter({
   history: createWebHistory(),
   routes: [
-    { path: '/', redirect: '/projects' },
+    { path: '/', component: () => import('../views/DashboardView.vue'), meta: { requiresAuth: true } },
     { path: '/login', component: LoginView, meta: { public: true } },
     { path: '/projects', component: ProjectsView },
     {
