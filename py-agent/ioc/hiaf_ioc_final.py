@@ -18,7 +18,11 @@ from __future__ import annotations
 import argparse
 import asyncio
 import logging
+import logging.config
+import os
+import random
 import time
+from collections import defaultdict
 from datetime import datetime
 from typing import Any
 from urllib.request import urlopen
@@ -27,11 +31,65 @@ from urllib.parse import quote
 from caproto import AlarmSeverity, AlarmStatus
 from caproto.server import PVGroup, pvproperty, run
 
-from asyncua import Client
+from asyncua import Client, ua
 from hiaf_storage import HiafStorage
 import hiaf_config
 
 LOGGER = logging.getLogger(__name__)
+
+# ── Structured logging (D4) ──
+_LOGGING_CONFIG: dict = {
+    "version": 1,
+    "formatters": {
+        "default": {
+            "format": "%(asctime)s %(levelname)s %(name)s: %(message)s",
+        },
+    },
+    "handlers": {
+        "stdout": {
+            "class": "logging.StreamHandler",
+            "stream": "ext://sys.stdout",
+            "level": "INFO",
+            "formatter": "default",
+        },
+        "stderr": {
+            "class": "logging.StreamHandler",
+            "stream": "ext://sys.stderr",
+            "level": "WARNING",
+            "formatter": "default",
+        },
+    },
+    "root": {
+        "level": "INFO",
+        "handlers": ["stdout", "stderr"],
+    },
+}
+logging.config.dictConfig(_LOGGING_CONFIG)
+
+
+QUEUE_HIGH_WATERMARK = 800
+QUEUE_CRITICAL_WATERMARK = 950
+HEARTBEAT_STALL_SEC = 30
+HEARTBEAT_RETRY_SEC = 60
+
+
+class _SensorSubHandler:
+    """OPC UA subscription callback — pure enqueue, no PV write (P1)."""
+    def __init__(self, nodeid_to_tag: dict[str, str], queue: asyncio.Queue,
+                 last_callback_ts: list[float]) -> None:
+        self._nodeid_to_tag = nodeid_to_tag
+        self._queue = queue
+        self._last_callback_ts = last_callback_ts
+
+    def datachange_notification(self, node, val, data) -> None:
+        tag = self._nodeid_to_tag.get(str(node.nodeid))
+        if tag is None or val is None:
+            return
+        self._last_callback_ts[0] = time.monotonic()
+        try:
+            self._queue.put_nowait((tag, float(val)))
+        except asyncio.QueueFull:
+            pass
 
 
 class HiafGasCellIOC(PVGroup):
@@ -158,7 +216,7 @@ class HiafGasCellIOC(PVGroup):
     )
 
     # ═══════════════════════════════════════════════
-    # Group 4: Piezo Valve Control  (9 PVs, r/w + r/o)
+    # Group 4: Piezo Valve Control  (8 PVs, r/w + r/o)
     # ═══════════════════════════════════════════════
     Piezo_A1 = pvproperty(
         name="Piezo:A1", value=0.0, dtype=float, read_only=True,
@@ -179,10 +237,6 @@ class HiafGasCellIOC(PVGroup):
     Piezo_Ki = pvproperty(
         name="Piezo:Ki", value=hiaf_config.DEFAULT_KI, dtype=float,
         doc="积分增益",
-    )
-    Piezo_Kd = pvproperty(
-        name="Piezo:Kd", value=hiaf_config.DEFAULT_KD, dtype=float,
-        doc="微分增益 (PV微分)",
     )
     Piezo_Running = pvproperty(
         name="Piezo:Running", value=0, dtype=int,
@@ -238,6 +292,12 @@ class HiafGasCellIOC(PVGroup):
         self._valve_node = None
         self._connected: bool | None = None
 
+        # Reconnect backoff state (R1)
+        self._reconnect_backoff = 0.0
+        self._reconnect_base = 1.0
+        self._reconnect_max = 60.0
+        self._reconnect_jitter = 2.0
+
         # Tag → OPC UA node mapping (built after connect)
         self._sensor_nodes: dict[str, Any] = {}
 
@@ -256,11 +316,9 @@ class HiafGasCellIOC(PVGroup):
 
         # PI control state
         self._last_error = 0.0
-        self._last_error_sign = 0
-        self._last_sign_change = 0.0
         self._cycle = 0
         self._running = False
-        self._valve_rate_max = hiaf_config.VALVE_RATE_MAX  # adjustable per-instance
+        self._valve_rate_max = hiaf_config.VALVE_RATE_MAX
 
         # HYST/PI state machine
         self._ctrl_mode = 'HYST'          # 'HYST' or 'PI'
@@ -271,16 +329,15 @@ class HiafGasCellIOC(PVGroup):
         self._sp_val = hiaf_config.DEFAULT_SETPOINT
         self._kp_val = hiaf_config.DEFAULT_KP
         self._ki_val = hiaf_config.DEFAULT_KI
-        self._kd_val = hiaf_config.DEFAULT_KD
-        self._filtered_dpv = 0.0
-        self._last_a1_for_d = None
 
         # Failure tracking
         self._fail_count = 0
 
         # A1 value cache (from OPC UA, shared between sensor poll and PI)
         self._a1_from_opc = 0.0
-        self._last_a1 = None  # for pressure rate suppression
+
+        # Background task tracking (for graceful shutdown)
+        self._tasks: list[asyncio.Task] = []
 
         # ── Storage (InfluxDB + SQLite) ──
         self._storage = HiafStorage(
@@ -298,6 +355,29 @@ class HiafGasCellIOC(PVGroup):
         self._pump_values: dict = {}
         self._active_pump_tags: list = []  # populated on first connect
 
+        # R4: per-sensor error counter & cool-off
+        self._sensor_error_count: dict[str, int] = defaultdict(int)
+        self._sensor_max_errors = 3
+        self._sensor_cooloff_cycles = 2
+        self._dead_nodes: set[str] = set()
+
+        # P1: OPC UA subscription — async queue + heartbeat
+        self._subscription = None
+        self._sub_handler = None
+        self._sub_queue: asyncio.Queue = asyncio.Queue(maxsize=1000)
+        self._last_callback_ts: list[float] = [0.0]
+        self._data_loss_cnt: int = 0
+        self._subscription_healthy: bool = False
+        # nodeid → tag lookup (built at subscription time, not __init__)
+        self._nodeid_to_tag: dict[str, str] = {}
+
+        # R5: ntfy alert dedup
+        self._last_ntfy_disconnect_warn = 0.0
+        self._last_ntfy_recovery_warn = 0.0
+        self._last_ntfy_failrate_warn = 0.0
+        self._ntfy_cooldown = 60.0
+        self._disconnect_warned = False
+
     @property
     def _alarm_pvs(self):
         """PVs that get alarm status updates."""
@@ -309,11 +389,26 @@ class HiafGasCellIOC(PVGroup):
 
     # ── OPC UA connection management ──────────────
     async def _ensure_connected(self) -> bool:
-        """Verify OPC UA connection is alive; reconnect + rebuild nodes if dead."""
+        """Verify OPC UA connection is alive; reconnect + rebuild nodes if dead.
+        Uses exponential backoff with jitter (R1)."""
         if self._opc is not None:
             try:
                 test_node = self._opc.get_node("i=2258")
                 await asyncio.wait_for(test_node.read_value(), timeout=5.0)
+                self._reconnect_backoff = 0.0
+                self._sensor_error_count.clear()
+                # Repopulate pump tags after dead node clear
+                self._active_pump_tags = [
+                    k for k in self._pump_nodes
+                    if any(s in k for s in ['DP3', 'DP4', '循环泵', '压缩机', '低温循环泵'])
+                ]
+                # R5: send recovery alert
+                if self._disconnect_warned:
+                    now_w = time.monotonic()
+                    if now_w - self._last_ntfy_recovery_warn > self._ntfy_cooldown:
+                        await self._send_ntfy("OPC UA 已恢复")
+                        self._last_ntfy_recovery_warn = now_w
+                    self._disconnect_warned = False
                 return True
             except Exception:
                 LOGGER.warning("OPC UA connection lost — reconnecting...")
@@ -324,6 +419,21 @@ class HiafGasCellIOC(PVGroup):
                 self._opc = None
                 self._valve_node = None
                 self._sensor_nodes.clear()
+                self._subscription = None
+                self._subscription_healthy = False
+
+        # R5: ntfy alert on prolonged disconnection
+        if self._reconnect_backoff >= 30.0 and not self._disconnect_warned:
+            self._disconnect_warned = True
+            now_w = time.monotonic()
+            if now_w - self._last_ntfy_disconnect_warn > self._ntfy_cooldown:
+                await self._send_ntfy("OPC UA 断连 >30s")
+                self._last_ntfy_disconnect_warn = now_w
+
+        # Backoff: exponential with jitter (R1)
+        if self._reconnect_backoff > 0:
+            sleep_sec = self._reconnect_backoff + random.random() * self._reconnect_jitter
+            await asyncio.sleep(sleep_sec)
 
         # (Re)connect
         try:
@@ -333,17 +443,35 @@ class HiafGasCellIOC(PVGroup):
             # Rebuild all sensor node references (old handles are invalid)
             for tag, _ in hiaf_config.ALL_SENSOR_TAGS:
                 node_id = f"ns=1;s=t|{tag}"
-                self._sensor_nodes[tag] = self._opc.get_node(node_id)
+                try:
+                    self._sensor_nodes[tag] = self._opc.get_node(node_id)
+                except Exception as e:
+                    LOGGER.warning("Dead sensor node on connect — %s: %s", tag, e)
+                    self._dead_nodes.add(tag)
             # Also rebuild pump nodes
             self._pump_nodes.clear()
             for opc_tag, meas, ftag in hiaf_config.PUMP_TAGS:
                 node_id = f"ns=1;s=t|{opc_tag}"
                 self._pump_nodes[opc_tag] = self._opc.get_node(node_id)
-            self._active_pump_tags = [tag for tag in list(self._pump_nodes.keys())[:20]]
-            LOGGER.info("OPC UA connected — %d sensor nodes cached", len(self._sensor_nodes))
+            # P4: precompute active pump tags at connect time
+            self._active_pump_tags = [
+                k for k in self._pump_nodes
+                if any(s in k for s in ['DP3', 'DP4', '循环泵', '压缩机', '低温循环泵'])
+            ]
+            self._reconnect_backoff = 0.0
+            # P3.2: clear dead_nodes only after all nodes processed
+            self._dead_nodes.clear()
+            # P1: re-create OPC UA subscription
+            await self._setup_subscription()
+            LOGGER.info("OPC UA connected — %d sensor nodes cached (%d dead)",
+                        len(self._sensor_nodes), len(self._dead_nodes))
             return True
         except Exception as e:
-            LOGGER.error("OPC UA connect failed: %s", e)
+            self._reconnect_backoff = min(
+                self._reconnect_max,
+                max(self._reconnect_base, self._reconnect_backoff * 2) if self._reconnect_backoff > 0 else self._reconnect_base,
+            )
+            LOGGER.error("OPC UA connect failed (backoff=%.1fs): %s", self._reconnect_backoff, e)
             self._opc = None
             return False
 
@@ -361,16 +489,56 @@ class HiafGasCellIOC(PVGroup):
         for prop in self._alarm_pvs:
             await prop.alarm.write(status=status, severity=severity)
 
+    # ── Health HTTP server (R2) ──
+    async def _run_health_server(self) -> None:
+        """Minimal HTTP /health endpoint on port 5080."""
+        import asyncio as aio
+
+        async def handle(reader: aio.StreamReader, writer: aio.StreamWriter) -> None:
+            try:
+                request_line = (await reader.readline()).decode("utf-8", errors="replace").strip()
+                while True:
+                    line = await reader.readline()
+                    if line in (b"\r\n", b"\n", b""):
+                        break
+                if "GET /health" in request_line or "GET /" in request_line:
+                    opc_ok = self._opc is not None
+                    caproto_alive = True
+                    status_code = 200 if (opc_ok and caproto_alive) else 503
+                    status_text = "ok" if status_code == 200 else "degraded"
+                    body = '{"status":"' + status_text + '","opc_ua":' + str(opc_ok).lower() + ',"caproto":true}'
+                    resp_text = "OK" if status_code == 200 else "Service Unavailable"
+                    resp = f"HTTP/1.1 {status_code} {resp_text}\r\nContent-Type: application/json\r\nContent-Length: {len(body.encode())}\r\nConnection: close\r\n\r\n{body}"
+                else:
+                    resp = "HTTP/1.1 404 Not Found\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"
+                writer.write(resp.encode())
+            except Exception:
+                pass
+            finally:
+                try:
+                    writer.close()
+                except Exception:
+                    pass
+
+        server = await aio.start_server(handle, "0.0.0.0", 5080)
+        LOGGER.info("Health HTTP server started on port 5080")
+        async with server:
+            await server.serve_forever()
+
     async def _read_pump_tags(self) -> None:
+<<<<<<< HEAD
         if not self._pump_nodes:
             return
         active_keys = [k for k in self._pump_nodes if any(s in k for s in ['DP3','DP4','循环泵','压缩机','低温循环泵'])]
         if not active_keys:
+=======
+        if not self._pump_nodes or not self._active_pump_tags:
+>>>>>>> origin/main
             return
         try:
-            tasks = [asyncio.wait_for(self._pump_nodes[k].read_value(), timeout=1.0) for k in active_keys]
+            tasks = [asyncio.wait_for(self._pump_nodes[k].read_value(), timeout=1.0) for k in self._active_pump_tags]
             vals = await asyncio.gather(*tasks, return_exceptions=True)
-            for k, v in zip(active_keys, vals):
+            for k, v in zip(self._active_pump_tags, vals):
                 if not isinstance(v, Exception) and v is not None:
                     self._pump_values[k] = float(v)
         except Exception:
@@ -379,6 +547,7 @@ class HiafGasCellIOC(PVGroup):
     # ── Background task 1: Sensor poll loop ~1Hz ──
     async def _sensor_poll_loop(self) -> None:
         """Poll all 27 sensor OPC UA nodes at ~1Hz, update PVs."""
+        cooloff: dict[str, int] = {}
         while True:
             loop_start = time.monotonic()
             try:
@@ -386,33 +555,88 @@ class HiafGasCellIOC(PVGroup):
                     await asyncio.sleep(hiaf_config.SENSOR_POLL_SEC)
                     continue
 
-                # Read all 27 sensors in parallel
+                # When subscription is healthy, skip PV writes (only storage + safety)
+                sub_healthy = self._subscription_healthy
+
+                # R4: skip dead nodes + cooled-off nodes
+                active_nodes = []
+                active_tag_map = []
+                for tag, _ in hiaf_config.ALL_SENSOR_TAGS:
+                    if tag in self._dead_nodes:
+                        continue
+                    cc = cooloff.get(tag, 0)
+                    if cc > 0:
+                        cooloff[tag] = cc - 1
+                        continue
+                    node = self._sensor_nodes.get(tag)
+                    if node is not None:
+                        active_nodes.append(node)
+                        active_tag_map.append(tag)
+
+                # Read active sensors in parallel
                 tasks = [
                     asyncio.wait_for(self._safe_read_node(node), timeout=2.0)
-                    for node in self._sensor_nodes.values()
+                    for node in active_nodes
                 ]
                 results = await asyncio.gather(*tasks, return_exceptions=True)
 
-                # Update PVs
-                for (tag, _), val_or_err in zip(hiaf_config.ALL_SENSOR_TAGS, results):
+                failed_count = 0
+                total_count = len(active_tag_map)
+                for tag, val_or_err in zip(active_tag_map, results):
                     if isinstance(val_or_err, Exception):
                         self._sensor_values[tag] = float('nan')
+                        self._sensor_error_count[tag] += 1
+                        failed_count += 1
+                        if self._sensor_error_count[tag] >= self._sensor_max_errors:
+                            cooloff[tag] = self._sensor_cooloff_cycles
+                            LOGGER.warning("Sensor %s: %d consecutive fails — cooling off %d cycles",
+                                           tag, self._sensor_error_count[tag], self._sensor_cooloff_cycles)
+                            self._sensor_error_count[tag] = 0
                         continue
+                    self._sensor_error_count[tag] = 0
                     if val_or_err is not None:
                         self._sensor_values[tag] = float(val_or_err)
+<<<<<<< HEAD
                         pv = self._sensor_pvs[tag]
                         try:
                             await pv.write(float(val_or_err))
                         except Exception:
                             pass
+=======
+                        if not sub_healthy:
+                            pv = self._sensor_pvs[tag]
+                            try:
+                                await pv.write(float(val_or_err))
+                            except Exception:
+                                LOGGER.debug("sensor PV write failed for tag %s", tag)
+
+                # R5: ntfy alert if >50% sensors failed
+                if total_count > 0:
+                    fail_rate = failed_count / total_count
+                    if fail_rate > 0.5:
+                        now_w = time.monotonic()
+                        if now_w - self._last_ntfy_failrate_warn > self._ntfy_cooldown:
+                            await self._send_ntfy(
+                                f"传感器读取失败率 {fail_rate:.0%} ({failed_count}/{total_count})"
+                            )
+                            self._last_ntfy_failrate_warn = now_w
+>>>>>>> origin/main
 
                 # Also update Piezo:A1 with the Vac:A1 reading
                 a1_val = self._sensor_values.get("直采数据_A1", 0.0)
                 self._a1_from_opc = a1_val
+<<<<<<< HEAD
                 try:
                     await self.Vac_A1.write(a1_val)
                 except Exception:
                     pass
+=======
+                if not sub_healthy:
+                    try:
+                        await self.Vac_A1.write(a1_val)
+                    except Exception:
+                        LOGGER.debug("Vac_A1 write failed")
+>>>>>>> origin/main
 
                 await self._set_connected(True)
 
@@ -467,11 +691,17 @@ class HiafGasCellIOC(PVGroup):
             if remaining > 0:
                 await asyncio.sleep(remaining)
 
+<<<<<<< HEAD
     # ── Background task 2: HYST+PI control loop ~10Hz ──
     async def _pi_control_loop(self, sleep) -> None:
         """HYST拉入 + PI精细维持，only active when Running=1."""
+=======
+    # ── Background task 2: PI control loop 10Hz ──
+    async def _pi_control_loop(self) -> None:
+        """PI fine pressure control at fixed 10Hz, only active when Running=1."""
+>>>>>>> origin/main
         while True:
-            loop_start = time.monotonic()
+            await asyncio.sleep(0.1)
 
             if not self._running:
                 try:
@@ -479,7 +709,6 @@ class HiafGasCellIOC(PVGroup):
                 except Exception:
                     pass
                 await self._set_connected(self._opc is not None)
-                await sleep(hiaf_config.PI_POLL_SEC)
                 continue
 
             self._cycle += 1
@@ -487,13 +716,11 @@ class HiafGasCellIOC(PVGroup):
 
             if self._opc is None:
                 LOGGER.warning('OPC UA disconnected, skipping cycle')
-                await sleep(hiaf_config.PI_POLL_SEC)
                 continue
 
             try:
-                a1 = await self._safe_read_a1()
+                a1 = self._a1_from_opc
                 self._fail_count = 0
-                self._a1_from_opc = a1
                 await self.Piezo_A1.write(a1)
                 await self._set_connected(True)
 
@@ -535,6 +762,7 @@ class HiafGasCellIOC(PVGroup):
                     await self.Piezo_Running.write(0)
                     await self._set_connected(False)
 
+<<<<<<< HEAD
             elapsed = time.monotonic() - loop_start
             remaining = hiaf_config.PI_POLL_SEC - elapsed
             if remaining > 0:
@@ -571,17 +799,20 @@ class HiafGasCellIOC(PVGroup):
         await self.Piezo_Delta.write(direction * step)
 
     # ── PI cycle: existing velocity-form PI ──
+=======
+    # ── PI cycle: pure velocity-form PI ──
+>>>>>>> origin/main
     async def _pi_cycle(self, sp_val, a1, error) -> None:
-        """Velocity-form PI（保留分级死区、抗积分饱和、压力速率抑制）."""
+        """Pure velocity-form PI (no deadband, no D, no feedforward, no trim)."""
         kp_val = self._kp_val
         ki_val = self._ki_val
-        kd_val = self._kd_val
 
         try:
             current_v = float(await self._valve_node.read_value())
         except Exception:
             current_v = float(self.Piezo_ValveSP.value)
 
+<<<<<<< HEAD
         ff_valve = hiaf_config.feedforward_valve(sp_val)
         current_trim = current_v - ff_valve
         now = time.monotonic()
@@ -602,10 +833,13 @@ class HiafGasCellIOC(PVGroup):
             await self.Piezo_Delta.write(0.0)
             return
 
+=======
+>>>>>>> origin/main
         derror = error - self._last_error
         p_term = kp_val * derror
         i_term = ki_val * error * hiaf_config.PI_POLL_SEC
 
+<<<<<<< HEAD
         # D term: PV微分 + 低通滤波
         dpv = a1 - (self._last_a1_for_d if self._last_a1_for_d is not None else a1)
         self._last_a1_for_d = a1
@@ -636,17 +870,143 @@ class HiafGasCellIOC(PVGroup):
                     or (a1_rate < -hiaf_config.PRESSURE_RATE_MAX and delta < 0)):
                 delta *= hiaf_config.PRESSURE_RATE_DAMP
         self._last_a1 = a1
+=======
+        # Anti-windup: clamp integration when valve saturated
+        if current_v <= hiaf_config.VALVE_MIN and i_term < 0:
+            i_term = 0.0
+        if current_v >= hiaf_config.VALVE_MAX and i_term > 0:
+            i_term = 0.0
+
+        delta = p_term + i_term
+>>>>>>> origin/main
         delta = max(-hiaf_config.VALVE_RATE_MAX, min(hiaf_config.VALVE_RATE_MAX, delta))
         self._last_error = error
 
         await self.Piezo_Error.write(error)
         await self.Piezo_Delta.write(delta)
 
-        new_trim = current_trim + delta
-        new_trim = max(-hiaf_config.VALVE_TRIM_MAX, min(hiaf_config.VALVE_TRIM_MAX, new_trim))
-        new_valve = ff_valve + new_trim
+        new_valve = current_v + delta
         new_valve = max(hiaf_config.VALVE_MIN, min(hiaf_config.VALVE_MAX, new_valve))
         await self.Piezo_ValveSP.write(new_valve)
+
+    # ── P1: OPC UA subscription consumer + heartbeat ──
+    def _drop_stale(self) -> None:
+        items: list[tuple[str, float]] = []
+        drained = 0
+        while True:
+            try:
+                items.append(self._sub_queue.get_nowait())
+            except asyncio.QueueEmpty:
+                break
+            drained += 1
+        if drained == 0:
+            return
+        latest: dict[str, tuple[str, float]] = {}
+        for tag, val in items:
+            latest[tag] = (tag, val)
+        for t, v in latest.values():
+            try:
+                self._sub_queue.put_nowait((t, v))
+            except asyncio.QueueFull:
+                pass
+        LOGGER.debug("_drop_stale: merged %d items -> %d", drained, len(latest))
+
+    async def _consume_sub_queue(self) -> None:
+        while True:
+            tag, val = await self._sub_queue.get()
+            qsize = self._sub_queue.qsize()
+            if qsize > QUEUE_HIGH_WATERMARK:
+                self._drop_stale()
+            if qsize > QUEUE_CRITICAL_WATERMARK:
+                self._data_loss_cnt += 1
+                if self._data_loss_cnt % 10 == 1:
+                    LOGGER.warning("data_loss_cnt=%d queue_depth=%d", self._data_loss_cnt, qsize)
+                    await self._send_ntfy(f"订阅数据丢失 {self._data_loss_cnt} 次")
+            self._sensor_values[tag] = val
+            pv = self._sensor_pvs.get(tag)
+            if pv is not None:
+                try:
+                    await pv.write(val)
+                except Exception:
+                    LOGGER.debug("sub consumer PV write failed for tag %s", tag)
+            if tag == "直采数据_A1":
+                self._a1_from_opc = val
+                try:
+                    await self.Piezo_A1.write(val)
+                except Exception:
+                    LOGGER.debug("Piezo_A1 write failed in sub consumer")
+
+    async def _heartbeat_check(self) -> None:
+        while True:
+            await asyncio.sleep(1)
+            now = self._last_callback_ts[0]
+            if now > 0 and (time.monotonic() - now) > HEARTBEAT_STALL_SEC and self._subscription_healthy:
+                LOGGER.warning("订阅断流30s，触发poll fallback")
+                self._subscription_healthy = False
+                task = asyncio.create_task(self._maybe_recover_subscription())
+                self._tasks.append(task)
+
+    async def _maybe_recover_subscription(self) -> None:
+        while not self._subscription_healthy:
+            await asyncio.sleep(HEARTBEAT_RETRY_SEC)
+            LOGGER.info("尝试恢复OPC UA订阅...")
+            await self._setup_subscription()
+            if self._subscription_healthy:
+                LOGGER.info("OPC UA订阅已恢复")
+            else:
+                LOGGER.warning("OPC UA订阅恢复失败，60s后重试")
+
+    async def _setup_subscription(self) -> None:
+        if self._opc is None or not self._sensor_nodes:
+            return
+        if self._subscription is not None:
+            try:
+                await self._subscription.delete()
+            except Exception:
+                LOGGER.debug("old subscription delete ignored during setup")
+        self._subscription_healthy = False
+        try:
+            self._nodeid_to_tag.clear()
+            for tag, node in self._sensor_nodes.items():
+                if node is not None:
+                    self._nodeid_to_tag[str(node.nodeid)] = tag
+            self._sub_handler = _SensorSubHandler(self._nodeid_to_tag, self._sub_queue, self._last_callback_ts)
+            sub_obj = await self._opc.create_subscription(100, self._sub_handler)
+            node_ids = []
+            for tag, node in self._sensor_nodes.items():
+                if tag not in self._dead_nodes:
+                    node_ids.append(node)
+            if node_ids:
+                await sub_obj.subscribe_data_change(node_ids, queuesize=1000)
+            self._subscription = sub_obj
+            self._subscription_healthy = True
+            LOGGER.info("OPC UA subscription created — publishing=100ms queuesize=1000 %d nodes", len(node_ids))
+        except Exception as e:
+            LOGGER.warning("OPC UA subscription failed — falling back to poll: %s", e)
+            self._subscription = None
+            self._subscription_healthy = False
+
+    # ── R5: ntfy alert helper ──
+    async def _send_ntfy(self, message: str) -> None:
+        ntfy_url = os.getenv("NTFY_URL", "http://ntfy:80")
+        topic = os.getenv("NTFY_TOPIC", "lab-system")
+        try:
+            import aiohttp
+            async with aiohttp.ClientSession() as session:
+                await session.post(
+                    f"{ntfy_url}/{topic}",
+                    data=message.encode(),
+                    headers={"Title": "IOC", "Priority": "3"},
+                    timeout=aiohttp.ClientTimeout(total=5),
+                )
+        except ImportError:
+            try:
+                req = urlopen(f"{ntfy_url}/{topic}", data=message.encode(), timeout=5)
+                req.close()
+            except Exception as e:
+                LOGGER.debug("ntfy send failed: %s", e)
+        except Exception as e:
+            LOGGER.debug("ntfy send failed: %s", e)
 
     # ── OPC UA safe reads ──
     async def _safe_read_node(self, node) -> float | None:
@@ -668,19 +1028,40 @@ class HiafGasCellIOC(PVGroup):
     # ── Startup hook (launches both background tasks) ──
     @Piezo_Running.startup
     async def Piezo_Running(self, instance, async_lib):
-        """Startup: connect OPC UA, launch sensor poll + PI control loops."""
-        sleep = async_lib.library.sleep
+        """Startup: connect OPC UA, launch all background tasks."""
         LOGGER.info("HiafGasCellIOC starting up...")
 
         # Initialize SQLite database via storage
         await self._storage.init_db()
 
         # Launch sensor poll background task
-        asyncio.create_task(self._sensor_poll_loop())
+        task = asyncio.create_task(self._sensor_poll_loop())
+        self._tasks.append(task)
         LOGGER.info("Sensor poll loop started (~%g Hz)", 1.0 / hiaf_config.SENSOR_POLL_SEC)
 
-        # Run PI control loop in the caproto async context
-        await self._pi_control_loop(sleep)
+        # Launch OPC UA subscription consumer
+        task = asyncio.create_task(self._consume_sub_queue())
+        self._tasks.append(task)
+        LOGGER.info("Subscription consumer started")
+
+        # Launch heartbeat check
+        task = asyncio.create_task(self._heartbeat_check())
+        self._tasks.append(task)
+        LOGGER.info("Heartbeat check started (stall=%ds retry=%ds)", HEARTBEAT_STALL_SEC, HEARTBEAT_RETRY_SEC)
+
+        # Launch health HTTP server (R2)
+        task = asyncio.create_task(self._run_health_server())
+        self._tasks.append(task)
+        LOGGER.info("Health HTTP server started on port 5080")
+
+        # Launch PI control loop as independent task
+        task = asyncio.create_task(self._pi_control_loop())
+        self._tasks.append(task)
+        LOGGER.info("PI control loop started (10Hz)")
+
+        # Keep startup alive
+        while True:
+            await asyncio.sleep(3600)
 
     # ── PV putter handlers (cache to instance vars — NO .read() calls) ──
 
@@ -692,6 +1073,7 @@ class HiafGasCellIOC(PVGroup):
         self._running = bool(int(value))
         if self._running:
             self._last_error = 0.0
+<<<<<<< HEAD
             self._last_error_sign = 0
             self._last_sign_change = 0.0
             self._ctrl_mode = 'HYST'
@@ -703,6 +1085,11 @@ class HiafGasCellIOC(PVGroup):
             ff_valve = hiaf_config.feedforward_valve(self._sp_val)
             await self.Piezo_ValveSP.write(ff_valve)
             LOGGER.info("PI control STARTED (target=%dPa ff_valve=%.1f)", self._sp_val, ff_valve)
+=======
+            self._cycle = 0
+            await self.Piezo_Cycle.write(0)
+            LOGGER.info("PI control STARTED (target=%dPa)", self._sp_val)
+>>>>>>> origin/main
         else:
             LOGGER.info("PI control STOPPED")
         return int(self._running)
@@ -758,19 +1145,29 @@ class HiafGasCellIOC(PVGroup):
         self._ki_val = float(value)
         return self._ki_val
 
-    @Piezo_Kd.putter
-    async def Piezo_Kd(self, instance, value):
-        self._kd_val = float(value)
-        return self._kd_val
-
     # ── Shutdown ──
     @Piezo_Running.shutdown
     async def Piezo_Running(self, instance, async_lib):
         self._running = False
+        for t in self._tasks:
+            t.cancel()
+        if self._tasks:
+            _, pending = await asyncio.wait(self._tasks, timeout=5.0)
+            for t in pending:
+                LOGGER.warning("Task %s did not finish in time", t)
+            self._tasks.clear()
+        if self._subscription is not None:
+            try:
+                await self._subscription.delete()
+            except Exception:
+                LOGGER.debug("subscription delete ignored")
+            self._subscription = None
         if self._opc is not None:
             try:
-                await self._opc.disconnect()
+                await asyncio.wait_for(self._opc.disconnect(), timeout=3.0)
                 LOGGER.info("OPC UA disconnected")
+            except asyncio.TimeoutError:
+                LOGGER.warning("OPC UA disconnect timed out")
             except Exception:
                 pass
         await self._storage.close()
@@ -799,10 +1196,8 @@ def build_arg_parser() -> argparse.ArgumentParser:
 
 def main() -> None:
     args = build_arg_parser().parse_args()
-    logging.basicConfig(
-        level=logging.DEBUG if args.verbose else logging.INFO,
-        format="%(asctime)s %(levelname)s %(name)s: %(message)s",
-    )
+    if args.verbose:
+        logging.getLogger().setLevel(logging.DEBUG)
 
     ioc = HiafGasCellIOC(prefix=args.prefix)
 

@@ -1,9 +1,12 @@
+<<<<<<< HEAD
 from bisect import bisect_left
+=======
+>>>>>>> origin/main
 import os
 from pathlib import Path
 
 # ── OPC UA ──
-OPC_URL = "opc.tcp://10.51.12.158:4862"
+OPC_URL = os.getenv("OPC_URL", "opc.tcp://10.51.12.158:4862")
 VALVE_NODE_ID = "ns=1;s=t|控制及设定_压电阀开度设定"
 
 # InfluxDB
@@ -21,6 +24,7 @@ INFLUX_BUCKET = os.getenv('INFLUX_BUCKET', 'lab-bucket')
 INFLUX_WRITE_SEC = 10.0
 MEOW_NAME = os.getenv("MEOW_NAME", "")
 
+<<<<<<< HEAD
 # ── Feedforward calibration (A1 target → valve) ──
 # From reverse calibration 2026-07-12, linear interpolation
 FF_A1 = [300, 400, 500, 600, 700, 800, 900, 1000, 1100, 1200, 1300, 1400, 1500, 1600]
@@ -35,6 +39,8 @@ def feedforward_valve(a1_target):
     v0, v1 = FF_VALVES[i - 1], FF_VALVES[i]
     return v0 + (v1 - v0) * (a1_target - a0) / (a1 - a0)
 
+=======
+>>>>>>> origin/main
 # ── Tag → PV-name mappings ──
 TEMP_TAGS: list[tuple[str, str]] = [
     ("218数据_T1", "Temp:T1"),
@@ -179,15 +185,11 @@ PUMP_TAGS = [
 SENSOR_POLL_SEC = 1.0
 PI_POLL_SEC = 0.1
 DEFAULT_SETPOINT = 1500.0
-DEFAULT_KP = 0.006
-DEFAULT_KI = 0.0005
-DEFAULT_KD = 0.0001
+DEFAULT_KP = 0.01
+DEFAULT_KI = 0.00025
 VALVE_MIN = 45.0
 VALVE_MAX = 100.0
 VALVE_RATE_MAX = 3.0
-VALVE_TRIM_MAX = 30.0
-PRESSURE_RATE_MAX = 10.0
-PRESSURE_RATE_DAMP = 0.15
 MAX_CONSECUTIVE_FAILURES = 5
 
 # ── HYST mode parameters ──
