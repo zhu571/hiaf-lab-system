@@ -28,6 +28,7 @@ import (
 	"github.com/zhu571/hiaf-lab-system/go-server/rfmatch"
 	"github.com/zhu571/hiaf-lab-system/go-server/runs"
 	"github.com/zhu571/hiaf-lab-system/go-server/sensors"
+	"github.com/zhu571/hiaf-lab-system/go-server/steptemplates"
 	"github.com/zhu571/hiaf-lab-system/go-server/testdata"
 )
 
@@ -85,6 +86,11 @@ func main() {
 	assemblyRepo := assembly.NewRepository(db)
 	assemblySvc := assembly.NewService(assemblyRepo, assembly.ProjectAccessAdapter{Repo: projectsRepo})
 	assemblyHandler := assembly.NewHandler(assemblySvc)
+	templatesRepo := steptemplates.NewRepository(db)
+	templatesSvc := steptemplates.NewService(templatesRepo, db)
+	templatesSvc.AutoConfigure()
+	templatesHandler := steptemplates.NewHandler(templatesSvc)
+	assemblySvc.ConfigureTemplates(templateReaderBridge{repo: templatesRepo})
 	testDataRepo := testdata.NewRepository(db)
 	selfBase := commonEnv("SELF_BASE_URL", "http://127.0.0.1:"+port)
 	testDataSvc := testdata.NewService(testDataRepo, testdata.ProjectAccessAdapter{Repo: projectsRepo},
@@ -214,6 +220,7 @@ func main() {
 			r.Post("/experiment-runs", runsHandler.Create)
 			r.Get("/assembly", assemblyHandler.List)
 			r.Post("/assembly", assemblyHandler.Create)
+			r.Post("/assembly/apply-template", assemblyHandler.ApplyTemplate)
 			r.Get("/test-data", testDataHandler.List)
 			r.Post("/test-data", testDataHandler.Create)
 			r.Get("/rf-matching", rfMatchingHandler.List)
@@ -266,6 +273,21 @@ func main() {
 			r.Get("/", assemblyHandler.GetByID)
 			r.Patch("/", assemblyHandler.Update)
 			r.Delete("/", assemblyHandler.SoftDelete)
+		})
+	})
+	r.Route("/api/v1/step-templates", func(r chi.Router) {
+		r.Use(mw.AuthRequired)
+		r.Use(mw.AgentContext(db))
+		r.Use(mw.Audit(db))
+		r.Use(mw.RequireIdempotencyKey(db))
+		r.Get("/", templatesHandler.List)
+		r.Post("/", templatesHandler.Create)
+		r.Post("/generate", templatesHandler.Generate)
+		r.Route("/{id}", func(r chi.Router) {
+			r.Get("/", templatesHandler.GetByID)
+			r.Patch("/", templatesHandler.Update)
+			r.Delete("/", templatesHandler.SoftDelete)
+			r.Patch("/items", templatesHandler.ReplaceItems)
 		})
 	})
 	r.Route("/api/v1/test-data", func(r chi.Router) {
@@ -498,4 +520,34 @@ func (e candidateExecutor) Execute(candidate agent.AgentCandidateAction, actingU
 	default:
 		return fmt.Errorf("unsupported candidate action %q", candidate.ActionType)
 	}
+}
+
+type templateReaderBridge struct {
+	repo *steptemplates.Repository
+}
+
+func (b templateReaderBridge) GetTemplateWithItems(id string) (*assembly.SteptemplatesTemplate, []assembly.SteptemplatesItem, error) {
+	tmpl, items, err := b.repo.GetTemplateWithItems(id)
+	if err != nil {
+		return nil, nil, err
+	}
+	if tmpl == nil {
+		return nil, nil, nil
+	}
+	t := &assembly.SteptemplatesTemplate{
+		ID:   tmpl.ID,
+		Name: tmpl.Name,
+		Kind: tmpl.Kind,
+	}
+	assemblyItems := make([]assembly.SteptemplatesItem, len(items))
+	for i, item := range items {
+		assemblyItems[i] = assembly.SteptemplatesItem{
+			ID:             item.ID,
+			Name:           item.Name,
+			Description:    item.Description,
+			StepOrder:      item.StepOrder,
+			DependsOnOrder: item.DependsOnOrder,
+		}
+	}
+	return t, assemblyItems, nil
 }

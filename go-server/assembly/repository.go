@@ -152,6 +152,68 @@ func (r *Repository) MaxStepOrder(projectID string) (int, error) {
 	return max, nil
 }
 
+func (r *Repository) CreateMany(projectID, userID string, steps []StepDef, startOrder int) ([]AssemblyStep, error) {
+	tx, err := r.db.Begin()
+	if err != nil {
+		return nil, fmt.Errorf("begin create many: %w", err)
+	}
+	defer tx.Rollback()
+
+	sortSteps(steps)
+	remap := make(map[int]int, len(steps))
+	for i := range steps {
+		remap[steps[i].StepOrder] = startOrder + i + 1
+	}
+
+	result := make([]AssemblyStep, 0, len(steps))
+	stepIDs := make([]string, len(steps))
+	for i, s := range steps {
+		newOrder := startOrder + i + 1
+		var dependsOn *string
+		if s.DependsOnOrder != nil {
+			if mappedIdx, ok := remap[*s.DependsOnOrder]; ok && mappedIdx <= newOrder {
+				if mappedIdx-1-startOrder >= 0 && mappedIdx-1-startOrder < i {
+					dependsOn = &stepIDs[mappedIdx-1-startOrder]
+				}
+			}
+		}
+		var step AssemblyStep
+		description := nullText(s.Description)
+		err := scanStep(tx.QueryRow(`INSERT INTO assembly_steps
+			(project_id, name, description, depends_on, status, step_order, created_by)
+			VALUES ($1,$2,$3,$4,$5,$6,$7) RETURNING `+stepColumns,
+			projectID, s.Name, description, dependsOn, StatusPlanned, newOrder, &userID), &step)
+		if err != nil {
+			return nil, fmt.Errorf("insert step in batch: %w", err)
+		}
+		stepIDs[i] = step.ID
+		result = append(result, step)
+	}
+
+	if err := tx.Commit(); err != nil {
+		return nil, fmt.Errorf("commit create many: %w", err)
+	}
+	return result, nil
+}
+
+func (r *Repository) SetSourceTemplateID(stepID, templateID string) error {
+	_, err := r.db.Exec(`UPDATE assembly_steps SET source_template_id=$2 WHERE id=$1`, stepID, templateID)
+	if err != nil {
+		return fmt.Errorf("set source template id: %w", err)
+	}
+	return nil
+}
+
+func sortSteps(steps []StepDef) {
+	for i := 0; i < len(steps); i++ {
+		for j := i + 1; j < len(steps); j++ {
+			if steps[i].StepOrder > steps[j].StepOrder {
+				steps[i], steps[j] = steps[j], steps[i]
+			}
+		}
+	}
+}
+
 type rowScanner interface{ Scan(...any) error }
 
 func scanStep(row rowScanner, step *AssemblyStep) error {

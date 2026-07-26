@@ -14,6 +14,7 @@ const AdminUsersView = () => import('../views/AdminUsersView.vue')
 const AgentCandidatesView = () => import('../views/AgentCandidatesView.vue')
 const RunListView = () => import('../views/RunListView.vue')
 const RunDetailView = () => import('../views/RunDetailView.vue')
+const StepTemplatesView = () => import('../views/StepTemplatesView.vue')
 const TestDataView = () => import('../views/TestDataView.vue')
 const RFMatchingView = () => import('../views/RFMatchingView.vue')
 const AssemblyView = () => import('../views/AssemblyView.vue')
@@ -53,6 +54,7 @@ const router = createRouter({
       ]
     },
     { path: '/experiment-runs/:id', component: RunDetailView },
+    { path: '/step-templates', component: StepTemplatesView, meta: { requiresAuth: true } },
     { path: '/attachments', component: AttachmentView },
     { path: '/instrument-measure', component: InstrumentMeasureView },
     { path: '/gas-control', component: GasControlView },

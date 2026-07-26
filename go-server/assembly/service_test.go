@@ -21,6 +21,10 @@ func (f *fakeRepo) SoftDelete(string) error                     { return nil }
 func (f *fakeRepo) Reorder(string, []ReorderItem) error         { return nil }
 func (f *fakeRepo) GetDependencyChain(string) ([]string, error) { return nil, nil }
 func (f *fakeRepo) MaxStepOrder(string) (int, error)            { return 0, nil }
+func (f *fakeRepo) CreateMany(string, string, []StepDef, int) ([]AssemblyStep, error) {
+	return nil, nil
+}
+func (f *fakeRepo) SetSourceTemplateID(string, string) error { return nil }
 func (f *fakeRepo) GetByID(id string) (*AssemblyStep, error)    { return f.steps[id], nil }
 func (f *fakeRepo) UpdateStatus(id, from, to string, started, completed *time.Time) error {
 	step := f.steps[id]

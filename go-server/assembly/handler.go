@@ -138,6 +138,29 @@ func (h *Handler) SoftDelete(w http.ResponseWriter, r *http.Request) {
 	common.WriteSuccess(w, r, map[string]string{"id": id})
 }
 
+func (h *Handler) ApplyTemplate(w http.ResponseWriter, r *http.Request) {
+	middleware.SetAuditAction(r.Context(), "assembly.template_applied")
+	if !requireIdempotencyKey(w, r) {
+		return
+	}
+	claims := middleware.GetUserClaims(r.Context())
+	if claims == nil {
+		common.WriteError(w, r, http.StatusUnauthorized, "unauthorized", "未登录", nil)
+		return
+	}
+	var req ApplyTemplateRequest
+	if err := decode(r, &req); err != nil {
+		common.WriteError(w, r, http.StatusBadRequest, "bad_request", "请求体解析失败", nil)
+		return
+	}
+	steps, err := h.svc.ApplyTemplate(projectID(r), middleware.EffectiveUserID(r.Context()), claims.Role, req)
+	if err != nil {
+		h.writeError(w, r, err)
+		return
+	}
+	common.WriteCreated(w, r, steps)
+}
+
 func decode(r *http.Request, dst any) error {
 	decoder := json.NewDecoder(r.Body)
 	decoder.DisallowUnknownFields()
