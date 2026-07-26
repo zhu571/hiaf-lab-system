@@ -1,7 +1,3 @@
-<<<<<<< HEAD
-from bisect import bisect_left
-=======
->>>>>>> origin/main
 import os
 from pathlib import Path
 
@@ -24,23 +20,6 @@ INFLUX_BUCKET = os.getenv('INFLUX_BUCKET', 'lab-bucket')
 INFLUX_WRITE_SEC = 10.0
 MEOW_NAME = os.getenv("MEOW_NAME", "")
 
-<<<<<<< HEAD
-# ── Feedforward calibration (A1 target → valve) ──
-# From reverse calibration 2026-07-12, linear interpolation
-FF_A1 = [300, 400, 500, 600, 700, 800, 900, 1000, 1100, 1200, 1300, 1400, 1500, 1600]
-FF_VALVES = [40.0, 43.5, 47.6, 48.8, 50.3, 51.5, 52.6, 56.0, 55.2, 55.6, 56.0, 56.3, 56.6, 56.9]
-
-def feedforward_valve(a1_target):
-    """Linear-interpolated valve opening for target A1 pressure."""
-    if a1_target <= FF_A1[0]: return FF_VALVES[0]
-    if a1_target >= FF_A1[-1]: return FF_VALVES[-1]
-    i = bisect_left(FF_A1, a1_target)
-    a0, a1 = FF_A1[i - 1], FF_A1[i]
-    v0, v1 = FF_VALVES[i - 1], FF_VALVES[i]
-    return v0 + (v1 - v0) * (a1_target - a0) / (a1 - a0)
-
-=======
->>>>>>> origin/main
 # ── Tag → PV-name mappings ──
 TEMP_TAGS: list[tuple[str, str]] = [
     ("218数据_T1", "Temp:T1"),
