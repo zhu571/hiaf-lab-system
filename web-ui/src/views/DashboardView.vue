@@ -423,6 +423,7 @@ function stagger(i: number) {
 .device-name {
   color: var(--text-1);
   font-weight: 600;
+  min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -550,7 +551,6 @@ function stagger(i: number) {
   flex: 0 0 210px;
   flex-direction: column;
   height: 158px;
-  width: 210px;
 }
 
 .brief-card.active {
@@ -681,7 +681,6 @@ function stagger(i: number) {
 
   .brief-card {
     flex-basis: 186px;
-    width: 186px;
   }
 }
 
