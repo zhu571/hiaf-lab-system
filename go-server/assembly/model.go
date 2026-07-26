@@ -80,3 +80,16 @@ type ListResult struct {
 	Page    int            `json:"page"`
 	PerPage int            `json:"per_page"`
 }
+
+type ApplyTemplateRequest struct {
+	TemplateID   *string    `json:"template_id,omitempty"`
+	Steps        []StepDef  `json:"steps,omitempty"`
+	SourcePrompt string     `json:"source_prompt,omitempty"`
+}
+
+type StepDef struct {
+	Name           string `json:"name"`
+	Description    string `json:"description,omitempty"`
+	StepOrder      int    `json:"step_order"`
+	DependsOnOrder *int   `json:"depends_on_order,omitempty"`
+}

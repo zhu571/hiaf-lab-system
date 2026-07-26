@@ -10,6 +10,7 @@ from starlette.responses import JSONResponse
 from starlette.routing import Route
 
 from tools.parse import InstrumentInterpreter, ParseError
+from tools.stepplan import StepPlanner
 
 
 def read_token():
@@ -44,7 +45,7 @@ def validate_request(data):
     return user_input.strip(), history, commands
 
 
-def create_app(interpreter, token):
+def create_app(interpreter, planner, token):
     async def health(_request):
         return JSONResponse({"status": "ok"})
 
@@ -67,12 +68,42 @@ def create_app(interpreter, token):
         except Exception:
             return JSONResponse({"error": "provider_unavailable"}, status_code=502)
 
-    return Starlette(routes=[Route("/health", health), Route("/v1/interpret", interpret, methods=["POST"])])
+    async def step_plan(request: Request):
+        supplied = request.headers.get("authorization", "").removeprefix("Bearer ")
+        if not token or not secrets.compare_digest(supplied, token):
+            return JSONResponse({"error": "unauthorized"}, status_code=401)
+        try:
+            data = await request.json()
+            if not isinstance(data, dict) or len(json.dumps(data, ensure_ascii=False)) > 64_000:
+                raise ValueError("request too large")
+            kind = data.get("kind")
+            prompt = data.get("prompt")
+            context = data.get("context", {})
+            if kind not in {"assembly", "experiment"}:
+                raise ValueError("kind is invalid")
+            if not isinstance(prompt, str) or not prompt.strip() or len(prompt) > 4000:
+                raise ValueError("prompt is invalid")
+            if not isinstance(context, dict):
+                raise ValueError("context is invalid")
+            result = planner.plan(kind, prompt.strip(), context)
+            return JSONResponse(result)
+        except (ValueError, json.JSONDecodeError):
+            return JSONResponse({"error": "bad_request"}, status_code=400)
+        except ParseError:
+            return JSONResponse({"error": "planning_failed"}, status_code=422)
+        except Exception:
+            return JSONResponse({"error": "provider_unavailable"}, status_code=502)
+
+    return Starlette(routes=[
+        Route("/health", health),
+        Route("/v1/interpret", interpret, methods=["POST"]),
+        Route("/v1/step-plan", step_plan, methods=["POST"]),
+    ])
 
 
 if __name__ == "__main__":
     api_key = os.getenv("DEEPSEEK_API_KEY")
     if not api_key:
         raise RuntimeError("DEEPSEEK_API_KEY environment variable is not set")
-    app = create_app(InstrumentInterpreter(api_key), read_token())
+    app = create_app(InstrumentInterpreter(api_key), StepPlanner(api_key), read_token())
     uvicorn.run(app, host="0.0.0.0", port=8001)

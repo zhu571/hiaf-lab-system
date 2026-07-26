@@ -5,6 +5,8 @@
       <el-select v-model="statusFilter" class="status-select" placeholder="全部状态" clearable>
         <el-option v-for="s in statuses" :key="s.value" :label="s.label" :value="s.value" />
       </el-select>
+      <el-button v-if="canOperate" type="primary" plain @click="aiDialog = true">AI 生成步骤</el-button>
+      <RouterLink to="/step-templates"><el-button>模板库</el-button></RouterLink>
       <el-button v-if="canOperate" type="primary" @click="createDialog = true">新建步骤</el-button>
     </div>
     <section class="panel">
@@ -76,6 +78,38 @@
         <el-button type="primary" @click="create">保存</el-button>
       </template>
     </el-dialog>
+    <el-dialog v-model="aiDialog" title="AI 生成步骤" width="760" @closed="resetAi">
+      <div v-if="aiStage === 'input'" class="grid">
+        <el-alert v-if="aiNotice" :type="aiNoticeType" :title="aiNotice" show-icon :closable="false" />
+        <el-input
+          v-model="aiPrompt"
+          type="textarea"
+          :rows="4"
+          maxlength="4000"
+          placeholder="用自然语言描述装配流程，例如：先清洁腔体并检查密封圈，再安装靶架，最后抽真空检漏"
+        />
+      </div>
+      <div v-else class="grid">
+        <el-form label-position="top">
+          <el-form-item label="模板名称（存模板时使用）">
+            <el-input v-model="aiName" maxlength="256" />
+          </el-form-item>
+        </el-form>
+        <StepItemsEditor :key="aiKey" v-model="aiItems" />
+      </div>
+      <template #footer>
+        <template v-if="aiStage === 'input'">
+          <el-button @click="aiDialog = false">取消</el-button>
+          <el-button type="primary" :loading="aiGenerating" :disabled="!aiPrompt.trim()" @click="generate">生成候选</el-button>
+        </template>
+        <template v-else>
+          <el-button @click="aiStage = 'input'">返回修改</el-button>
+          <el-button :loading="aiSubmitting" @click="applyInline">直接应用</el-button>
+          <el-button v-if="canSaveTemplate" :loading="aiSubmitting" @click="saveTemplateOnly">存模板</el-button>
+          <el-button v-if="canSaveTemplate" type="primary" :loading="aiSubmitting" @click="saveAndApply">存并应用</el-button>
+        </template>
+      </template>
+    </el-dialog>
     <el-dialog v-model="overrideDialog" title="前置步骤未完成" width="480">
       <div class="grid">
         <p class="override-tip">
@@ -103,7 +137,9 @@ import { useRoute } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { Rank } from '@element-plus/icons-vue'
 import StatusBadge from '../components/StatusBadge.vue'
+import StepItemsEditor from '../components/StepItemsEditor.vue'
 import {
+  applyAssemblyTemplate,
   createAssemblyStep,
   deleteAssemblyStep,
   listAssemblySteps,
@@ -111,6 +147,7 @@ import {
   transitionAssemblyStep,
   type AssemblyStep
 } from '../api/assembly'
+import { createTemplate, generateSteps, type StepTemplateItem } from '../api/stepTemplates'
 import { listMembers, type ProjectMember } from '../api/projects'
 import { useAuthStore } from '../stores/auth'
 import { showApiError } from '../composables/useNotify'
@@ -130,6 +167,17 @@ const overrideReason = ref('')
 const overrideTarget = ref<{ step: AssemblyStep; transition: string; dep: AssemblyStep } | null>(null)
 const dragIndex = ref(-1)
 const draft = reactive({ name: '', description: '', depends_on: '', assigned_to: '' })
+// AI 生成步骤对话框状态：input（输入自然语言）→ result（编辑候选）
+const aiDialog = ref(false)
+const aiStage = ref<'input' | 'result'>('input')
+const aiPrompt = ref('')
+const aiNotice = ref('')
+const aiNoticeType = ref<'warning' | 'error'>('warning')
+const aiGenerating = ref(false)
+const aiSubmitting = ref(false)
+const aiName = ref('')
+const aiItems = ref<StepTemplateItem[]>([])
+const aiKey = ref(0)
 const statuses = [
   { value: 'planned', label: '计划中' },
   { value: 'in_progress', label: '进行中' },
@@ -159,6 +207,8 @@ const transitionsByStatus: Record<string, TransitionAction[]> = {
 
 const canOperate = computed(() => ['admin', 'maintainer', 'member'].includes(auth.user?.role || ''))
 const canReorder = computed(() => ['admin', 'maintainer'].includes(auth.user?.role || ''))
+// 后端 steptemplates 创建模板仅允许 admin/maintainer
+const canSaveTemplate = computed(() => ['admin', 'maintainer'].includes(auth.user?.role || ''))
 // projectId 的唯一事实来源是路由参数（由 ProjectLayout 保证存在）
 const projectId = computed(() => String(route.params.id || ''))
 const filteredSteps = computed(() => (statusFilter.value ? steps.value.filter((s) => s.status === statusFilter.value) : steps.value))
@@ -292,6 +342,111 @@ async function remove(step: AssemblyStep) {
     await load()
   } catch (err) {
     showApiError(err, '步骤删除失败')
+  }
+}
+
+function resetAi() {
+  aiStage.value = 'input'
+  aiPrompt.value = ''
+  aiNotice.value = ''
+  aiName.value = ''
+  aiItems.value = []
+}
+
+async function generate() {
+  aiGenerating.value = true
+  aiNotice.value = ''
+  try {
+    const res = await generateSteps('assembly', aiPrompt.value.trim())
+    if (res.status === 'ok') {
+      aiItems.value = res.steps ?? []
+      aiName.value = res.name_suggestion || ''
+      aiKey.value += 1
+      aiStage.value = 'result'
+    } else if (res.status === 'clarify') {
+      aiNoticeType.value = 'warning'
+      aiNotice.value = res.question ? `需要补充信息：${res.question}` : '需要补充更多信息，请完善描述后重试'
+    } else {
+      aiNoticeType.value = 'error'
+      aiNotice.value = res.reason ? `无法生成：${res.reason}` : '无法生成步骤，请调整描述后重试'
+    }
+  } catch (err) {
+    showApiError(err, 'AI 生成失败')
+  } finally {
+    aiGenerating.value = false
+  }
+}
+
+function validAiItems() {
+  if (aiItems.value.length < 1 || aiItems.value.length > 30) {
+    ElMessage.warning('候选步骤数需在 1-30 之间')
+    return false
+  }
+  if (aiItems.value.some((s) => !s.name.trim())) {
+    ElMessage.warning('请填写所有步骤名称')
+    return false
+  }
+  return true
+}
+
+async function applyInline() {
+  if (!validAiItems()) return
+  aiSubmitting.value = true
+  try {
+    await applyAssemblyTemplate(projectId.value, { steps: aiItems.value, source_prompt: aiPrompt.value.trim() })
+    ElMessage.success('步骤已应用到当前项目')
+    aiDialog.value = false
+    await load()
+  } catch (err) {
+    showApiError(err, '应用失败')
+  } finally {
+    aiSubmitting.value = false
+  }
+}
+
+async function createTemplateFromAi() {
+  if (!aiName.value.trim()) {
+    ElMessage.warning('请填写模板名称')
+    return null
+  }
+  if (!validAiItems()) return null
+  return createTemplate({
+    name: aiName.value.trim(),
+    kind: 'assembly',
+    items: aiItems.value,
+    source_prompt: aiPrompt.value.trim(),
+    ai_generated: true
+  })
+}
+
+async function saveTemplateOnly() {
+  aiSubmitting.value = true
+  try {
+    const t = await createTemplateFromAi()
+    if (t) {
+      ElMessage.success('模板已保存，可在模板库中查看')
+      aiDialog.value = false
+    }
+  } catch (err) {
+    showApiError(err, '模板保存失败')
+  } finally {
+    aiSubmitting.value = false
+  }
+}
+
+async function saveAndApply() {
+  aiSubmitting.value = true
+  try {
+    const t = await createTemplateFromAi()
+    if (!t) return
+    await applyAssemblyTemplate(projectId.value, { template_id: t.id })
+    ElMessage.success('模板已保存并应用到当前项目')
+    aiDialog.value = false
+    await load()
+  } catch (err) {
+    showApiError(err, '保存并应用失败')
+  } finally {
+    aiSubmitting.value = false
   }
 }
 </script>

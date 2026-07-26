@@ -61,3 +61,21 @@ export function reorderAssemblySteps(data: ReorderPayload) {
 export function deleteAssemblyStep(id: string) {
   return request<{ id: string }>({ url: `/assembly/${id}`, method: 'DELETE' })
 }
+
+export type ApplyTemplateStepDef = {
+  name: string
+  description?: string
+  step_order: number
+  depends_on_order?: number | null
+}
+
+// template_id 与 steps 二选一（后端校验），分别对应“按模板应用”和“inline 步骤应用”
+export type ApplyTemplatePayload = {
+  template_id?: string
+  steps?: ApplyTemplateStepDef[]
+  source_prompt?: string
+}
+
+export function applyAssemblyTemplate(projectId: string, data: ApplyTemplatePayload) {
+  return request<AssemblyStep[]>({ url: `/projects/${projectId}/assembly/apply-template`, method: 'POST', data })
+}
