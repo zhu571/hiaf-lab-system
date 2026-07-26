@@ -36,16 +36,41 @@ type stepRepository interface {
 	Reorder(projectID string, items []ReorderItem) error
 	GetDependencyChain(id string) ([]string, error)
 	MaxStepOrder(projectID string) (int, error)
+	CreateMany(projectID, userID string, steps []StepDef, startOrder int) ([]AssemblyStep, error)
+	SetSourceTemplateID(stepID, templateID string) error
+}
+
+type TemplateReader interface {
+	GetTemplateWithItems(id string) (*SteptemplatesTemplate, []SteptemplatesItem, error)
+}
+
+type SteptemplatesTemplate struct {
+	ID   string
+	Name string
+	Kind string
+}
+
+type SteptemplatesItem struct {
+	ID             string
+	Name           string
+	Description    string
+	StepOrder      int
+	DependsOnOrder *int
 }
 
 type Service struct {
-	repo   stepRepository
-	access ProjectAccessChecker
-	now    func() time.Time
+	repo       stepRepository
+	access     ProjectAccessChecker
+	now        func() time.Time
+	tmplReader TemplateReader
 }
 
 func NewService(repo stepRepository, access ProjectAccessChecker) *Service {
 	return &Service{repo: repo, access: access, now: time.Now}
+}
+
+func (s *Service) ConfigureTemplates(reader TemplateReader) {
+	s.tmplReader = reader
 }
 
 func (s *Service) Create(projectID, userID, userRole string, req CreateStepRequest) (*AssemblyStep, error) {
@@ -306,6 +331,75 @@ func (s *Service) requireProject(projectID string) error {
 		return ErrProjectNotFound
 	}
 	return nil
+}
+
+func (s *Service) ApplyTemplate(projectID, userID, userRole string, req ApplyTemplateRequest) ([]AssemblyStep, error) {
+	projectID = strings.TrimSpace(projectID)
+	if userRole == auth.RoleAgent {
+		return nil, ErrForbidden
+	}
+	if err := s.requireProject(projectID); err != nil {
+		return nil, err
+	}
+	if err := s.requireAccess(projectID, userID, userRole, projects.RoleMember); err != nil {
+		return nil, err
+	}
+	hasTemplateID := req.TemplateID != nil && strings.TrimSpace(*req.TemplateID) != ""
+	hasInlineSteps := len(req.Steps) > 0
+	if hasTemplateID == hasInlineSteps {
+		return nil, ErrInvalidInput
+	}
+	if hasTemplateID && s.tmplReader == nil {
+		return nil, errors.New("模板读取服务未配置")
+	}
+
+	var stepDefs []StepDef
+	var sourceTemplateID *string
+
+	if hasTemplateID {
+		tmpl, items, err := s.tmplReader.GetTemplateWithItems(strings.TrimSpace(*req.TemplateID))
+		if err != nil {
+			return nil, err
+		}
+		if tmpl == nil {
+			return nil, errors.New("模板不存在")
+		}
+		sourceTemplateID = &tmpl.ID
+		stepDefs = make([]StepDef, len(items))
+		for i, item := range items {
+			stepDefs[i] = StepDef{
+				Name:           item.Name,
+				Description:    item.Description,
+				StepOrder:      item.StepOrder,
+				DependsOnOrder: item.DependsOnOrder,
+			}
+		}
+	} else {
+		if len(req.Steps) > 30 {
+			return nil, errors.New("步骤数不能超过 30")
+		}
+		stepDefs = req.Steps
+	}
+
+	maxOrder, err := s.repo.MaxStepOrder(projectID)
+	if err != nil {
+		return nil, err
+	}
+
+	steps, err := s.repo.CreateMany(projectID, userID, stepDefs, maxOrder)
+	if err != nil {
+		return nil, err
+	}
+
+	if sourceTemplateID != nil {
+		for i := range steps {
+			if err := s.repo.SetSourceTemplateID(steps[i].ID, *sourceTemplateID); err != nil {
+				return nil, err
+			}
+		}
+	}
+
+	return steps, nil
 }
 
 func (s *Service) requireAccess(projectID, userID, userRole, minRole string) error {
