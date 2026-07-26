@@ -1,67 +1,97 @@
 <template>
   <div class="page dashboard">
-    <div class="toolbar">
-      <h2>实验室仪表盘</h2>
+    <div class="toolbar dash-head">
+      <div class="dash-title">
+        <h2>实验室仪表盘</h2>
+        <p class="dash-sub">设备运行状态与团队动态一览</p>
+      </div>
+      <div class="dash-date">
+        <el-icon><Calendar /></el-icon>
+        <span>{{ todayText }}</span>
+      </div>
     </div>
 
     <div class="dashboard-grid">
       <!-- 左列：设备状态 -->
       <section class="panel column">
-        <h3>设备状态</h3>
+        <div class="panel-head">
+          <span class="panel-icon"><el-icon><Odometer /></el-icon></span>
+          <h3>设备状态</h3>
+          <span class="panel-meta">{{ onlineCount }}/{{ instruments.length + 1 }} 在线</span>
+        </div>
         <div v-loading="loadingInstruments" class="card-list">
           <el-empty v-if="!loadingInstruments && !instruments.length" description="暂无设备" />
-          <el-card
-            v-for="inst in instruments"
+          <div
+            v-for="(inst, i) in instruments"
             :key="inst.id"
-            shadow="hover"
             class="device-card"
+            :style="stagger(i)"
             @click="router.push('/instrument-measure')"
           >
-            <div class="device-row">
-              <span class="device-name">{{ inst.name }}</span>
-              <el-tag :type="isOnline(inst.state) ? 'success' : 'info'" size="small">
-                {{ isOnline(inst.state) ? '在线' : '离线' }}
-              </el-tag>
-            </div>
-          </el-card>
+            <span class="status-dot" :class="{ online: isOnline(inst.state) }"></span>
+            <span class="device-name">{{ inst.name }}</span>
+            <span class="device-state" :class="{ online: isOnline(inst.state) }">
+              {{ isOnline(inst.state) ? '在线' : '离线' }}
+            </span>
+            <el-icon class="card-chev"><ArrowRight /></el-icon>
+          </div>
 
-          <el-card shadow="hover" class="device-card" @click="router.push('/gas-control')">
+          <div class="device-card gas-card" :style="stagger(instruments.length)" @click="router.push('/gas-control')">
             <div class="device-row">
+              <span class="status-dot" :class="{ online: gasOnline }"></span>
               <span class="device-name">气压控制</span>
-              <el-tag :type="gasOnline ? 'success' : 'info'" size="small">
+              <span class="device-state" :class="{ online: gasOnline }">
                 {{ gasOnline ? '在线' : '离线' }}
-              </el-tag>
+              </span>
+              <el-icon class="card-chev"><ArrowRight /></el-icon>
             </div>
-            <div class="gas-values" :class="{ offline: !gasOnline }">
-              <span>状态：{{ gasRunningText }}</span>
-              <span>A1：{{ gasA1Text }}</span>
+            <div class="gas-stats" :class="{ offline: !gasOnline }">
+              <div class="gas-stat">
+                <span class="gas-label">运行状态</span>
+                <span class="gas-value">{{ gasRunningText }}</span>
+              </div>
+              <div class="gas-stat">
+                <span class="gas-label">A1 压力</span>
+                <span class="gas-value">{{ gasA1Text }}</span>
+              </div>
             </div>
-          </el-card>
+          </div>
         </div>
       </section>
 
       <!-- 中列：综合简报 -->
       <section class="panel column">
-        <h3>综合简报</h3>
+        <div class="panel-head">
+          <span class="panel-icon"><el-icon><DataAnalysis /></el-icon></span>
+          <h3>综合简报</h3>
+          <span class="panel-meta">近 7 天</span>
+        </div>
         <div v-loading="loadingReports" class="brief-strip">
-          <el-card
-            v-for="day in briefDays"
+          <div
+            v-for="(day, i) in briefDays"
             :key="day.date"
-            shadow="hover"
             class="brief-card"
             :class="{ active: day.date === selectedDate }"
+            :style="stagger(i)"
             @click="selectDate(day.date)"
           >
-            <div class="brief-date">{{ day.date }}</div>
-            <div class="brief-count">{{ day.reports.length }} 人</div>
-            <p class="brief-summary">{{ day.summary || '暂无日报' }}</p>
-          </el-card>
+            <div class="brief-top">
+              <span class="brief-date">{{ briefDayLabel(day.date) }}</span>
+              <span class="brief-count">{{ day.reports.length }} 人</span>
+            </div>
+            <span class="brief-week">{{ weekdayLabel(day.date) }}</span>
+            <p class="brief-summary" :class="{ empty: !day.summary }">{{ day.summary || '暂无日报' }}</p>
+          </div>
         </div>
       </section>
 
       <!-- 右列：团队成员日报 -->
       <section class="panel column">
-        <h3>团队成员日报</h3>
+        <div class="panel-head">
+          <span class="panel-icon"><el-icon><Avatar /></el-icon></span>
+          <h3>团队成员日报</h3>
+          <span class="panel-meta">{{ dayReports.length }} 篇</span>
+        </div>
         <div class="date-bar">
           <el-button :icon="ArrowLeft" circle size="small" @click="shiftDate(-1)" />
           <el-date-picker v-model="selectedDate" type="date" value-format="YYYY-MM-DD" :clearable="false" />
@@ -69,19 +99,22 @@
         </div>
         <div v-loading="loadingReports" class="card-list">
           <el-empty v-if="!loadingReports && !dayReports.length" description="当天暂无日报" />
-          <el-card
-            v-for="report in dayReports"
+          <div
+            v-for="(report, i) in dayReports"
             :key="report.id"
-            shadow="hover"
             class="member-card"
+            :style="stagger(i)"
             @click="router.push('/daily-reports/' + report.id)"
           >
             <div class="member-row">
               <span class="avatar">{{ initial(report) }}</span>
               <span class="member-name">{{ report.author_name || report.author_id }}</span>
+              <el-icon class="card-chev"><ArrowRight /></el-icon>
             </div>
-            <p class="member-summary">{{ truncate(report.summary) || '暂无摘要' }}</p>
-          </el-card>
+            <p class="member-summary" :class="{ empty: !report.summary }">
+              {{ truncate(report.summary) || '暂无摘要' }}
+            </p>
+          </div>
         </div>
       </section>
     </div>
@@ -91,7 +124,7 @@
 <script setup lang="ts">
 import { ref, reactive, computed, watch, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
-import { ArrowLeft, ArrowRight } from '@element-plus/icons-vue'
+import { ArrowLeft, ArrowRight, Avatar, Calendar, DataAnalysis, Odometer } from '@element-plus/icons-vue'
 import { listInstruments, gasCellStatus, type InstrumentSummary, type GasCellPoint } from '../api/instruments'
 import { listReports, type DailyReport } from '../api/logs'
 import { showApiError } from '../composables/useNotify'
@@ -223,9 +256,73 @@ function initial(report: DailyReport) {
   const name = (report.author_name || report.author_id || '?').trim()
   return name.charAt(0).toUpperCase()
 }
+
+/* ---------- 纯展示辅助 ---------- */
+
+// 顶栏日期与简报卡片文案，仅用于显示，不参与数据逻辑
+const todayStr = localDate(new Date())
+const yesterdayStr = localDate(new Date(Date.now() - 86400000))
+const todayText = new Date().toLocaleDateString('zh-CN', {
+  year: 'numeric',
+  month: 'long',
+  day: 'numeric',
+  weekday: 'long'
+})
+
+// 设备列角标：在线数（仪器 + 气压控制）
+const onlineCount = computed(
+  () => instruments.value.filter((i) => isOnline(i.state)).length + (gasOnline.value ? 1 : 0)
+)
+
+function briefDayLabel(date: string) {
+  if (date === todayStr) return '今天'
+  if (date === yesterdayStr) return '昨天'
+  return date.slice(5) // MM-DD
+}
+
+function weekdayLabel(date: string) {
+  return new Date(`${date}T00:00:00`).toLocaleDateString('zh-CN', { weekday: 'short' })
+}
+
+// 卡片入场动画的交错延迟
+function stagger(i: number) {
+  return { animationDelay: `${i * 45}ms` }
+}
 </script>
 
 <style scoped>
+/* ---------- 页头 ---------- */
+
+.dash-title h2 {
+  font-size: 22px;
+}
+
+.dash-sub {
+  color: var(--text-3);
+  font-size: 13px;
+  margin-top: 2px;
+}
+
+.dash-date {
+  align-items: center;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  box-shadow: var(--shadow-sm);
+  color: var(--text-2);
+  display: inline-flex;
+  font-size: 13px;
+  gap: 8px;
+  padding: 7px 14px;
+  white-space: nowrap;
+}
+
+.dash-date .el-icon {
+  color: var(--brand-600);
+}
+
+/* ---------- 三列布局 ---------- */
+
 .dashboard-grid {
   align-items: start;
   display: grid;
@@ -233,9 +330,42 @@ function initial(report: DailyReport) {
   grid-template-columns: repeat(3, minmax(0, 1fr));
 }
 
-.column h3 {
-  font-size: 16px;
-  margin: 0 0 14px;
+.panel-head {
+  align-items: center;
+  border-bottom: 1px solid var(--border);
+  display: flex;
+  gap: 10px;
+  margin-bottom: 14px;
+  padding-bottom: 12px;
+}
+
+.panel-icon {
+  align-items: center;
+  background: var(--brand-050);
+  border-radius: 8px;
+  color: var(--brand-600);
+  display: inline-flex;
+  flex-shrink: 0;
+  font-size: 15px;
+  height: 28px;
+  justify-content: center;
+  width: 28px;
+}
+
+.panel-head h3 {
+  font-size: 15px;
+}
+
+.panel-meta {
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  color: var(--text-3);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+  margin-left: auto;
+  padding: 2px 10px;
+  white-space: nowrap;
 }
 
 .card-list {
@@ -245,70 +375,243 @@ function initial(report: DailyReport) {
   min-height: 80px;
 }
 
+/* ---------- 卡片基座 ---------- */
+
 .device-card,
 .brief-card,
 .member-card {
+  animation: card-in 0.4s cubic-bezier(0.21, 0.61, 0.35, 1) both;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-sm);
   cursor: pointer;
+  padding: 14px 16px;
+  transition:
+    border-color 0.18s ease,
+    box-shadow 0.18s ease,
+    transform 0.18s ease;
+}
+
+.device-card:hover,
+.brief-card:hover,
+.member-card:hover {
+  border-color: var(--brand-500);
+  box-shadow: var(--shadow-md);
+  transform: translateY(-2px);
+}
+
+@keyframes card-in {
+  from {
+    opacity: 0;
+    translate: 0 10px;
+  }
+  to {
+    opacity: 1;
+    translate: 0 0;
+  }
+}
+
+/* ---------- 设备卡片 ---------- */
+
+.device-card {
+  align-items: center;
+  display: flex;
+  gap: 10px;
+}
+
+.device-name {
+  color: var(--text-1);
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.status-dot {
+  background: #b9c6d2;
+  border-radius: 50%;
+  flex-shrink: 0;
+  height: 8px;
+  position: relative;
+  width: 8px;
+}
+
+.status-dot.online {
+  background: var(--ok);
+}
+
+.status-dot.online::after {
+  animation: dot-pulse 2.2s ease-out infinite;
+  border: 2px solid var(--ok);
+  border-radius: 50%;
+  content: '';
+  inset: -4px;
+  position: absolute;
+}
+
+@keyframes dot-pulse {
+  0% {
+    opacity: 0.8;
+    transform: scale(0.6);
+  }
+  70%,
+  100% {
+    opacity: 0;
+    transform: scale(1.15);
+  }
+}
+
+.device-state {
+  color: var(--text-3);
+  flex-shrink: 0;
+  font-size: 12px;
+  margin-left: auto;
+}
+
+.device-state.online {
+  color: var(--ok);
+  font-weight: 600;
+}
+
+.card-chev {
+  color: var(--text-3);
+  flex-shrink: 0;
+  font-size: 14px;
+  transition:
+    color 0.18s ease,
+    translate 0.18s ease;
+}
+
+.device-card:hover .card-chev,
+.member-card:hover .card-chev {
+  color: var(--brand-600);
+  translate: 2px 0;
+}
+
+/* 气压控制卡：淡品牌色底，与仪器卡区分 */
+
+.gas-card {
+  background: linear-gradient(150deg, var(--brand-050) 0%, var(--surface) 70%);
+  border-color: var(--brand-100);
+  display: block;
 }
 
 .device-row {
   align-items: center;
   display: flex;
-  gap: 8px;
-  justify-content: space-between;
+  gap: 10px;
 }
 
-.device-name {
-  font-weight: 600;
+.gas-stats {
+  display: grid;
+  gap: 10px;
+  grid-template-columns: 1fr 1fr;
+  margin-top: 12px;
 }
 
-.gas-values {
-  color: var(--text-2);
-  display: flex;
-  font-size: 13px;
-  gap: 16px;
-  margin-top: 10px;
+.gas-stat {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  display: grid;
+  gap: 1px;
+  padding: 8px 12px;
 }
 
-.gas-values.offline {
+.gas-label {
+  color: var(--text-3);
+  font-size: 12px;
+}
+
+.gas-value {
+  color: var(--text-1);
+  font-size: 14px;
+  font-variant-numeric: tabular-nums;
+  font-weight: 650;
+}
+
+.gas-stats.offline .gas-value {
   color: var(--text-3);
 }
+
+/* ---------- 简报卡片（横向滚动条） ---------- */
 
 .brief-strip {
   display: flex;
   gap: 12px;
+  margin: -4px -4px -12px;
   overflow-x: auto;
-  padding-bottom: 6px;
+  padding: 4px 4px 16px;
 }
 
 .brief-card {
-  flex: 0 0 220px;
-  width: 220px;
+  display: flex;
+  flex: 0 0 210px;
+  flex-direction: column;
+  height: 158px;
+  width: 210px;
 }
 
 .brief-card.active {
-  border-color: var(--el-color-primary);
+  background: var(--brand-050);
+  border-color: var(--brand-500);
+  box-shadow: 0 6px 16px -8px rgba(18, 112, 138, 0.35);
+}
+
+.brief-top {
+  align-items: center;
+  display: flex;
+  justify-content: space-between;
 }
 
 .brief-date {
-  font-weight: 600;
+  color: var(--text-1);
+  font-size: 15px;
+  font-weight: 650;
 }
 
 .brief-count {
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  color: var(--text-3);
+  font-size: 11px;
+  padding: 1px 8px;
+  transition:
+    background 0.18s ease,
+    color 0.18s ease;
+  white-space: nowrap;
+}
+
+.brief-card.active .brief-count {
+  background: var(--brand-600);
+  border-color: var(--brand-600);
+  color: #fff;
+}
+
+.brief-week {
   color: var(--text-3);
   font-size: 12px;
-  margin: 4px 0;
+  margin-top: 2px;
 }
 
 .brief-summary {
   color: var(--text-2);
   display: -webkit-box;
   font-size: 13px;
-  margin: 0;
+  line-height: 1.55;
+  margin: 8px 0 0;
   overflow: hidden;
   -webkit-box-orient: vertical;
-  -webkit-line-clamp: 6;
+  -webkit-line-clamp: 4;
 }
+
+.brief-summary.empty {
+  color: var(--text-3);
+}
+
+/* ---------- 日报卡片 ---------- */
 
 .date-bar {
   align-items: center;
@@ -329,34 +632,74 @@ function initial(report: DailyReport) {
 
 .avatar {
   align-items: center;
-  background: var(--el-color-primary);
-  border-radius: 50%;
+  background: linear-gradient(135deg, var(--brand-500), var(--brand-700));
+  border-radius: 10px;
+  box-shadow: 0 2px 6px -2px rgba(18, 112, 138, 0.5);
   color: #fff;
   display: inline-flex;
   flex-shrink: 0;
   font-size: 14px;
-  height: 32px;
+  font-weight: 700;
+  height: 34px;
   justify-content: center;
-  width: 32px;
+  width: 34px;
 }
 
 .member-name {
+  color: var(--text-1);
   font-weight: 600;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.member-row .card-chev {
+  margin-left: auto;
 }
 
 .member-summary {
   color: var(--text-2);
   display: -webkit-box;
   font-size: 13px;
-  margin: 8px 0 0;
+  margin: 10px 0 0;
   overflow: hidden;
   -webkit-box-orient: vertical;
   -webkit-line-clamp: 3;
 }
 
+.member-summary.empty {
+  color: var(--text-3);
+}
+
+/* ---------- 响应式与动效偏好 ---------- */
+
 @media (max-width: 768px) {
   .dashboard-grid {
     grid-template-columns: 1fr;
+  }
+
+  .brief-card {
+    flex-basis: 186px;
+    width: 186px;
+  }
+}
+
+@media (max-width: 480px) {
+  .gas-stats {
+    grid-template-columns: 1fr;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .device-card,
+  .brief-card,
+  .member-card {
+    animation: none;
+  }
+
+  .status-dot.online::after {
+    animation: none;
   }
 }
 </style>
