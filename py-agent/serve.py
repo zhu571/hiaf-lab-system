@@ -10,10 +10,7 @@ from starlette.responses import JSONResponse
 from starlette.routing import Route
 
 from tools.parse import InstrumentInterpreter, ParseError
-<<<<<<< HEAD
-=======
 from tools.stepplan import StepPlanner
->>>>>>> origin/main
 
 
 def read_token():
@@ -108,9 +105,5 @@ if __name__ == "__main__":
     api_key = os.getenv("DEEPSEEK_API_KEY")
     if not api_key:
         raise RuntimeError("DEEPSEEK_API_KEY environment variable is not set")
-<<<<<<< HEAD
-    app = create_app(InstrumentInterpreter(api_key), read_token())
-=======
     app = create_app(InstrumentInterpreter(api_key), StepPlanner(api_key), read_token())
->>>>>>> origin/main
     uvicorn.run(app, host="0.0.0.0", port=8001)
