@@ -736,6 +736,27 @@ class HiafGasCellIOC(PVGroup):
                     await self.Piezo_Running.write(0)
                     await self._set_connected(False)
 
+    # ── HYST cycle: fixed-step coarse control ──
+    async def _hyst_cycle(self, error) -> None:
+        """Hysteresis coarse control: fixed-step valve nudges toward setpoint."""
+        try:
+            current_v = float(await self._valve_node.read_value())
+        except Exception:
+            current_v = float(self.Piezo_ValveSP.value)
+
+        if abs(error) <= hiaf_config.HYST_TARGET_BAND:
+            return
+
+        step = (hiaf_config.HYST_STEP_BIG
+                if abs(error) > 5 * hiaf_config.HYST_TARGET_BAND
+                else hiaf_config.HYST_STEP_SMALL)
+        # error > 0: 压力低于设定 → 开大阀门；error < 0: 关小阀门
+        direction = 1.0 if error > 0 else -1.0
+
+        new_valve = current_v + direction * step
+        new_valve = max(hiaf_config.VALVE_MIN, min(hiaf_config.VALVE_MAX, new_valve))
+        await self.Piezo_ValveSP.write(new_valve)
+
     # ── PI cycle: pure velocity-form PI ──
     async def _pi_cycle(self, sp_val, a1, error) -> None:
         """Pure velocity-form PI (no deadband, no D, no feedforward, no trim)."""
