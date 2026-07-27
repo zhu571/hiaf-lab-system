@@ -199,7 +199,7 @@ async function loadLatest() {
   latestError.value = ''
   try {
     const data = await getLatest(selectedMeasurements.value)
-    latestPoints.value = [...data.points].sort((a, b) => a.tag.localeCompare(b.tag))
+    latestPoints.value = data.points ? [...data.points].sort((a, b) => a.tag.localeCompare(b.tag)) : []
   } catch (err) {
     latestError.value = err instanceof Error ? err.message : '最新读数加载失败'
     // 自动刷新期间的失败不打 toast，避免刷屏；手动刷新（点击）时提示
@@ -216,7 +216,7 @@ async function loadHistory() {
   const range = RANGES.find((r) => r.from === historyRange.value) || RANGES[0]
   try {
     const data = await getHistory(historyMeasurement.value, range.from, '', range.interval)
-    historyPoints.value = data.points
+    historyPoints.value = data.points || []
   } catch (err) {
     historyError.value = err instanceof Error ? err.message : '历史数据加载失败'
     if (!autoRefresh.value) showApiError(err, '历史数据加载失败')
