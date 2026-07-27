@@ -545,8 +545,10 @@ class HiafGasCellIOC(PVGroup):
             loop_start = time.monotonic()
             try:
                 if self._opc is None or self._valve_node is None:
-                    await asyncio.sleep(hiaf_config.SENSOR_POLL_SEC)
-                    continue
+                    await self._ensure_connected()
+                    if self._opc is None or self._valve_node is None:
+                        await asyncio.sleep(hiaf_config.SENSOR_POLL_SEC)
+                        continue
 
                 # When subscription is healthy, skip PV writes (only storage + safety)
                 sub_healthy = self._subscription_healthy
@@ -964,13 +966,15 @@ class HiafGasCellIOC(PVGroup):
             return self.Piezo_ValveSP.value  # refuse, keep current
         val = float(value)
         val = max(0.0, min(hiaf_config.VALVE_MAX, val))
-        if self._opc is not None and self._valve_node is not None:
-            try:
-                await self._valve_node.write_value(val)
-                LOGGER.info("Valve manually set to %.2f", val)
-            except Exception as e:
-                LOGGER.error("Valve write failed: %s", e)
-                raise
+        if self._opc is None or self._valve_node is None:
+            LOGGER.error("Valve write refused: OPC UA not connected")
+            raise RuntimeError("OPC UA not connected — valve write refused")
+        try:
+            await self._valve_node.write_value(val)
+            LOGGER.info("Valve manually set to %.2f", val)
+        except Exception as e:
+            LOGGER.error("Valve write failed: %s", e)
+            raise
         return val
 
     @Safety_A5Max.putter
