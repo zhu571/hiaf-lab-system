@@ -1,22 +1,22 @@
 <template>
   <div class="page">
     <div class="toolbar">
-      <h2>经验库</h2>
-      <el-select v-model="selectedProjectId" class="project-select" placeholder="选择项目">
+      <h2>{{ $t('experiences.pageTitle') }}</h2>
+      <el-select v-model="selectedProjectId" class="project-select" :placeholder="$t('experiences.selectProject')">
         <el-option v-for="p in projects.projects" :key="p.id" :label="p.short_name || p.name" :value="p.id" />
       </el-select>
-      <el-button type="primary" @click="dialog = true">新增经验</el-button>
+      <el-button type="primary" @click="dialog = true">{{ $t('experiences.create') }}</el-button>
     </div>
     <section class="panel filters-panel">
       <div class="filters">
-        <el-input v-model="keyword" placeholder="关键词" clearable @change="load" />
-        <el-input v-model="tagText" placeholder="标签，逗号分隔" clearable @change="load" />
+        <el-input v-model="keyword" :placeholder="$t('experiences.keyword')" clearable @change="load" />
+        <el-input v-model="tagText" :placeholder="$t('experiences.tagPlaceholder')" clearable @change="load" />
       </div>
     </section>
     <div class="board">
       <section v-for="col in columns" :key="col.status" class="panel column" :data-status="col.status">
         <div class="column-head">
-          <h3><span class="dot" />{{ col.label }}</h3>
+          <h3><span class="dot" />{{ $t(col.labelKey) }}</h3>
           <span class="count">{{ grouped[col.status].length }}</span>
         </div>
         <article v-for="item in grouped[col.status]" :key="item.id" class="exp-card" @click="open(item)">
@@ -25,28 +25,28 @@
             <el-tag v-for="tag in item.tags" :key="tag" size="small" @click.stop="appendTag(tag)">{{ tag }}</el-tag>
           </span>
         </article>
-        <p v-if="grouped[col.status].length === 0" class="empty-hint">暂无经验</p>
+        <p v-if="grouped[col.status].length === 0" class="empty-hint">{{ $t('experiences.empty') }}</p>
       </section>
     </div>
-    <el-drawer v-model="drawer" size="460" title="经验详情">
+    <el-drawer v-model="drawer" size="460" :title="$t('experiences.detail')">
       <div v-if="selected" class="grid">
         <StatusBadge :value="selected.status" />
         <h3>{{ selected.title }}</h3>
         <p class="exp-content">{{ selected.content }}</p>
         <div class="tags"><el-tag v-for="tag in selected.tags" :key="tag">{{ tag }}</el-tag></div>
-        <el-button v-if="selected.status === 'candidate'" type="primary" @click="publish(selected.id)">发布</el-button>
-        <el-button v-if="selected.status === 'published'" @click="archive(selected.id)">归档</el-button>
+        <el-button v-if="selected.status === 'candidate'" type="primary" @click="publish(selected.id)">{{ $t('experiences.publish') }}</el-button>
+        <el-button v-if="selected.status === 'published'" @click="archive(selected.id)">{{ $t('experiences.archive') }}</el-button>
       </div>
     </el-drawer>
-    <el-dialog v-model="dialog" title="新增经验" width="620">
+    <el-dialog v-model="dialog" :title="$t('experiences.create')" width="620">
       <el-form label-position="top">
-        <el-form-item label="标题"><el-input v-model="draft.title" /></el-form-item>
-        <el-form-item label="标签"><el-input v-model="draft.tags" /></el-form-item>
-        <el-form-item label="内容"><el-input v-model="draft.content" type="textarea" :rows="6" /></el-form-item>
+        <el-form-item :label="$t('experiences.labelTitle')"><el-input v-model="draft.title" /></el-form-item>
+        <el-form-item :label="$t('experiences.labelTags')"><el-input v-model="draft.tags" /></el-form-item>
+        <el-form-item :label="$t('experiences.labelContent')"><el-input v-model="draft.content" type="textarea" :rows="6" /></el-form-item>
       </el-form>
       <template #footer>
-        <el-button @click="dialog = false">取消</el-button>
-        <el-button type="primary" @click="create">保存</el-button>
+        <el-button @click="dialog = false">{{ $t('experiences.cancel') }}</el-button>
+        <el-button type="primary" @click="create">{{ $t('experiences.save') }}</el-button>
       </template>
     </el-dialog>
   </div>
@@ -54,12 +54,14 @@
 
 <script setup lang="ts">
 import { computed, onMounted, reactive, ref, watch } from 'vue'
+import { useI18n } from 'vue-i18n'
 import { ElMessage } from 'element-plus'
 import { showApiError } from '../composables/useNotify'
 import StatusBadge from '../components/StatusBadge.vue'
 import { archiveExperience, createExperience, listExperiences, publishExperience, type Experience } from '../api/experiences'
 import { useProjectStore } from '../stores/project'
 
+const { t } = useI18n()
 const projects = useProjectStore()
 const items = ref<Experience[]>([])
 const selected = ref<Experience | null>(null)
@@ -69,9 +71,9 @@ const keyword = ref('')
 const tagText = ref('')
 const draft = reactive({ title: '', content: '', tags: '' })
 const columns = [
-  { status: 'candidate', label: '待审核' },
-  { status: 'published', label: '已发布' },
-  { status: 'archived', label: '已归档' }
+  { status: 'candidate', labelKey: 'experiences.columnCandidate' },
+  { status: 'published', labelKey: 'experiences.columnPublished' },
+  { status: 'archived', labelKey: 'experiences.columnArchived' }
 ]
 
 const projectId = computed(() => projects.current?.id || '')
@@ -96,7 +98,7 @@ async function load() {
     )
     items.value = results.flatMap((result) => result.items ?? [])
   } catch (err) {
-    showApiError(err, '经验加载失败')
+    showApiError(err, t('experiences.loadFailed'))
   }
 }
 
@@ -115,20 +117,20 @@ function open(item: Experience) {
 async function publish(id: string) {
   try {
     selected.value = await publishExperience(id)
-    ElMessage.success('经验已发布')
+    ElMessage.success(t('experiences.published'))
     await load()
   } catch (err) {
-    showApiError(err, '发布失败')
+    showApiError(err, t('experiences.publishFailed'))
   }
 }
 
 async function archive(id: string) {
   try {
     selected.value = await archiveExperience(id)
-    ElMessage.success('经验已归档')
+    ElMessage.success(t('experiences.archived'))
     await load()
   } catch (err) {
-    showApiError(err, '归档失败')
+    showApiError(err, t('experiences.archiveFailed'))
   }
 }
 
@@ -136,10 +138,10 @@ async function create() {
   try {
     await createExperience({ project_id: projectId.value || undefined, title: draft.title, content: draft.content, tags: draft.tags.split(',').map((item) => item.trim()).filter(Boolean) })
     dialog.value = false
-    ElMessage.success('经验已保存')
+    ElMessage.success(t('experiences.saved'))
     await load()
   } catch (err) {
-    showApiError(err, '保存失败')
+    showApiError(err, t('experiences.saveFailed'))
   }
 }
 </script>
