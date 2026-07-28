@@ -4,7 +4,7 @@
       <div class="toolbar">
         <div class="dash-title">
           <h2>{{ store.current.name }}</h2>
-          <p class="muted">{{ store.current.description || '暂无说明' }}</p>
+          <p class="muted">{{ store.current.description || t('projectDashboard.noDescription') }}</p>
         </div>
       </div>
       <div class="stage-panel">
@@ -41,22 +41,22 @@
           </template>
         </div>
         <div class="stage-desc">
-          <strong class="stage-desc-title">{{ currentStage.icon }} 当前阶段：{{ currentStage.label }}</strong>
+          <strong class="stage-desc-title">{{ t('projectDashboard.currentStage', { label: currentStage.label }) }}</strong>
           <p v-for="item in stageDesc.can" :key="'can-' + item" class="desc-line">✅ {{ item }}</p>
           <p v-for="item in stageDesc.cannot" :key="'no-' + item" class="desc-line">❌ {{ item }}</p>
         </div>
       </div>
       <div class="metric-grid">
-        <div class="metric"><strong>{{ members.length }}</strong><span>成员</span></div>
-        <div class="metric"><strong>{{ issueTotal }}</strong><span>问题</span></div>
-        <div class="metric"><strong>{{ store.current.log_count || logs.length }}</strong><span>日志</span></div>
+        <div class="metric"><strong>{{ members.length }}</strong><span>{{ t('projectDashboard.metricMembers') }}</span></div>
+        <div class="metric"><strong>{{ issueTotal }}</strong><span>{{ t('projectDashboard.metricIssues') }}</span></div>
+        <div class="metric"><strong>{{ store.current.log_count || logs.length }}</strong><span>{{ t('projectDashboard.metricLogs') }}</span></div>
       </div>
       <el-alert v-if="loadError" :title="loadError" type="error" show-icon :closable="false" />
       <div v-loading="loading" class="overview-grid">
         <section class="overview-card">
           <div class="toolbar overview-head">
-            <h3>项目成员</h3>
-            <el-button v-if="auth.isAdmin" link type="primary" @click="go('/admin/users')">用户管理</el-button>
+            <h3>{{ t('projectDashboard.projectMembers') }}</h3>
+            <el-button v-if="auth.isAdmin" link type="primary" @click="go('/admin/users')">{{ t('projectDashboard.userManagement') }}</el-button>
           </div>
           <div v-if="members.length" class="member-list">
             <div v-for="member in members" :key="member.user_id" class="member-row">
@@ -64,12 +64,12 @@
               <el-tag size="small" effect="plain">{{ roleLabel(member.role) }}</el-tag>
             </div>
           </div>
-          <el-empty v-else :image-size="52" description="暂无成员" />
+          <el-empty v-else :image-size="52" description="{{ t('projectDashboard.noMembers') }}" />
         </section>
         <section class="overview-card timeline-card">
           <div class="toolbar overview-head">
-            <h3>最近日志</h3>
-            <el-button link type="primary" @click="go('/daily-report')">新建日志</el-button>
+            <h3>{{ t('projectDashboard.recentLogs') }}</h3>
+            <el-button link type="primary" @click="go('/daily-report')">{{ t('projectDashboard.newLog') }}</el-button>
           </div>
           <div v-if="logs.length" class="timeline-list">
             <article v-for="log in logs" :key="log.id" class="timeline-item">
@@ -80,12 +80,12 @@
               <p>{{ log.content }}</p>
             </article>
           </div>
-          <el-empty v-else :image-size="52" description="暂无日志" />
+          <el-empty v-else :image-size="52" description="{{ t('projectDashboard.noLogs') }}" />
         </section>
         <section class="overview-card">
           <div class="toolbar overview-head">
-            <h3>最近问题</h3>
-            <el-button link type="primary" @click="go('/projects/' + store.current.id + '/issues')">新建问题</el-button>
+            <h3>{{ t('projectDashboard.recentIssues') }}</h3>
+            <el-button link type="primary" @click="go('/projects/' + store.current.id + '/issues')">{{ t('projectDashboard.newIssue') }}</el-button>
           </div>
           <div v-if="issues.length" class="issue-list">
             <div v-for="issue in issues" :key="issue.id" class="issue-row">
@@ -93,25 +93,25 @@
               <el-tag size="small" effect="dark" class="severity-tag" :data-severity="issue.severity">{{ severityLabel(issue.severity) }}</el-tag>
             </div>
           </div>
-          <el-empty v-else :image-size="52" description="暂无问题" />
+          <el-empty v-else :image-size="52" description="{{ t('projectDashboard.noIssues') }}" />
         </section>
       </div>
     </div>
-    <el-empty v-else description="暂无项目" />
+    <el-empty v-else description="{{ t('projectDashboard.noProject') }}" />
     <el-dialog v-model="confirmVisible" :title="confirmTitle" width="min(440px, 92vw)">
-      <p v-if="pendingNext" class="confirm-text">切换后项目将进入「{{ pendingNext.target.label }}」阶段。</p>
+      <p v-if="pendingNext" class="confirm-text">{{ t('projectDashboard.confirmSwitchDesc', { label: pendingNext.target.label }) }}</p>
       <el-alert
         v-if="pendingNext?.action === 'complete' && (unresolvedIssues ?? 0) > 0"
         class="confirm-alert"
         type="warning"
         show-icon
         :closable="false"
-        :title="`项目仍有 ${unresolvedIssues} 个未解决 Issue`"
-        description="完成后仍可继续关闭 Issue、发布经验和生成最终报告。"
+        :title="t('projectDashboard.unresolvedWarning', { count: unresolvedIssues })"
+        description="{{ t('projectDashboard.unresolvedDesc') }}"
       />
       <template #footer>
-        <el-button @click="confirmVisible = false">取消</el-button>
-        <el-button type="primary" :loading="transitioning" @click="confirmTransition">确认切换</el-button>
+        <el-button @click="confirmVisible = false">{{ t('common.cancel') }}</el-button>
+        <el-button type="primary" :loading="transitioning" @click="confirmTransition">{{ t('projectDashboard.confirmSwitch') }}</el-button>
       </template>
     </el-dialog>
   </section>
@@ -120,6 +120,7 @@
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
+import { useI18n } from 'vue-i18n'
 import { ElMessage } from 'element-plus'
 import { showApiError } from '../composables/useNotify'
 import { useProjectStore } from '../stores/project'
@@ -131,6 +132,7 @@ import { listProjectIssues, type Issue } from '../api/issues'
 const router = useRouter()
 const store = useProjectStore()
 const auth = useAuthStore()
+const { t, locale } = useI18n()
 
 const members = ref<ProjectMember[]>([])
 const logs = ref<LogItem[]>([])
@@ -149,7 +151,7 @@ watch(projectId, async (id) => {
   if (!id) return
   loading.value = true
   try {
-    // 三个区块独立加载：任一接口失败只显示错误提示，不影响其他区块渲染
+    // Three sections load independently: a single API failure shows an error banner without blocking other sections
     const [memberRes, logRes, issueRes] = await Promise.allSettled([
       getMembers(id),
       listProjectLogs(id, { per_page: 5 }),
@@ -158,10 +160,10 @@ watch(projectId, async (id) => {
     if (id !== projectId.value) return
     if (memberRes.status === 'fulfilled') {
       const data = memberRes.value
-      // members API 返回裸数组，兜底兼容分页对象格式
+      // members API returns a bare array; also handle paginated object format as fallback
       members.value = Array.isArray(data) ? data : (data as { items?: ProjectMember[] }).items || []
     }
-    // 空列表时后端返回 items: null，统一兜底为空数组
+    // Backend returns items: null for empty lists; normalize to empty array
     if (logRes.status === 'fulfilled') logs.value = logRes.value.items || []
     if (issueRes.status === 'fulfilled') {
       issues.value = issueRes.value.items || []
@@ -169,7 +171,7 @@ watch(projectId, async (id) => {
     }
     const failed = [memberRes, logRes, issueRes].find((r) => r.status === 'rejected')
     if (failed && failed.status === 'rejected') {
-      loadError.value = failed.reason instanceof Error ? failed.reason.message : '项目概览加载失败'
+      loadError.value = failed.reason instanceof Error ? failed.reason.message : t('projectDashboard.loadFailed')
     }
   } finally {
     if (id === projectId.value) loading.value = false
@@ -178,28 +180,28 @@ watch(projectId, async (id) => {
 
 type Stage = { key: string; label: string; icon: string }
 
-const STAGES: Stage[] = [
-  { key: 'draft', label: '筹备', icon: '📝' },
-  { key: 'active', label: '进行中', icon: '🔬' },
-  { key: 'completed', label: '已完成', icon: '✅' },
-  { key: 'archived', label: '归档', icon: '📦' }
-]
+const STAGES = computed(() => [
+  { key: 'draft', label: t('project.stages.draft'), icon: '📝' },
+  { key: 'active', label: t('project.stages.active'), icon: '🔬' },
+  { key: 'completed', label: t('project.stages.completed'), icon: '✅' },
+  { key: 'archived', label: t('project.stages.archived'), icon: '📦' }
+])
 
-// 与 go-server projects.targetStatus 的合法流转一一对应
+// Maps to valid transitions in go-server projects.targetStatus
 const NEXT_ACTIONS: Record<string, { action: string; label: string; target: string }> = {
   draft: { action: 'activate', label: '开始实验', target: 'active' },
   active: { action: 'complete', label: '标记完成', target: 'completed' },
   completed: { action: 'archive', label: '归档项目', target: 'archived' }
 }
 
-// 进度倒退操作，仅 admin 可见/可调（后端二次校验）
+// Backward transitions, admin-only visibility/invocation (backend re-validates)
 const BACK_ACTIONS: Record<string, { action: string; label: string; target: string; type: 'info' | 'warning' }> = {
   active: { action: 'deactivate', label: '退回筹备', target: 'draft', type: 'info' },
   completed: { action: 'reopen', label: '重新打开', target: 'active', type: 'warning' }
 }
 const BACKWARD_ACTIONS = new Set(['deactivate', 'reopen'])
 
-// 阶段权限说明，与 docs/project-design.md 第 3 节保持一致
+// Stage permission descriptions, consistent with docs/project-design.md §3
 const STAGE_DESC: Record<string, { can: string[]; cannot: string[] }> = {
   draft: {
     can: ['完善项目信息、成员和配置', '创建实验计划', 'owner 可记录少量筹备日志'],
@@ -255,7 +257,7 @@ function openTransition(action?: { action: string; target: string }) {
   pendingNext.value = { action: action.action, target, from: currentStage.value }
   unresolvedIssues.value = null
   confirmVisible.value = true
-  // 标记完成前拉取未解决 Issue 数（open + in_progress），用于对话框警告
+  // Fetch unresolved issue count before marking complete, for dialog warning
   if (action.action === 'complete') void loadUnresolvedIssues()
 }
 
@@ -270,7 +272,7 @@ async function loadUnresolvedIssues() {
     if (id !== projectId.value || !confirmVisible.value) return
     unresolvedIssues.value = (openRes.total || 0) + (progressRes.total || 0)
   } catch {
-    // 拉取失败则不显示数量警告，流转结果仍由后端二次校验
+    // If fetch fails, skip count warning; backend still validates the transition
   }
 }
 
@@ -280,7 +282,7 @@ async function confirmTransition() {
   transitioning.value = true
   try {
     const payload: { action: string; ignore_warnings?: boolean } = { action: pending.action }
-    // 对话框已展示未解决 Issue 警告并由用户确认，跳转时跳过后端重复告警
+    // Dialog already showed the unresolved issue warning and user confirmed; skip duplicate backend alert
     if (pending.action === 'complete') payload.ignore_warnings = true
     await transitionProject(store.current.id, payload)
     ElMessage.success(`项目已切换到「${pending.target.label}」`)
