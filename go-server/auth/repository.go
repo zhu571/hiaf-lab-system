@@ -29,11 +29,11 @@ func (r *Repository) CreateUserWithProfile(username, passwordHash, displayName, 
 		`INSERT INTO users (username, password_hash, display_name, role)
 		 VALUES ($1, $2, $3, $4)
 		 RETURNING id, username, password_hash, display_name, role, must_change_pw,
-		           failed_attempts, token_version, locked_until, created_at, updated_at, disabled`,
+		           failed_attempts, token_version, locked_until, created_at, updated_at, disabled, language`,
 		username, passwordHash, displayName, role,
 	).Scan(
 		&user.ID, &user.Username, &user.PasswordHash, &user.DisplayName, &user.Role,
-		&user.MustChangePW, &user.FailedAttempts, &user.TokenVersion, &lockedUntil, &user.CreatedAt, &user.UpdatedAt, &user.Disabled,
+		&user.MustChangePW, &user.FailedAttempts, &user.TokenVersion, &lockedUntil, &user.CreatedAt, &user.UpdatedAt, &user.Disabled, &user.Language,
 	)
 	if err != nil {
 		return nil, fmt.Errorf("create user: %w", err)
@@ -51,13 +51,13 @@ func (r *Repository) GetByUsername(username string) (*User, error) {
 
 	err := r.db.QueryRow(
 		`SELECT id, username, password_hash, display_name, role, must_change_pw,
-		        failed_attempts, token_version, locked_until, created_at, updated_at, disabled
+		        failed_attempts, token_version, locked_until, created_at, updated_at, disabled, language
 		 FROM users
 		 WHERE username = $1`,
 		username,
 	).Scan(
 		&user.ID, &user.Username, &user.PasswordHash, &user.DisplayName, &user.Role,
-		&user.MustChangePW, &user.FailedAttempts, &user.TokenVersion, &lockedUntil, &user.CreatedAt, &user.UpdatedAt, &user.Disabled,
+		&user.MustChangePW, &user.FailedAttempts, &user.TokenVersion, &lockedUntil, &user.CreatedAt, &user.UpdatedAt, &user.Disabled, &user.Language,
 	)
 	if err != nil {
 		if err == sql.ErrNoRows {
@@ -78,13 +78,13 @@ func (r *Repository) GetByID(id string) (*User, error) {
 
 	err := r.db.QueryRow(
 		`SELECT id, username, password_hash, display_name, role, must_change_pw,
-		        failed_attempts, token_version, locked_until, created_at, updated_at, disabled
+		        failed_attempts, token_version, locked_until, created_at, updated_at, disabled, language
 		 FROM users
 		 WHERE id = $1`,
 		id,
 	).Scan(
 		&user.ID, &user.Username, &user.PasswordHash, &user.DisplayName, &user.Role,
-		&user.MustChangePW, &user.FailedAttempts, &user.TokenVersion, &lockedUntil, &user.CreatedAt, &user.UpdatedAt, &user.Disabled,
+		&user.MustChangePW, &user.FailedAttempts, &user.TokenVersion, &lockedUntil, &user.CreatedAt, &user.UpdatedAt, &user.Disabled, &user.Language,
 	)
 	if err != nil {
 		if err == sql.ErrNoRows {
@@ -101,7 +101,7 @@ func (r *Repository) GetByID(id string) (*User, error) {
 func (r *Repository) ListUsers() ([]User, error) {
 	rows, err := r.db.Query(
 		`SELECT id, username, password_hash, display_name, role, must_change_pw,
-		        failed_attempts, token_version, locked_until, created_at, updated_at, disabled
+		        failed_attempts, token_version, locked_until, created_at, updated_at, disabled, language
 		 FROM users
 		 ORDER BY created_at DESC`,
 	)
@@ -116,7 +116,7 @@ func (r *Repository) ListUsers() ([]User, error) {
 		var lockedUntil sql.NullTime
 		if err := rows.Scan(
 			&user.ID, &user.Username, &user.PasswordHash, &user.DisplayName, &user.Role,
-			&user.MustChangePW, &user.FailedAttempts, &user.TokenVersion, &lockedUntil, &user.CreatedAt, &user.UpdatedAt, &user.Disabled,
+			&user.MustChangePW, &user.FailedAttempts, &user.TokenVersion, &lockedUntil, &user.CreatedAt, &user.UpdatedAt, &user.Disabled, &user.Language,
 		); err != nil {
 			return nil, fmt.Errorf("scan user: %w", err)
 		}
@@ -144,14 +144,14 @@ func (r *Repository) UpdateUser(id string, displayName *string, role *string, di
 		     updated_at = now()
 		 WHERE id = $1
 		 RETURNING id, username, password_hash, display_name, role, must_change_pw,
-		           failed_attempts, token_version, locked_until, created_at, updated_at, disabled`,
+		           failed_attempts, token_version, locked_until, created_at, updated_at, disabled, language`,
 		id,
 		nullStringPtr(displayName),
 		nullStringPtr(role),
 		nullBoolPtr(disabled),
 	).Scan(
 		&user.ID, &user.Username, &user.PasswordHash, &user.DisplayName, &user.Role,
-		&user.MustChangePW, &user.FailedAttempts, &user.TokenVersion, &lockedUntil, &user.CreatedAt, &user.UpdatedAt, &user.Disabled,
+		&user.MustChangePW, &user.FailedAttempts, &user.TokenVersion, &lockedUntil, &user.CreatedAt, &user.UpdatedAt, &user.Disabled, &user.Language,
 	)
 	if err != nil {
 		if err == sql.ErrNoRows {
@@ -166,6 +166,33 @@ func (r *Repository) UpdateUser(id string, displayName *string, role *string, di
 		if err := r.RevokeUserRefreshTokens(id); err != nil {
 			return nil, err
 		}
+	}
+	return &user, nil
+}
+
+// UpdateLanguage sets the user's UI language preference.
+func (r *Repository) UpdateLanguage(id, language string) (*User, error) {
+	var user User
+	var lockedUntil sql.NullTime
+	err := r.db.QueryRow(
+		`UPDATE users
+		 SET language = $2, updated_at = now()
+		 WHERE id = $1
+		 RETURNING id, username, password_hash, display_name, role, must_change_pw,
+		           failed_attempts, token_version, locked_until, created_at, updated_at, disabled, language`,
+		id, language,
+	).Scan(
+		&user.ID, &user.Username, &user.PasswordHash, &user.DisplayName, &user.Role,
+		&user.MustChangePW, &user.FailedAttempts, &user.TokenVersion, &lockedUntil, &user.CreatedAt, &user.UpdatedAt, &user.Disabled, &user.Language,
+	)
+	if err != nil {
+		if err == sql.ErrNoRows {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("update user language: %w", err)
+	}
+	if lockedUntil.Valid {
+		user.LockedUntil = &lockedUntil.Time
 	}
 	return &user, nil
 }

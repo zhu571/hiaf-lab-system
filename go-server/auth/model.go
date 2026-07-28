@@ -11,6 +11,12 @@ const (
 	RoleAgent      = "agent"
 )
 
+// Language values for UI preference.
+const (
+	LanguageZH = "zh"
+	LanguageEN = "en"
+)
+
 // User represents an account in the system.
 type User struct {
 	ID             string     `json:"id"`
@@ -20,6 +26,7 @@ type User struct {
 	Role           string     `json:"role"`
 	Disabled       bool       `json:"disabled"`
 	MustChangePW   bool       `json:"must_change_password"`
+	Language       string     `json:"language"`
 	FailedAttempts int        `json:"-"`
 	TokenVersion   int        `json:"-"`
 	LockedUntil    *time.Time `json:"-"`
@@ -34,6 +41,7 @@ type UserInfo struct {
 	DisplayName  string    `json:"display_name"`
 	Role         string    `json:"role"`
 	Disabled     bool      `json:"disabled"`
+	Language     string    `json:"language"`
 	CreatedAt    time.Time `json:"created_at"`
 	MustChangePW bool      `json:"must_change_password"`
 }
@@ -65,6 +73,11 @@ type LoginResponse struct {
 type ChangePasswordRequest struct {
 	OldPassword string `json:"old_password"`
 	NewPassword string `json:"new_password"`
+}
+
+// UpdateProfileRequest is the body for self-service profile updates.
+type UpdateProfileRequest struct {
+	Language string `json:"language"`
 }
 
 // RefreshRequest is the body for token rotation.

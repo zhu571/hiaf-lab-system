@@ -89,3 +89,16 @@ func TestRemovesActiveAdmin(t *testing.T) {
 		}
 	}
 }
+
+func TestValidLanguage(t *testing.T) {
+	for _, lang := range []string{LanguageZH, LanguageEN} {
+		if !validLanguage(lang) {
+			t.Errorf("validLanguage(%q) should be true", lang)
+		}
+	}
+	for _, lang := range []string{"", "fr", "zh-CN", "english"} {
+		if validLanguage(lang) {
+			t.Errorf("validLanguage(%q) should be false", lang)
+		}
+	}
+}

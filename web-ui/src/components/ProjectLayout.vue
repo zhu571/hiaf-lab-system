@@ -3,20 +3,20 @@
     <section v-if="!ready" v-loading="true" class="panel workspace-loading" />
     <div v-else-if="!project" class="fallback-page">
       <el-empty :description="fallbackText" />
-      <el-button type="primary" @click="router.push('/projects')">前往项目列表</el-button>
+      <el-button type="primary" @click="router.push('/projects')">{{ t('project.goToProjects') }}</el-button>
     </div>
     <template v-else>
       <section class="panel workspace-head">
         <el-button class="back-btn" @click="router.push('/projects')">
           <el-icon><ArrowLeft /></el-icon>
-          项目列表
+          {{ t('project.backToList') }}
         </el-button>
         <div class="title-block">
           <h2>{{ project.name }}</h2>
           <span v-if="project.code" class="code">({{ project.code }})</span>
           <el-tag :type="stage.type" size="small" effect="light">{{ stage.label }}</el-tag>
         </div>
-        <el-select :model-value="projectId" class="switch-select" placeholder="切换项目" @change="switchProject">
+        <el-select :model-value="projectId" class="switch-select" :placeholder="t('project.switchProject')" @change="switchProject">
           <el-option v-for="p in projects.projects" :key="p.id" :label="p.short_name || p.name" :value="p.id" />
         </el-select>
       </section>
@@ -31,22 +31,24 @@
 <script setup lang="ts">
 import { computed, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
+import { useI18n } from 'vue-i18n'
 import { ArrowLeft } from '@element-plus/icons-vue'
 import { useProjectStore } from '../stores/project'
 
 const route = useRoute()
 const router = useRouter()
 const projects = useProjectStore()
+const { t } = useI18n()
 const ready = ref(false)
 
-const tabs = [
-  { label: '概览', name: 'overview', path: '' },
-  { label: '问题', name: 'issues', path: 'issues' },
-  { label: '批次', name: 'experiment-runs', path: 'experiment-runs' },
-  { label: '数据', name: 'test-data', path: 'test-data' },
-  { label: 'RF匹配', name: 'rf-matching', path: 'rf-matching' },
-  { label: '装配', name: 'assembly', path: 'assembly' }
-]
+const tabs = computed(() => [
+  { label: t('project.tabs.overview'), name: 'overview', path: '' },
+  { label: t('project.tabs.issues'), name: 'issues', path: 'issues' },
+  { label: t('project.tabs.runs'), name: 'experiment-runs', path: 'experiment-runs' },
+  { label: t('project.tabs.testData'), name: 'test-data', path: 'test-data' },
+  { label: t('project.tabs.rfMatching'), name: 'rf-matching', path: 'rf-matching' },
+  { label: t('project.tabs.assembly'), name: 'assembly', path: 'assembly' }
+])
 
 // 项目上下文的唯一事实来源是路由参数；store 只作为跨页共享缓存跟随同步
 const projectId = computed(() => String(route.params.id || ''))
@@ -70,20 +72,26 @@ watch(
   { immediate: true }
 )
 
-const STAGE_META: Record<string, { label: string; type: 'primary' | 'success' | 'info' | 'warning' }> = {
-  draft: { label: '筹备', type: 'info' },
-  active: { label: '进行中', type: 'success' },
-  completed: { label: '已完成', type: 'primary' },
-  archived: { label: '归档', type: 'info' }
+const STAGE_TYPES: Record<string, 'primary' | 'success' | 'info' | 'warning'> = {
+  draft: 'info',
+  active: 'success',
+  completed: 'primary',
+  archived: 'info'
 }
-const stage = computed(() => STAGE_META[project.value?.status || ''] || { label: project.value?.status || '未知', type: 'info' as const })
+const stage = computed(() => {
+  const status = project.value?.status || ''
+  return {
+    label: STAGE_TYPES[status] ? t(`project.stages.${status}`) : project.value?.status || t('project.stages.unknown'),
+    type: STAGE_TYPES[status] || ('info' as const)
+  }
+})
 
-const fallbackText = computed(() => (projects.projects.length ? '项目不存在或无权访问，请重新选择' : '暂无项目，请先创建或选择一个项目'))
+const fallbackText = computed(() => (projects.projects.length ? t('project.fallbackNoAccess') : t('project.fallbackNoProjects')))
 
 const activeTab = computed(() => String(route.path.split('/')[3] || 'overview'))
 
 function onTabChange(name: string | number) {
-  const tab = tabs.find((t) => t.name === name)
+  const tab = tabs.value.find((t) => t.name === name)
   if (!tab || !projectId.value) return
   const target = `/projects/${projectId.value}${tab.path ? `/${tab.path}` : ''}`
   if (route.path !== target) router.push(target)
@@ -92,7 +100,7 @@ function onTabChange(name: string | number) {
 function switchProject(id: string) {
   if (!id || id === projectId.value) return
   projects.select(id)
-  const tab = tabs.find((t) => t.name === activeTab.value)
+  const tab = tabs.value.find((t) => t.name === activeTab.value)
   router.push(`/projects/${id}${tab?.path ? `/${tab.path}` : ''}`)
 }
 </script>

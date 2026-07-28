@@ -39,7 +39,7 @@ HIAF 低温气体靶实验室的多人协作日志管理平台。系统已完成
 |----|------|
 | 后端 | Go 1.22+，chi 路由，标准库 `net/http` |
 | 数据库 | PostgreSQL 16，golang-migrate/migrate |
-| 前端 | Vue 3 + Element Plus，Vite 单文件构建（JS/CSS 全部内联进 index.html，go:embed 嵌入） |
+| 前端 | Vue 3 + Element Plus + vue-i18n（中/英），Vite 单文件构建（JS/CSS 全部内联进 index.html，go:embed 嵌入） |
 | AI Agent | Python 3.11+，LightAgent (`wanxingai/lightagent`) |
 | 时序库 | InfluxDB 2.x |
 | 监控 | Grafana |
@@ -159,6 +159,7 @@ go-server/<module>/
 - 列表页必须处理加载中、空、错误三种状态。
 - 表单提交要显示后端返回的 `request_id`，便于追审计日志。
 - 不把 access token 放入 `localStorage`（使用 HttpOnly Cookie）。
+- UI 文案走 vue-i18n：`src/i18n/zh.ts` 是完整基准，`src/i18n/en.ts` 对齐同一 key 结构；新页面不要写死中文。语言偏好存后端 `users.language`（`PATCH /api/v1/auth/profile`），`localStorage` 兜底。
 
 ### Python / Agent
 

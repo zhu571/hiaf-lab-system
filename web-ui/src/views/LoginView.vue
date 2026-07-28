@@ -4,36 +4,36 @@
       <div class="brand-block">
         <span class="brand-mark">H</span>
         <h1>HIAF Lab System</h1>
-        <p class="muted">实验室日志管理平台</p>
+        <p class="muted">{{ t('login.subtitle') }}</p>
       </div>
       <el-form label-position="top" @submit.prevent="submit">
-        <el-form-item label="用户名">
+        <el-form-item :label="t('login.username')">
           <el-input v-model="form.username" autocomplete="username" />
         </el-form-item>
-        <el-form-item label="密码">
+        <el-form-item :label="t('login.password')">
           <el-input v-model="form.password" type="password" autocomplete="current-password" show-password />
         </el-form-item>
         <el-alert v-if="error" :title="error" type="error" show-icon :closable="false" />
-        <el-button type="primary" native-type="submit" :loading="loading">登录</el-button>
-        <span class="register-tip">还没有账户？<el-button link type="primary" @click="registerDialogVisible = true">注册</el-button></span>
+        <el-button type="primary" native-type="submit" :loading="loading">{{ t('login.submit') }}</el-button>
+        <span class="register-tip">{{ t('login.noAccount') }}<el-button link type="primary" @click="registerDialogVisible = true">{{ t('login.register') }}</el-button></span>
       </el-form>
     </section>
-    <el-dialog v-model="registerDialogVisible" title="注册账户" width="360px" :close-on-click-modal="false">
+    <el-dialog v-model="registerDialogVisible" :title="t('login.registerTitle')" width="360px" :close-on-click-modal="false">
       <el-form label-position="top" @submit.prevent="submitRegister">
-        <el-form-item label="用户名">
-          <el-input v-model="registerForm.username" autocomplete="username" placeholder="2-32 个字符" />
+        <el-form-item :label="t('login.username')">
+          <el-input v-model="registerForm.username" autocomplete="username" :placeholder="t('login.usernamePlaceholder')" />
         </el-form-item>
-        <el-form-item label="密码">
-          <el-input v-model="registerForm.password" type="password" autocomplete="new-password" show-password placeholder="至少 8 位" />
+        <el-form-item :label="t('login.password')">
+          <el-input v-model="registerForm.password" type="password" autocomplete="new-password" show-password :placeholder="t('login.passwordPlaceholder')" />
         </el-form-item>
-        <el-form-item label="确认密码">
+        <el-form-item :label="t('login.confirmPassword')">
           <el-input v-model="registerForm.confirm" type="password" autocomplete="new-password" show-password />
         </el-form-item>
         <el-alert v-if="registerError" :title="registerError" type="error" show-icon :closable="false" />
       </el-form>
       <template #footer>
-        <el-button @click="registerDialogVisible = false">取消</el-button>
-        <el-button type="primary" native-type="submit" :loading="registering" :disabled="registering" @click="submitRegister">注册</el-button>
+        <el-button @click="registerDialogVisible = false">{{ t('common.cancel') }}</el-button>
+        <el-button type="primary" native-type="submit" :loading="registering" :disabled="registering" @click="submitRegister">{{ t('login.register') }}</el-button>
       </template>
     </el-dialog>
   </main>
@@ -42,11 +42,13 @@
 <script setup lang="ts">
 import { reactive, ref } from 'vue'
 import { useRouter } from 'vue-router'
+import { useI18n } from 'vue-i18n'
 import { register } from '../api/auth'
 import { useAuthStore } from '../stores/auth'
 
 const router = useRouter()
 const auth = useAuthStore()
+const { t } = useI18n()
 const loading = ref(false)
 const error = ref('')
 const form = reactive({ username: '', password: '' })
@@ -63,7 +65,7 @@ async function submit() {
     await auth.login(form.username, form.password)
     await router.push('/')
   } catch (err) {
-    error.value = err instanceof Error ? err.message : '登录失败'
+    error.value = err instanceof Error ? err.message : t('login.loginFailed')
   } finally {
     loading.value = false
   }
@@ -72,15 +74,15 @@ async function submit() {
 async function submitRegister() {
   const username = registerForm.username.trim()
   if (username.length < 2 || username.length > 32) {
-    registerError.value = '用户名长度需为 2-32 个字符'
+    registerError.value = t('login.usernameLength')
     return
   }
   if (registerForm.password.length < 8) {
-    registerError.value = '密码至少 8 位'
+    registerError.value = t('login.passwordLength')
     return
   }
   if (registerForm.password !== registerForm.confirm) {
-    registerError.value = '两次输入的密码不一致'
+    registerError.value = t('login.passwordMismatch')
     return
   }
   registering.value = true
@@ -92,7 +94,7 @@ async function submitRegister() {
     registerDialogVisible.value = false
     await router.push('/')
   } catch (err) {
-    registerError.value = err instanceof Error ? err.message : '注册失败'
+    registerError.value = err instanceof Error ? err.message : t('login.registerFailed')
   } finally {
     registering.value = false
   }

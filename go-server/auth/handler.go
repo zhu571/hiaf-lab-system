@@ -49,6 +49,7 @@ func (h *Handler) Routes(audit ...func(http.Handler) http.Handler) chi.Router {
 		r.Use(middleware.AuthRequired)
 		r.Get("/me", h.Me)
 		r.Post("/change-password", h.ChangePassword)
+		r.Patch("/profile", h.UpdateProfile)
 	})
 	return r
 }
@@ -184,6 +185,33 @@ func (h *Handler) ChangePassword(w http.ResponseWriter, r *http.Request) {
 	common.WriteSuccess(w, r, map[string]bool{"success": true})
 }
 
+// UpdateProfile updates the authenticated user's own profile (language preference).
+func (h *Handler) UpdateProfile(w http.ResponseWriter, r *http.Request) {
+	if !requireIdempotencyKey(w, r) {
+		return
+	}
+
+	claims := middleware.GetUserClaims(r.Context())
+	if claims == nil {
+		common.WriteError(w, r, http.StatusUnauthorized, "unauthorized", "未登录", nil)
+		return
+	}
+
+	var req UpdateProfileRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		common.WriteError(w, r, http.StatusBadRequest, "bad_request", "请求体解析失败", nil)
+		return
+	}
+
+	info, err := h.svc.UpdateProfile(claims.UserID, req)
+	if err != nil {
+		mapAuthError(w, r, err)
+		return
+	}
+
+	common.WriteSuccess(w, r, info)
+}
+
 func (h *Handler) AdminListUsers(w http.ResponseWriter, r *http.Request) {
 	users, err := h.svc.ListUsers()
 	if err != nil {
@@ -287,6 +315,7 @@ func toUserInfo(user *User) UserInfo {
 		DisplayName:  user.DisplayName,
 		Role:         user.Role,
 		Disabled:     user.Disabled,
+		Language:     user.Language,
 		CreatedAt:    user.CreatedAt,
 		MustChangePW: user.MustChangePW,
 	}
@@ -365,6 +394,8 @@ func mapAuthError(w http.ResponseWriter, r *http.Request, err error) {
 		common.WriteError(w, r, http.StatusUnauthorized, "invalid_credentials", err.Error(), nil)
 	case errors.Is(err, ErrInvalidRole):
 		common.WriteError(w, r, http.StatusBadRequest, "invalid_role", err.Error(), nil)
+	case errors.Is(err, ErrInvalidLanguage):
+		common.WriteError(w, r, http.StatusBadRequest, "invalid_language", err.Error(), nil)
 	case errors.Is(err, ErrCannotModifySelf):
 		common.WriteError(w, r, http.StatusBadRequest, "cannot_modify_self", err.Error(), nil)
 	case errors.Is(err, ErrLastActiveAdmin):
