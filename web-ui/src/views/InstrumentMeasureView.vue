@@ -1,13 +1,13 @@
 <template>
   <div class="page">
     <div class="toolbar">
-      <h2>测量仪器</h2>
-      <el-button :icon="Refresh" circle title="刷新" @click="loadAll" />
+      <h2>{{ t('instrument.title') }}</h2>
+      <el-button :icon="Refresh" circle :title="t('instrument.refresh')" @click="loadAll" />
     </div>
 
     <!-- 仪器卡片 -->
     <el-alert v-if="error" :title="error" type="error" show-icon :closable="false">
-      <el-button size="small" @click="loadInstruments">重试</el-button>
+      <el-button size="small" @click="loadInstruments">{{ t('instrument.retry') }}</el-button>
     </el-alert>
     <div v-loading="loading" class="card-grid">
       <section v-for="ins in instruments" :key="ins.id" class="panel ins-card">
@@ -21,28 +21,28 @@
         </header>
         <div class="ins-actions">
           <el-button size="small" :type="expandedId === ins.id ? 'primary' : 'default'" plain @click="toggleExpand(ins)">
-            {{ expandedId === ins.id ? '收起' : '详情' }}
+            {{ expandedId === ins.id ? t('instrument.collapse') : t('instrument.details') }}
           </el-button>
-          <el-button size="small" type="primary" plain @click="openAI(ins)">AI 对话</el-button>
-          <el-button size="small" type="danger" class="estop-btn" @click="onEmergencyStop(ins)">紧急停机</el-button>
+          <el-button size="small" type="primary" plain @click="openAI(ins)">{{ t('instrument.aiChat') }}</el-button>
+          <el-button size="small" type="danger" class="estop-btn" @click="onEmergencyStop(ins)">{{ t('instrument.emergencyStop') }}</el-button>
         </div>
 
         <div v-if="expandedId === ins.id" v-loading="detailLoading" class="ins-detail">
           <template v-if="detailStatus">
             <div class="detail-row">
-              <span class="muted">Worker 状态</span>
+              <span class="muted">{{ t('instrument.workerStatus') }}</span>
               <span>{{ stateLabel(detailStatus.state) }}</span>
             </div>
             <div class="detail-row">
-              <span class="muted">限流</span>
-              <span>{{ detailStatus.rate_limited ? '是' : '否' }}</span>
+              <span class="muted">{{ t('instrument.rateLimited') }}</span>
+              <span>{{ detailStatus.rate_limited ? t('instrument.yes') : t('instrument.no') }}</span>
             </div>
           </template>
 
           <template v-if="canOperate">
             <el-divider class="detail-divider" />
-            <h4 class="detail-subtitle">执行命令</h4>
-            <el-select v-model="cmdName" placeholder="选择白名单命令" class="cmd-select" @change="onCommandPick">
+            <h4 class="detail-subtitle">{{ t('instrument.executeCommand') }}</h4>
+            <el-select v-model="cmdName" :placeholder="t('instrument.selectWhitelistCommand')" class="cmd-select" @change="onCommandPick">
               <el-option v-for="c in executableCommands" :key="c.name" :label="c.name" :value="c.name">
                 <div class="cmd-option">
                   <span>{{ c.name }}</span>
@@ -68,11 +68,11 @@
                   <el-input v-else v-model="cmdParams[pname]" />
                 </el-form-item>
               </el-form>
-              <el-button type="primary" :loading="cmdRunning" :disabled="!cmdName" @click="runCommand(ins)">执行</el-button>
+              <el-button type="primary" :loading="cmdRunning" :disabled="!cmdName" @click="runCommand(ins)">{{ t('instrument.execute') }}</el-button>
             </template>
             <div v-if="cmdResult" class="cmd-result">
               <div v-if="parsedResult?.type === 'sweep_xy' && parsedResult.points?.length" class="parsed-chart">
-                <canvas ref="chartCanvas" aria-label="扫频曲线"></canvas>
+                <canvas ref="chartCanvas" :aria-label="t('instrument.chartLabel')"></canvas>
                 <p v-if="parsedResult.x_label || parsedResult.y_label" class="muted chart-caption">
                   {{ parsedResult.x_label || 'x' }} / {{ parsedResult.y_label || 'y' }}
                 </p>
@@ -80,51 +80,51 @@
               <p v-else-if="parsedResult?.type === 'single_value'" class="parsed-value">{{ parsedResult.value }}</p>
               <pre v-if="cmdResult.response" class="cmd-response">{{ cmdResult.response }}</pre>
               <div class="cmd-result-footer">
-                <p class="muted">命令 {{ cmdResult.command }} 完成，耗时 {{ (cmdResult.duration / 1e6).toFixed(1) }} ms</p>
+                <p class="muted">{{ t('instrument.cmdResultInfo', { cmd: cmdResult.command, duration: (cmdResult.duration / 1e6).toFixed(1) }) }}</p>
                 <el-button v-if="!isViewer" size="small" plain @click="openSave({ instrumentId: ins.id, command: cmdResult.command, response: cmdResult.response, parsed: parsedResult })">
-                  保存到测试数据
+                  {{ t('instrument.saveToTestData') }}
                 </el-button>
               </div>
             </div>
           </template>
-          <p v-else class="muted cmd-desc">命令执行需要 maintainer 或 admin 权限</p>
+          <p v-else class="muted cmd-desc">{{ t('instrument.noPermission') }}</p>
         </div>
       </section>
-      <el-empty v-if="!loading && !instruments.length && !error" description="暂无仪器" class="grid-empty" />
+      <el-empty v-if="!loading && !instruments.length && !error" :description="t('instrument.noInstruments')" class="grid-empty" />
     </div>
 
     <!-- 命令白名单 -->
     <section class="panel">
       <div class="panel-head">
-        <h3 class="panel-title">命令白名单</h3>
-        <span class="muted hint">红色风险命令由后端拒绝执行</span>
+        <h3 class="panel-title">{{ t('instrument.whitelist') }}</h3>
+        <span class="muted hint">{{ t('instrument.whitelistHint') }}</span>
       </div>
       <el-table v-loading="whitelistLoading" :data="whitelist">
-        <el-table-column prop="name" label="命令" min-width="150" />
-        <el-table-column prop="description" label="描述" min-width="180" show-overflow-tooltip />
-        <el-table-column label="风险" width="90">
+        <el-table-column prop="name" :label="t('instrument.command')" min-width="150" />
+        <el-table-column prop="description" :label="t('instrument.description')" min-width="180" show-overflow-tooltip />
+        <el-table-column :label="t('instrument.risk')" width="90">
           <template #default="{ row }">
             <el-tag :type="riskTag(row.risk)" size="small" effect="light">{{ row.risk }}</el-tag>
           </template>
         </el-table-column>
-        <el-table-column label="SCPI 模板" min-width="220" show-overflow-tooltip>
+        <el-table-column :label="t('instrument.scpiTemplate')" min-width="220" show-overflow-tooltip>
           <template #default="{ row }">
             <code class="scpi-code">{{ row.scpi || row.build || '—' }}</code>
           </template>
         </el-table-column>
-        <el-table-column label="超时" width="90">
+        <el-table-column :label="t('instrument.timeout')" width="90">
           <template #default="{ row }">{{ row.timeout_ms ? `${row.timeout_ms} ms` : '—' }}</template>
         </el-table-column>
         <template #empty>
-          <el-empty description="白名单为空" />
+          <el-empty :description="t('instrument.whitelistEmpty')" />
         </template>
       </el-table>
     </section>
 
-    <el-drawer v-model="aiOpen" :title="`${aiInstrument?.name || ''} · AI 对话`" :size="isMobile ? '100%' : '440px'">
+    <el-drawer v-model="aiOpen" :title="`${aiInstrument?.name || ''} · ${t('instrument.aiChat')}`" :size="isMobile ? '100%' : '440px'">
       <div class="chat-shell">
         <div class="chat-list">
-          <el-empty v-if="!aiMessages.length" description="描述想执行的操作，例如“读取仪器标识”" :image-size="72" />
+          <el-empty v-if="!aiMessages.length" :description="t('instrument.aiPlaceholder')" :image-size="72" />
           <div v-for="(message, index) in aiMessages" :key="index" class="chat-message" :class="message.role">
             <div class="chat-bubble">
               <p v-if="message.content">{{ message.content }}</p>
@@ -139,7 +139,7 @@
                   <pre v-if="message.candidate.scpi_preview" class="candidate-scpi">{{ message.candidate.scpi_preview }}</pre>
                   <el-alert
                     v-if="!message.candidate.validation?.ok"
-                    :title="message.candidate.validation?.reasons?.join('；') || '参数校验未通过'"
+                    :title="message.candidate.validation?.reasons?.join('\uff1b') || t('instrument.validationFailed')"
                     type="error"
                     :closable="false"
                   />
@@ -150,24 +150,24 @@
                       :loading="message.running"
                       :disabled="!canOperate || !message.candidate.validation?.ok || message.done"
                       @click="runAICandidate(message)"
-                    >执行</el-button>
-                    <el-button size="small" :disabled="message.done" @click="message.done = true">放弃</el-button>
+                    >{{ t('instrument.execute') }}</el-button>
+                    <el-button size="small" :disabled="message.done" @click="message.done = true">{{ t('instrument.discard') }}</el-button>
                   </div>
                 </template>
                 <el-alert
                   v-else
-                  :title="message.candidate.question || message.candidate.reason || '无法生成候选命令'"
+                  :title="message.candidate.question || message.candidate.reason || t('instrument.cannotGenerate')"
                   :type="message.candidate.status === 'rejected' ? 'error' : 'info'"
                   :closable="false"
                 />
                 <p v-if="message.requestId" class="request-id">request_id: {{ message.requestId }}</p>
               </div>
               <div v-if="message.exec && !isViewer" class="exec-actions">
-                <el-button size="small" plain @click="openSave(message.exec!)">保存到测试数据</el-button>
+                <el-button size="small" plain @click="openSave(message.exec!)">{{ t('instrument.saveToTestData') }}</el-button>
               </div>
             </div>
           </div>
-          <p v-if="aiLoading" class="muted chat-loading">正在翻译并校验…</p>
+          <p v-if="aiLoading" class="muted chat-loading">{{ t('instrument.aiTranslating') }}</p>
         </div>
         <el-alert v-if="aiError" :title="aiError" type="error" :closable="false" show-icon />
         <div class="chat-input">
@@ -177,51 +177,51 @@
             :rows="3"
             maxlength="1000"
             show-word-limit
-            placeholder="输入自然语言命令"
+            :placeholder="t('instrument.aiInputPlaceholder')"
             @keydown.ctrl.enter.prevent="sendAI"
           />
-          <el-button type="primary" :loading="aiLoading" :disabled="!aiInput.trim()" @click="sendAI">发送</el-button>
+          <el-button type="primary" :loading="aiLoading" :disabled="!aiInput.trim()" @click="sendAI">{{ t('instrument.send') }}</el-button>
         </div>
       </div>
     </el-drawer>
 
     <!-- 保存到测试数据 -->
-    <el-dialog v-model="saveOpen" title="保存到测试数据" :width="isMobile ? '100%' : '480px'">
+    <el-dialog v-model="saveOpen" :title="t('instrument.saveDialogTitle')" :width="isMobile ? '100%' : '480px'">
       <el-form label-position="top" @submit.prevent>
-        <el-form-item label="项目" required>
-          <el-select v-model="saveForm.project_id" placeholder="选择项目" :loading="saveProjectsLoading" @change="onSaveProjectChange">
+        <el-form-item :label="t('instrument.project')" required>
+          <el-select v-model="saveForm.project_id" :placeholder="t('instrument.selectProject')" :loading="saveProjectsLoading" @change="onSaveProjectChange">
             <el-option v-for="p in saveProjects" :key="p.id" :label="`${p.name}（${p.code}）`" :value="p.id" />
           </el-select>
         </el-form-item>
-        <el-form-item label="批次">
-          <el-select v-model="saveForm.run_id" placeholder="选择批次（可选）" clearable :disabled="!saveForm.project_id">
+        <el-form-item :label="t('instrument.run')">
+          <el-select v-model="saveForm.run_id" :placeholder="t('instrument.selectRun')" clearable :disabled="!saveForm.project_id">
             <el-option v-for="r in saveRuns" :key="r.id" :label="r.name" :value="r.id" />
           </el-select>
         </el-form-item>
-        <el-form-item label="数据类型" required>
-          <el-select v-model="saveForm.data_type" placeholder="选择数据类型">
+        <el-form-item :label="t('instrument.dataType')" required>
+          <el-select v-model="saveForm.data_type" :placeholder="t('instrument.selectDataType')">
             <el-option v-for="t in dataTypes" :key="t" :label="t" :value="t" />
           </el-select>
         </el-form-item>
-        <el-form-item label="测量项" required>
-          <el-input v-model="saveForm.measurement" placeholder="如 beam_current" />
+        <el-form-item :label="t('instrument.measurement')" required>
+          <el-input v-model="saveForm.measurement" :placeholder="t('instrument.measurementPlaceholder')" />
         </el-form-item>
-        <el-form-item label="数值" required>
-          <el-input-number v-model="saveForm.value" :controls="false" class="save-number" placeholder="数值" />
+        <el-form-item :label="t('instrument.valueLabel')" required>
+          <el-input-number v-model="saveForm.value" :controls="false" class="save-number" :placeholder="t('instrument.valueLabel')" />
         </el-form-item>
-        <el-form-item label="单位">
-          <el-input v-model="saveForm.unit" placeholder="如 K / mbar / V" />
+        <el-form-item :label="t('instrument.unitLabel')">
+          <el-input v-model="saveForm.unit" :placeholder="t('instrument.unitPlaceholder')" />
         </el-form-item>
-        <el-form-item label="测量时间">
-          <el-date-picker v-model="saveForm.measured_at" type="datetime" placeholder="选择时间" />
+        <el-form-item :label="t('instrument.measuredAt')">
+          <el-date-picker v-model="saveForm.measured_at" type="datetime" :placeholder="t('instrument.selectTime')" />
         </el-form-item>
-        <el-form-item label="备注">
-          <el-input v-model="saveForm.notes" placeholder="备注（可选）" />
+        <el-form-item :label="t('instrument.notesLabel')">
+          <el-input v-model="saveForm.notes" :placeholder="t('instrument.notesPlaceholder')" />
         </el-form-item>
       </el-form>
       <template #footer>
-        <el-button @click="saveOpen = false">取消</el-button>
-        <el-button type="primary" :loading="saveLoading" @click="submitSave">保存</el-button>
+        <el-button @click="saveOpen = false">{{ t('common.cancel') }}</el-button>
+        <el-button type="primary" :loading="saveLoading" @click="submitSave">{{ t('instrument.save') }}</el-button>
       </template>
     </el-dialog>
   </div>
@@ -230,6 +230,7 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
+import { useI18n } from 'vue-i18n'
 import { Refresh } from '@element-plus/icons-vue'
 import {
   Chart,
@@ -267,6 +268,8 @@ import { showApiError } from '../composables/useNotify'
 import { useMobile } from '../composables/useMobile'
 
 Chart.register(LineController, ScatterController, LineElement, PointElement, LinearScale, Legend, Tooltip)
+
+const { t } = useI18n()
 
 const auth = useAuthStore()
 // 与后端 RequireRole(maintainer, admin) 对应，前端隐藏只是 UX，后端仍强校验
@@ -366,8 +369,8 @@ async function loadInstruments() {
   try {
     instruments.value = await listInstruments()
   } catch (err) {
-    error.value = err instanceof Error ? err.message : '仪器列表加载失败'
-    showApiError(err, '仪器列表加载失败')
+    error.value = err instanceof Error ? err.message : t('instrument.loadFailed')
+    showApiError(err, t('instrument.loadFailed'))
   } finally {
     loading.value = false
   }
@@ -378,7 +381,7 @@ async function loadWhitelist() {
   try {
     whitelist.value = await getWhitelist()
   } catch (err) {
-    showApiError(err, '白名单加载失败')
+    showApiError(err, t('instrument.whitelistLoadFailed'))
   } finally {
     whitelistLoading.value = false
   }
@@ -398,7 +401,7 @@ async function toggleExpand(ins: InstrumentSummary) {
   try {
     detailStatus.value = await getStatus(ins.id)
   } catch (err) {
-    showApiError(err, '仪器状态获取失败')
+    showApiError(err, t('instrument.statusLoadFailed'))
   } finally {
     detailLoading.value = false
   }
@@ -459,7 +462,7 @@ async function sendAI() {
       requestId: response.requestId
     })
   } catch (err) {
-    aiError.value = err instanceof Error ? err.message : 'AI 翻译失败'
+    aiError.value = err instanceof Error ? err.message : t('instrument.aiTranslateFailed')
   } finally {
     aiLoading.value = false
   }
@@ -471,8 +474,8 @@ async function runAICandidate(message: ChatMessage) {
   if (!ins || !candidate?.command || !candidate.validation?.ok || message.done) return
   if (candidate.risk === 'yellow') {
     try {
-      await ElMessageBox.confirm(`「${candidate.command}」将改变仪器状态，确认执行候选参数吗？`, '人工确认', {
-        confirmButtonText: '执行', cancelButtonText: '取消', type: 'warning'
+      await ElMessageBox.confirm(t('instrument.confirmExecute', { command: candidate.command }), t('instrument.manualConfirm'), {
+        confirmButtonText: t('instrument.execute'), cancelButtonText: t('common.cancel'), type: 'warning'
       })
     } catch {
       return
@@ -485,11 +488,11 @@ async function runAICandidate(message: ChatMessage) {
     const parsed = await parseExecution(ins.id, candidate.command, response.data.response)
     aiMessages.value.push({
       role: 'assistant',
-      content: `${response.data.response || '命令执行完成'}\nrequest_id: ${response.requestId}`,
+      content: `${response.data.response || t('instrument.commandExecuted')}\nrequest_id: ${response.requestId}`,
       exec: { instrumentId: ins.id, command: candidate.command, response: response.data.response, parsed }
     })
   } catch (err) {
-    aiError.value = err instanceof Error ? err.message : '命令执行失败'
+    aiError.value = err instanceof Error ? err.message : t('instrument.commandExecFailed')
   } finally {
     message.running = false
   }
@@ -500,9 +503,9 @@ async function runCommand(ins: InstrumentSummary) {
   if (!def) return
   if (def.risk === 'yellow') {
     try {
-      await ElMessageBox.confirm(`「${def.name}」是写入类命令（yellow），将改变仪器状态，确定执行吗？`, '写入确认', {
-        confirmButtonText: '执行',
-        cancelButtonText: '取消',
+      await ElMessageBox.confirm(t('instrument.confirmWrite', { name: def.name }), t('instrument.writeConfirm'), {
+        confirmButtonText: t('instrument.execute'),
+        cancelButtonText: t('common.cancel'),
         type: 'warning'
       })
     } catch {
@@ -513,14 +516,14 @@ async function runCommand(ins: InstrumentSummary) {
   clearCmdResult()
   try {
     cmdResult.value = await executeCommand(ins.id, def.name, { ...cmdParams })
-    ElMessage.success(`命令 ${def.name} 执行成功`)
+    ElMessage.success(t('instrument.executeSuccess', { name: def.name }))
     parsedResult.value = await parseExecution(ins.id, cmdResult.value.command, cmdResult.value.response)
     if (parsedResult.value?.type === 'sweep_xy') {
       await nextTick()
       renderChart(cmdResult.value.command, parsedResult.value)
     }
   } catch (err) {
-    showApiError(err, '命令执行失败')
+    showApiError(err, t('instrument.commandExecFailed'))
   } finally {
     cmdRunning.value = false
   }
@@ -615,7 +618,7 @@ async function loadSaveProjects() {
   try {
     saveProjects.value = await listProjects()
   } catch (err) {
-    showApiError(err, '项目列表加载失败')
+    showApiError(err, t('instrument.projectsLoadFailed'))
   } finally {
     saveProjectsLoading.value = false
   }
@@ -629,25 +632,25 @@ async function onSaveProjectChange(projectId: string) {
     const data = await listRuns(projectId, { per_page: 100 })
     saveRuns.value = data.items ?? []
   } catch (err) {
-    showApiError(err, '批次列表加载失败')
+    showApiError(err, t('instrument.runsLoadFailed'))
   }
 }
 
 async function submitSave() {
   if (!saveForm.project_id) {
-    ElMessage.warning('请选择项目')
+    ElMessage.warning(t('instrument.pleaseSelectProject'))
     return
   }
   if (!saveForm.data_type) {
-    ElMessage.warning('请选择数据类型')
+    ElMessage.warning(t('instrument.pleaseSelectDataType'))
     return
   }
   if (!saveForm.measurement.trim()) {
-    ElMessage.warning('请填写测量项')
+    ElMessage.warning(t('instrument.pleaseEnterMeasurement'))
     return
   }
   if (saveForm.value === undefined || Number.isNaN(saveForm.value)) {
-    ElMessage.warning('请填写数值')
+    ElMessage.warning(t('instrument.pleaseEnterValue'))
     return
   }
   // 后端开启 DisallowUnknownFields，只提交白名单内字段
@@ -665,10 +668,10 @@ async function submitSave() {
   saveLoading.value = true
   try {
     await createTestData(saveForm.project_id, payload)
-    ElMessage.success('测试数据已保存')
+    ElMessage.success(t('instrument.testDataSaved'))
     saveOpen.value = false
   } catch (err) {
-    showApiError(err, '保存失败')
+    showApiError(err, t('instrument.saveFailed'))
   } finally {
     saveLoading.value = false
   }
@@ -677,11 +680,11 @@ async function submitSave() {
 async function onEmergencyStop(ins: InstrumentSummary) {
   try {
     await ElMessageBox.confirm(
-      `确定对「${ins.name}」执行紧急停机吗？仪器命令队列将立即停止，该操作会记录审计日志并触发告警。`,
-      '紧急停机',
+      t('instrument.emergencyStopConfirm', { name: ins.name }),
+      t('instrument.emergencyStopTitle'),
       {
-        confirmButtonText: '紧急停机',
-        cancelButtonText: '取消',
+        confirmButtonText: t('instrument.emergencyStopTitle'),
+        cancelButtonText: t('common.cancel'),
         type: 'error',
         confirmButtonClass: 'el-button--danger'
       }
@@ -691,18 +694,18 @@ async function onEmergencyStop(ins: InstrumentSummary) {
   }
   try {
     await emergencyStop(ins.id)
-    ElMessage.success('紧急停机指令已下发')
+    ElMessage.success(t('instrument.emergencyStopSent'))
     await loadInstruments()
   } catch (err) {
-    showApiError(err, '紧急停机失败')
+    showApiError(err, t('instrument.emergencyStopFailed'))
   }
 }
 
-const STATE_META: Record<string, { label: string; color: string; tag: 'success' | 'warning' | 'danger' | 'info' }> = {
-  running: { label: '运行中', color: 'var(--ok)', tag: 'success' },
-  rate_limited: { label: '限流中', color: 'var(--warn)', tag: 'warning' },
-  needs_reconnect: { label: '待重连', color: 'var(--warn)', tag: 'warning' },
-  error: { label: '错误', color: 'var(--danger)', tag: 'danger' }
+const STATE_META: Record<string, { color: string; tag: 'success' | 'warning' | 'danger' | 'info' }> = {
+  running: { color: 'var(--ok)', tag: 'success' },
+  rate_limited: { color: 'var(--warn)', tag: 'warning' },
+  needs_reconnect: { color: 'var(--warn)', tag: 'warning' },
+  error: { color: 'var(--danger)', tag: 'danger' }
 }
 
 function stateColor(s: string) {
@@ -710,7 +713,13 @@ function stateColor(s: string) {
 }
 
 function stateLabel(s: string) {
-  return STATE_META[s]?.label || s
+  const map: Record<string, string> = {
+    running: 'instrument.stateRunning',
+    rate_limited: 'instrument.stateRateLimited',
+    needs_reconnect: 'instrument.stateNeedsReconnect',
+    error: 'instrument.stateError'
+  }
+  return t(map[s] || '') || s
 }
 
 function stateTag(s: string) {

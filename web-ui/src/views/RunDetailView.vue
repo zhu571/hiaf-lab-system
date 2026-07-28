@@ -2,13 +2,13 @@
   <div v-loading="loading" class="page detail-page">
     <section v-if="error" class="panel error-box">
       <el-alert :title="error" type="error" show-icon :closable="false" />
-      <el-button @click="load">重试</el-button>
+      <el-button @click="load">{{ t('runDetail.retry') }}</el-button>
     </section>
-    <el-empty v-else-if="!run && !loading" description="未找到实验批次" />
+    <el-empty v-else-if="!run && !loading" :description="t('runDetail.runNotFound')" />
     <template v-else-if="run">
       <section class="panel">
         <div class="head-row">
-          <el-button class="back-btn" @click="goBack">返回</el-button>
+          <el-button class="back-btn" @click="goBack">{{ t('runDetail.back') }}</el-button>
           <div class="title-block">
             <h2>{{ run.name }}</h2>
             <StatusBadge :value="run.status" />
@@ -17,40 +17,40 @@
             <el-button v-for="t in transitions" :key="t.value" :type="t.type" :loading="transitioning" @click="doTransition(t)">
               {{ t.label }}
             </el-button>
-            <el-button @click="openEdit">编辑元数据</el-button>
-            <el-button type="danger" plain @click="remove">删除</el-button>
+            <el-button @click="openEdit">{{ t('runDetail.editMetadata') }}</el-button>
+            <el-button type="danger" plain @click="remove">{{ t('runDetail.delete') }}</el-button>
           </div>
         </div>
       </section>
       <el-tabs v-model="activeTab" class="page-tabs">
-        <el-tab-pane label="概览" name="overview">
+        <el-tab-pane :label="t('runDetail.overview')" name="overview">
           <div class="tab-stack">
             <section class="panel">
-              <h3 class="panel-title">元信息</h3>
+              <h3 class="panel-title">{{ t('runDetail.metaInfo') }}</h3>
               <el-descriptions :column="2" border>
                 <el-descriptions-item label="Campaign">{{ run.campaign || '—' }}</el-descriptions-item>
-                <el-descriptions-item label="类型">{{ runTypeLabel(run.run_type) }}</el-descriptions-item>
-                <el-descriptions-item label="气体">{{ run.gas_type || '—' }}</el-descriptions-item>
-                <el-descriptions-item label="束流">{{ run.has_beam ? '有' : '无' }}</el-descriptions-item>
-                <el-descriptions-item label="目标温度">{{ numText(run.target_temp) }}</el-descriptions-item>
-                <el-descriptions-item label="最低温度">{{ numText(run.min_temp) }}</el-descriptions-item>
-                <el-descriptions-item label="压力范围">{{ pressureText }}</el-descriptions-item>
-                <el-descriptions-item label="设备">
+                <el-descriptions-item :label="t('runDetail.type')">{{ runTypeLabel(run.run_type) }}</el-descriptions-item>
+                <el-descriptions-item :label="t('runDetail.gas')">{{ run.gas_type || '—' }}</el-descriptions-item>
+                <el-descriptions-item :label="t('runDetail.hasBeam')">{{ run.has_beam ? t('runDetail.yes') : t('runDetail.no') }}</el-descriptions-item>
+                <el-descriptions-item :label="t('runDetail.targetTemp')">{{ numText(run.target_temp) }}</el-descriptions-item>
+                <el-descriptions-item :label="t('runDetail.minTemp')">{{ numText(run.min_temp) }}</el-descriptions-item>
+                <el-descriptions-item :label="t('runDetail.pressureRange')">{{ pressureText }}</el-descriptions-item>
+                <el-descriptions-item :label="t('runDetail.devices')">
                   <template v-if="run.devices?.length">
                     <el-tag v-for="d in run.devices" :key="d" size="small" effect="plain" class="dev-tag">{{ d }}</el-tag>
                   </template>
                   <span v-else>—</span>
                 </el-descriptions-item>
-                <el-descriptions-item label="创建时间">{{ fmtTime(run.created_at) }}</el-descriptions-item>
-                <el-descriptions-item label="开始时间">{{ fmtTime(run.started_at) }}</el-descriptions-item>
-                <el-descriptions-item label="结束时间">{{ fmtTime(run.ended_at) }}</el-descriptions-item>
-                <el-descriptions-item label="描述" :span="2">
+                <el-descriptions-item :label="t('runDetail.createdAt')">{{ fmtTime(run.created_at) }}</el-descriptions-item>
+                <el-descriptions-item :label="t('runDetail.startedAt')">{{ fmtTime(run.started_at) }}</el-descriptions-item>
+                <el-descriptions-item :label="t('runDetail.endedAt')">{{ fmtTime(run.ended_at) }}</el-descriptions-item>
+                <el-descriptions-item :label="t('runDetail.description')" :span="2">
                   <p class="desc">{{ run.description || '—' }}</p>
                 </el-descriptions-item>
               </el-descriptions>
             </section>
             <section class="panel">
-              <h3 class="panel-title">状态时间线</h3>
+              <h3 class="panel-title">{{ t('runDetail.statusTimeline') }}</h3>
               <!-- 后端暂无状态历史接口，时间线仅由已知时间戳（created/started/ended）+ 当前状态构建 -->
               <el-timeline>
                 <el-timeline-item
@@ -66,31 +66,31 @@
             </section>
           </div>
         </el-tab-pane>
-        <el-tab-pane label="步骤" name="steps">
+        <el-tab-pane :label="t('runDetail.stepsTab')" name="steps">
           <section class="panel">
             <div class="steps-toolbar">
-              <h3 class="panel-title">实验步骤</h3>
+              <h3 class="panel-title">{{ t('runDetail.experimentSteps') }}</h3>
               <div v-if="canEdit" class="steps-actions">
-                <el-button size="small" type="primary" plain @click="aiDialog = true">AI 生成步骤</el-button>
-                <el-button size="small" plain @click="openImport">从模板导入</el-button>
-                <el-button size="small" type="primary" @click="openCreateStep">手动新建</el-button>
+                <el-button size="small" type="primary" plain @click="aiDialog = true">{{ t('runDetail.aiGenerateSteps') }}</el-button>
+                <el-button size="small" plain @click="openImport">{{ t('runDetail.importFromTemplate') }}</el-button>
+                <el-button size="small" type="primary" @click="openCreateStep">{{ t('runDetail.createManually') }}</el-button>
               </div>
             </div>
             <el-table v-loading="stepsLoading" :data="steps" size="small">
               <el-table-column label="#" width="50" align="center">
                 <template #default="{ row }">{{ row.step_order }}</template>
               </el-table-column>
-              <el-table-column prop="name" label="名称" min-width="140" />
-              <el-table-column label="描述" min-width="180">
+              <el-table-column prop="name" :label="t('runDetail.name')" min-width="140" />
+              <el-table-column :label="t('runDetail.description')" min-width="180">
                 <template #default="{ row }">{{ row.description || '—' }}</template>
               </el-table-column>
-              <el-table-column label="状态" width="100">
+              <el-table-column :label="t('runDetail.status')" width="100">
                 <template #default="{ row }"><StatusBadge :value="row.status" /></template>
               </el-table-column>
-              <el-table-column label="依赖步骤" width="140">
+              <el-table-column :label="t('runDetail.dependsOn')" width="140">
                 <template #default="{ row }">{{ depName(row.depends_on) }}</template>
               </el-table-column>
-              <el-table-column v-if="canEdit" label="操作" width="280" fixed="right">
+              <el-table-column v-if="canEdit" :label="t('runDetail.actions')" width="280" fixed="right">
                 <template #default="{ row }">
                   <el-button
                     v-for="a in stepTransitions[row.status] || []"
@@ -102,43 +102,43 @@
                   >
                     {{ a.label }}
                   </el-button>
-                  <el-button size="small" type="danger" plain @click="removeStep(row)">删除</el-button>
+                  <el-button size="small" type="danger" plain @click="removeStep(row)">{{ t('runDetail.delete') }}</el-button>
                 </template>
               </el-table-column>
               <template #empty>
-                <el-empty description="暂无实验步骤" :image-size="60" />
+                <el-empty :description="t('runDetail.noSteps')" :image-size="60" />
               </template>
             </el-table>
           </section>
         </el-tab-pane>
-        <el-tab-pane label="关联日报" name="reports">
+        <el-tab-pane :label="t('runDetail.linkedReports')" name="reports">
           <section class="panel">
-            <h3 class="panel-title">关联日报</h3>
+            <h3 class="panel-title">{{ t('runDetail.linkedReports') }}</h3>
             <!-- 后端暂无查询既有关联的端点，下列列表仅反映本次会话中的关联/解绑操作结果 -->
             <div v-if="canEdit" class="link-row">
-              <el-select v-model="selectedReportId" class="report-select" filterable placeholder="选择日报" :loading="reportsLoading">
+              <el-select v-model="selectedReportId" class="report-select" filterable :placeholder="t('runDetail.selectReport')" :loading="reportsLoading">
                 <el-option v-for="r in reportOptions" :key="r.id" :label="reportLabel(r)" :value="r.id" />
               </el-select>
-              <el-button type="primary" :disabled="!selectedReportId" :loading="linking" @click="link">关联</el-button>
+              <el-button type="primary" :disabled="!selectedReportId" :loading="linking" @click="link">{{ t('runDetail.link') }}</el-button>
             </div>
-            <el-empty v-if="!linkedReportIds.length" description="暂无关联日报" :image-size="60" />
+            <el-empty v-if="!linkedReportIds.length" :description="t('runDetail.noLinkedReports')" :image-size="60" />
             <ul v-else class="link-list">
               <li v-for="id in linkedReportIds" :key="id">
                 <span class="report-id">{{ id }}</span>
-                <el-button v-if="canEdit" size="small" type="danger" plain @click="unlink(id)">解绑</el-button>
+                <el-button v-if="canEdit" size="small" type="danger" plain @click="unlink(id)">{{ t('runDetail.unlink') }}</el-button>
               </li>
             </ul>
           </section>
         </el-tab-pane>
-        <el-tab-pane label="测试数据" name="testdata">
+        <el-tab-pane :label="t('runDetail.testData')" name="testdata">
           <section class="panel">
-            <h3 class="panel-title">关联测试数据</h3>
+            <h3 class="panel-title">{{ t('runDetail.linkedTestData') }}</h3>
             <el-table v-loading="testDataLoading" :data="testData" size="small">
-              <el-table-column prop="measurement" label="测量项" />
-              <el-table-column prop="value" label="值" width="120" />
-              <el-table-column prop="unit" label="单位" width="100" />
-              <el-table-column prop="quality" label="质量" width="100" />
-              <el-table-column label="测量时间" width="180">
+              <el-table-column prop="measurement" :label="t('runDetail.measurement')" />
+              <el-table-column prop="value" :label="t('runDetail.value')" width="120" />
+              <el-table-column prop="unit" :label="t('runDetail.unit')" width="100" />
+              <el-table-column prop="quality" :label="t('runDetail.quality')" width="100" />
+              <el-table-column :label="t('runDetail.measuredAt')" width="180">
                 <template #default="{ row }">{{ row.measured_at ? fmtTime(row.measured_at) : '—' }}</template>
               </el-table-column>
               <template #empty>
@@ -252,6 +252,7 @@
 <script setup lang="ts">
 import { computed, onMounted, reactive, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
+import { useI18n } from 'vue-i18n'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import StatusBadge from '../components/StatusBadge.vue'
 import StepItemsEditor from '../components/StepItemsEditor.vue'
@@ -279,6 +280,7 @@ import { showApiError } from '../composables/useNotify'
 
 const route = useRoute()
 const router = useRouter()
+const { t } = useI18n()
 const auth = useAuthStore()
 
 const runId = String(route.params.id || '')
