@@ -71,8 +71,20 @@
               <el-button type="primary" :loading="cmdRunning" :disabled="!cmdName" @click="runCommand(ins)">执行</el-button>
             </template>
             <div v-if="cmdResult" class="cmd-result">
+              <div v-if="parsedResult?.type === 'sweep_xy' && parsedResult.points?.length" class="parsed-chart">
+                <canvas ref="chartCanvas" aria-label="扫频曲线"></canvas>
+                <p v-if="parsedResult.x_label || parsedResult.y_label" class="muted chart-caption">
+                  {{ parsedResult.x_label || 'x' }} / {{ parsedResult.y_label || 'y' }}
+                </p>
+              </div>
+              <p v-else-if="parsedResult?.type === 'single_value'" class="parsed-value">{{ parsedResult.value }}</p>
               <pre v-if="cmdResult.response" class="cmd-response">{{ cmdResult.response }}</pre>
-              <p class="muted">命令 {{ cmdResult.command }} 完成，耗时 {{ (cmdResult.duration / 1e6).toFixed(1) }} ms</p>
+              <div class="cmd-result-footer">
+                <p class="muted">命令 {{ cmdResult.command }} 完成，耗时 {{ (cmdResult.duration / 1e6).toFixed(1) }} ms</p>
+                <el-button v-if="!isViewer" size="small" plain @click="openSave({ instrumentId: ins.id, command: cmdResult.command, response: cmdResult.response, parsed: parsedResult })">
+                  保存到测试数据
+                </el-button>
+              </div>
             </div>
           </template>
           <p v-else class="muted cmd-desc">命令执行需要 maintainer 或 admin 权限</p>
@@ -150,6 +162,9 @@
                 />
                 <p v-if="message.requestId" class="request-id">request_id: {{ message.requestId }}</p>
               </div>
+              <div v-if="message.exec && !isViewer" class="exec-actions">
+                <el-button size="small" plain @click="openSave(message.exec!)">保存到测试数据</el-button>
+              </div>
             </div>
           </div>
           <p v-if="aiLoading" class="muted chat-loading">正在翻译并校验…</p>
@@ -169,13 +184,64 @@
         </div>
       </div>
     </el-drawer>
+
+    <!-- 保存到测试数据 -->
+    <el-dialog v-model="saveOpen" title="保存到测试数据" :width="isMobile ? '100%' : '480px'">
+      <el-form label-position="top" @submit.prevent>
+        <el-form-item label="项目" required>
+          <el-select v-model="saveForm.project_id" placeholder="选择项目" :loading="saveProjectsLoading" @change="onSaveProjectChange">
+            <el-option v-for="p in saveProjects" :key="p.id" :label="`${p.name}（${p.code}）`" :value="p.id" />
+          </el-select>
+        </el-form-item>
+        <el-form-item label="批次">
+          <el-select v-model="saveForm.run_id" placeholder="选择批次（可选）" clearable :disabled="!saveForm.project_id">
+            <el-option v-for="r in saveRuns" :key="r.id" :label="r.name" :value="r.id" />
+          </el-select>
+        </el-form-item>
+        <el-form-item label="数据类型" required>
+          <el-select v-model="saveForm.data_type" placeholder="选择数据类型">
+            <el-option v-for="t in dataTypes" :key="t" :label="t" :value="t" />
+          </el-select>
+        </el-form-item>
+        <el-form-item label="测量项" required>
+          <el-input v-model="saveForm.measurement" placeholder="如 beam_current" />
+        </el-form-item>
+        <el-form-item label="数值" required>
+          <el-input-number v-model="saveForm.value" :controls="false" class="save-number" placeholder="数值" />
+        </el-form-item>
+        <el-form-item label="单位">
+          <el-input v-model="saveForm.unit" placeholder="如 K / mbar / V" />
+        </el-form-item>
+        <el-form-item label="测量时间">
+          <el-date-picker v-model="saveForm.measured_at" type="datetime" placeholder="选择时间" />
+        </el-form-item>
+        <el-form-item label="备注">
+          <el-input v-model="saveForm.notes" placeholder="备注（可选）" />
+        </el-form-item>
+      </el-form>
+      <template #footer>
+        <el-button @click="saveOpen = false">取消</el-button>
+        <el-button type="primary" :loading="saveLoading" @click="submitSave">保存</el-button>
+      </template>
+    </el-dialog>
   </div>
 </template>
 
 <script setup lang="ts">
-import { computed, onMounted, reactive, ref } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { Refresh } from '@element-plus/icons-vue'
+import {
+  Chart,
+  LineController,
+  LineElement,
+  PointElement,
+  ScatterController,
+  LinearScale,
+  Legend,
+  Tooltip,
+  type ChartDataset
+} from 'chart.js'
 import {
   emergencyStop,
   executeCommand,
@@ -184,21 +250,37 @@ import {
   getWhitelist,
   interpretCommand,
   listInstruments,
+  parseResult,
   type CommandParamDef,
   type CommandResult,
   type InstrumentStatus,
   type InstrumentSummary,
   type NLCommandCandidate,
+  type ParsedResult,
   type WhitelistCommand
 } from '../api/instruments'
+import { createTestData, type TestDataPayload } from '../api/testdata'
+import { listProjects, type Project } from '../api/projects'
+import { listRuns, type ExperimentRun } from '../api/runs'
 import { useAuthStore } from '../stores/auth'
 import { showApiError } from '../composables/useNotify'
 import { useMobile } from '../composables/useMobile'
 
+Chart.register(LineController, ScatterController, LineElement, PointElement, LinearScale, Legend, Tooltip)
+
 const auth = useAuthStore()
 // 与后端 RequireRole(maintainer, admin) 对应，前端隐藏只是 UX，后端仍强校验
 const canOperate = computed(() => ['maintainer', 'admin'].includes(auth.user?.role || ''))
+const isViewer = computed(() => auth.user?.role === 'viewer')
 const isMobile = useMobile()
+
+// 一次命令执行的结构化结果，cmdResult 区块和 AI 对话执行结果共用同一个保存对话框
+type ExecRecord = {
+  instrumentId: string
+  command: string
+  response?: string
+  parsed?: ParsedResult | null
+}
 
 type ChatMessage = {
   role: 'user' | 'assistant'
@@ -207,6 +289,7 @@ type ChatMessage = {
   requestId?: string
   running?: boolean
   done?: boolean
+  exec?: ExecRecord
 }
 
 const aiOpen = ref(false)
@@ -230,6 +313,29 @@ const cmdName = ref('')
 const cmdParams = reactive<Record<string, any>>({})
 const cmdRunning = ref(false)
 const cmdResult = ref<CommandResult | null>(null)
+
+// 执行结果解析与可视化
+const parsedResult = ref<ParsedResult | null>(null)
+const chartCanvas = ref<HTMLCanvasElement>()
+let chart: Chart | undefined
+
+// 保存到测试数据对话框
+const dataTypes = ['cryo', 'pressure', 'voltage', 'rf_voltage', 'efficiency']
+const saveOpen = ref(false)
+const saveLoading = ref(false)
+const saveProjects = ref<Project[]>([])
+const saveProjectsLoading = ref(false)
+const saveRuns = ref<ExperimentRun[]>([])
+const saveForm = reactive({
+  project_id: '',
+  run_id: '',
+  data_type: '',
+  measurement: '',
+  value: undefined as number | undefined,
+  unit: '',
+  measured_at: null as Date | null,
+  notes: ''
+})
 
 // red 命令后端拒绝（command_not_allowed），同名命令多台仪器复用，按名称去重
 const executableCommands = computed(() => {
@@ -285,7 +391,7 @@ async function toggleExpand(ins: InstrumentSummary) {
   }
   expandedId.value = ins.id
   cmdName.value = ''
-  cmdResult.value = null
+  clearCmdResult()
   resetParams()
   detailLoading.value = true
   detailStatus.value = null
@@ -304,7 +410,7 @@ function resetParams() {
 
 function onCommandPick() {
   resetParams()
-  cmdResult.value = null
+  clearCmdResult()
   if (!cmdDef.value) return
   for (const [name, def] of paramEntries(cmdDef.value)) {
     if (def.default === undefined || def.default === null) continue
@@ -376,9 +482,11 @@ async function runAICandidate(message: ChatMessage) {
   try {
     const response = await executeCommandWithMeta(ins.id, candidate.command, candidate.params || {})
     message.done = true
+    const parsed = await parseExecution(ins.id, candidate.command, response.data.response)
     aiMessages.value.push({
       role: 'assistant',
-      content: `${response.data.response || '命令执行完成'}\nrequest_id: ${response.requestId}`
+      content: `${response.data.response || '命令执行完成'}\nrequest_id: ${response.requestId}`,
+      exec: { instrumentId: ins.id, command: candidate.command, response: response.data.response, parsed }
     })
   } catch (err) {
     aiError.value = err instanceof Error ? err.message : '命令执行失败'
@@ -402,14 +510,167 @@ async function runCommand(ins: InstrumentSummary) {
     }
   }
   cmdRunning.value = true
-  cmdResult.value = null
+  clearCmdResult()
   try {
     cmdResult.value = await executeCommand(ins.id, def.name, { ...cmdParams })
     ElMessage.success(`命令 ${def.name} 执行成功`)
+    parsedResult.value = await parseExecution(ins.id, cmdResult.value.command, cmdResult.value.response)
+    if (parsedResult.value?.type === 'sweep_xy') {
+      await nextTick()
+      renderChart(cmdResult.value.command, parsedResult.value)
+    }
   } catch (err) {
     showApiError(err, '命令执行失败')
   } finally {
     cmdRunning.value = false
+  }
+}
+
+function clearCmdResult() {
+  cmdResult.value = null
+  parsedResult.value = null
+  destroyChart()
+}
+
+// 解析失败（命令未配置 result_parser 返回 null，响应无法解析返回 400）不影响原始结果展示，静默忽略
+async function parseExecution(instrumentId: string, command: string, response?: string): Promise<ParsedResult | null> {
+  if (!response) return null
+  try {
+    return await parseResult(instrumentId, command, response)
+  } catch {
+    return null
+  }
+}
+
+function destroyChart() {
+  chart?.destroy()
+  chart = undefined
+}
+
+function renderChart(command: string, parsed: ParsedResult) {
+  destroyChart()
+  if (!chartCanvas.value || !parsed.points?.length) return
+  const datasets: ChartDataset<'scatter'>[] = [
+    {
+      label: parsed.y_label || 'value',
+      data: parsed.points,
+      showLine: true,
+      borderColor: '#167d9a',
+      backgroundColor: '#167d9a',
+      pointRadius: 2
+    }
+  ]
+  // 命令名含 min/max 时标注扫频数据中的对应极值点
+  const lower = command.toLowerCase()
+  const extreme = lower.includes('min')
+    ? { label: 'min', point: parsed.points.reduce((a, b) => (b.y < a.y ? b : a)) }
+    : lower.includes('max')
+      ? { label: 'max', point: parsed.points.reduce((a, b) => (b.y > a.y ? b : a)) }
+      : null
+  if (extreme) {
+    datasets.push({
+      label: `${extreme.label} (${extreme.point.x}, ${extreme.point.y})`,
+      data: [extreme.point],
+      borderColor: '#e6a23c',
+      backgroundColor: '#e6a23c',
+      pointRadius: 6,
+      pointStyle: 'triangle'
+    })
+  }
+  chart = new Chart(chartCanvas.value, {
+    type: 'scatter',
+    data: { datasets },
+    options: {
+      animation: false,
+      responsive: true,
+      maintainAspectRatio: false,
+      plugins: { legend: { display: true } },
+      scales: {
+        x: { type: 'linear', title: { display: !!parsed.x_label, text: parsed.x_label || '' } },
+        y: { type: 'linear', title: { display: !!parsed.y_label, text: parsed.y_label || '' } }
+      }
+    }
+  })
+}
+
+onBeforeUnmount(destroyChart)
+
+function openSave(exec: ExecRecord) {
+  saveForm.project_id = ''
+  saveForm.run_id = ''
+  saveRuns.value = []
+  saveForm.data_type = ''
+  saveForm.measurement = exec.command
+  saveForm.value = exec.parsed?.type === 'single_value' ? exec.parsed.value : undefined
+  saveForm.unit = ''
+  saveForm.measured_at = new Date()
+  saveForm.notes = `instrument=${exec.instrumentId} command=${exec.command}`
+  saveOpen.value = true
+  loadSaveProjects()
+}
+
+async function loadSaveProjects() {
+  if (saveProjects.value.length || saveProjectsLoading.value) return
+  saveProjectsLoading.value = true
+  try {
+    saveProjects.value = await listProjects()
+  } catch (err) {
+    showApiError(err, '项目列表加载失败')
+  } finally {
+    saveProjectsLoading.value = false
+  }
+}
+
+async function onSaveProjectChange(projectId: string) {
+  saveForm.run_id = ''
+  saveRuns.value = []
+  if (!projectId) return
+  try {
+    const data = await listRuns(projectId, { per_page: 100 })
+    saveRuns.value = data.items ?? []
+  } catch (err) {
+    showApiError(err, '批次列表加载失败')
+  }
+}
+
+async function submitSave() {
+  if (!saveForm.project_id) {
+    ElMessage.warning('请选择项目')
+    return
+  }
+  if (!saveForm.data_type) {
+    ElMessage.warning('请选择数据类型')
+    return
+  }
+  if (!saveForm.measurement.trim()) {
+    ElMessage.warning('请填写测量项')
+    return
+  }
+  if (saveForm.value === undefined || Number.isNaN(saveForm.value)) {
+    ElMessage.warning('请填写数值')
+    return
+  }
+  // 后端开启 DisallowUnknownFields，只提交白名单内字段
+  const payload: TestDataPayload = {
+    data_type: saveForm.data_type,
+    measurement: saveForm.measurement.trim(),
+    value: saveForm.value
+  }
+  const unit = saveForm.unit.trim()
+  if (unit) payload.unit = unit
+  if (saveForm.measured_at) payload.measured_at = new Date(saveForm.measured_at).toISOString()
+  if (saveForm.run_id) payload.run_id = saveForm.run_id
+  const notes = saveForm.notes.trim()
+  if (notes) payload.notes = notes
+  saveLoading.value = true
+  try {
+    await createTestData(saveForm.project_id, payload)
+    ElMessage.success('测试数据已保存')
+    saveOpen.value = false
+  } catch (err) {
+    showApiError(err, '保存失败')
+  } finally {
+    saveLoading.value = false
   }
 }
 
@@ -609,6 +870,46 @@ function riskTag(risk: string): 'success' | 'warning' | 'danger' | 'info' {
   overflow-x: auto;
   white-space: pre-wrap;
   word-break: break-all;
+}
+
+.parsed-chart {
+  height: 220px;
+  margin-bottom: 8px;
+}
+
+.parsed-chart canvas {
+  max-height: 190px;
+}
+
+.chart-caption {
+  font-size: 11px;
+  margin: 4px 0 0;
+  text-align: center;
+}
+
+.parsed-value {
+  font-size: 28px;
+  font-weight: 650;
+  margin: 0 0 8px;
+}
+
+.cmd-result-footer {
+  align-items: center;
+  display: flex;
+  gap: 10px;
+  justify-content: space-between;
+}
+
+.cmd-result-footer p {
+  margin: 0;
+}
+
+.exec-actions {
+  margin-top: 8px;
+}
+
+.save-number {
+  width: 100%;
 }
 
 .scpi-code {

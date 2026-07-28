@@ -104,6 +104,14 @@ type SCPIConnection struct {
 	conn       net.Conn
 }
 
+// ResultParserConfig describes how to parse a command's raw response.
+type ResultParserConfig struct {
+	Type   string `yaml:"type" json:"type"` // "sweep_xy" | "single_value"
+	XLabel string `yaml:"x_label,omitempty" json:"x_label,omitempty"`
+	YLabel string `yaml:"y_label,omitempty" json:"y_label,omitempty"`
+	Regex  string `yaml:"regex,omitempty" json:"regex,omitempty"`
+}
+
 // CommandDef is a command loaded from the instrument whitelist.
 type CommandDef struct {
 	Name              string                    `yaml:"name" json:"name"`
@@ -116,6 +124,16 @@ type CommandDef struct {
 	Constraints       []map[string]any          `yaml:"constraints,omitempty" json:"-"`
 	ObjectConstraints map[string]map[string]any `yaml:"object_constraints,omitempty" json:"-"`
 	Returns           any                       `yaml:"returns,omitempty" json:"returns,omitempty"`
+	ResultParser      *ResultParserConfig       `yaml:"result_parser,omitempty" json:"result_parser,omitempty"`
+}
+
+// ParsedResult is the structured output of parsing a command response.
+type ParsedResult struct {
+	Type   string   `json:"type"`
+	Points []Point  `json:"points,omitempty"`
+	Value  *float64 `json:"value,omitempty"`
+	XLabel string   `json:"x_label,omitempty"`
+	YLabel string   `json:"y_label,omitempty"`
 }
 
 type NLHistoryItem struct {

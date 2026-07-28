@@ -42,6 +42,15 @@ export type CommandResult = {
   duration: number // Go time.Duration，单位纳秒
 }
 
+// 与 go-server/instruments/model.go 的 ParsedResult 一致；命令无 result_parser 时后端返回 data: null
+export type ParsedResult = {
+  type: string // sweep_xy | single_value
+  points?: { x: number; y: number }[]
+  value?: number
+  x_label?: string
+  y_label?: string
+}
+
 export type NLCommandCandidate = {
   status: 'ok' | 'clarify' | 'rejected'
   command?: string
@@ -109,6 +118,11 @@ export function executeCommand(id: string, command: string, params: Record<strin
 
 export function executeCommandWithMeta(id: string, command: string, params: Record<string, unknown> = {}) {
   return requestWithMeta<CommandResult>({ url: `/instruments/${id}/commands`, method: 'POST', data: { command, params } })
+}
+
+// 只读解析接口，不需要 Idempotency-Key；解析失败（parse_failed）由调用方静默处理
+export function parseResult(id: string, command: string, response: string) {
+  return request<ParsedResult | null>({ url: `/instruments/${id}/parse-result`, method: 'POST', data: { command, response } })
 }
 
 export function interpretCommand(id: string, input: string, history: { role: 'user' | 'assistant'; content: string }[]) {

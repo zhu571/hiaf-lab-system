@@ -380,6 +380,13 @@ func main() {
 		})
 	})
 	r.Route("/api/v1/instruments", func(r chi.Router) {
+		// parse-result 是只读解析接口：与 ListInstruments 同级鉴权，但不需要 Idempotency-Key。
+		r.Group(func(r chi.Router) {
+			r.Use(mw.AuthRequired)
+			r.Use(mw.AgentContext(db))
+			r.Use(mw.Audit(db))
+			r.Post("/{id}/parse-result", instrumentsHandler.ParseResult)
+		})
 		r.Group(func(r chi.Router) {
 			r.Use(mw.AuthRequired)
 			r.Use(mw.AgentContext(db))

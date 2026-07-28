@@ -13,6 +13,8 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"regexp"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -144,6 +146,71 @@ func NewServiceWithGateway(gateway string) *Service {
 		client:  &http.Client{Timeout: 15 * time.Second},
 		gateway: normalizeHTTPBase(gateway),
 	}
+}
+
+// firstFloatRegex matches the first floating-point number in a response.
+var firstFloatRegex = regexp.MustCompile(`[-+]?(?:\d+\.?\d*|\.\d+)(?:[eE][-+]?\d+)?`)
+
+// ParseResult parses a raw command response according to the command's result_parser
+// whitelist config. Returns (nil, nil) when the command has no parser configured.
+func (s *Service) ParseResult(def *CommandDef, response string) (*ParsedResult, error) {
+	if def.ResultParser == nil {
+		return nil, nil
+	}
+	switch def.ResultParser.Type {
+	case "sweep_xy":
+		// response contains "freq1,val1;freq2,val2;..."
+		data := strings.TrimSpace(response)
+		if def.ResultParser.Regex != "" {
+			re, err := regexp.Compile(def.ResultParser.Regex)
+			if err != nil {
+				return nil, fmt.Errorf("invalid result_parser regex: %w", err)
+			}
+			match := re.FindStringSubmatch(data)
+			if match == nil {
+				return nil, fmt.Errorf("响应中未找到扫频数据")
+			}
+			data = match[0]
+			if idx := re.SubexpIndex("points"); idx >= 0 && idx < len(match) && match[idx] != "" {
+				data = match[idx]
+			}
+		}
+		points := make([]Point, 0)
+		for _, segment := range strings.Split(data, ";") {
+			segment = strings.TrimSpace(segment)
+			if segment == "" {
+				continue
+			}
+			parts := strings.Split(segment, ",")
+			if len(parts) != 2 {
+				return nil, fmt.Errorf("无法解析数据点 %q", segment)
+			}
+			x, errX := strconv.ParseFloat(strings.TrimSpace(parts[0]), 64)
+			y, errY := strconv.ParseFloat(strings.TrimSpace(parts[1]), 64)
+			if errX != nil || errY != nil {
+				return nil, fmt.Errorf("无法解析数据点 %q", segment)
+			}
+			points = append(points, Point{X: x, Y: y})
+		}
+		if len(points) == 0 {
+			return nil, fmt.Errorf("响应中未找到扫频数据")
+		}
+		return &ParsedResult{
+			Type: "sweep_xy", Points: points,
+			XLabel: def.ResultParser.XLabel, YLabel: def.ResultParser.YLabel,
+		}, nil
+	case "single_value":
+		match := firstFloatRegex.FindString(response)
+		if match == "" {
+			return nil, fmt.Errorf("响应中未找到数值")
+		}
+		val, err := strconv.ParseFloat(match, 64)
+		if err != nil {
+			return nil, fmt.Errorf("无法解析数值 %q", match)
+		}
+		return &ParsedResult{Type: "single_value", Value: &val}, nil
+	}
+	return nil, nil
 }
 
 // NewSCPIConnection opens a TCP connection to a SCPI instrument.
