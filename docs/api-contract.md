@@ -114,6 +114,18 @@
 
 撤销当前 refresh token。
 
+### `PATCH /api/v1/auth/profile`
+
+更新当前用户自己的资料。请求：
+
+```json
+{
+  "language": "zh"
+}
+```
+
+`language` 仅支持 `zh` / `en`，用于前端界面语言；登录、刷新、`/auth/me` 返回的 user 对象均携带 `language` 字段。非法值返回 `invalid_language`。
+
 ### `GET /api/v1/users/me`
 
 返回当前用户资料、角色、对象级权限摘要。

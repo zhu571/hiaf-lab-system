@@ -50,3 +50,13 @@ func TestSetCSRFCookieIsReadableFromPages(t *testing.T) {
 		t.Error("csrf_token cookie must not be HttpOnly")
 	}
 }
+
+// 未携带 access token 的请求必须被 AuthRequired 拦截（svc 为 nil 也不会被触达）。
+func TestUpdateProfileRequiresAuth(t *testing.T) {
+	req := httptest.NewRequest(http.MethodPatch, "/profile", nil)
+	rec := httptest.NewRecorder()
+	NewHandler(nil).Routes().ServeHTTP(rec, req)
+	if rec.Code != http.StatusUnauthorized {
+		t.Errorf("expected 401 for unauthenticated /profile, got %d", rec.Code)
+	}
+}

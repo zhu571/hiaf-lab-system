@@ -22,6 +22,7 @@ var (
 	ErrUsernameTaken      = errors.New("用户名已存在")
 	ErrPasswordTooShort   = errors.New("密码长度至少8位")
 	ErrInvalidRole        = errors.New("用户角色无效")
+	ErrInvalidLanguage    = errors.New("语言偏好无效")
 	ErrCannotModifySelf   = errors.New("不能通过用户管理修改自己的账户")
 	ErrLastActiveAdmin    = errors.New("不能停用或降级最后一个管理员账户")
 )
@@ -51,6 +52,22 @@ func NewService(repo *Repository, jwtKey []byte) *Service {
 // GetUser returns a user by ID.
 func (s *Service) GetUser(userID string) (*User, error) {
 	return s.repo.GetByID(userID)
+}
+
+// UpdateProfile applies self-service profile edits (currently only language).
+func (s *Service) UpdateProfile(userID string, req UpdateProfileRequest) (*UserInfo, error) {
+	if !validLanguage(req.Language) {
+		return nil, ErrInvalidLanguage
+	}
+	user, err := s.repo.UpdateLanguage(userID, req.Language)
+	if err != nil {
+		return nil, err
+	}
+	if user == nil {
+		return nil, ErrInvalidCredentials
+	}
+	info := toUserInfo(user)
+	return &info, nil
 }
 
 func (s *Service) ListUsers() ([]UserInfo, error) {
@@ -409,6 +426,15 @@ func generateTemporaryPassword() (string, error) {
 func validRole(role string) bool {
 	switch role {
 	case RoleAdmin, RoleMaintainer, RoleMember, RoleViewer, RoleAgent:
+		return true
+	default:
+		return false
+	}
+}
+
+func validLanguage(language string) bool {
+	switch language {
+	case LanguageZH, LanguageEN:
 		return true
 	default:
 		return false

@@ -8,6 +8,7 @@ export type UserInfo = {
   must_change_password: boolean
   created_at: string
   disabled: boolean
+  language: string
 }
 
 type LoginResponse = {
@@ -38,6 +39,10 @@ export function me() {
 
 export function changePassword(old_password: string, new_password: string) {
   return request<{ success: boolean }>({ url: '/auth/change-password', method: 'POST', data: { old_password, new_password } })
+}
+
+export function updateProfile(data: { language: string }) {
+  return request<UserInfo>({ url: '/auth/profile', method: 'PATCH', data })
 }
 
 export function logout() {

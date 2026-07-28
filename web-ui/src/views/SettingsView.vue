@@ -4,24 +4,31 @@
       <div class="user-head">
         <span class="avatar">{{ (auth.user?.username || '?').slice(0, 1).toUpperCase() }}</span>
         <div class="user-meta">
-          <h2>个人设置</h2>
+          <h2>{{ t('settings.title') }}</h2>
           <p class="muted">{{ auth.user?.username }} · {{ auth.user?.role }}</p>
         </div>
       </div>
-      <el-alert v-if="auth.user?.must_change_password" title="首次登录需要修改密码" type="warning" show-icon :closable="false" />
+      <el-alert v-if="auth.user?.must_change_password" :title="t('settings.mustChangePassword')" type="warning" show-icon :closable="false" />
+      <div class="language-row">
+        <span class="language-label">{{ t('settings.language') }}</span>
+        <el-select :model-value="locale" style="width: 160px" @change="onLanguageChange">
+          <el-option label="中文" value="zh" />
+          <el-option label="English" value="en" />
+        </el-select>
+      </div>
       <el-form label-position="top" @submit.prevent="submit">
-        <el-form-item label="旧密码"><el-input v-model="form.oldPassword" type="password" show-password /></el-form-item>
-        <el-form-item label="新密码"><el-input v-model="form.newPassword" type="password" show-password /></el-form-item>
-        <el-form-item label="确认新密码"><el-input v-model="form.confirm" type="password" show-password /></el-form-item>
+        <el-form-item :label="t('settings.oldPassword')"><el-input v-model="form.oldPassword" type="password" show-password /></el-form-item>
+        <el-form-item :label="t('settings.newPassword')"><el-input v-model="form.newPassword" type="password" show-password /></el-form-item>
+        <el-form-item :label="t('settings.confirmNewPassword')"><el-input v-model="form.confirm" type="password" show-password /></el-form-item>
         <div class="form-actions">
-          <el-button type="primary" native-type="submit">修改密码</el-button>
-          <el-button @click="doLogout">退出登录</el-button>
+          <el-button type="primary" native-type="submit">{{ t('settings.changePassword') }}</el-button>
+          <el-button @click="doLogout">{{ t('nav.logout') }}</el-button>
         </div>
       </el-form>
     </section>
 
     <section v-if="quickLinks.length" class="panel quick-links">
-      <h3 class="section-title">快捷入口</h3>
+      <h3 class="section-title">{{ t('settings.quickLinks') }}</h3>
       <el-link v-for="link in quickLinks" :key="link.path" :underline="false" @click="router.push(link.path)">
         <el-icon style="margin-right:6px"><component :is="link.icon" /></el-icon>
         {{ link.label }}
@@ -33,33 +40,49 @@
 <script setup lang="ts">
 import { computed, reactive } from 'vue'
 import { useRouter } from 'vue-router'
+import { useI18n } from 'vue-i18n'
 import { ElMessage } from 'element-plus'
 import { User, DataBoard, Tickets } from '@element-plus/icons-vue'
 import { changePassword } from '../api/auth'
 import { useAuthStore } from '../stores/auth'
+import { setLocale, type AppLocale } from '../i18n'
 
 const router = useRouter()
 const auth = useAuthStore()
+const { t, locale } = useI18n()
 const form = reactive({ oldPassword: '', newPassword: '', confirm: '' })
 
 interface QuickLink { label: string; path: string; icon: any }
 
 const quickLinks = computed<QuickLink[]>(() => {
   const links: QuickLink[] = []
-  if (auth.canReviewAgent) links.push({ label: 'AI 审核', path: '/agent-candidates', icon: Tickets })
-  if (auth.isAdmin) links.push({ label: '用户管理', path: '/admin/users', icon: User })
-  links.push({ label: '审计', path: '/audit', icon: DataBoard })
+  if (auth.canReviewAgent) links.push({ label: t('nav.aiReview'), path: '/agent-candidates', icon: Tickets })
+  if (auth.isAdmin) links.push({ label: t('nav.adminUsers'), path: '/admin/users', icon: User })
+  links.push({ label: t('nav.audit'), path: '/audit', icon: DataBoard })
   return links
 })
 
+async function onLanguageChange(value: string | number | boolean) {
+  const lang = value as AppLocale
+  const prev = locale.value as AppLocale
+  setLocale(lang) // 本地先生效，后端保存失败再回滚
+  try {
+    await auth.setLanguage(lang)
+    ElMessage.success(t('settings.languageSaved'))
+  } catch {
+    setLocale(prev)
+    ElMessage.error(t('settings.languageSaveFailed'))
+  }
+}
+
 async function submit() {
   if (form.newPassword !== form.confirm) {
-    ElMessage.error('两次密码不一致')
+    ElMessage.error(t('settings.passwordMismatch'))
     return
   }
   await changePassword(form.oldPassword, form.newPassword)
   await auth.loadMe()
-  ElMessage.success('密码已修改')
+  ElMessage.success(t('settings.passwordChanged'))
 }
 
 async function doLogout() {
@@ -103,6 +126,17 @@ async function doLogout() {
 .user-meta {
   display: grid;
   gap: 2px;
+}
+
+.language-row {
+  align-items: center;
+  display: flex;
+  gap: 12px;
+}
+
+.language-label {
+  color: var(--text-2);
+  font-size: 14px;
 }
 
 .form-actions {

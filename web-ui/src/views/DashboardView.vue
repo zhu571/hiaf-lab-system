@@ -2,8 +2,8 @@
   <div class="page dashboard">
     <div class="toolbar dash-head">
       <div class="dash-title">
-        <h2>实验室仪表盘</h2>
-        <p class="dash-sub">设备运行状态与团队动态一览</p>
+        <h2>{{ t('dashboard.title') }}</h2>
+        <p class="dash-sub">{{ t('dashboard.subtitle') }}</p>
       </div>
       <div class="dash-date">
         <el-icon><Calendar /></el-icon>
@@ -16,11 +16,11 @@
       <section class="panel column">
         <div class="panel-head">
           <span class="panel-icon"><el-icon><Odometer /></el-icon></span>
-          <h3>设备状态</h3>
-          <span class="panel-meta">{{ onlineCount }}/{{ instruments.length + 1 }} 在线</span>
+          <h3>{{ t('dashboard.deviceStatus') }}</h3>
+          <span class="panel-meta">{{ t('dashboard.onlineCount', { online: onlineCount, total: instruments.length + 1 }) }}</span>
         </div>
         <div v-loading="loadingInstruments" class="card-list">
-          <el-empty v-if="!loadingInstruments && !instruments.length" description="暂无设备" />
+          <el-empty v-if="!loadingInstruments && !instruments.length" :description="t('dashboard.noDevices')" />
           <div
             v-for="(inst, i) in instruments"
             :key="inst.id"
@@ -31,7 +31,7 @@
             <span class="status-dot" :class="{ online: isOnline(inst.state) }"></span>
             <span class="device-name">{{ inst.name }}</span>
             <span class="device-state" :class="{ online: isOnline(inst.state) }">
-              {{ isOnline(inst.state) ? '在线' : '离线' }}
+              {{ isOnline(inst.state) ? t('common.online') : t('common.offline') }}
             </span>
             <el-icon class="card-chev"><ArrowRight /></el-icon>
           </div>
@@ -39,19 +39,19 @@
           <div class="device-card gas-card" :style="stagger(instruments.length)" @click="router.push('/gas-control')">
             <div class="device-row">
               <span class="status-dot" :class="{ online: gasOnline }"></span>
-              <span class="device-name">气压控制</span>
+              <span class="device-name">{{ t('dashboard.gasControl') }}</span>
               <span class="device-state" :class="{ online: gasOnline }">
-                {{ gasOnline ? '在线' : '离线' }}
+                {{ gasOnline ? t('common.online') : t('common.offline') }}
               </span>
               <el-icon class="card-chev"><ArrowRight /></el-icon>
             </div>
             <div class="gas-stats" :class="{ offline: !gasOnline }">
               <div class="gas-stat">
-                <span class="gas-label">运行状态</span>
+                <span class="gas-label">{{ t('dashboard.runningState') }}</span>
                 <span class="gas-value">{{ gasRunningText }}</span>
               </div>
               <div class="gas-stat">
-                <span class="gas-label">A1 压力</span>
+                <span class="gas-label">{{ t('dashboard.a1Pressure') }}</span>
                 <span class="gas-value">{{ gasA1Text }}</span>
               </div>
             </div>
@@ -63,8 +63,8 @@
       <section class="panel column">
         <div class="panel-head">
           <span class="panel-icon"><el-icon><DataAnalysis /></el-icon></span>
-          <h3>综合简报</h3>
-          <span class="panel-meta">近 7 天</span>
+          <h3>{{ t('dashboard.brief') }}</h3>
+          <span class="panel-meta">{{ t('dashboard.last7Days') }}</span>
         </div>
         <div v-loading="loadingReports" class="brief-strip">
           <div
@@ -77,10 +77,10 @@
           >
             <div class="brief-top">
               <span class="brief-date">{{ briefDayLabel(day.date) }}</span>
-              <span class="brief-count">{{ day.reports.length }} 人</span>
+              <span class="brief-count">{{ t('dashboard.peopleCount', { n: day.reports.length }) }}</span>
             </div>
             <span class="brief-week">{{ weekdayLabel(day.date) }}</span>
-            <p class="brief-summary" :class="{ empty: !day.summary }">{{ day.summary || '暂无日报' }}</p>
+            <p class="brief-summary" :class="{ empty: !day.summary }">{{ day.summary || t('dashboard.noReport') }}</p>
           </div>
         </div>
       </section>
@@ -89,8 +89,8 @@
       <section class="panel column">
         <div class="panel-head">
           <span class="panel-icon"><el-icon><Avatar /></el-icon></span>
-          <h3>团队成员日报</h3>
-          <span class="panel-meta">{{ dayReports.length }} 篇</span>
+          <h3>{{ t('dashboard.teamReports') }}</h3>
+          <span class="panel-meta">{{ t('dashboard.reportsCount', { n: dayReports.length }) }}</span>
         </div>
         <div class="date-bar">
           <el-button :icon="ArrowLeft" circle size="small" @click="shiftDate(-1)" />
@@ -98,7 +98,7 @@
           <el-button :icon="ArrowRight" circle size="small" @click="shiftDate(1)" />
         </div>
         <div v-loading="loadingReports" class="card-list">
-          <el-empty v-if="!loadingReports && !dayReports.length" description="当天暂无日报" />
+          <el-empty v-if="!loadingReports && !dayReports.length" :description="t('dashboard.noReportToday')" />
           <div
             v-for="(report, i) in dayReports"
             :key="report.id"
@@ -112,7 +112,7 @@
               <el-icon class="card-chev"><ArrowRight /></el-icon>
             </div>
             <p class="member-summary" :class="{ empty: !report.summary }">
-              {{ truncate(report.summary) || '暂无摘要' }}
+              {{ truncate(report.summary) || t('dashboard.noSummary') }}
             </p>
           </div>
         </div>
@@ -124,12 +124,14 @@
 <script setup lang="ts">
 import { ref, reactive, computed, watch, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
+import { useI18n } from 'vue-i18n'
 import { ArrowLeft, ArrowRight, Avatar, Calendar, DataAnalysis, Odometer } from '@element-plus/icons-vue'
 import { listInstruments, gasCellStatus, type InstrumentSummary, type GasCellPoint } from '../api/instruments'
 import { listReports, type DailyReport } from '../api/logs'
 import { showApiError } from '../composables/useNotify'
 
 const router = useRouter()
+const { t, locale } = useI18n()
 
 const RUNNING = 'GasCell:Piezo:Running'
 const A1 = 'GasCell:Piezo:A1'
@@ -161,7 +163,7 @@ async function loadInstruments() {
   try {
     instruments.value = await listInstruments()
   } catch (err) {
-    showApiError(err, '设备列表加载失败')
+    showApiError(err, t('dashboard.loadDevicesFailed'))
   } finally {
     loadingInstruments.value = false
   }
@@ -171,7 +173,7 @@ async function loadGasCell() {
   try {
     Object.assign(gasData, (await gasCellStatus()).data)
   } catch (err) {
-    showApiError(err, '气压状态加载失败')
+    showApiError(err, t('dashboard.loadGasFailed'))
   }
 }
 
@@ -180,7 +182,7 @@ async function loadReports() {
   try {
     reports.value = (await listReports({ per_page: 100 })).items ?? []
   } catch (err) {
-    showApiError(err, '日报加载失败')
+    showApiError(err, t('dashboard.loadReportsFailed'))
   } finally {
     loadingReports.value = false
   }
@@ -199,7 +201,7 @@ const gasOnline = computed(() => point(RUNNING).q === 'good' && point(A1).q === 
 
 const gasRunningText = computed(() => {
   if (point(RUNNING).q !== 'good') return '—'
-  return Number(point(RUNNING).v) ? '运行中' : '已停止'
+  return Number(point(RUNNING).v) ? t('dashboard.running') : t('dashboard.stopped')
 })
 
 const gasA1Text = computed(() => {
@@ -259,15 +261,20 @@ function initial(report: DailyReport) {
 
 /* ---------- 纯展示辅助 ---------- */
 
+// 日期显示跟随界面语言（zh → zh-CN，en → en-US）
+const dateLocale = computed(() => (locale.value === 'zh' ? 'zh-CN' : 'en-US'))
+
 // 顶栏日期与简报卡片文案，仅用于显示，不参与数据逻辑
 const todayStr = localDate(new Date())
 const yesterdayStr = localDate(new Date(Date.now() - 86400000))
-const todayText = new Date().toLocaleDateString('zh-CN', {
-  year: 'numeric',
-  month: 'long',
-  day: 'numeric',
-  weekday: 'long'
-})
+const todayText = computed(() =>
+  new Date().toLocaleDateString(dateLocale.value, {
+    year: 'numeric',
+    month: 'long',
+    day: 'numeric',
+    weekday: 'long'
+  })
+)
 
 // 设备列角标：在线数（仪器 + 气压控制）
 const onlineCount = computed(
@@ -275,13 +282,13 @@ const onlineCount = computed(
 )
 
 function briefDayLabel(date: string) {
-  if (date === todayStr) return '今天'
-  if (date === yesterdayStr) return '昨天'
+  if (date === todayStr) return t('dashboard.today')
+  if (date === yesterdayStr) return t('dashboard.yesterday')
   return date.slice(5) // MM-DD
 }
 
 function weekdayLabel(date: string) {
-  return new Date(`${date}T00:00:00`).toLocaleDateString('zh-CN', { weekday: 'short' })
+  return new Date(`${date}T00:00:00`).toLocaleDateString(dateLocale.value, { weekday: 'short' })
 }
 
 // 卡片入场动画的交错延迟

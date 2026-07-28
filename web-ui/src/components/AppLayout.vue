@@ -14,7 +14,7 @@
         <el-icon><component :is="item.icon" /></el-icon>
         <span>{{ item.label }}</span>
       </RouterLink>
-      <p class="nav-group">系统</p>
+      <p class="nav-group">{{ t('nav.systemGroup') }}</p>
       <RouterLink
         v-for="item in systemItems"
         :key="item.path"
@@ -35,8 +35,8 @@
         </button>
         <template #dropdown>
           <el-dropdown-menu>
-            <el-dropdown-item command="settings">个人设置</el-dropdown-item>
-            <el-dropdown-item command="logout" divided>退出登录</el-dropdown-item>
+            <el-dropdown-item command="settings">{{ t('nav.settings') }}</el-dropdown-item>
+            <el-dropdown-item command="logout" divided>{{ t('nav.logout') }}</el-dropdown-item>
           </el-dropdown-menu>
         </template>
       </el-dropdown>
@@ -67,6 +67,7 @@
 <script setup lang="ts">
 import { computed, onMounted, type Component } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
+import { useI18n } from 'vue-i18n'
 import { ArrowUp, Connection, DataBoard, Document, FolderOpened, HomeFilled, MagicStick, Memo, Monitor, Odometer, Paperclip, Setting, User } from '@element-plus/icons-vue'
 import { useMobile } from '../composables/useMobile'
 import { useAuthStore } from '../stores/auth'
@@ -79,6 +80,7 @@ const route = useRoute()
 const router = useRouter()
 const auth = useAuthStore()
 const projects = useProjectStore()
+const { t } = useI18n()
 
 onMounted(() => {
   projects.load().catch(() => undefined)
@@ -86,34 +88,34 @@ onMounted(() => {
 
 const navItems = computed<NavItem[]>(() => {
   const items: NavItem[] = [
-    { label: '首页', path: '/', icon: HomeFilled },
-    { label: '项目', path: '/projects', icon: FolderOpened },
-    { label: '日报', path: '/daily-report', icon: Document },
-    { label: '经验库', path: '/experiences', icon: Memo },
-    { label: '附件', path: '/attachments', icon: Paperclip }
+    { label: t('nav.home'), path: '/', icon: HomeFilled },
+    { label: t('nav.projects'), path: '/projects', icon: FolderOpened },
+    { label: t('nav.dailyReport'), path: '/daily-report', icon: Document },
+    { label: t('nav.experiences'), path: '/experiences', icon: Memo },
+    { label: t('nav.attachments'), path: '/attachments', icon: Paperclip }
   ]
-  if (auth.canReviewAgent) items.push({ label: 'AI审核', path: '/agent-candidates', icon: MagicStick })
+  if (auth.canReviewAgent) items.push({ label: t('nav.aiReview'), path: '/agent-candidates', icon: MagicStick })
   return items
 })
 
 const systemItems = computed<NavItem[]>(() => {
   const items: NavItem[] = [
-    { label: '气压控制', path: '/gas-control', icon: Monitor },
-    { label: '测量仪器', path: '/instrument-measure', icon: Odometer },
-    { label: '传感器', path: '/sensors', icon: Connection }
+    { label: t('nav.gasControl'), path: '/gas-control', icon: Monitor },
+    { label: t('nav.instruments'), path: '/instrument-measure', icon: Odometer },
+    { label: t('nav.sensors'), path: '/sensors', icon: Connection }
   ]
-  if (auth.isAdmin) items.push({ label: '用户管理', path: '/admin/users', icon: User })
-  items.push({ label: '审计', path: '/audit', icon: DataBoard })
+  if (auth.isAdmin) items.push({ label: t('nav.adminUsers'), path: '/admin/users', icon: User })
+  items.push({ label: t('nav.audit'), path: '/audit', icon: DataBoard })
   return items
 })
 
 const mobileItems = computed<NavItem[]>(() => {
   const items: NavItem[] = [
-    { label: '项目', path: '/projects', icon: FolderOpened },
-    { label: '日报', path: '/daily-report', icon: Document },
-    { label: '经验', path: '/experiences', icon: Memo },
-    { label: '附件', path: '/attachments', icon: Paperclip },
-    { label: '我的', path: '/settings', icon: Setting }
+    { label: t('nav.projects'), path: '/projects', icon: FolderOpened },
+    { label: t('nav.short.dailyReport'), path: '/daily-report', icon: Document },
+    { label: t('nav.short.experiences'), path: '/experiences', icon: Memo },
+    { label: t('nav.short.attachments'), path: '/attachments', icon: Paperclip },
+    { label: t('nav.short.mine'), path: '/settings', icon: Setting }
   ]
   return items
 })
