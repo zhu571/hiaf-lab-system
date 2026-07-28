@@ -64,7 +64,7 @@
               <el-tag size="small" effect="plain">{{ roleLabel(member.role) }}</el-tag>
             </div>
           </div>
-          <el-empty v-else :image-size="52" description="{{ t('projectDashboard.noMembers') }}" />
+          <el-empty v-else :image-size="52" :description="t('projectDashboard.noMembers')" />
         </section>
         <section class="overview-card timeline-card">
           <div class="toolbar overview-head">
@@ -80,7 +80,7 @@
               <p>{{ log.content }}</p>
             </article>
           </div>
-          <el-empty v-else :image-size="52" description="{{ t('projectDashboard.noLogs') }}" />
+          <el-empty v-else :image-size="52" :description="t('projectDashboard.noLogs')" />
         </section>
         <section class="overview-card">
           <div class="toolbar overview-head">
@@ -93,11 +93,11 @@
               <el-tag size="small" effect="dark" class="severity-tag" :data-severity="issue.severity">{{ severityLabel(issue.severity) }}</el-tag>
             </div>
           </div>
-          <el-empty v-else :image-size="52" description="{{ t('projectDashboard.noIssues') }}" />
+          <el-empty v-else :image-size="52" :description="t('projectDashboard.noIssues')" />
         </section>
       </div>
     </div>
-    <el-empty v-else description="{{ t('projectDashboard.noProject') }}" />
+    <el-empty v-else :image-size="52" :description="t('projectDashboard.noProject')" />
     <el-dialog v-model="confirmVisible" :title="confirmTitle" width="min(440px, 92vw)">
       <p v-if="pendingNext" class="confirm-text">{{ t('projectDashboard.confirmSwitchDesc', { label: pendingNext.target.label }) }}</p>
       <el-alert
@@ -107,7 +107,7 @@
         show-icon
         :closable="false"
         :title="t('projectDashboard.unresolvedWarning', { count: unresolvedIssues })"
-        description="{{ t('projectDashboard.unresolvedDesc') }}"
+        :description="t('projectDashboard.unresolvedDesc')"
       />
       <template #footer>
         <el-button @click="confirmVisible = false">{{ t('common.cancel') }}</el-button>
@@ -178,9 +178,9 @@ watch(projectId, async (id) => {
   }
 }, { immediate: true })
 
-type Stage = { key: string; label: string; icon: string }
+type StageItem = { key: string; label: string; icon: string }
 
-const STAGES = computed(() => [
+const STAGES = computed<StageItem[]>(() => [
   { key: 'draft', label: t('project.stages.draft'), icon: '📝' },
   { key: 'active', label: t('project.stages.active'), icon: '🔬' },
   { key: 'completed', label: t('project.stages.completed'), icon: '✅' },
@@ -188,58 +188,60 @@ const STAGES = computed(() => [
 ])
 
 // Maps to valid transitions in go-server projects.targetStatus
-const NEXT_ACTIONS: Record<string, { action: string; label: string; target: string }> = {
-  draft: { action: 'activate', label: '开始实验', target: 'active' },
-  active: { action: 'complete', label: '标记完成', target: 'completed' },
-  completed: { action: 'archive', label: '归档项目', target: 'archived' }
-}
+const NEXT_ACTIONS = computed<Record<string, { action: string; label: string; target: string }>>(() => ({
+  draft: { action: 'activate', label: t('projectDashboard.actionActivate'), target: 'active' },
+  active: { action: 'complete', label: t('projectDashboard.actionComplete'), target: 'completed' },
+  completed: { action: 'archive', label: t('projectDashboard.actionArchive'), target: 'archived' }
+}))
 
 // Backward transitions, admin-only visibility/invocation (backend re-validates)
-const BACK_ACTIONS: Record<string, { action: string; label: string; target: string; type: 'info' | 'warning' }> = {
-  active: { action: 'deactivate', label: '退回筹备', target: 'draft', type: 'info' },
-  completed: { action: 'reopen', label: '重新打开', target: 'active', type: 'warning' }
-}
+const BACK_ACTIONS = computed<Record<string, { action: string; label: string; target: string; type: 'info' | 'warning' }>>(() => ({
+  active: { action: 'deactivate', label: t('projectDashboard.actionDeactivate'), target: 'draft', type: 'info' as const },
+  completed: { action: 'reopen', label: t('projectDashboard.actionReopen'), target: 'active', type: 'warning' as const }
+}))
 const BACKWARD_ACTIONS = new Set(['deactivate', 'reopen'])
 
 // Stage permission descriptions, consistent with docs/project-design.md §3
-const STAGE_DESC: Record<string, { can: string[]; cannot: string[] }> = {
+const STAGE_DESC = computed<Record<string, { can: string[]; cannot: string[] }>>(() => ({
   draft: {
-    can: ['完善项目信息、成员和配置', '创建实验计划', 'owner 可记录少量筹备日志'],
-    cannot: ['新增正式日志、Issue 和测试数据']
+    can: [t('projectDashboard.descDraftCan1'), t('projectDashboard.descDraftCan2'), t('projectDashboard.descDraftCan3')],
+    cannot: [t('projectDashboard.descDraftCannot1')]
   },
   active: {
-    can: ['新增日志、Issue 和测试数据', '提交经验候选、推进实验计划', '有导出权限时可导出报告'],
+    can: [t('projectDashboard.descActiveCan1'), t('projectDashboard.descActiveCan2'), t('projectDashboard.descActiveCan3')],
     cannot: []
   },
   completed: {
-    can: ['补录分析、总结、文档类整理日志', '关闭 Issue、发布经验、生成最终报告'],
-    cannot: ['新增普通日志和测试数据']
+    can: [t('projectDashboard.descCompletedCan1'), t('projectDashboard.descCompletedCan2')],
+    cannot: [t('projectDashboard.descCompletedCannot1')]
   },
   archived: {
-    can: ['只读查询历史数据', 'owner/admin 可导出归档资料'],
-    cannot: ['新增或修改日志、Issue、测试数据']
+    can: [t('projectDashboard.descArchivedCan1'), t('projectDashboard.descArchivedCan2')],
+    cannot: [t('projectDashboard.descArchivedCannot1')]
   }
-}
+}))
 
 const currentIndex = computed(() => {
-  const index = STAGES.findIndex((stage) => stage.key === store.current?.status)
+  const index = STAGES.value.findIndex((stage) => stage.key === store.current?.status)
   return index >= 0 ? index : 0
 })
-const currentStage = computed(() => STAGES[currentIndex.value])
-const stageDesc = computed(() => STAGE_DESC[currentStage.value.key])
-const nextAction = computed(() => (store.current ? NEXT_ACTIONS[store.current.status] : undefined))
-const backAction = computed(() => (store.current && auth.isAdmin ? BACK_ACTIONS[store.current.status] : undefined))
+const currentStage = computed(() => STAGES.value[currentIndex.value])
+const stageDesc = computed(() => STAGE_DESC.value[currentStage.value.key])
+const nextAction = computed(() => (store.current ? NEXT_ACTIONS.value[store.current.status] : undefined))
+const backAction = computed(() => (store.current && auth.isAdmin ? BACK_ACTIONS.value[store.current.status] : undefined))
 const nodeState = (index: number) => (index < currentIndex.value ? 'done' : index === currentIndex.value ? 'current' : 'future')
 
 const confirmVisible = ref(false)
 const transitioning = ref(false)
 const unresolvedIssues = ref<number | null>(null)
-const pendingNext = ref<{ action: string; target: Stage; from: Stage } | null>(null)
+const pendingNext = ref<{ action: string; target: StageItem; from: StageItem } | null>(null)
 const confirmTitle = computed(() => {
   const pending = pendingNext.value
-  if (!pending) return '确认切换项目状态'
-  const verb = BACKWARD_ACTIONS.has(pending.action) ? '退回到' : '切换到'
-  return `确认将项目从「${pending.from.label}」${verb}「${pending.target.label}」？`
+  if (!pending) return t('projectDashboard.confirmTitleDefault')
+  if (BACKWARD_ACTIONS.has(pending.action)) {
+    return t('projectDashboard.confirmBackTemplate', { from: pending.from.label, to: pending.target.label })
+  }
+  return t('projectDashboard.confirmForwardTemplate', { from: pending.from.label, to: pending.target.label })
 })
 
 function openConfirm() {
@@ -252,7 +254,7 @@ function openBackConfirm() {
 
 function openTransition(action?: { action: string; target: string }) {
   if (!store.current || !action) return
-  const target = STAGES.find((stage) => stage.key === action.target)
+  const target = STAGES.value.find((stage) => stage.key === action.target)
   if (!target) return
   pendingNext.value = { action: action.action, target, from: currentStage.value }
   unresolvedIssues.value = null
@@ -285,19 +287,38 @@ async function confirmTransition() {
     // Dialog already showed the unresolved issue warning and user confirmed; skip duplicate backend alert
     if (pending.action === 'complete') payload.ignore_warnings = true
     await transitionProject(store.current.id, payload)
-    ElMessage.success(`项目已切换到「${pending.target.label}」`)
+    ElMessage.success(t('projectDashboard.switchedTo', { label: pending.target.label }))
     confirmVisible.value = false
     await store.load()
   } catch (err) {
-    showApiError(err, '项目状态切换失败')
+    showApiError(err, t('projectDashboard.transitionFailed'))
   } finally {
     transitioning.value = false
   }
 }
 
-const roleLabel = (role: string) => ({ owner: '负责人', maintainer: '维护者', member: '成员', viewer: '访客' })[role] || role
-const severityLabel = (severity: string) => ({ low: '低', medium: '中', high: '高', critical: '严重' })[severity] || severity
-const formatTime = (value: string) => new Intl.DateTimeFormat('zh-CN', { dateStyle: 'short', timeStyle: 'short' }).format(new Date(value))
+const roleLabel = (role: string) => {
+  const map: Record<string, string> = {
+    owner: t('projectDashboard.roleOwner'),
+    maintainer: t('projectDashboard.roleMaintainer'),
+    member: t('projectDashboard.roleMember'),
+    viewer: t('projectDashboard.roleViewer')
+  }
+  return map[role] || role
+}
+const severityLabel = (severity: string) => {
+  const map: Record<string, string> = {
+    low: t('projectDashboard.severityLow'),
+    medium: t('projectDashboard.severityMedium'),
+    high: t('projectDashboard.severityHigh'),
+    critical: t('projectDashboard.severityCritical')
+  }
+  return map[severity] || severity
+}
+const formatTime = (value: string) => {
+  const l = locale.value === 'zh' ? 'zh-CN' : 'en-US'
+  return new Intl.DateTimeFormat(l, { dateStyle: 'short', timeStyle: 'short' }).format(new Date(value))
+}
 const go = (path: string) => router.push(path)
 </script>
 

@@ -1,77 +1,77 @@
 <template>
   <div class="page">
     <div class="toolbar">
-      <h2>日报录入</h2>
-      <el-button v-if="canSubmit" type="primary" :disabled="!report" @click="submit(false)">提交日报</el-button>
+      <h2>{{ t('dailyReport.title') }}</h2>
+      <el-button v-if="canSubmit" type="primary" :disabled="!report" @click="submit(false)">{{ t('dailyReport.submit') }}</el-button>
     </div>
     <section class="panel editor-panel">
       <div class="toolbar">
-        <h3>今日记录</h3>
+        <h3>{{ t('dailyReport.todayRecord') }}</h3>
         <div class="toolbar-actions">
           <el-upload :auto-upload="false" :show-file-list="false" :on-change="onFileSelect" accept="image/*,.pdf">
-            <el-button>📎 添加附件</el-button>
+            <el-button>{{ t('dailyReport.addAttachment') }}</el-button>
           </el-upload>
-          <el-button @click="saveRaw">保存原文</el-button>
+          <el-button @click="saveRaw">{{ t('dailyReport.saveRaw') }}</el-button>
         </div>
       </div>
-      <el-input v-model="rawText" type="textarea" :rows="8" placeholder="记录今天的实验、装配、测试、问题和结论" />
+      <el-input v-model="rawText" type="textarea" :rows="8" :placeholder="t('dailyReport.editorPlaceholder')" />
     </section>
     <section class="panel">
       <div class="toolbar">
-        <h3>项目化日志</h3>
-        <el-button @click="openAddLog">添加日志</el-button>
+        <h3>{{ t('dailyReport.structuredLogs') }}</h3>
+        <el-button @click="openAddLog">{{ t('dailyReport.addLog') }}</el-button>
       </div>
       <el-table :data="report?.logs || []">
-        <el-table-column prop="category" label="分类" width="140" />
-        <el-table-column prop="content" label="内容" />
-        <el-table-column label="状态" width="120">
+        <el-table-column prop="category" :label="t('dailyReport.category')" width="140" />
+        <el-table-column prop="content" :label="t('dailyReport.content')" />
+        <el-table-column :label="t('dailyReport.status')" width="120">
           <template #default="{ row }">
             <StatusBadge :value="row.content_status" />
           </template>
         </el-table-column>
-        <el-table-column label="操作" width="150">
+        <el-table-column :label="t('dailyReport.actions')" width="150">
           <template #default="{ row }">
             <template v-if="row.content_status === 'draft'">
-              <el-button link type="primary" @click="openEditLog(row)">编辑</el-button>
-              <el-button link type="success" @click="confirmLog(row.id)">确认</el-button>
+              <el-button link type="primary" @click="openEditLog(row)">{{ t('dailyReport.edit') }}</el-button>
+              <el-button link type="success" @click="confirmLog(row.id)">{{ t('dailyReport.confirm') }}</el-button>
             </template>
           </template>
         </el-table-column>
         <template #empty>
-          <el-empty description="暂无日志，点击右上角添加" />
+          <el-empty :description="t('dailyReport.emptyLogs')" />
         </template>
       </el-table>
     </section>
-    <el-dialog v-model="logDialog" :title="editingLogId ? '编辑日志' : '添加日志'" width="560">
+    <el-dialog v-model="logDialog" :title="editingLogId ? t('dailyReport.editLog') : t('dailyReport.addNewLog')" width="560">
       <el-form label-position="top">
-        <el-form-item v-if="!editingLogId" label="项目"><el-select v-model="logDraft.project_id"><el-option v-for="p in projects.projects" :key="p.id" :label="p.name" :value="p.id" /></el-select></el-form-item>
-        <el-form-item label="分类"><el-input v-model="logDraft.category" /></el-form-item>
-        <el-form-item label="内容"><el-input v-model="logDraft.content" type="textarea" /></el-form-item>
+        <el-form-item v-if="!editingLogId" :label="t('dailyReport.project')"><el-select v-model="logDraft.project_id"><el-option v-for="p in projects.projects" :key="p.id" :label="p.name" :value="p.id" /></el-select></el-form-item>
+        <el-form-item :label="t('dailyReport.category')"><el-input v-model="logDraft.category" /></el-form-item>
+        <el-form-item :label="t('dailyReport.content')"><el-input v-model="logDraft.content" type="textarea" /></el-form-item>
       </el-form>
       <template #footer>
-        <el-button @click="logDialog = false">取消</el-button>
-        <el-button type="primary" @click="saveLog">保存</el-button>
+        <el-button @click="logDialog = false">{{ t('common.cancel') }}</el-button>
+        <el-button type="primary" @click="saveLog">{{ t('dailyReport.save') }}</el-button>
       </template>
     </el-dialog>
-    <el-dialog v-model="warningDialog" title="提交前请确认" width="520">
+    <el-dialog v-model="warningDialog" :title="t('dailyReport.confirmSubmit')" width="520">
       <div class="warning-list">
         <el-alert v-for="warning in warnings" :key="warning.code + warning.log_id" :title="warning.message" type="warning" show-icon :closable="false" />
       </div>
       <template #footer>
-        <el-button @click="warningDialog = false">返回修改</el-button>
-        <el-button type="warning" @click="submit(true)">忽略并提交</el-button>
+        <el-button @click="warningDialog = false">{{ t('dailyReport.backToEdit') }}</el-button>
+        <el-button type="warning" @click="submit(true)">{{ t('dailyReport.ignoreSubmit') }}</el-button>
       </template>
     </el-dialog>
 
     <section v-if="pendingFiles.length" class="panel">
-      <h3>附件 ({{ pendingFiles.length }})</h3>
+      <h3>{{ t('dailyReport.attachments', { n: pendingFiles.length }) }}</h3>
       <div class="file-list">
         <div v-for="f in pendingFiles" :key="f.name" class="file-item">
           <el-icon><Paperclip /></el-icon>
           <span>{{ f.name }}</span>
           <span class="muted">({{ formatSize(f.size) }})</span>
           <span v-if="f.uploaded" style="color:var(--success,#67c23a)">✓</span>
-          <el-button v-else size="small" @click="uploadPendingFile(f)">上传</el-button>
+          <el-button v-else size="small" @click="uploadPendingFile(f)">{{ t('dailyReport.upload') }}</el-button>
         </div>
       </div>
     </section>
@@ -80,6 +80,7 @@
 
 <script setup lang="ts">
 import { computed, onMounted, reactive, ref } from 'vue'
+import { useI18n } from 'vue-i18n'
 import { ElMessage } from 'element-plus'
 import { showApiError } from '../composables/useNotify'
 import { Paperclip } from '@element-plus/icons-vue'
@@ -89,12 +90,13 @@ import { useProjectStore } from '../stores/project'
 import { useAuthStore } from '../stores/auth'
 import { uploadAttachment } from '../api/attachments'
 
+const { t } = useI18n()
 const projectStore = useProjectStore()
 const auth = useAuthStore()
 const canSubmit = computed(() => auth.user?.role !== 'viewer')
 const projects = projectStore
 
-// 附件
+// Attachments
 type PendingFile = { file: File; name: string; size: number; uploaded: boolean }
 const pendingFiles = ref<PendingFile[]>([])
 
@@ -109,11 +111,11 @@ async function onFileSelect(uploadFile: any) {
   const entry: PendingFile = { file, name: file.name, size: file.size, uploaded: false }
   pendingFiles.value.push(entry)
 
-  // 如果日报已存在（已创建今日日报），立即上传
+  // Upload immediately if today's report already exists
   if (report.value?.id) {
     await uploadPendingFile(entry)
   } else {
-    ElMessage.info(`${file.name} 将在日报创建后自动上传`)
+    ElMessage.info(t('dailyReport.autoUploadHint', { name: file.name }))
   }
 }
 
@@ -123,7 +125,7 @@ async function uploadPendingFile(pf: PendingFile) {
     await uploadAttachment(pf.file, 'daily_report', report.value.id)
     pf.uploaded = true
   } catch {
-    ElMessage.warning(`${pf.name} 上传失败`)
+    ElMessage.warning(t('dailyReport.uploadFailed', { name: pf.name }))
   }
 }
 
@@ -151,7 +153,7 @@ onMounted(async () => {
 async function saveRaw() {
   if (!report.value) return
   report.value = await updateReportRawText(report.value.id, rawText.value)
-  ElMessage.success('已保存')
+  ElMessage.success(t('dailyReport.saved'))
 }
 
 function openAddLog() {
@@ -179,7 +181,7 @@ async function saveLog() {
     report.value = await todayReport()
     logDialog.value = false
   } catch (err) {
-    showApiError(err, '保存日志失败')
+    showApiError(err, t('dailyReport.saveLogFailed'))
   }
 }
 
@@ -187,9 +189,9 @@ async function confirmLog(id: string) {
   try {
     await updateLog(id, { content_status: 'confirmed' })
     report.value = await todayReport()
-    ElMessage.success('日志已确认')
+    ElMessage.success(t('dailyReport.logConfirmed'))
   } catch (err) {
-    showApiError(err, '确认日志失败')
+    showApiError(err, t('dailyReport.confirmLogFailed'))
   }
 }
 
@@ -203,7 +205,7 @@ async function submit(force: boolean) {
     return
   }
   warningDialog.value = false
-  ElMessage.success('日报已提交')
+  ElMessage.success(t('dailyReport.submitted'))
 }
 </script>
 
