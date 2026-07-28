@@ -1,24 +1,24 @@
 <template>
   <div class="page">
     <div class="toolbar">
-      <h2>传感器数据</h2>
+      <h2>{{ t('sensors.title') }}</h2>
       <div class="toolbar-right">
-        <span class="muted">自动刷新</span>
+        <span class="muted">{{ $t('sensors.autoRefresh') }}</span>
         <el-switch v-model="autoRefresh" />
-        <el-button :icon="Refresh" circle title="刷新" @click="loadAll" />
+        <el-button :icon="Refresh" circle :title="$t('sensors.refresh')" @click="loadAll" />
       </div>
     </div>
 
-    <!-- 最新读数 -->
+    <!-- Latest Readings -->
     <section class="panel">
       <div class="panel-head">
-        <h3 class="panel-title">最新读数</h3>
+        <h3 class="panel-title">{{ $t('sensors.latest') }}</h3>
         <el-select
           v-model="selectedMeasurements"
           multiple
           collapse-tags
           collapse-tags-tooltip
-          placeholder="全部测量项"
+          :placeholder="$t('sensors.allMeasurements')"
           class="measure-select"
           @change="loadLatest"
         >
@@ -26,7 +26,7 @@
         </el-select>
       </div>
       <el-alert v-if="latestError" :title="latestError" type="error" show-icon :closable="false">
-        <el-button size="small" @click="loadLatest">重试</el-button>
+        <el-button size="small" @click="loadLatest">{{ $t('sensors.retry') }}</el-button>
       </el-alert>
       <template v-else>
         <div v-loading="latestLoading" class="reading-grid">
@@ -38,7 +38,7 @@
               <el-tag v-for="(v, k) in point.meta" :key="k" size="small" effect="plain">{{ k }}: {{ v }}</el-tag>
             </div>
           </div>
-          <el-empty v-if="!latestLoading && !latestPoints.length" description="暂无读数" class="grid-empty" />
+          <el-empty v-if="!latestLoading && !latestPoints.length" :description="t('sensors.noReadings')" class="grid-empty" />
         </div>
       </template>
     </section>
@@ -46,7 +46,7 @@
     <!-- 历史趋势 -->
     <section class="panel chart-panel">
       <div class="panel-head">
-        <h3 class="panel-title">历史趋势 <span class="muted hint">各序列独立归一化</span></h3>
+        <h3 class="panel-title">{{ t('sensors.history') }} <span class="muted hint">{{ t('sensors.historyHint') }}</span></h3>
         <div class="chart-controls">
           <el-select v-model="historyMeasurement" class="chart-measure" @change="loadHistory">
             <el-option v-for="m in MEASUREMENTS" :key="m.value" :label="m.label" :value="m.value" />
@@ -57,7 +57,7 @@
         </div>
       </div>
       <el-alert v-if="historyError" :title="historyError" type="error" show-icon :closable="false">
-        <el-button size="small" @click="loadHistory">重试</el-button>
+        <el-button size="small" @click="loadHistory">{{ $t('sensors.retry') }}</el-button>
       </el-alert>
       <div v-else v-loading="historyLoading">
         <template v-if="chartGroups.length">
@@ -85,7 +85,7 @@
             </span>
           </div>
         </template>
-        <el-empty v-else-if="!historyLoading" description="所选时间范围内暂无数据" />
+        <el-empty v-else-if="!historyLoading" :description="t('sensors.noDataInRange')" />
       </div>
     </section>
   </div>
@@ -93,26 +93,29 @@
 
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { useI18n } from 'vue-i18n'
 import { Refresh } from '@element-plus/icons-vue'
 import { getHistory, getLatest, type SensorPoint } from '../api/sensors'
 import { showApiError } from '../composables/useNotify'
 
+const { t } = useI18n()
+
 // 与后端 INFLUXDB_MEASUREMENTS 默认值一致（go-server/sensors/service.go）
-const MEASUREMENTS = [
-  { value: 'pressure', label: '压力 pressure' },
-  { value: 'vacuum', label: '真空 vacuum' },
-  { value: 'control', label: '控制 control' },
-  { value: 'temperature', label: '温度 temperature' },
-  { value: 'pump', label: '泵 pump' }
-]
+const MEASUREMENTS = computed(() => [
+    { value: 'pressure', label: t('sensors.measurement.pressure') },
+    { value: 'vacuum', label: t('sensors.measurement.vacuum') },
+    { value: 'control', label: t('sensors.measurement.control') },
+    { value: 'temperature', label: t('sensors.measurement.temperature') },
+    { value: 'pump', label: t('sensors.measurement.pump') }
+  ])
 
 // history 的 from 是 Flux range 表达式，interval 用于 aggregateWindow 降采样
-const RANGES = [
-  { label: '最近 1 小时', from: '-1h', interval: '30s' },
-  { label: '最近 6 小时', from: '-6h', interval: '2m' },
-  { label: '最近 24 小时', from: '-24h', interval: '10m' },
-  { label: '最近 7 天', from: '-7d', interval: '1h' }
-]
+const RANGES = computed(() => [
+    { label: t('sensors.range.1h'), from: '-1h', interval: '30s' },
+    { label: t('sensors.range.6h'), from: '-6h', interval: '2m' },
+    { label: t('sensors.range.24h'), from: '-24h', interval: '10m' },
+    { label: t('sensors.range.7d'), from: '-7d', interval: '1h' }
+  ])
 
 const REFRESH_MS = 5000
 
@@ -201,9 +204,9 @@ async function loadLatest() {
     const data = await getLatest(selectedMeasurements.value)
     latestPoints.value = data.points ? [...data.points].sort((a, b) => a.tag.localeCompare(b.tag)) : []
   } catch (err) {
-    latestError.value = err instanceof Error ? err.message : '最新读数加载失败'
+    latestError.value = err instanceof Error ? err.message : t('sensors.latestFailed')
     // 自动刷新期间的失败不打 toast，避免刷屏；手动刷新（点击）时提示
-    if (!autoRefresh.value) showApiError(err, '最新读数加载失败')
+    if (!autoRefresh.value) showApiError(err, t('sensors.latestFailed'))
   } finally {
     latestLoading.value = false
   }
@@ -213,13 +216,13 @@ async function loadHistory() {
   if (!historyMeasurement.value) return
   historyLoading.value = true
   historyError.value = ''
-  const range = RANGES.find((r) => r.from === historyRange.value) || RANGES[0]
+  const range = RANGES.value.find((r) => r.from === historyRange.value) || RANGES.value[0]
   try {
     const data = await getHistory(historyMeasurement.value, range.from, '', range.interval)
     historyPoints.value = data.points || []
   } catch (err) {
-    historyError.value = err instanceof Error ? err.message : '历史数据加载失败'
-    if (!autoRefresh.value) showApiError(err, '历史数据加载失败')
+    historyError.value = err instanceof Error ? err.message : t('sensors.historyFailed')
+    if (!autoRefresh.value) showApiError(err, t('sensors.historyFailed'))
   } finally {
     historyLoading.value = false
   }
