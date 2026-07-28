@@ -1,35 +1,35 @@
 <template>
   <div class="page">
     <div class="toolbar">
-      <h2>附件管理</h2>
+      <h2>{{ t('attachment.title') }}</h2>
     </div>
     <section v-if="canOperate" class="panel upload-panel">
       <el-upload drag multiple :show-file-list="false" :http-request="onUpload" class="uploader">
         <el-icon class="el-icon--upload"><UploadFilled /></el-icon>
-        <div class="el-upload__text">将文件拖到此处，或<em>点击上传</em></div>
+        <div class="el-upload__text" v-html="t('attachment.dragOrClick')"></div>
       </el-upload>
       <div class="bind-form">
-        <p class="muted">不填写绑定信息则上传为未绑定附件</p>
-        <el-select v-model="bindForm.entity_type" clearable placeholder="绑定对象类型">
+        <p class="muted">{{ t('attachment.uploadHint') }}</p>
+        <el-select v-model="bindForm.entity_type" clearable :placeholder="t('attachment.entityTypePlaceholder')">
           <el-option v-for="t in ATTACHMENT_ENTITY_TYPES" :key="t" :label="t" :value="t" />
         </el-select>
-        <el-input v-model="bindForm.entity_id" placeholder="绑定对象 ID" clearable />
-        <el-input v-model="bindForm.description" placeholder="附件描述" clearable />
+        <el-input v-model="bindForm.entity_id" :placeholder="t('attachment.entityIdPlaceholder')" clearable />
+        <el-input v-model="bindForm.description" :placeholder="t('attachment.descriptionPlaceholder')" clearable />
       </div>
     </section>
     <section class="panel filters-panel">
       <div class="filters">
-        <el-select v-model="filterType" clearable placeholder="绑定对象类型">
+        <el-select v-model="filterType" clearable :placeholder="t('attachment.entityTypePlaceholder')">
           <el-option v-for="t in ATTACHMENT_ENTITY_TYPES" :key="t" :label="t" :value="t" />
         </el-select>
-        <el-input v-model="filterEntityId" placeholder="绑定对象 ID" clearable />
-        <el-button type="primary" @click="search">查询</el-button>
+        <el-input v-model="filterEntityId" :placeholder="t('attachment.entityIdPlaceholder')" clearable />
+        <el-button type="primary" @click="search">{{ t('attachment.search') }}</el-button>
       </div>
-      <p class="muted filter-hint">两个条件都留空时显示未绑定附件列表</p>
+      <p class="muted filter-hint">{{ t('attachment.filterHint') }}</p>
     </section>
     <section class="panel">
       <el-alert v-if="loadError" class="load-error" type="error" :title="loadError" show-icon :closable="false">
-        <el-button size="small" @click="load">重试</el-button>
+        <el-button size="small" @click="load">{{ t('attachment.retry') }}</el-button>
       </el-alert>
       <div v-loading="loading" class="list-area">
         <div v-if="items.length" class="card-grid">
@@ -44,15 +44,15 @@
             <p class="att-meta">{{ fmtSize(att.file_size) }} · {{ fmtTime(att.created_at) }}</p>
             <p v-if="att.description" class="att-desc">{{ att.description }}</p>
             <div class="att-actions">
-              <el-button size="small" @click="download(att)">下载</el-button>
+              <el-button size="small" @click="download(att)">{{ t('attachment.download') }}</el-button>
               <template v-if="canOperate">
-                <el-button size="small" type="primary" plain @click="openBind(att)">绑定</el-button>
-                <el-button size="small" type="danger" plain @click="remove(att)">删除</el-button>
+                <el-button size="small" type="primary" plain @click="openBind(att)">{{ t('attachment.bind') }}</el-button>
+                <el-button size="small" type="danger" plain @click="remove(att)">{{ t('attachment.delete') }}</el-button>
               </template>
             </div>
           </div>
         </div>
-        <el-empty v-if="!loading && !loadError && items.length === 0" description="暂无附件" />
+        <el-empty v-if="!loading && !loadError && items.length === 0" :description="t('attachment.empty')" />
         <el-pagination
           v-if="total > 0"
           v-model:current-page="page"
@@ -64,23 +64,23 @@
         />
       </div>
     </section>
-    <el-dialog v-model="bindDialog" title="绑定附件" width="480">
+    <el-dialog v-model="bindDialog" :title="t('attachment.bindTitle')" width="480">
       <el-form label-position="top">
-        <el-form-item label="绑定对象类型" required>
-          <el-select v-model="linkForm.entity_type" placeholder="选择类型">
+        <el-form-item :label="t('attachment.bindEntityType')" required>
+          <el-select v-model="linkForm.entity_type" :placeholder="t('attachment.selectType')">
             <el-option v-for="t in ATTACHMENT_ENTITY_TYPES" :key="t" :label="t" :value="t" />
           </el-select>
         </el-form-item>
-        <el-form-item label="绑定对象 ID" required>
-          <el-input v-model="linkForm.entity_id" placeholder="对象 UUID" />
+        <el-form-item :label="t('attachment.bindEntityId')" required>
+          <el-input v-model="linkForm.entity_id" :placeholder="t('attachment.objectUuidPlaceholder')" />
         </el-form-item>
-        <el-form-item label="描述">
+        <el-form-item :label="t('attachment.description')">
           <el-input v-model="linkForm.description" type="textarea" :rows="2" />
         </el-form-item>
       </el-form>
       <template #footer>
-        <el-button @click="bindDialog = false">取消</el-button>
-        <el-button type="primary" @click="submitBind">绑定</el-button>
+        <el-button @click="bindDialog = false">{{ t('common.cancel') }}</el-button>
+        <el-button type="primary" @click="submitBind">{{ t('attachment.bind') }}</el-button>
       </template>
     </el-dialog>
   </div>
@@ -88,6 +88,7 @@
 
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, reactive, ref } from 'vue'
+import { useI18n } from 'vue-i18n'
 import { ElMessage, ElMessageBox, type UploadRequestOptions } from 'element-plus'
 import { Document, UploadFilled } from '@element-plus/icons-vue'
 import {
@@ -103,6 +104,7 @@ import { useAuthStore } from '../stores/auth'
 import { showApiError } from '../composables/useNotify'
 
 const auth = useAuthStore()
+const { t, locale } = useI18n()
 const items = ref<Attachment[]>([])
 const total = ref(0)
 const page = ref(1)
@@ -140,7 +142,7 @@ async function load() {
     total.value = data.total
     await loadThumbs()
   } catch (err) {
-    loadError.value = err instanceof Error ? err.message : '附件加载失败'
+    loadError.value = err instanceof Error ? err.message : t('attachment.loadFailed')
   } finally {
     loading.value = false
   }
@@ -170,7 +172,7 @@ async function loadThumbs() {
 
 function search() {
   if (pairInvalid(filterType.value, filterEntityId.value)) {
-    ElMessage.warning('绑定对象类型和 ID 需要同时填写或同时留空')
+    ElMessage.warning(t('attachment.pairRequired'))
     return
   }
   page.value = 1
@@ -183,15 +185,15 @@ function pairInvalid(entityType: string, entityId: string) {
 
 async function onUpload(options: UploadRequestOptions) {
   if (pairInvalid(bindForm.entity_type, bindForm.entity_id)) {
-    ElMessage.warning('绑定对象类型和 ID 需要同时填写或同时留空')
+    ElMessage.warning(t('attachment.pairRequired'))
     return
   }
   try {
     await uploadAttachment(options.file, bindForm.entity_type, bindForm.entity_id.trim(), bindForm.description.trim())
-    ElMessage.success('上传成功')
+    ElMessage.success(t('attachment.uploadSuccess'))
     await load()
   } catch (err) {
-    showApiError(err, '上传失败')
+    showApiError(err, t('attachment.uploadFailed'))
   }
 }
 
@@ -205,7 +207,7 @@ async function download(att: Attachment) {
     a.click()
     URL.revokeObjectURL(url)
   } catch (err) {
-    showApiError(err, '下载失败')
+    showApiError(err, t('attachment.downloadFailed'))
   }
 }
 
@@ -220,7 +222,7 @@ function openBind(att: Attachment) {
 async function submitBind() {
   if (!bindTarget.value) return
   if (!linkForm.entity_type || !linkForm.entity_id.trim()) {
-    ElMessage.warning('请填写绑定对象类型和 ID')
+    ElMessage.warning(t('attachment.bindRequired'))
     return
   }
   try {
@@ -230,25 +232,25 @@ async function submitBind() {
       description: linkForm.description.trim() || undefined
     })
     bindDialog.value = false
-    ElMessage.success('绑定成功')
+    ElMessage.success(t('attachment.bindSuccess'))
     await load()
   } catch (err) {
-    showApiError(err, '绑定失败')
+    showApiError(err, t('attachment.bindFailed'))
   }
 }
 
 async function remove(att: Attachment) {
   try {
-    await ElMessageBox.confirm(`确认删除附件「${att.original_name}」？`, '删除附件', { type: 'warning' })
+    await ElMessageBox.confirm(t('attachment.confirmDelete', { name: att.original_name }), t('attachment.deleteTitle'), { type: 'warning' })
   } catch {
     return
   }
   try {
     await deleteAttachment(att.id)
-    ElMessage.success('附件已删除')
+    ElMessage.success(t('attachment.deleted'))
     await load()
   } catch (err) {
-    showApiError(err, '删除失败')
+    showApiError(err, t('attachment.deleteFailed'))
   }
 }
 
@@ -259,7 +261,7 @@ function fmtSize(size: number) {
 }
 
 function fmtTime(t?: string) {
-  return t ? new Date(t).toLocaleString('zh-CN', { hour12: false }) : '—'
+  return t ? new Date(t).toLocaleString(locale.value === 'zh' ? 'zh-CN' : 'en-US', { hour12: false }) : '—'
 }
 </script>
 
