@@ -124,14 +124,37 @@
 
     <el-dialog v-model="applyDialog" title="应用到项目" width="480">
       <div class="grid">
-        <p class="apply-tip">将模板「{{ applyTarget?.name }}」的 {{ applyTarget?._item_count ?? '' }} 个步骤追加到目标项目的装配步骤。</p>
-        <el-select v-model="applyProjectId" v-loading="projectsLoading" placeholder="选择项目（需 member 及以上角色）" class="apply-select">
+        <p class="apply-tip">{{ applyTip }}</p>
+        <el-select
+          v-model="applyProjectId"
+          v-loading="projectsLoading"
+          placeholder="选择项目（需 member 及以上角色）"
+          class="apply-select"
+          @change="onApplyProjectChange"
+        >
           <el-option v-for="p in projectOptions" :key="p.id" :label="p.short_name || p.name" :value="p.id" />
+        </el-select>
+        <el-select
+          v-if="applyTarget?.kind === 'experiment'"
+          v-model="applyRunId"
+          v-loading="runsLoading"
+          placeholder="选择实验批次"
+          class="apply-select"
+          :disabled="!applyProjectId"
+        >
+          <el-option v-for="r in runOptions" :key="r.id" :label="r.name" :value="r.id" />
         </el-select>
       </div>
       <template #footer>
         <el-button @click="applyDialog = false">取消</el-button>
-        <el-button type="primary" :loading="applying" :disabled="!applyProjectId" @click="confirmApply">确认应用</el-button>
+        <el-button
+          type="primary"
+          :loading="applying"
+          :disabled="!applyProjectId || (applyTarget?.kind === 'experiment' && !applyRunId)"
+          @click="confirmApply"
+        >
+          确认应用
+        </el-button>
       </template>
     </el-dialog>
   </div>
@@ -152,6 +175,7 @@ import {
   type StepTemplateItem
 } from '../api/stepTemplates'
 import { applyAssemblyTemplate } from '../api/assembly'
+import { applyRunTemplate, listRuns, type ExperimentRun } from '../api/runs'
 import { listMembers, listProjects, type Project } from '../api/projects'
 import { useAuthStore } from '../stores/auth'
 import { showApiError } from '../composables/useNotify'
@@ -186,11 +210,23 @@ const applyTarget = ref<StepTemplate | null>(null)
 const applyProjectId = ref('')
 const projectOptions = ref<Project[]>([])
 const projectsLoading = ref(false)
+const applyRunId = ref('')
+const runOptions = ref<ExperimentRun[]>([])
+const runsLoading = ref(false)
 const applying = ref(false)
 const saving = ref(false)
 
 // 与后端 requireWriteAccess 对齐：创建模板需 admin/maintainer；更新/删除允许创建人本人
 const canCreate = computed(() => ['admin', 'maintainer'].includes(auth.user?.role || ''))
+
+// experiment 模板应用到批次步骤，assembly 模板应用到项目装配步骤
+const applyTip = computed(() => {
+  if (!applyTarget.value) return ''
+  const count = applyTarget.value._item_count ?? ''
+  return applyTarget.value.kind === 'experiment'
+    ? `将模板「${applyTarget.value.name}」的 ${count} 个步骤追加到目标实验批次的步骤。`
+    : `将模板「${applyTarget.value.name}」的 ${count} 个步骤追加到目标项目的装配步骤。`
+})
 
 onMounted(load)
 
@@ -341,6 +377,8 @@ async function saveCreate() {
 async function openApply(row: StepTemplate) {
   applyTarget.value = row
   applyProjectId.value = ''
+  applyRunId.value = ''
+  runOptions.value = []
   projectOptions.value = []
   applyDialog.value = true
   if (row._item_count === undefined) {
@@ -380,13 +418,35 @@ async function filterMemberPlus(all: Project[]) {
   return checks.filter((p): p is Project => p !== null)
 }
 
+// experiment 模板需要再选目标批次：项目变更时加载该项目下的实验批次
+async function onApplyProjectChange() {
+  applyRunId.value = ''
+  runOptions.value = []
+  if (applyTarget.value?.kind !== 'experiment' || !applyProjectId.value) return
+  runsLoading.value = true
+  try {
+    const res = await listRuns(applyProjectId.value, { per_page: 100 })
+    runOptions.value = res.items ?? []
+  } catch (err) {
+    showApiError(err, '实验批次列表加载失败')
+  } finally {
+    runsLoading.value = false
+  }
+}
+
 async function confirmApply() {
   if (!applyTarget.value || !applyProjectId.value) return
   applying.value = true
   try {
-    await applyAssemblyTemplate(applyProjectId.value, { template_id: applyTarget.value.id })
+    if (applyTarget.value.kind === 'experiment') {
+      if (!applyRunId.value) return
+      await applyRunTemplate(applyRunId.value, { template_id: applyTarget.value.id })
+      ElMessage.success('模板已应用到实验批次步骤')
+    } else {
+      await applyAssemblyTemplate(applyProjectId.value, { template_id: applyTarget.value.id })
+      ElMessage.success('模板已应用到项目装配步骤')
+    }
     applyDialog.value = false
-    ElMessage.success('模板已应用到项目装配步骤')
   } catch (err) {
     showApiError(err, '应用模板失败')
   } finally {

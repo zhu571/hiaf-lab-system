@@ -31,8 +31,8 @@ export interface GenerateCandidate {
   reason?: string | null
 }
 
-export function generateSteps(kind: string, prompt: string) {
-  return request<GenerateCandidate>({ method: 'POST', url: '/step-templates/generate', data: { kind, prompt } })
+export function generateSteps(kind: string, prompt: string, context?: Record<string, unknown>) {
+  return request<GenerateCandidate>({ method: 'POST', url: '/step-templates/generate', data: { kind, prompt, context } })
 }
 
 export function listTemplates(params?: { kind?: string; q?: string; page?: number; per_page?: number }) {
