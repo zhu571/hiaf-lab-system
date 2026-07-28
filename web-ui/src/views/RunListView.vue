@@ -1,36 +1,36 @@
 <template>
   <div class="page">
     <div class="toolbar">
-      <h2>实验批次</h2>
+      <h2>{{ t('runList.title') }}</h2>
       <div class="controls">
-        <el-select v-model="statusFilter" class="status-select" placeholder="状态" @change="search">
-          <el-option label="全部" value="" />
+        <el-select v-model="statusFilter" class="status-select" :placeholder="t('runList.status')" @change="search">
+          <el-option :label="t('runList.all')" value="" />
           <el-option v-for="s in statuses" :key="s.value" :label="s.label" :value="s.value" />
         </el-select>
-        <el-input v-model="campaign" class="campaign-input" placeholder="搜索 campaign" clearable @change="search" @clear="search" />
-        <el-button v-if="canEdit" type="primary" @click="createDialog = true">新建批次</el-button>
+        <el-input v-model="campaign" class="campaign-input" :placeholder="t('runList.searchCampaign')" clearable @change="search" @clear="search" />
+        <el-button v-if="canEdit" type="primary" @click="createDialog = true">{{ t('runList.create') }}</el-button>
       </div>
     </div>
     <section v-loading="loading" class="panel list-panel">
       <div v-if="error" class="error-box">
         <el-alert :title="error" type="error" show-icon :closable="false" />
-        <el-button @click="load">重试</el-button>
+        <el-button @click="load">{{ t('runList.retry') }}</el-button>
       </div>
       <template v-else>
-        <el-empty v-if="!runs.length && !loading" description="暂无实验批次" />
+        <el-empty v-if="!runs.length && !loading" :description="t('runList.empty')" />
         <div v-else class="run-grid">
           <button v-for="run in runs" :key="run.id" class="run-card" @click="open(run)">
             <span class="card-head">
               <strong>{{ run.name }}</strong>
               <StatusBadge :value="run.status" />
             </span>
-            <span class="meta">{{ run.campaign || '未设置 campaign' }}</span>
+            <span class="meta">{{ run.campaign || t('runList.noCampaign') }}</span>
             <span class="tags">
               <el-tag size="small" effect="plain">{{ runTypeLabel(run.run_type) }}</el-tag>
               <el-tag size="small" type="info" effect="plain">{{ run.gas_type }}</el-tag>
               <el-tag v-for="d in run.devices || []" :key="d" size="small" type="warning" effect="plain">{{ d }}</el-tag>
             </span>
-            <span class="time">创建：{{ fmtTime(run.created_at) }}</span>
+            <span class="time">{{ t('runList.createdAt') }}{{ fmtTime(run.created_at) }}</span>
           </button>
         </div>
         <el-pagination
@@ -45,42 +45,42 @@
         />
       </template>
     </section>
-    <el-dialog v-model="createDialog" title="新建批次" width="620">
+    <el-dialog v-model="createDialog" :title="t('runList.create')" width="620">
       <el-form label-position="top">
-        <el-form-item label="名称（必填）"><el-input v-model="draft.name" /></el-form-item>
+        <el-form-item :label="t('runList.nameLabel')"><el-input v-model="draft.name" /></el-form-item>
         <el-form-item label="Campaign"><el-input v-model="draft.campaign" /></el-form-item>
         <div class="form-row">
-          <el-form-item label="类型">
+          <el-form-item :label="t('runList.type')">
             <el-select v-model="draft.run_type">
               <el-option v-for="t in runTypes" :key="t.value" :label="t.label" :value="t.value" />
             </el-select>
           </el-form-item>
-          <el-form-item label="气体">
+          <el-form-item :label="t('runList.gasType')">
             <el-select v-model="draft.gas_type">
               <el-option v-for="g in gasTypes" :key="g" :label="g" :value="g" />
             </el-select>
           </el-form-item>
         </div>
         <div class="form-row">
-          <el-form-item label="目标温度"><el-input-number v-model="draft.target_temp" :controls="false" placeholder="可选" /></el-form-item>
-          <el-form-item label="最低温度"><el-input-number v-model="draft.min_temp" :controls="false" placeholder="可选" /></el-form-item>
+          <el-form-item :label="t('runList.targetTemp')"><el-input-number v-model="draft.target_temp" :controls="false" :placeholder="t('runList.optional')" /></el-form-item>
+          <el-form-item :label="t('runList.minTemp')"><el-input-number v-model="draft.min_temp" :controls="false" :placeholder="t('runList.optional')" /></el-form-item>
         </div>
         <div class="form-row three">
-          <el-form-item label="压力下限"><el-input-number v-model="draft.pressure_min" :controls="false" placeholder="可选" /></el-form-item>
-          <el-form-item label="压力上限"><el-input-number v-model="draft.pressure_max" :controls="false" placeholder="可选" /></el-form-item>
-          <el-form-item label="压力单位"><el-input v-model="draft.pressure_unit" /></el-form-item>
+          <el-form-item :label="t('runList.pressureMin')"><el-input-number v-model="draft.pressure_min" :controls="false" :placeholder="t('runList.optional')" /></el-form-item>
+          <el-form-item :label="t('runList.pressureMax')"><el-input-number v-model="draft.pressure_max" :controls="false" :placeholder="t('runList.optional')" /></el-form-item>
+          <el-form-item :label="t('runList.pressureUnit')"><el-input v-model="draft.pressure_unit" /></el-form-item>
         </div>
-        <el-form-item label="有束流"><el-switch v-model="draft.has_beam" /></el-form-item>
-        <el-form-item label="设备">
-          <el-select v-model="draft.devices" multiple placeholder="选择设备">
+        <el-form-item :label="t('runList.hasBeam')"><el-switch v-model="draft.has_beam" /></el-form-item>
+        <el-form-item :label="t('runList.devices')">
+          <el-select v-model="draft.devices" multiple :placeholder="t('runList.devicesPlaceholder')">
             <el-option v-for="d in deviceOptions" :key="d" :label="d" :value="d" />
           </el-select>
         </el-form-item>
-        <el-form-item label="描述"><el-input v-model="draft.description" type="textarea" :rows="3" /></el-form-item>
+        <el-form-item :label="t('runList.description')"><el-input v-model="draft.description" type="textarea" :rows="3" /></el-form-item>
       </el-form>
       <template #footer>
-        <el-button @click="createDialog = false">取消</el-button>
-        <el-button type="primary" :loading="creating" @click="create">保存</el-button>
+        <el-button @click="createDialog = false">{{ t('common.cancel') }}</el-button>
+        <el-button type="primary" :loading="creating" @click="create">{{ t('runList.save') }}</el-button>
       </template>
     </el-dialog>
   </div>
@@ -89,12 +89,14 @@
 <script setup lang="ts">
 import { computed, onMounted, reactive, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
+import { useI18n } from 'vue-i18n'
 import { ElMessage } from 'element-plus'
 import StatusBadge from '../components/StatusBadge.vue'
 import { createRun, listRuns, type ExperimentRun, type RunPayload } from '../api/runs'
 import { useAuthStore } from '../stores/auth'
 import { showApiError } from '../composables/useNotify'
 
+const { t } = useI18n()
 const route = useRoute()
 const router = useRouter()
 const auth = useAuthStore()
@@ -110,19 +112,19 @@ const campaign = ref('')
 const createDialog = ref(false)
 const creating = ref(false)
 
-const statuses = [
-  { value: 'planned', label: '计划中' },
-  { value: 'active', label: '进行中' },
-  { value: 'paused', label: '已暂停' },
-  { value: 'completed', label: '已完成' },
-  { value: 'aborted', label: '已中止' }
-]
-const runTypes = [
-  { value: 'cooldown', label: '冷却' },
-  { value: 'warmup', label: '升温' },
-  { value: 'steady_state', label: '稳态' },
-  { value: 'test', label: '测试' }
-]
+const statuses = computed(() => [
+  { value: 'planned', label: t('runList.runStatus.planned') },
+  { value: 'active', label: t('runList.runStatus.active') },
+  { value: 'paused', label: t('runList.runStatus.paused') },
+  { value: 'completed', label: t('runList.runStatus.completed') },
+  { value: 'aborted', label: t('runList.runStatus.aborted') }
+])
+const runTypes = computed(() => [
+  { value: 'cooldown', label: t('runList.runType.cooldown') },
+  { value: 'warmup', label: t('runList.runType.warmup') },
+  { value: 'steady_state', label: t('runList.runType.steady_state') },
+  { value: 'test', label: t('runList.runType.test') }
+])
 const gasTypes = ['He', 'Ar', 'Xe']
 const deviceOptions = ['rf_carpet', 'rfq', 'qpig']
 
@@ -184,8 +186,8 @@ async function load() {
     runs.value = data.items ?? []
     total.value = data.total
   } catch (err) {
-    error.value = err instanceof Error ? err.message : '批次加载失败'
-    showApiError(err, '批次加载失败')
+    error.value = err instanceof Error ? err.message : t('runList.loadFailed')
+    showApiError(err, t('runList.loadFailed'))
   } finally {
     loading.value = false
   }
@@ -201,7 +203,7 @@ function open(run: ExperimentRun) {
 }
 
 function runTypeLabel(value: string) {
-  return runTypes.find((t) => t.value === value)?.label || value
+  return runTypes.value.find((t) => t.value === value)?.label || value
 }
 
 function fmtTime(x?: string) {
@@ -229,18 +231,18 @@ function toPayload(form: RunForm): RunPayload {
 
 async function create() {
   if (!draft.name.trim()) {
-    ElMessage.warning('请填写批次名称')
+    ElMessage.warning(t('runList.nameRequired'))
     return
   }
   creating.value = true
   try {
     await createRun(projectId.value, toPayload(draft))
-    ElMessage.success('批次已创建')
+    ElMessage.success(t('runList.created'))
     createDialog.value = false
     Object.assign(draft, emptyDraft())
     await load()
   } catch (err) {
-    showApiError(err, '批次创建失败')
+    showApiError(err, t('runList.createFailed'))
   } finally {
     creating.value = false
   }
