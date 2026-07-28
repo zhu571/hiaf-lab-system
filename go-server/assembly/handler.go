@@ -168,7 +168,10 @@ func decode(r *http.Request, dst any) error {
 }
 
 func (h *Handler) writeError(w http.ResponseWriter, r *http.Request, err error) {
+	var commonErr *common.Error
 	switch {
+	case errors.As(err, &commonErr):
+		common.WriteError(w, r, common.StatusForCode(commonErr.Code), commonErr.Code, commonErr.Message, commonErr.Details)
 	case errors.Is(err, ErrStepNotFound):
 		common.WriteError(w, r, http.StatusNotFound, "assembly_step_not_found", err.Error(), nil)
 	case errors.Is(err, ErrProjectNotFound):

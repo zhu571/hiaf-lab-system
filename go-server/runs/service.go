@@ -3,8 +3,11 @@ package runs
 import (
 	"errors"
 	"strings"
+	"time"
 
+	"github.com/google/uuid"
 	"github.com/zhu571/hiaf-lab-system/go-server/auth"
+	"github.com/zhu571/hiaf-lab-system/go-server/common"
 	"github.com/zhu571/hiaf-lab-system/go-server/projects"
 )
 
@@ -12,10 +15,12 @@ var (
 	ErrRunNotFound        = errors.New("实验批次不存在")
 	ErrProjectNotFound    = errors.New("项目不存在")
 	ErrReportLinkNotFound = errors.New("日报关联不存在")
+	ErrStepNotFound       = errors.New("实验步骤不存在")
 	ErrForbidden          = errors.New("当前用户无权访问该项目")
 	ErrInvalidInput       = errors.New("请求参数无效")
 	ErrInvalidTransition  = errors.New("不允许的状态转移")
 	ErrRunConflict        = errors.New("实验批次状态已变化")
+	ErrStepConflict       = errors.New("实验步骤状态已变化")
 )
 
 type ProjectAccessChecker interface {
@@ -33,15 +38,48 @@ type runRepository interface {
 	AddReportLink(runID, reportID string) error
 	RemoveReportLink(runID, reportID string) error
 	GetReportLinks(runID string) ([]string, error)
+	ListSteps(runID string) ([]RunStep, error)
+	CreateStep(step *RunStep) error
+	CreateStepsMany(runID, userID string, steps []StepDef, startOrder int) ([]RunStep, error)
+	GetStepByID(id string) (*RunStep, error)
+	UpdateStep(id string, req UpdateStepRequest) error
+	UpdateStepStatus(id, fromStatus, toStatus string, startedAt, completedAt *time.Time) error
+	SoftDeleteStep(id string) error
+	Reorder(runID string, items []ReorderItem) error
+	MaxStepOrder(runID string) (int, error)
+	SetSourceTemplateID(stepID, templateID string) error
+}
+
+type TemplateReader interface {
+	GetTemplateWithItems(id string) (*SteptemplatesTemplate, []SteptemplatesItem, error)
+}
+
+type SteptemplatesTemplate struct {
+	ID   string
+	Name string
+	Kind string
+}
+
+type SteptemplatesItem struct {
+	ID             string
+	Name           string
+	Description    string
+	StepOrder      int
+	DependsOnOrder *int
 }
 
 type Service struct {
-	repo   runRepository
-	access ProjectAccessChecker
+	repo       runRepository
+	access     ProjectAccessChecker
+	tmplReader TemplateReader
 }
 
 func NewService(repo runRepository, access ProjectAccessChecker) *Service {
 	return &Service{repo: repo, access: access}
+}
+
+func (s *Service) ConfigureTemplates(reader TemplateReader) {
+	s.tmplReader = reader
 }
 
 func (s *Service) Create(projectID, userID, userRole string, req CreateRunRequest) (*ExperimentRun, error) {
@@ -176,6 +214,300 @@ func (s *Service) RemoveReportLink(runID, reportID, userID, userRole string) ([]
 	}
 	return s.repo.GetReportLinks(runID)
 }
+
+func (s *Service) ListSteps(runID, userID, userRole string) (*StepListResult, error) {
+	run, err := s.getAccessible(runID, userID, userRole, projects.RoleViewer, false)
+	if err != nil {
+		return nil, err
+	}
+	items, err := s.repo.ListSteps(run.ID)
+	if err != nil {
+		return nil, err
+	}
+	return &StepListResult{Items: items, Total: len(items)}, nil
+}
+
+func (s *Service) CreateStep(runID, userID, userRole string, req CreateStepRequest) (*RunStep, error) {
+	run, err := s.getAccessible(runID, userID, userRole, projects.RoleMember, false)
+	if err != nil {
+		return nil, err
+	}
+	name := strings.TrimSpace(req.Name)
+	if name == "" || len(name) > 256 || req.StepOrder < 0 {
+		return nil, ErrInvalidInput
+	}
+	if req.DependsOn != nil {
+		dependencyID := strings.TrimSpace(*req.DependsOn)
+		if err := s.validateStepDependency("", run.ID, dependencyID); err != nil {
+			return nil, err
+		}
+		req.DependsOn = &dependencyID
+	}
+	order := req.StepOrder
+	if order == 0 {
+		max, err := s.repo.MaxStepOrder(run.ID)
+		if err != nil {
+			return nil, err
+		}
+		order = max + 1
+	}
+	step := &RunStep{RunID: run.ID, Name: name, Description: strings.TrimSpace(req.Description),
+		DependsOn: req.DependsOn, Status: StepStatusPlanned, StepOrder: order, CreatedBy: &userID}
+	if err := s.repo.CreateStep(step); err != nil {
+		return nil, err
+	}
+	return step, nil
+}
+
+func (s *Service) UpdateStep(stepID, userID, userRole string, req UpdateStepRequest) (*RunStep, error) {
+	step, err := s.getStep(stepID)
+	if err != nil {
+		return nil, err
+	}
+	if req.Transition == nil {
+		if req.Name == nil && req.Description == nil && req.DependsOn == nil {
+			return nil, ErrInvalidInput
+		}
+		if err := s.requireStepAccess(step, userID, userRole, projects.RoleMaintainer); err != nil {
+			return nil, err
+		}
+		if err := s.normalizeStepUpdate(step, &req); err != nil {
+			return nil, err
+		}
+		if err := s.repo.UpdateStep(step.ID, req); err != nil {
+			return nil, err
+		}
+	} else {
+		if req.Name != nil || req.Description != nil || req.DependsOn != nil {
+			return nil, ErrInvalidInput
+		}
+		if err := s.requireStepAccess(step, userID, userRole, projects.RoleMember); err != nil {
+			return nil, err
+		}
+		transition := strings.TrimSpace(*req.Transition)
+		toStatus, ok := stepTransitionTarget(step.Status, transition)
+		if !ok {
+			return nil, ErrInvalidTransition
+		}
+		startedAt, completedAt := stepTransitionTimes(step, transition, time.Now())
+		if err := s.repo.UpdateStepStatus(step.ID, step.Status, toStatus, startedAt, completedAt); err != nil {
+			return nil, err
+		}
+	}
+	return s.getStep(step.ID)
+}
+
+func (s *Service) DeleteStep(stepID, userID, userRole string) error {
+	step, err := s.getStep(stepID)
+	if err != nil {
+		return err
+	}
+	if step.CreatedBy == nil || *step.CreatedBy != userID {
+		if err := s.requireStepAccess(step, userID, userRole, projects.RoleMaintainer); err != nil {
+			return err
+		}
+	}
+	return s.repo.SoftDeleteStep(step.ID)
+}
+
+func (s *Service) ReorderSteps(runID, userID, userRole string, items []ReorderItem) error {
+	run, err := s.getAccessible(runID, userID, userRole, projects.RoleMaintainer, false)
+	if err != nil {
+		return err
+	}
+	if len(items) == 0 {
+		return ErrInvalidInput
+	}
+	ids, orders := map[string]bool{}, map[int]bool{}
+	for _, item := range items {
+		if uuid.Validate(item.ID) != nil || item.StepOrder <= 0 || ids[item.ID] || orders[item.StepOrder] {
+			return ErrInvalidInput
+		}
+		step, err := s.repo.GetStepByID(item.ID)
+		if err != nil {
+			return err
+		}
+		if step == nil {
+			return ErrStepNotFound
+		}
+		if step.RunID != run.ID {
+			return ErrInvalidInput
+		}
+		ids[item.ID], orders[item.StepOrder] = true, true
+	}
+	return s.repo.Reorder(run.ID, items)
+}
+
+func (s *Service) ApplyTemplate(runID, userID, userRole string, req ApplyTemplateRequest) ([]RunStep, error) {
+	run, err := s.getAccessible(runID, userID, userRole, projects.RoleMember, false)
+	if err != nil {
+		return nil, err
+	}
+	hasTemplateID := req.TemplateID != nil && strings.TrimSpace(*req.TemplateID) != ""
+	hasInlineSteps := len(req.Steps) > 0
+	if hasTemplateID == hasInlineSteps {
+		return nil, ErrInvalidInput
+	}
+	if hasTemplateID && s.tmplReader == nil {
+		return nil, errors.New("模板读取服务未配置")
+	}
+
+	var stepDefs []StepDef
+	var sourceTemplateID *string
+
+	if hasTemplateID {
+		tmpl, items, err := s.tmplReader.GetTemplateWithItems(strings.TrimSpace(*req.TemplateID))
+		if err != nil {
+			return nil, err
+		}
+		if tmpl == nil {
+			return nil, errors.New("模板不存在")
+		}
+		if tmpl.Kind != "experiment" {
+			return nil, common.NewError("bad_request", "模板类型不匹配，期望 experiment", nil)
+		}
+		sourceTemplateID = &tmpl.ID
+		stepDefs = make([]StepDef, len(items))
+		for i, item := range items {
+			stepDefs[i] = StepDef{
+				Name:           item.Name,
+				Description:    item.Description,
+				StepOrder:      item.StepOrder,
+				DependsOnOrder: item.DependsOnOrder,
+			}
+		}
+	} else {
+		if len(req.Steps) > 30 {
+			return nil, errors.New("步骤数不能超过 30")
+		}
+		stepDefs = req.Steps
+	}
+
+	maxOrder, err := s.repo.MaxStepOrder(run.ID)
+	if err != nil {
+		return nil, err
+	}
+
+	steps, err := s.repo.CreateStepsMany(run.ID, userID, stepDefs, maxOrder)
+	if err != nil {
+		return nil, err
+	}
+
+	if sourceTemplateID != nil {
+		for i := range steps {
+			if err := s.repo.SetSourceTemplateID(steps[i].ID, *sourceTemplateID); err != nil {
+				return nil, err
+			}
+		}
+	}
+
+	return steps, nil
+}
+
+// validateStepDependency 校验依赖步骤存在且属于同一实验批次；依赖只存不强制。
+func (s *Service) validateStepDependency(stepID, runID, dependencyID string) error {
+	if uuid.Validate(dependencyID) != nil || dependencyID == stepID {
+		return ErrInvalidInput
+	}
+	dependency, err := s.repo.GetStepByID(dependencyID)
+	if err != nil {
+		return err
+	}
+	if dependency == nil {
+		return ErrStepNotFound
+	}
+	if dependency.RunID != runID {
+		return ErrInvalidInput
+	}
+	return nil
+}
+
+func (s *Service) normalizeStepUpdate(step *RunStep, req *UpdateStepRequest) error {
+	if req.Name != nil {
+		name := strings.TrimSpace(*req.Name)
+		if name == "" || len(name) > 256 {
+			return ErrInvalidInput
+		}
+		req.Name = &name
+	}
+	if req.Description != nil {
+		description := strings.TrimSpace(*req.Description)
+		req.Description = &description
+	}
+	if req.DependsOn != nil {
+		dependencyID := strings.TrimSpace(*req.DependsOn)
+		if err := s.validateStepDependency(step.ID, step.RunID, dependencyID); err != nil {
+			return err
+		}
+		req.DependsOn = &dependencyID
+	}
+	return nil
+}
+
+func (s *Service) getStep(id string) (*RunStep, error) {
+	id = strings.TrimSpace(id)
+	if uuid.Validate(id) != nil {
+		return nil, ErrInvalidInput
+	}
+	step, err := s.repo.GetStepByID(id)
+	if err != nil {
+		return nil, err
+	}
+	if step == nil {
+		return nil, ErrStepNotFound
+	}
+	return step, nil
+}
+
+func (s *Service) requireStepAccess(step *RunStep, userID, userRole, minRole string) error {
+	run, err := s.repo.GetByID(step.RunID)
+	if err != nil {
+		return err
+	}
+	if run == nil {
+		return ErrRunNotFound
+	}
+	return s.requireAccess(run.ProjectID, userID, userRole, minRole)
+}
+
+func stepTransitionTarget(status, transition string) (string, bool) {
+	for _, allowed := range StepAllowedTransitions[status] {
+		if transition == allowed {
+			switch transition {
+			case StepTransitionStart, StepTransitionResume:
+				return StepStatusInProgress, true
+			case StepTransitionPause:
+				return StepStatusPaused, true
+			case StepTransitionComplete:
+				return StepStatusCompleted, true
+			case StepTransitionSkip:
+				return StepStatusSkipped, true
+			case StepTransitionCancel:
+				return StepStatusCancelled, true
+			}
+		}
+	}
+	return "", false
+}
+
+func stepTransitionTimes(step *RunStep, transition string, now time.Time) (*time.Time, *time.Time) {
+	startedAt, completedAt := step.StartedAt, step.CompletedAt
+	switch transition {
+	case StepTransitionStart:
+		startedAt, completedAt = &now, nil
+	case StepTransitionPause, StepTransitionResume:
+		completedAt = nil
+	case StepTransitionComplete, StepTransitionSkip:
+		if startedAt == nil {
+			startedAt = &now
+		}
+		completedAt = &now
+	case StepTransitionCancel:
+		completedAt = &now
+	}
+	return startedAt, completedAt
+}
+
 
 func (s *Service) getAccessible(id, userID, userRole, minRole string, creatorAllowed bool) (*ExperimentRun, error) {
 	run, err := s.repo.GetByID(strings.TrimSpace(id))
