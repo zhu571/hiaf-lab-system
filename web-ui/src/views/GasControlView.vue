@@ -3,57 +3,57 @@
     <header class="page-header">
       <div>
         <p class="eyebrow">GasCell</p>
-        <h1>气压控制</h1>
-        <p class="subtitle">只读实时仪表盘，控制回路与安全联锁运行在 IOC。</p>
+        <h1>{{ t('gasControl.title') }}</h1>
+        <p class="subtitle">{{ t('gasControl.subtitle') }}</p>
       </div>
-      <el-tag :type="connected ? 'success' : 'warning'">{{ connected ? '实时推送' : '正在重连' }}</el-tag>
+      <el-tag :type="connected ? 'success' : 'warning'">{{ connected ? t('gasControl.realtime') : t('gasControl.reconnecting') }}</el-tag>
     </header>
 
     <el-alert v-if="streamError" :title="streamError" type="warning" :closable="false" show-icon />
-    <el-alert v-if="tripCode" :title="`A5 联锁已触发（代码 ${tripCode}）`" type="error" :closable="false" show-icon />
+    <el-alert v-if="tripCode" :title="t('gasControl.a5Trip', { code: tripCode })" type="error" :closable="false" show-icon />
 
     <section v-loading="loading" class="status-grid">
       <article v-for="card in cards" :key="card.pv" class="status-card">
-        <span>{{ card.label }}</span>
+        <span>{{ t(card.labelKey) }}</span>
         <strong :class="{ invalid: point(card.pv).q !== 'good' }">{{ display(card.pv, card.unit) }}</strong>
-        <small>{{ point(card.pv).q === 'good' ? card.pv : '数据失效' }}</small>
+        <small>{{ point(card.pv).q === 'good' ? card.pv : t('gasControl.dataInvalid') }}</small>
       </article>
     </section>
 
     <section class="chart-card">
       <div class="section-title">
         <div>
-          <h2>A1 / 阀位 / Setpoint</h2>
-          <p>最近 120 个有效采样点</p>
+          <h2>{{ t('gasControl.chartTitle') }}</h2>
+          <p>{{ t('gasControl.chartHint') }}</p>
         </div>
       </div>
-      <div v-if="error" class="state-panel"><el-result icon="error" title="数据加载失败" :sub-title="error" /></div>
-      <canvas v-else ref="chartCanvas" aria-label="GasCell 实时曲线"></canvas>
+      <div v-if="error" class="state-panel"><el-result icon="error" :title="t('gasControl.loadFailed')" :sub-title="error" /></div>
+      <canvas v-else ref="chartCanvas" :aria-label="t('gasControl.chartAria')"></canvas>
     </section>
 
     <section v-if="canOperate" class="control-card">
       <div class="section-title">
-        <div><h2>控制面板</h2><p>每次写入均由后端校验并回读确认。</p></div>
+        <div><h2>{{ t('gasControl.panel') }}</h2><p>{{ t('gasControl.panelHint') }}</p></div>
         <el-tag type="warning">maintainer / admin</el-tag>
       </div>
       <el-form class="control-grid" label-position="top" @submit.prevent>
         <el-form-item label="Setpoint (Pa)"><el-input-number v-model="form.setpoint" :min="0" :max="10000" :controls="false" /></el-form-item>
         <el-form-item label="Kp"><el-input-number v-model="form.kp" :min="0" :max="1" :controls="false" /></el-form-item>
         <el-form-item label="Ki"><el-input-number v-model="form.ki" :min="0" :max="1" :controls="false" /></el-form-item>
-        <el-form-item class="control-actions"><el-button type="primary" :loading="writeBusy" @click="applyParams">应用参数</el-button></el-form-item>
+        <el-form-item class="control-actions"><el-button type="primary" :loading="writeBusy" @click="applyParams">{{ t('gasControl.applyParams') }}</el-button></el-form-item>
         <div class="param-display">
           <span>Kp = <strong>{{ point('GasCell:Piezo:Kp').v ?? '—' }}</strong></span>
           <span>Ki = <strong>{{ point('GasCell:Piezo:Ki').v ?? '—' }}</strong></span>
         </div>
       </el-form>
       <div class="button-row">
-        <el-button v-if="!isRunning" type="success" :loading="writeBusy" @click="start">启动</el-button>
-        <el-button v-else type="warning" :loading="writeBusy" @click="stop">停止</el-button>
-        <el-input-number v-model="form.valve" :min="0" :max="100" :controls="false" placeholder="手动阀位 %" />
-        <el-button :disabled="isRunning" :loading="writeBusy" @click="setValve">设置阀位</el-button>
+        <el-button v-if="!isRunning" type="success" :loading="writeBusy" @click="start">{{ t('gasControl.start') }}</el-button>
+        <el-button v-else type="warning" :loading="writeBusy" @click="stop">{{ t('gasControl.stop') }}</el-button>
+        <el-input-number v-model="form.valve" :min="0" :max="100" :controls="false" :placeholder="t('gasControl.manualValve')" />
+        <el-button :disabled="isRunning" :loading="writeBusy" @click="setValve">{{ t('gasControl.setValve') }}</el-button>
         <el-input-number v-model="form.a5Max" :min="0.01" :max="1000" :controls="false" placeholder="A5Max Pa" />
-        <el-button type="danger" plain :loading="writeBusy" @click="setA5Max">修改 A5Max</el-button>
-        <el-button v-if="tripCode" type="danger" :loading="writeBusy" @click="clearA5">清除 A5 联锁</el-button>
+        <el-button type="danger" plain :loading="writeBusy" @click="setA5Max">{{ t('gasControl.setA5Max') }}</el-button>
+        <el-button v-if="tripCode" type="danger" :loading="writeBusy" @click="clearA5">{{ t('gasControl.clearA5') }}</el-button>
       </div>
     </section>
   </div>
@@ -61,6 +61,7 @@
 
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref } from 'vue'
+import { useI18n } from 'vue-i18n'
 import {
   Chart,
   LineController,
@@ -89,6 +90,8 @@ import { useAuthStore } from '../stores/auth'
 
 Chart.register(LineController, LineElement, PointElement, LinearScale, CategoryScale, Legend, Tooltip)
 
+const { t } = useI18n()
+
 const A1 = 'GasCell:Piezo:A1'
 const VALVE = 'GasCell:Piezo:ValveSP'
 const SETPOINT = 'GasCell:Piezo:Setpoint'
@@ -98,12 +101,12 @@ const CYCLE = 'GasCell:Piezo:Cycle'
 const TRIP = 'GasCell:Safety:A5Trip'
 
 const cards = [
-  { label: 'A1 气压', pv: A1, unit: 'Pa' },
-  { label: '设定值', pv: SETPOINT, unit: 'Pa' },
-  { label: '阀门开度', pv: VALVE, unit: '%' },
-  { label: '控制误差', pv: ERROR, unit: '' },
-  { label: '运行状态', pv: RUNNING, unit: '' },
-  { label: 'Cycle', pv: CYCLE, unit: '' }
+  { labelKey: 'gasControl.a1Pressure', pv: A1, unit: 'Pa' },
+  { labelKey: 'gasControl.setpoint', pv: SETPOINT, unit: 'Pa' },
+  { labelKey: 'gasControl.valveOpening', pv: VALVE, unit: '%' },
+  { labelKey: 'gasControl.controlError', pv: ERROR, unit: '' },
+  { labelKey: 'gasControl.runningState', pv: RUNNING, unit: '' },
+  { labelKey: 'gasControl.cycle', pv: CYCLE, unit: '' }
 ]
 
 const data = reactive<Record<string, GasCellPoint>>({})
@@ -143,7 +146,7 @@ function point(pv: string): GasCellPoint {
 function display(pv: string, unit: string) {
   const current = point(pv)
   if (current.q !== 'good' || current.v === undefined || current.v === null) return '—'
-  if (pv === RUNNING) return Number(current.v) ? '运行中' : '已停止'
+  if (pv === RUNNING) return Number(current.v) ? t('gasControl.running') : t('gasControl.stopped')
   const value = typeof current.v === 'number' ? Number(current.v.toPrecision(6)) : current.v
   return `${value}${unit ? ` ${unit}` : ''}`
 }
@@ -154,7 +157,7 @@ async function refreshSnapshot() {
     Object.assign(data, (await gasCellStatus()).data)
     error.value = ''
   } catch (err) {
-    error.value = err instanceof Error ? err.message : '快照加载失败'
+    error.value = err instanceof Error ? err.message : t('gasControl.snapshotFailed')
   } finally {
     loading.value = false
   }
@@ -168,7 +171,7 @@ function connect() {
   }
   source.onerror = () => {
     connected.value = false
-    streamError.value = '实时连接中断，浏览器正在自动重连。'
+    streamError.value = t('gasControl.streamInterrupted')
   }
   source.onmessage = (event) => applyFrame(JSON.parse(event.data) as GasCellFrame)
 }
@@ -186,7 +189,7 @@ function createChart() {
   const datasets: ChartDataset<'line'>[] = [
     { label: 'A1 (Pa)', data: [], borderColor: '#167d9a', yAxisID: 'pressure', pointRadius: 0 },
     { label: 'Setpoint (Pa)', data: [], borderColor: '#e6a23c', borderDash: [6, 4], yAxisID: 'pressure', pointRadius: 0 },
-    { label: '阀位 (%)', data: [], borderColor: '#67c23a', yAxisID: 'valve', pointRadius: 0 }
+    { label: t('gasControl.chartValve'), data: [], borderColor: '#67c23a', yAxisID: 'valve', pointRadius: 0 }
   ]
   chart = new Chart(chartCanvas.value, {
     type: 'line',
@@ -225,10 +228,10 @@ async function write(action: () => Promise<PVWriteResult | PVWriteResult[]>, suc
   try {
     const result = await action()
     const warnings = (Array.isArray(result) ? result : [result]).map((item) => item.warning).filter(Boolean)
-    warnings.length ? ElMessage.warning(warnings.join('；')) : ElMessage.success(success)
+    warnings.length ? ElMessage.warning(warnings.join('; ')) : ElMessage.success(success)
     await refreshSnapshot()
   } catch (err) {
-    ElMessage.error(err instanceof Error ? err.message : '写入失败')
+    ElMessage.error(err instanceof Error ? err.message : t('gasControl.writeFailed'))
   } finally {
     writeBusy.value = false
   }
@@ -236,30 +239,30 @@ async function write(action: () => Promise<PVWriteResult | PVWriteResult[]>, suc
 
 function applyParams() {
   const params = Object.fromEntries(Object.entries({ setpoint: form.setpoint, kp: form.kp, ki: form.ki }).filter(([, value]) => value !== undefined))
-  if (!Object.keys(params).length) return ElMessage.warning('请至少填写一个参数')
-  return write(() => gasCellParams(params), '参数已写入并回读确认')
+  if (!Object.keys(params).length) return ElMessage.warning(t('gasControl.paramRequired'))
+  return write(() => gasCellParams(params), t('gasControl.paramsWritten'))
 }
 
-function start() { return write(gasCellStart, '控制已启动') }
-function stop() { return write(gasCellStop, '控制已停止') }
+function start() { return write(gasCellStart, t('gasControl.startSuccess')) }
+function stop() { return write(gasCellStop, t('gasControl.stopSuccess')) }
 function setValve() {
-  if (form.valve === undefined) return ElMessage.warning('请填写手动阀位')
-  return write(() => gasCellValve(form.valve!), '阀位已写入并回读确认')
+  if (form.valve === undefined) return ElMessage.warning(t('gasControl.valveRequired'))
+  return write(() => gasCellValve(form.valve!), t('gasControl.valveWritten'))
 }
 
 async function setA5Max() {
-  if (form.a5Max === undefined) return ElMessage.warning('请填写 A5Max')
+  if (form.a5Max === undefined) return ElMessage.warning(t('gasControl.a5MaxRequired'))
   try {
-    await ElMessageBox.confirm('修改安全阈值会影响 A5 超压联锁，确认继续？', '安全阈值确认', { type: 'warning' })
+    await ElMessageBox.confirm(t('gasControl.a5MaxConfirm'), t('gasControl.a5MaxConfirmTitle'), { type: 'warning' })
   } catch { return }
-  return write(() => gasCellA5Max(form.a5Max!), 'A5Max 已写入并回读确认')
+  return write(() => gasCellA5Max(form.a5Max!), t('gasControl.a5MaxWritten'))
 }
 
 async function clearA5() {
   try {
-    await ElMessageBox.confirm('请确认现场条件已安全。清除报警并解锁？', '清除 A5 联锁', { type: 'error' })
+    await ElMessageBox.confirm(t('gasControl.clearA5Confirm'), t('gasControl.clearA5'), { type: 'error' })
   } catch { return }
-  return write(gasCellA5Clear, 'A5 联锁已清除')
+  return write(gasCellA5Clear, t('gasControl.a5Cleared'))
 }
 </script>
 
