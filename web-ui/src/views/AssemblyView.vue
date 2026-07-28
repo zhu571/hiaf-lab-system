@@ -1,17 +1,17 @@
 <template>
   <div class="page">
     <div class="toolbar">
-      <h2>装配步骤</h2>
-      <el-select v-model="statusFilter" class="status-select" placeholder="全部状态" clearable>
+      <h2>{{ t('assembly.title') }}</h2>
+      <el-select v-model="statusFilter" class="status-select" :placeholder="t('assembly.allStatus')" clearable>
         <el-option v-for="s in statuses" :key="s.value" :label="s.label" :value="s.value" />
       </el-select>
-      <el-button v-if="canOperate" type="primary" plain @click="aiDialog = true">AI 生成步骤</el-button>
-      <RouterLink to="/step-templates"><el-button>模板库</el-button></RouterLink>
-      <el-button v-if="canOperate" type="primary" @click="createDialog = true">新建步骤</el-button>
+      <el-button v-if="canOperate" type="primary" plain @click="aiDialog = true">{{ t('assembly.aiGenerate') }}</el-button>
+      <RouterLink to="/step-templates"><el-button>{{ t('assembly.templateLibrary') }}</el-button></RouterLink>
+      <el-button v-if="canOperate" type="primary" @click="createDialog = true">{{ t('assembly.create') }}</el-button>
     </div>
     <section class="panel">
       <el-alert v-if="loadError" class="load-error" type="error" :title="loadError" show-icon :closable="false">
-        <el-button size="small" @click="load">重试</el-button>
+        <el-button size="small" @click="load">{{ t('assembly.retry') }}</el-button>
       </el-alert>
       <div v-loading="loading" class="step-list">
         <div
@@ -24,7 +24,7 @@
           @dragover.prevent
           @drop="onDrop(index)"
         >
-          <span v-if="canReorder && !statusFilter" class="drag-handle" title="拖拽排序">
+          <span v-if="canReorder && !statusFilter" class="drag-handle" :title="t('assembly.dragSort')">
             <el-icon><Rank /></el-icon>
           </span>
           <span class="order-dot">{{ step.step_order }}</span>
@@ -35,10 +35,10 @@
             </div>
             <p v-if="step.description" class="step-desc">{{ step.description }}</p>
             <p class="step-meta">
-              <span>执行人：{{ memberName(step.assigned_to) }}</span>
-              <span>依赖：{{ depName(step.depends_on) }}</span>
-              <span>开始：{{ fmtTime(step.started_at) }}</span>
-              <span>完成：{{ fmtTime(step.completed_at) }}</span>
+              <span>{{ t('assembly.metaAssignee') }}{{ memberName(step.assigned_to) }}</span>
+              <span>{{ t('assembly.metaDependency') }}{{ depName(step.depends_on) }}</span>
+              <span>{{ t('assembly.metaStarted') }}{{ fmtTime(step.started_at) }}</span>
+              <span>{{ t('assembly.metaCompleted') }}{{ fmtTime(step.completed_at) }}</span>
             </p>
           </div>
           <div v-if="canOperate" class="step-actions">
@@ -52,33 +52,33 @@
             >
               {{ action.label }}
             </el-button>
-            <el-button size="small" type="danger" plain @click="remove(step)">删除</el-button>
+            <el-button size="small" type="danger" plain @click="remove(step)">{{ t('assembly.delete') }}</el-button>
           </div>
         </div>
-        <el-empty v-if="!loading && !loadError && filteredSteps.length === 0" description="暂无装配步骤" />
+        <el-empty v-if="!loading && !loadError && filteredSteps.length === 0" :description="t('assembly.empty')" />
       </div>
     </section>
-    <el-dialog v-model="createDialog" title="新建步骤" width="560">
+    <el-dialog v-model="createDialog" :title="t('assembly.create')" width="560">
       <el-form label-position="top">
-        <el-form-item label="名称" required><el-input v-model="draft.name" /></el-form-item>
-        <el-form-item label="描述"><el-input v-model="draft.description" type="textarea" :rows="3" /></el-form-item>
-        <el-form-item label="依赖步骤">
-          <el-select v-model="draft.depends_on" clearable placeholder="无依赖">
+        <el-form-item :label="t('assembly.name')" required><el-input v-model="draft.name" /></el-form-item>
+        <el-form-item :label="t('assembly.description')"><el-input v-model="draft.description" type="textarea" :rows="3" /></el-form-item>
+        <el-form-item :label="t('assembly.dependsOn')">
+          <el-select v-model="draft.depends_on" clearable :placeholder="t('assembly.noDependency')">
             <el-option v-for="s in steps" :key="s.id" :label="`${s.step_order}. ${s.name}`" :value="s.id" />
           </el-select>
         </el-form-item>
-        <el-form-item label="执行人">
-          <el-select v-model="draft.assigned_to" clearable placeholder="未分配">
+        <el-form-item :label="t('assembly.assignee')">
+          <el-select v-model="draft.assigned_to" clearable :placeholder="t('assembly.unassigned')">
             <el-option v-for="m in members" :key="m.user_id" :label="m.username || m.user_id" :value="m.user_id" />
           </el-select>
         </el-form-item>
       </el-form>
       <template #footer>
-        <el-button @click="createDialog = false">取消</el-button>
-        <el-button type="primary" @click="create">保存</el-button>
+        <el-button @click="createDialog = false">{{ t('common.cancel') }}</el-button>
+        <el-button type="primary" @click="create">{{ t('assembly.save') }}</el-button>
       </template>
     </el-dialog>
-    <el-dialog v-model="aiDialog" title="AI 生成步骤" width="760" @closed="resetAi">
+    <el-dialog v-model="aiDialog" :title="t('assembly.aiGenerate')" width="760" @closed="resetAi">
       <div v-if="aiStage === 'input'" class="grid">
         <el-alert v-if="aiNotice" :type="aiNoticeType" :title="aiNotice" show-icon :closable="false" />
         <el-input
@@ -86,12 +86,12 @@
           type="textarea"
           :rows="4"
           maxlength="4000"
-          placeholder="用自然语言描述装配流程，例如：先清洁腔体并检查密封圈，再安装靶架，最后抽真空检漏"
+          :placeholder="t('assembly.aiPromptPlaceholder')"
         />
       </div>
       <div v-else class="grid">
         <el-form label-position="top">
-          <el-form-item label="模板名称（存模板时使用）">
+          <el-form-item :label="t('assembly.templateName')">
             <el-input v-model="aiName" maxlength="256" />
           </el-form-item>
         </el-form>
@@ -99,33 +99,33 @@
       </div>
       <template #footer>
         <template v-if="aiStage === 'input'">
-          <el-button @click="aiDialog = false">取消</el-button>
-          <el-button type="primary" :loading="aiGenerating" :disabled="!aiPrompt.trim()" @click="generate">生成候选</el-button>
+          <el-button @click="aiDialog = false">{{ t('common.cancel') }}</el-button>
+          <el-button type="primary" :loading="aiGenerating" :disabled="!aiPrompt.trim()" @click="generate">{{ t('assembly.generate') }}</el-button>
         </template>
         <template v-else>
-          <el-button @click="aiStage = 'input'">返回修改</el-button>
-          <el-button :loading="aiSubmitting" @click="applyInline">直接应用</el-button>
-          <el-button v-if="canSaveTemplate" :loading="aiSubmitting" @click="saveTemplateOnly">存模板</el-button>
-          <el-button v-if="canSaveTemplate" type="primary" :loading="aiSubmitting" @click="saveAndApply">存并应用</el-button>
+          <el-button @click="aiStage = 'input'">{{ t('assembly.backToEdit') }}</el-button>
+          <el-button :loading="aiSubmitting" @click="applyInline">{{ t('assembly.apply') }}</el-button>
+          <el-button v-if="canSaveTemplate" :loading="aiSubmitting" @click="saveTemplateOnly">{{ t('assembly.saveTemplate') }}</el-button>
+          <el-button v-if="canSaveTemplate" type="primary" :loading="aiSubmitting" @click="saveAndApply">{{ t('assembly.saveAndApply') }}</el-button>
         </template>
       </template>
     </el-dialog>
-    <el-dialog v-model="overrideDialog" title="前置步骤未完成" width="480">
+    <el-dialog v-model="overrideDialog" :title="t('assembly.overrideTitle')" width="480">
       <div class="grid">
         <p class="override-tip">
-          前置步骤《{{ overrideTarget?.dep.name }}》当前状态为
+          {{ t('assembly.overrideTip', { name: overrideTarget?.dep.name || '' }) }}
           <StatusBadge :value="overrideTarget?.dep.status || ''" />
         </p>
         <el-input
           v-model="overrideReason"
           type="textarea"
           :rows="3"
-          placeholder="前置步骤已取消时可填写理由强制绕过（override_reason）"
+          :placeholder="t('assembly.overridePlaceholder')"
         />
       </div>
       <template #footer>
-        <el-button @click="overrideDialog = false">取消</el-button>
-        <el-button type="primary" @click="submitOverride">继续流转</el-button>
+        <el-button @click="overrideDialog = false">{{ t('common.cancel') }}</el-button>
+        <el-button type="primary" @click="submitOverride">{{ t('assembly.overrideSubmit') }}</el-button>
       </template>
     </el-dialog>
   </div>
@@ -133,6 +133,7 @@
 
 <script setup lang="ts">
 import { computed, onMounted, reactive, ref, watch } from 'vue'
+import { useI18n } from 'vue-i18n'
 import { useRoute } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { Rank } from '@element-plus/icons-vue'
@@ -152,6 +153,8 @@ import { listMembers, type ProjectMember } from '../api/projects'
 import { useAuthStore } from '../stores/auth'
 import { showApiError } from '../composables/useNotify'
 
+const { t } = useI18n()
+
 type TransitionAction = { transition: string; label: string; confirm: boolean; danger?: boolean }
 
 const route = useRoute()
@@ -167,7 +170,7 @@ const overrideReason = ref('')
 const overrideTarget = ref<{ step: AssemblyStep; transition: string; dep: AssemblyStep } | null>(null)
 const dragIndex = ref(-1)
 const draft = reactive({ name: '', description: '', depends_on: '', assigned_to: '' })
-// AI 生成步骤对话框状态：input（输入自然语言）→ result（编辑候选）
+// AI generation dialog state: input (enter natural language) → result (edit candidates)
 const aiDialog = ref(false)
 const aiStage = ref<'input' | 'result'>('input')
 const aiPrompt = ref('')
@@ -178,38 +181,38 @@ const aiSubmitting = ref(false)
 const aiName = ref('')
 const aiItems = ref<StepTemplateItem[]>([])
 const aiKey = ref(0)
-const statuses = [
-  { value: 'planned', label: '计划中' },
-  { value: 'in_progress', label: '进行中' },
-  { value: 'paused', label: '已暂停' },
-  { value: 'completed', label: '已完成' },
-  { value: 'skipped', label: '已跳过' },
-  { value: 'cancelled', label: '已取消' }
-]
-// 与后端状态机保持一致：planned→start/cancel；in_progress→pause/complete/skip/cancel；paused→resume/cancel；skipped→start
-const transitionsByStatus: Record<string, TransitionAction[]> = {
+const statuses = computed(() => [
+  { value: 'planned', label: t('assembly.status.planned') },
+  { value: 'in_progress', label: t('assembly.status.in_progress') },
+  { value: 'paused', label: t('assembly.status.paused') },
+  { value: 'completed', label: t('assembly.status.completed') },
+  { value: 'skipped', label: t('assembly.status.skipped') },
+  { value: 'cancelled', label: t('assembly.status.cancelled') }
+])
+// Consistent with the backend state machine: planned→start/cancel; in_progress→pause/complete/skip/cancel; paused→resume/cancel; skipped→start
+const transitionsByStatus = computed<Record<string, TransitionAction[]>>(() => ({
   planned: [
-    { transition: 'start', label: '开始', confirm: false },
-    { transition: 'cancel', label: '取消', confirm: true, danger: true }
+    { transition: 'start', label: t('assembly.action.start'), confirm: false },
+    { transition: 'cancel', label: t('assembly.action.cancel'), confirm: true, danger: true }
   ],
   in_progress: [
-    { transition: 'pause', label: '暂停', confirm: false },
-    { transition: 'complete', label: '完成', confirm: true },
-    { transition: 'skip', label: '跳过', confirm: true },
-    { transition: 'cancel', label: '取消', confirm: true, danger: true }
+    { transition: 'pause', label: t('assembly.action.pause'), confirm: false },
+    { transition: 'complete', label: t('assembly.action.complete'), confirm: true },
+    { transition: 'skip', label: t('assembly.action.skip'), confirm: true },
+    { transition: 'cancel', label: t('assembly.action.cancel'), confirm: true, danger: true }
   ],
   paused: [
-    { transition: 'resume', label: '恢复', confirm: false },
-    { transition: 'cancel', label: '取消', confirm: true, danger: true }
+    { transition: 'resume', label: t('assembly.action.resume'), confirm: false },
+    { transition: 'cancel', label: t('assembly.action.cancel'), confirm: true, danger: true }
   ],
-  skipped: [{ transition: 'start', label: '重新开始', confirm: false }]
-}
+  skipped: [{ transition: 'start', label: t('assembly.action.restart'), confirm: false }]
+}))
 
 const canOperate = computed(() => ['admin', 'maintainer', 'member'].includes(auth.user?.role || ''))
 const canReorder = computed(() => ['admin', 'maintainer'].includes(auth.user?.role || ''))
-// 后端 steptemplates 创建模板仅允许 admin/maintainer
+// Only admin/maintainer can create step templates on the backend
 const canSaveTemplate = computed(() => ['admin', 'maintainer'].includes(auth.user?.role || ''))
-// projectId 的唯一事实来源是路由参数（由 ProjectLayout 保证存在）
+// projectId's single source of truth is the route param (guaranteed by ProjectLayout)
 const projectId = computed(() => String(route.params.id || ''))
 const filteredSteps = computed(() => (statusFilter.value ? steps.value.filter((s) => s.status === statusFilter.value) : steps.value))
 const memberMap = computed(() => Object.fromEntries(members.value.map((m) => [m.user_id, m.username || m.user_id])) as Record<string, string>)
@@ -226,7 +229,7 @@ async function load() {
     steps.value = (data.items ?? []).slice().sort((a, b) => a.step_order - b.step_order)
     members.value = memberList ?? []
   } catch (err) {
-    loadError.value = err instanceof Error ? err.message : '装配步骤加载失败'
+    loadError.value = err instanceof Error ? err.message : t('assembly.loadFailed')
   } finally {
     loading.value = false
   }
@@ -242,12 +245,12 @@ function depName(id?: string) {
   return steps.value.find((s) => s.id === id)?.name || '—'
 }
 
-function fmtTime(t?: string) {
-  return t ? new Date(t).toLocaleString('zh-CN', { hour12: false }) : '—'
+function fmtTime(time?: string) {
+  return time ? new Date(time).toLocaleString(undefined, { hour12: false }) : '—'
 }
 
 async function onTransition(step: AssemblyStep, action: TransitionAction) {
-  // start/resume 时检查依赖门槛：前置步骤非 completed 时走 override 对话框
+  // start/resume check dependency: show override dialog when prerequisite is not completed
   if (action.transition === 'start' || action.transition === 'resume') {
     const dep = step.depends_on ? steps.value.find((s) => s.id === step.depends_on) : undefined
     if (dep && dep.status !== 'completed') {
@@ -259,7 +262,11 @@ async function onTransition(step: AssemblyStep, action: TransitionAction) {
   }
   if (action.confirm) {
     try {
-      await ElMessageBox.confirm(`确认${action.label}步骤「${step.name}」？`, '状态流转', { type: 'warning' })
+      await ElMessageBox.confirm(
+        t('assembly.confirmTransition', { action: action.label, name: step.name }),
+        t('assembly.transitionTitle'),
+        { type: 'warning' }
+      )
     } catch {
       return
     }
@@ -277,10 +284,10 @@ async function submitOverride() {
 async function doTransition(id: string, transition: string, reason = '') {
   try {
     await transitionAssemblyStep(id, transition, reason)
-    ElMessage.success('状态已更新')
+    ElMessage.success(t('assembly.statusUpdated'))
     await load()
   } catch (err) {
-    showApiError(err, '状态流转失败')
+    showApiError(err, t('assembly.transitionFailed'))
   }
 }
 
@@ -297,21 +304,21 @@ async function onDrop(index: number) {
   reordered.splice(index, 0, moved)
   try {
     await reorderAssemblySteps({ project_id: projectId.value, steps: reordered.map((s, i) => ({ id: s.id, step_order: i + 1 })) })
-    ElMessage.success('顺序已更新')
+    ElMessage.success(t('assembly.orderUpdated'))
     await load()
   } catch (err) {
-    showApiError(err, '排序失败')
+    showApiError(err, t('assembly.reorderFailed'))
     await load()
   }
 }
 
 async function create() {
   if (!draft.name.trim()) {
-    ElMessage.warning('请填写步骤名称')
+    ElMessage.warning(t('assembly.nameRequired'))
     return
   }
   try {
-    // step_order 不传，由服务端自动取 max+1
+    // step_order is not sent; the server assigns max+1 automatically
     await createAssemblyStep(projectId.value, {
       name: draft.name.trim(),
       description: draft.description.trim() || undefined,
@@ -323,25 +330,29 @@ async function create() {
     draft.description = ''
     draft.depends_on = ''
     draft.assigned_to = ''
-    ElMessage.success('步骤已创建')
+    ElMessage.success(t('assembly.created'))
     await load()
   } catch (err) {
-    showApiError(err, '步骤创建失败')
+    showApiError(err, t('assembly.createFailed'))
   }
 }
 
 async function remove(step: AssemblyStep) {
   try {
-    await ElMessageBox.confirm(`确认删除步骤「${step.name}」？`, '删除步骤', { type: 'warning' })
+    await ElMessageBox.confirm(
+      t('assembly.confirmDelete', { name: step.name }),
+      t('assembly.deleteTitle'),
+      { type: 'warning' }
+    )
   } catch {
     return
   }
   try {
     await deleteAssemblyStep(step.id)
-    ElMessage.success('步骤已删除')
+    ElMessage.success(t('assembly.deleted'))
     await load()
   } catch (err) {
-    showApiError(err, '步骤删除失败')
+    showApiError(err, t('assembly.deleteFailed'))
   }
 }
 
@@ -365,13 +376,17 @@ async function generate() {
       aiStage.value = 'result'
     } else if (res.status === 'clarify') {
       aiNoticeType.value = 'warning'
-      aiNotice.value = res.question ? `需要补充信息：${res.question}` : '需要补充更多信息，请完善描述后重试'
+      aiNotice.value = res.question
+        ? t('assembly.clarifyNeeded', { question: res.question })
+        : t('assembly.clarifyMore')
     } else {
       aiNoticeType.value = 'error'
-      aiNotice.value = res.reason ? `无法生成：${res.reason}` : '无法生成步骤，请调整描述后重试'
+      aiNotice.value = res.reason
+        ? t('assembly.generateFailedReason', { reason: res.reason })
+        : t('assembly.generateFailed')
     }
   } catch (err) {
-    showApiError(err, 'AI 生成失败')
+    showApiError(err, t('assembly.aiFailed'))
   } finally {
     aiGenerating.value = false
   }
@@ -379,11 +394,11 @@ async function generate() {
 
 function validAiItems() {
   if (aiItems.value.length < 1 || aiItems.value.length > 30) {
-    ElMessage.warning('候选步骤数需在 1-30 之间')
+    ElMessage.warning(t('assembly.itemsCount'))
     return false
   }
   if (aiItems.value.some((s) => !s.name.trim())) {
-    ElMessage.warning('请填写所有步骤名称')
+    ElMessage.warning(t('assembly.allNamesRequired'))
     return false
   }
   return true
@@ -394,11 +409,11 @@ async function applyInline() {
   aiSubmitting.value = true
   try {
     await applyAssemblyTemplate(projectId.value, { steps: aiItems.value, source_prompt: aiPrompt.value.trim() })
-    ElMessage.success('步骤已应用到当前项目')
+    ElMessage.success(t('assembly.applied'))
     aiDialog.value = false
     await load()
   } catch (err) {
-    showApiError(err, '应用失败')
+    showApiError(err, t('assembly.applyFailed'))
   } finally {
     aiSubmitting.value = false
   }
@@ -406,7 +421,7 @@ async function applyInline() {
 
 async function createTemplateFromAi() {
   if (!aiName.value.trim()) {
-    ElMessage.warning('请填写模板名称')
+    ElMessage.warning(t('assembly.templateNameRequired'))
     return null
   }
   if (!validAiItems()) return null
@@ -422,13 +437,13 @@ async function createTemplateFromAi() {
 async function saveTemplateOnly() {
   aiSubmitting.value = true
   try {
-    const t = await createTemplateFromAi()
-    if (t) {
-      ElMessage.success('模板已保存，可在模板库中查看')
+    const templ = await createTemplateFromAi()
+    if (templ) {
+      ElMessage.success(t('assembly.templateSaved'))
       aiDialog.value = false
     }
   } catch (err) {
-    showApiError(err, '模板保存失败')
+    showApiError(err, t('assembly.templateSaveFailed'))
   } finally {
     aiSubmitting.value = false
   }
@@ -437,14 +452,14 @@ async function saveTemplateOnly() {
 async function saveAndApply() {
   aiSubmitting.value = true
   try {
-    const t = await createTemplateFromAi()
-    if (!t) return
-    await applyAssemblyTemplate(projectId.value, { template_id: t.id })
-    ElMessage.success('模板已保存并应用到当前项目')
+    const templ = await createTemplateFromAi()
+    if (!templ) return
+    await applyAssemblyTemplate(projectId.value, { template_id: templ.id })
+    ElMessage.success(t('assembly.templateSavedApplied'))
     aiDialog.value = false
     await load()
   } catch (err) {
-    showApiError(err, '保存并应用失败')
+    showApiError(err, t('assembly.saveApplyFailed'))
   } finally {
     aiSubmitting.value = false
   }

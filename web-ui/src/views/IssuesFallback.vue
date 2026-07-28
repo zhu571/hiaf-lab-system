@@ -1,11 +1,13 @@
 <template>
   <div class="fallback-page">
-    <el-empty description="请先在项目页面选择一个项目" />
-    <el-button type="primary" @click="$router.push('/projects')">前往项目列表</el-button>
+    <el-empty :description="t('issuesFallback.selectProject')" />
+    <el-button type="primary" @click="$router.push('/projects')">{{ t('issuesFallback.goToProjects') }}</el-button>
   </div>
 </template>
 
 <script setup lang="ts">
+import { useI18n } from 'vue-i18n'
+const { t } = useI18n()
 </script>
 
 <style scoped>
