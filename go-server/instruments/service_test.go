@@ -8,6 +8,62 @@ import (
 	"testing"
 )
 
+func TestParseResultSweepXY(t *testing.T) {
+	svc := NewServiceWithGateway("http://unused")
+	def, err := GetCommand("e5063a", "trigger_single")
+	if err != nil || def.ResultParser == nil {
+		t.Fatalf("trigger_single missing result_parser: def=%+v err=%v", def, err)
+	}
+	parsed, err := svc.ParseResult(def, "noise 1000000,-10.5;2000000,-20.25;3000000,-15.0; tail")
+	if err != nil {
+		t.Fatalf("ParseResult returned error: %v", err)
+	}
+	if parsed.Type != "sweep_xy" || len(parsed.Points) != 3 || parsed.XLabel == "" || parsed.YLabel == "" {
+		t.Fatalf("unexpected parsed result: %+v", parsed)
+	}
+	if parsed.Points[0] != (Point{X: 1000000, Y: -10.5}) || parsed.Points[2] != (Point{X: 3000000, Y: -15.0}) {
+		t.Fatalf("unexpected points: %+v", parsed.Points)
+	}
+}
+
+func TestParseResultSingleValue(t *testing.T) {
+	svc := NewServiceWithGateway("http://unused")
+	def, err := GetCommand("hioki_im3536", "measure_single")
+	if err != nil || def.ResultParser == nil {
+		t.Fatalf("measure_single missing result_parser: def=%+v err=%v", def, err)
+	}
+	parsed, err := svc.ParseResult(def, "1.0234E+2,-89.5,0,0")
+	if err != nil {
+		t.Fatalf("ParseResult returned error: %v", err)
+	}
+	if parsed.Type != "single_value" || parsed.Value == nil || *parsed.Value != 102.34 {
+		t.Fatalf("unexpected parsed result: %+v", parsed)
+	}
+}
+
+func TestParseResultWithoutParser(t *testing.T) {
+	svc := NewServiceWithGateway("http://unused")
+	def, err := GetCommand("e5063a", "identify")
+	if err != nil {
+		t.Fatalf("GetCommand: %v", err)
+	}
+	parsed, err := svc.ParseResult(def, "Keysight,E5063A")
+	if err != nil || parsed != nil {
+		t.Fatalf("expected (nil, nil), got parsed=%+v err=%v", parsed, err)
+	}
+}
+
+func TestParseResultRejectsMalformedSweep(t *testing.T) {
+	svc := NewServiceWithGateway("http://unused")
+	def, err := GetCommand("e5063a", "trigger_single")
+	if err != nil {
+		t.Fatalf("GetCommand: %v", err)
+	}
+	if _, err := svc.ParseResult(def, "no numeric data here"); err == nil {
+		t.Fatal("expected error for unparseable sweep response")
+	}
+}
+
 func TestInterpretValidatesAgentCandidate(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Header.Get("Authorization") != "Bearer internal" {

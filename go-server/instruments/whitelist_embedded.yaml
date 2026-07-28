@@ -160,6 +160,11 @@ e5063a:
           continuous: "INIT1:CONT?"
         failure_action: "mark_instrument_needs_check_and_alert"
       returns: "complex_s11"
+      result_parser:
+        type: sweep_xy
+        x_label: "频率 (Hz)"
+        y_label: "S11 (dB)"
+        regex: "(?P<points>(?:[\\d.]+,[\\d.-]+(?:;|$))+)"
 
     - name: take_screenshot
       description: "保存仪器屏幕截图"
@@ -217,6 +222,8 @@ hioki_im3536:
       risk: green
       scpi: "MEASure?"
       returns: [Z_ohm, theta_deg, param3, param4]
+      result_parser:
+        type: single_value
 
     - name: self_test
       description: "自检"

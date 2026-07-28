@@ -105,6 +105,36 @@ func (h *Handler) ExecuteCommand(w http.ResponseWriter, r *http.Request) {
 	common.WriteSuccess(w, r, result)
 }
 
+// ParseResult handles POST /api/v1/instruments/{id}/parse-result.
+// It parses a raw instrument response with the whitelist result_parser config;
+// it is read-only and does not require an Idempotency-Key.
+func (h *Handler) ParseResult(w http.ResponseWriter, r *http.Request) {
+	id := chi.URLParam(r, "id")
+	if _, ok := whitelist[id]; !ok {
+		common.WriteError(w, r, http.StatusNotFound, "instrument_not_found", "仪器不存在", nil)
+		return
+	}
+	var req struct {
+		Command  string `json:"command"`
+		Response string `json:"response"`
+	}
+	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<20)).Decode(&req); err != nil || req.Command == "" {
+		common.WriteError(w, r, http.StatusBadRequest, "bad_request", "请求体解析失败", nil)
+		return
+	}
+	def, err := GetCommand(id, req.Command)
+	if err != nil {
+		common.WriteError(w, r, http.StatusBadRequest, "command_not_allowed", "命令不在允许的白名单中", nil)
+		return
+	}
+	parsed, err := h.svc.ParseResult(def, req.Response)
+	if err != nil {
+		common.WriteError(w, r, http.StatusBadRequest, "parse_failed", err.Error(), nil)
+		return
+	}
+	common.WriteSuccess(w, r, parsed)
+}
+
 // InterpretCommand translates natural language into a validated candidate and never executes it.
 func (h *Handler) InterpretCommand(w http.ResponseWriter, r *http.Request) {
 	if !requireIdempotencyKey(w, r) {
