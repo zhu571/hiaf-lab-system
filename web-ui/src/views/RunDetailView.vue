@@ -66,6 +66,51 @@
             </section>
           </div>
         </el-tab-pane>
+        <el-tab-pane label="步骤" name="steps">
+          <section class="panel">
+            <div class="steps-toolbar">
+              <h3 class="panel-title">实验步骤</h3>
+              <div v-if="canEdit" class="steps-actions">
+                <el-button size="small" type="primary" plain @click="aiDialog = true">AI 生成步骤</el-button>
+                <el-button size="small" plain @click="openImport">从模板导入</el-button>
+                <el-button size="small" type="primary" @click="openCreateStep">手动新建</el-button>
+              </div>
+            </div>
+            <el-table v-loading="stepsLoading" :data="steps" size="small">
+              <el-table-column label="#" width="50" align="center">
+                <template #default="{ row }">{{ row.step_order }}</template>
+              </el-table-column>
+              <el-table-column prop="name" label="名称" min-width="140" />
+              <el-table-column label="描述" min-width="180">
+                <template #default="{ row }">{{ row.description || '—' }}</template>
+              </el-table-column>
+              <el-table-column label="状态" width="100">
+                <template #default="{ row }"><StatusBadge :value="row.status" /></template>
+              </el-table-column>
+              <el-table-column label="依赖步骤" width="140">
+                <template #default="{ row }">{{ depName(row.depends_on) }}</template>
+              </el-table-column>
+              <el-table-column v-if="canEdit" label="操作" width="280" fixed="right">
+                <template #default="{ row }">
+                  <el-button
+                    v-for="a in stepTransitions[row.status] || []"
+                    :key="a.value"
+                    size="small"
+                    :type="a.danger ? 'danger' : 'primary'"
+                    plain
+                    @click="onStepTransition(row, a)"
+                  >
+                    {{ a.label }}
+                  </el-button>
+                  <el-button size="small" type="danger" plain @click="removeStep(row)">删除</el-button>
+                </template>
+              </el-table-column>
+              <template #empty>
+                <el-empty description="暂无实验步骤" :image-size="60" />
+              </template>
+            </el-table>
+          </section>
+        </el-tab-pane>
         <el-tab-pane label="关联日报" name="reports">
           <section class="panel">
             <h3 class="panel-title">关联日报</h3>
@@ -142,6 +187,65 @@
         <el-button type="primary" :loading="saving" @click="saveEdit">保存</el-button>
       </template>
     </el-dialog>
+    <el-dialog v-model="createStepDialog" title="新建步骤" width="520">
+      <el-form label-position="top">
+        <el-form-item label="名称" required><el-input v-model="stepDraft.name" maxlength="256" /></el-form-item>
+        <el-form-item label="描述"><el-input v-model="stepDraft.description" type="textarea" :rows="3" /></el-form-item>
+        <el-form-item label="依赖步骤">
+          <el-select v-model="stepDraft.depends_on" clearable placeholder="无依赖">
+            <el-option v-for="s in steps" :key="s.id" :label="`${s.step_order}. ${s.name}`" :value="s.id" />
+          </el-select>
+        </el-form-item>
+      </el-form>
+      <template #footer>
+        <el-button @click="createStepDialog = false">取消</el-button>
+        <el-button type="primary" :loading="stepSaving" @click="createStep">保存</el-button>
+      </template>
+    </el-dialog>
+    <el-dialog v-model="aiDialog" title="AI 生成步骤" width="760" @closed="resetAi">
+      <div v-if="aiStage === 'input'" class="grid">
+        <el-alert v-if="aiNotice" :type="aiNoticeType" :title="aiNotice" show-icon :closable="false" />
+        <el-input
+          v-model="aiPrompt"
+          type="textarea"
+          :rows="4"
+          maxlength="4000"
+          placeholder="用自然语言描述实验流程，例如：先降温到 4K 并稳定，再充气到目标压力，最后开始数据采集"
+        />
+      </div>
+      <div v-else class="grid">
+        <el-form label-position="top">
+          <el-form-item label="模板名称（存模板时使用）">
+            <el-input v-model="aiName" maxlength="256" />
+          </el-form-item>
+        </el-form>
+        <StepItemsEditor :key="aiKey" v-model="aiItems" />
+      </div>
+      <template #footer>
+        <template v-if="aiStage === 'input'">
+          <el-button @click="aiDialog = false">取消</el-button>
+          <el-button type="primary" :loading="aiGenerating" :disabled="!aiPrompt.trim()" @click="generateAiSteps">生成候选</el-button>
+        </template>
+        <template v-else>
+          <el-button @click="aiStage = 'input'">返回修改</el-button>
+          <el-button :loading="aiSubmitting" @click="applyInline">直接应用</el-button>
+          <el-button v-if="canSaveTemplate" :loading="aiSubmitting" @click="saveTemplateOnly">存模板</el-button>
+          <el-button v-if="canSaveTemplate" type="primary" :loading="aiSubmitting" @click="saveAndApply">存并应用</el-button>
+        </template>
+      </template>
+    </el-dialog>
+    <el-dialog v-model="importDialog" title="从模板导入" width="520">
+      <div class="grid">
+        <p class="import-tip">将所选实验模板的步骤追加到当前批次。</p>
+        <el-select v-model="importTemplateId" v-loading="templatesLoading" filterable placeholder="选择实验步骤模板" class="import-select">
+          <el-option v-for="t in templateOptions" :key="t.id" :label="t.name" :value="t.id" />
+        </el-select>
+      </div>
+      <template #footer>
+        <el-button @click="importDialog = false">取消</el-button>
+        <el-button type="primary" :loading="importing" :disabled="!importTemplateId" @click="confirmImport">导入</el-button>
+      </template>
+    </el-dialog>
   </div>
 </template>
 
@@ -150,16 +254,24 @@ import { computed, onMounted, reactive, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import StatusBadge from '../components/StatusBadge.vue'
+import StepItemsEditor from '../components/StepItemsEditor.vue'
 import {
   addReportLink,
+  applyRunTemplate,
+  createRunStep,
   deleteRun,
+  deleteRunStep,
   getRun,
+  listRunSteps,
   removeReportLink,
   transitionRun,
   updateRun,
+  updateRunStep,
   type ExperimentRun,
-  type RunPayload
+  type RunPayload,
+  type RunStep
 } from '../api/runs'
+import { createTemplate, generateSteps, listTemplates, type StepTemplate, type StepTemplateItem } from '../api/stepTemplates'
 import { listReports, type DailyReport } from '../api/logs'
 import { listTestData, type TestData } from '../api/testdata'
 import { useAuthStore } from '../stores/auth'
@@ -186,6 +298,28 @@ const linking = ref(false)
 
 const testData = ref<TestData[]>([])
 const testDataLoading = ref(false)
+
+const steps = ref<RunStep[]>([])
+const stepsLoading = ref(false)
+const createStepDialog = ref(false)
+const stepSaving = ref(false)
+const stepDraft = reactive({ name: '', description: '', depends_on: '' })
+// AI 生成步骤对话框状态：input（输入自然语言）→ result（编辑候选）
+const aiDialog = ref(false)
+const aiStage = ref<'input' | 'result'>('input')
+const aiPrompt = ref('')
+const aiNotice = ref('')
+const aiNoticeType = ref<'warning' | 'error'>('warning')
+const aiGenerating = ref(false)
+const aiSubmitting = ref(false)
+const aiName = ref('')
+const aiItems = ref<StepTemplateItem[]>([])
+const aiKey = ref(0)
+const importDialog = ref(false)
+const importTemplateId = ref('')
+const templateOptions = ref<StepTemplate[]>([])
+const templatesLoading = ref(false)
+const importing = ref(false)
 
 const statusLabels: Record<string, string> = {
   planned: '计划中',
@@ -254,6 +388,28 @@ const transitionMap: Record<string, TransitionAction[]> = {
 // viewer 只读，隐藏状态转移/编辑/删除/关联入口（后端仍强校验）
 const canEdit = computed(() => !!auth.user && auth.user.role !== 'viewer')
 const transitions = computed(() => (run.value ? transitionMap[run.value.status] || [] : []))
+// 后端 steptemplates 创建模板仅允许 admin/maintainer
+const canSaveTemplate = computed(() => ['admin', 'maintainer'].includes(auth.user?.role || ''))
+
+// 与后端 StepAllowedTransitions 保持一致：planned→start/cancel；in_progress→pause/complete/skip/cancel；paused→resume/cancel；skipped→start
+type StepAction = { value: string; label: string; confirm?: boolean; danger?: boolean }
+const stepTransitions: Record<string, StepAction[]> = {
+  planned: [
+    { value: 'start', label: '开始' },
+    { value: 'cancel', label: '取消', confirm: true, danger: true }
+  ],
+  in_progress: [
+    { value: 'pause', label: '暂停' },
+    { value: 'complete', label: '完成', confirm: true },
+    { value: 'skip', label: '跳过', confirm: true },
+    { value: 'cancel', label: '取消', confirm: true, danger: true }
+  ],
+  paused: [
+    { value: 'resume', label: '恢复' },
+    { value: 'cancel', label: '取消', confirm: true, danger: true }
+  ],
+  skipped: [{ value: 'start', label: '重新开始' }]
+}
 
 const pressureText = computed(() => {
   if (!run.value) return '—'
@@ -285,8 +441,8 @@ async function load() {
   error.value = ''
   try {
     run.value = await getRun(runId)
-    // 两个面板独立加载，失败不影响主内容
-    await Promise.all([loadReports(), loadTestData()])
+    // 三个面板独立加载，失败不影响主内容
+    await Promise.all([loadReports(), loadTestData(), loadSteps()])
   } catch (err) {
     error.value = err instanceof Error ? err.message : '批次加载失败'
     showApiError(err, '批次加载失败')
@@ -317,6 +473,226 @@ async function loadTestData() {
     showApiError(err, '测试数据加载失败')
   } finally {
     testDataLoading.value = false
+  }
+}
+
+// 步骤变更后只刷新步骤列表，不触发主 load()
+async function loadSteps() {
+  stepsLoading.value = true
+  try {
+    const data = await listRunSteps(runId)
+    steps.value = (data.items ?? []).slice().sort((a, b) => a.step_order - b.step_order)
+  } catch (err) {
+    showApiError(err, '步骤列表加载失败')
+  } finally {
+    stepsLoading.value = false
+  }
+}
+
+function depName(id?: string) {
+  if (!id) return '—'
+  const dep = steps.value.find((s) => s.id === id)
+  return dep ? `${dep.step_order}. ${dep.name}` : '—'
+}
+
+async function onStepTransition(step: RunStep, action: StepAction) {
+  if (action.confirm) {
+    try {
+      await ElMessageBox.confirm(`确认${action.label}步骤「${step.name}」？`, '状态流转', { type: 'warning' })
+    } catch {
+      return
+    }
+  }
+  try {
+    await updateRunStep(step.id, { transition: action.value })
+    ElMessage.success('状态已更新')
+    await loadSteps()
+  } catch (err) {
+    showApiError(err, '状态流转失败')
+  }
+}
+
+function openCreateStep() {
+  stepDraft.name = ''
+  stepDraft.description = ''
+  stepDraft.depends_on = ''
+  createStepDialog.value = true
+}
+
+async function createStep() {
+  if (!stepDraft.name.trim()) {
+    ElMessage.warning('请填写步骤名称')
+    return
+  }
+  stepSaving.value = true
+  try {
+    // step_order 不传，由服务端自动取 max+1
+    await createRunStep(runId, {
+      name: stepDraft.name.trim(),
+      description: stepDraft.description.trim() || undefined,
+      depends_on: stepDraft.depends_on || undefined
+    })
+    createStepDialog.value = false
+    ElMessage.success('步骤已创建')
+    await loadSteps()
+  } catch (err) {
+    showApiError(err, '步骤创建失败')
+  } finally {
+    stepSaving.value = false
+  }
+}
+
+async function removeStep(step: RunStep) {
+  try {
+    await ElMessageBox.confirm(`确认删除步骤「${step.name}」？`, '删除步骤', { type: 'warning' })
+  } catch {
+    return
+  }
+  try {
+    await deleteRunStep(step.id)
+    ElMessage.success('步骤已删除')
+    await loadSteps()
+  } catch (err) {
+    showApiError(err, '步骤删除失败')
+  }
+}
+
+function resetAi() {
+  aiStage.value = 'input'
+  aiPrompt.value = ''
+  aiNotice.value = ''
+  aiName.value = ''
+  aiItems.value = []
+}
+
+async function generateAiSteps() {
+  aiGenerating.value = true
+  aiNotice.value = ''
+  try {
+    // 带上批次上下文（类型/气体/设备），帮助模型生成更贴合的步骤
+    const context = run.value
+      ? { run_type: run.value.run_type, gas_type: run.value.gas_type, devices: run.value.devices ?? [] }
+      : undefined
+    const res = await generateSteps('experiment', aiPrompt.value.trim(), context)
+    if (res.status === 'ok') {
+      aiItems.value = res.steps ?? []
+      aiName.value = res.name_suggestion || ''
+      aiKey.value += 1
+      aiStage.value = 'result'
+    } else if (res.status === 'clarify') {
+      aiNoticeType.value = 'warning'
+      aiNotice.value = res.question ? `需要补充信息：${res.question}` : '需要补充更多信息，请完善描述后重试'
+    } else {
+      aiNoticeType.value = 'error'
+      aiNotice.value = res.reason ? `无法生成：${res.reason}` : '无法生成步骤，请调整描述后重试'
+    }
+  } catch (err) {
+    showApiError(err, 'AI 生成失败')
+  } finally {
+    aiGenerating.value = false
+  }
+}
+
+function validAiItems() {
+  if (aiItems.value.length < 1 || aiItems.value.length > 30) {
+    ElMessage.warning('候选步骤数需在 1-30 之间')
+    return false
+  }
+  if (aiItems.value.some((s) => !s.name.trim())) {
+    ElMessage.warning('请填写所有步骤名称')
+    return false
+  }
+  return true
+}
+
+async function applyInline() {
+  if (!validAiItems()) return
+  aiSubmitting.value = true
+  try {
+    await applyRunTemplate(runId, { steps: aiItems.value, source_prompt: aiPrompt.value.trim() })
+    ElMessage.success('步骤已应用到当前批次')
+    aiDialog.value = false
+    await loadSteps()
+  } catch (err) {
+    showApiError(err, '应用失败')
+  } finally {
+    aiSubmitting.value = false
+  }
+}
+
+async function createTemplateFromAi() {
+  if (!aiName.value.trim()) {
+    ElMessage.warning('请填写模板名称')
+    return null
+  }
+  if (!validAiItems()) return null
+  return createTemplate({
+    name: aiName.value.trim(),
+    kind: 'experiment',
+    items: aiItems.value,
+    source_prompt: aiPrompt.value.trim(),
+    ai_generated: true
+  })
+}
+
+async function saveTemplateOnly() {
+  aiSubmitting.value = true
+  try {
+    const t = await createTemplateFromAi()
+    if (t) {
+      ElMessage.success('模板已保存，可在模板库中查看')
+      aiDialog.value = false
+    }
+  } catch (err) {
+    showApiError(err, '模板保存失败')
+  } finally {
+    aiSubmitting.value = false
+  }
+}
+
+async function saveAndApply() {
+  aiSubmitting.value = true
+  try {
+    const t = await createTemplateFromAi()
+    if (!t) return
+    await applyRunTemplate(runId, { template_id: t.id })
+    ElMessage.success('模板已保存并应用到当前批次')
+    aiDialog.value = false
+    await loadSteps()
+  } catch (err) {
+    showApiError(err, '保存并应用失败')
+  } finally {
+    aiSubmitting.value = false
+  }
+}
+
+async function openImport() {
+  importTemplateId.value = ''
+  templateOptions.value = []
+  importDialog.value = true
+  templatesLoading.value = true
+  try {
+    const res = await listTemplates({ kind: 'experiment', per_page: 100 })
+    templateOptions.value = res.items ?? []
+  } catch (err) {
+    showApiError(err, '模板列表加载失败')
+  } finally {
+    templatesLoading.value = false
+  }
+}
+
+async function confirmImport() {
+  if (!importTemplateId.value) return
+  importing.value = true
+  try {
+    await applyRunTemplate(runId, { template_id: importTemplateId.value })
+    ElMessage.success('模板步骤已导入')
+    importDialog.value = false
+    await loadSteps()
+  } catch (err) {
+    showApiError(err, '导入失败')
+  } finally {
+    importing.value = false
   }
 }
 
@@ -522,6 +898,38 @@ function fmtTime(x?: string) {
 .panel-title {
   font-size: 15px;
   margin-bottom: 14px;
+}
+
+.steps-toolbar {
+  align-items: center;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  justify-content: space-between;
+  margin-bottom: 14px;
+}
+
+.steps-toolbar .panel-title {
+  margin-bottom: 0;
+}
+
+.steps-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.steps-actions .el-button + .el-button {
+  margin-left: 0;
+}
+
+.import-tip {
+  color: var(--text-2);
+  font-size: 13px;
+}
+
+.import-select {
+  width: 100%;
 }
 
 .dev-tag {
