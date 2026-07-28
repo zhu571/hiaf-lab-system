@@ -149,34 +149,34 @@
         </el-tab-pane>
       </el-tabs>
     </template>
-    <el-dialog v-model="editDialog" title="编辑元数据" width="620">
+    <el-dialog v-model="editDialog" :title="t('runDetail.editMetadata')" width="620">
       <el-form label-position="top">
-        <el-form-item label="名称（必填）"><el-input v-model="editDraft.name" /></el-form-item>
+        <el-form-item :label="t('runDetail.nameRequired')"><el-input v-model="editDraft.name" /></el-form-item>
         <el-form-item label="Campaign"><el-input v-model="editDraft.campaign" /></el-form-item>
         <div class="form-row">
-          <el-form-item label="类型">
+          <el-form-item :label="t('runDetail.type')">
             <el-select v-model="editDraft.run_type">
               <el-option v-for="t in runTypes" :key="t.value" :label="t.label" :value="t.value" />
             </el-select>
           </el-form-item>
-          <el-form-item label="气体">
+          <el-form-item :label="t('runDetail.gas')">
             <el-select v-model="editDraft.gas_type">
               <el-option v-for="g in gasTypes" :key="g" :label="g" :value="g" />
             </el-select>
           </el-form-item>
         </div>
         <div class="form-row">
-          <el-form-item label="目标温度"><el-input-number v-model="editDraft.target_temp" :controls="false" placeholder="可选" /></el-form-item>
-          <el-form-item label="最低温度"><el-input-number v-model="editDraft.min_temp" :controls="false" placeholder="可选" /></el-form-item>
+          <el-form-item :label="t('runDetail.targetTemp')"><el-input-number v-model="editDraft.target_temp" :controls="false" :placeholder="t('runDetail.optional')" /></el-form-item>
+          <el-form-item :label="t('runDetail.minTemp')"><el-input-number v-model="editDraft.min_temp" :controls="false" :placeholder="t('runDetail.optional')" /></el-form-item>
         </div>
         <div class="form-row three">
-          <el-form-item label="压力下限"><el-input-number v-model="editDraft.pressure_min" :controls="false" placeholder="可选" /></el-form-item>
-          <el-form-item label="压力上限"><el-input-number v-model="editDraft.pressure_max" :controls="false" placeholder="可选" /></el-form-item>
-          <el-form-item label="压力单位"><el-input v-model="editDraft.pressure_unit" /></el-form-item>
+          <el-form-item :label="t('runDetail.pressureMin')"><el-input-number v-model="editDraft.pressure_min" :controls="false" :placeholder="t('runDetail.optional')" /></el-form-item>
+          <el-form-item :label="t('runDetail.pressureMax')"><el-input-number v-model="editDraft.pressure_max" :controls="false" :placeholder="t('runDetail.optional')" /></el-form-item>
+          <el-form-item :label="t('runDetail.pressureUnit')"><el-input v-model="editDraft.pressure_unit" /></el-form-item>
         </div>
-        <el-form-item label="有束流"><el-switch v-model="editDraft.has_beam" /></el-form-item>
-        <el-form-item label="设备">
-          <el-select v-model="editDraft.devices" multiple placeholder="选择设备">
+        <el-form-item :label="t('runDetail.hasBeam')"><el-switch v-model="editDraft.has_beam" /></el-form-item>
+        <el-form-item :label="t('runDetail.devices')">
+          <el-select v-model="editDraft.devices" multiple :placeholder="t('runDetail.selectDevices')">
             <el-option v-for="d in deviceOptions" :key="d" :label="d" :value="d" />
           </el-select>
         </el-form-item>
