@@ -1,8 +1,8 @@
 <template>
   <div class="page">
     <div class="toolbar">
-      <h2>问题看板</h2>
-      <el-button type="primary" @click="createDialog = true">新建问题</el-button>
+      <h2>{{ t('issues.title') }}</h2>
+      <el-button type="primary" @click="createDialog = true">{{ t('issues.create') }}</el-button>
     </div>
     <div class="board">
       <section v-for="status in statuses" :key="status" class="panel column" :data-status="status">
@@ -21,10 +21,10 @@
           <span class="severity"><i class="sev-dot" />{{ issue.severity }}</span>
           <el-tag v-if="issue.ai_generated" class="ai-tag" size="small" type="warning" effect="light">AI</el-tag>
         </button>
-        <p v-if="grouped[status].length === 0" class="empty-hint">暂无问题</p>
+        <p v-if="grouped[status].length === 0" class="empty-hint">{{ t('issues.empty') }}</p>
       </section>
     </div>
-    <el-drawer v-model="drawer" size="420" title="问题详情">
+    <el-drawer v-model="drawer" size="420" :title="t('issues.detail')">
       <div v-if="selected" class="grid">
         <StatusBadge :value="selected.status" />
         <h3>{{ selected.title }}</h3>
@@ -32,20 +32,20 @@
         <el-select v-model="targetStatus">
           <el-option v-for="s in statuses" :key="s" :label="s" :value="s" />
         </el-select>
-        <el-input v-model="reason" placeholder="状态变更理由" />
-        <el-button @click="transition">更新状态</el-button>
+        <el-input v-model="reason" :placeholder="t('issues.reasonPlaceholder')" />
+        <el-button @click="transition">{{ t('issues.updateStatus') }}</el-button>
         <CommentSection :comments="selected.comments || []" @submit="comment" />
       </div>
     </el-drawer>
-    <el-dialog v-model="createDialog" title="新建问题" width="560">
+    <el-dialog v-model="createDialog" :title="t('issues.create')" width="560">
       <el-form label-position="top">
-        <el-form-item label="标题"><el-input v-model="draft.title" /></el-form-item>
-        <el-form-item label="严重程度"><el-select v-model="draft.severity"><el-option v-for="s in severities" :key="s" :label="s" :value="s" /></el-select></el-form-item>
-        <el-form-item label="描述"><el-input v-model="draft.description" type="textarea" /></el-form-item>
+        <el-form-item :label="t('issues.fieldTitle')"><el-input v-model="draft.title" /></el-form-item>
+        <el-form-item :label="t('issues.severity')"><el-select v-model="draft.severity"><el-option v-for="s in severities" :key="s" :label="s" :value="s" /></el-select></el-form-item>
+        <el-form-item :label="t('issues.description')"><el-input v-model="draft.description" type="textarea" /></el-form-item>
       </el-form>
       <template #footer>
-        <el-button @click="createDialog = false">取消</el-button>
-        <el-button type="primary" @click="create">保存</el-button>
+        <el-button @click="createDialog = false">{{ t('common.cancel') }}</el-button>
+        <el-button type="primary" @click="create">{{ t('issues.save') }}</el-button>
       </template>
     </el-dialog>
   </div>
@@ -54,6 +54,7 @@
 <script setup lang="ts">
 import { computed, onMounted, reactive, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
+import { useI18n } from 'vue-i18n'
 import { ElMessage } from 'element-plus'
 import { showApiError } from '../composables/useNotify'
 import StatusBadge from '../components/StatusBadge.vue'
@@ -64,6 +65,7 @@ import { useProjectStore } from '../stores/project'
 const route = useRoute()
 const router = useRouter()
 const projects = useProjectStore()
+const { t } = useI18n()
 const issues = ref<Issue[]>([])
 const selected = ref<Issue | null>(null)
 const drawer = ref(false)
@@ -105,11 +107,11 @@ async function transition() {
   try {
     await transitionIssue(id, targetStatus.value, reason.value)
     reason.value = ''
-    ElMessage.success('状态已更新')
+    ElMessage.success(t('issues.statusUpdated'))
     await load()
     await open(id)
   } catch (err) {
-    showApiError(err, '状态更新失败')
+    showApiError(err, t('issues.statusUpdateFailed'))
   }
 }
 

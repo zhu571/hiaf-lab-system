@@ -1,52 +1,52 @@
 <template>
   <div class="page">
     <div class="toolbar">
-      <h2>步骤模板</h2>
-      <el-select v-model="kindFilter" class="kind-select" placeholder="全部类型" clearable @change="onFilter">
-        <el-option label="装配" value="assembly" />
-        <el-option label="实验" value="experiment" />
+      <h2>{{ t('stepTemplates.title') }}</h2>
+      <el-select v-model="kindFilter" class="kind-select" :placeholder="t('stepTemplates.allTypes')" clearable @change="onFilter">
+        <el-option :label="t('stepTemplates.assembly')" value="assembly" />
+        <el-option :label="t('stepTemplates.experiment')" value="experiment" />
       </el-select>
-      <el-input v-model="keyword" class="search-input" placeholder="搜索名称 / 描述" clearable @change="onFilter" />
-      <el-button v-if="canCreate" type="primary" @click="openCreate">新建模板</el-button>
+      <el-input v-model="keyword" class="search-input" :placeholder="t('stepTemplates.searchPlaceholder')" clearable @change="onFilter" />
+      <el-button v-if="canCreate" type="primary" @click="openCreate">{{ t('stepTemplates.newTemplate') }}</el-button>
     </div>
     <section class="panel">
       <el-alert v-if="loadError" class="load-error" type="error" :title="loadError" show-icon :closable="false">
-        <el-button size="small" @click="load">重试</el-button>
+        <el-button size="small" @click="load">{{ t('stepTemplates.retry') }}</el-button>
       </el-alert>
       <el-table v-loading="loading" :data="items">
-        <el-table-column label="名称" min-width="180">
+        <el-table-column :label="t('stepTemplates.name')" min-width="180">
           <template #default="{ row }">{{ row.name }}</template>
         </el-table-column>
-        <el-table-column label="类型" width="90">
+        <el-table-column :label="t('stepTemplates.type')" width="90">
           <template #default="{ row }">
             <el-tag size="small" :type="row.kind === 'assembly' ? 'primary' : 'success'" effect="light">{{ kindLabel(row.kind) }}</el-tag>
           </template>
         </el-table-column>
-        <el-table-column label="步骤数" width="80" align="center">
+        <el-table-column :label="t('stepTemplates.stepCount')" width="80" align="center">
           <template #default="{ row }">{{ row._item_count ?? '—' }}</template>
         </el-table-column>
-        <el-table-column label="来源" width="80">
+        <el-table-column :label="t('stepTemplates.source')" width="80">
           <template #default="{ row }">
             <el-tag v-if="row.ai_generated" size="small" type="warning" effect="light">AI</el-tag>
-            <span v-else>手动</span>
+            <span v-else>{{ t('stepTemplates.manual') }}</span>
           </template>
         </el-table-column>
-        <el-table-column label="创建人" width="120">
+        <el-table-column :label="t('stepTemplates.createdBy')" width="120">
           <template #default="{ row }">{{ row.created_by || '—' }}</template>
         </el-table-column>
-        <el-table-column label="创建时间" width="170">
+        <el-table-column :label="t('stepTemplates.createdAt')" width="170">
           <template #default="{ row }">{{ fmtTime(row.created_at) }}</template>
         </el-table-column>
-        <el-table-column label="操作" width="300" fixed="right">
+        <el-table-column :label="t('stepTemplates.actions')" width="300" fixed="right">
           <template #default="{ row }">
-            <el-button size="small" @click="openDetail(row)">详情</el-button>
-            <el-button v-if="canManage(row)" size="small" @click="openEdit(row)">编辑</el-button>
-            <el-button size="small" type="primary" plain @click="openApply(row)">应用到项目</el-button>
-            <el-button v-if="canManage(row)" size="small" type="danger" plain @click="remove(row)">删除</el-button>
+            <el-button size="small" @click="openDetail(row)">{{ t('stepTemplates.detail') }}</el-button>
+            <el-button v-if="canManage(row)" size="small" @click="openEdit(row)">{{ t('stepTemplates.edit') }}</el-button>
+            <el-button size="small" type="primary" plain @click="openApply(row)">{{ t('stepTemplates.applyToProject') }}</el-button>
+            <el-button v-if="canManage(row)" size="small" type="danger" plain @click="remove(row)">{{ t('stepTemplates.delete') }}</el-button>
           </template>
         </el-table-column>
         <template #empty>
-          <el-empty description="暂无步骤模板" />
+          <el-empty :description="t('stepTemplates.empty')" />
         </template>
       </el-table>
       <el-pagination
@@ -59,28 +59,28 @@
       />
     </section>
 
-    <el-dialog v-model="detailDialog" title="模板详情" width="640">
+    <el-dialog v-model="detailDialog" :title="t('stepTemplates.templateDetail')" width="640">
       <div v-loading="detailLoading" class="grid">
         <template v-if="detail">
           <el-descriptions border :column="1" size="small">
-            <el-descriptions-item label="名称">{{ detail.name }}</el-descriptions-item>
-            <el-descriptions-item label="类型">{{ kindLabel(detail.kind) }}</el-descriptions-item>
-            <el-descriptions-item label="描述">{{ detail.description || '—' }}</el-descriptions-item>
-            <el-descriptions-item v-if="detail.source_prompt" label="来源提示词">{{ detail.source_prompt }}</el-descriptions-item>
-            <el-descriptions-item label="来源">{{ detail.ai_generated ? 'AI 生成' : '手动创建' }}</el-descriptions-item>
-            <el-descriptions-item label="创建时间">{{ fmtTime(detail.created_at) }}</el-descriptions-item>
+            <el-descriptions-item :label="t('stepTemplates.name')">{{ detail.name }}</el-descriptions-item>
+            <el-descriptions-item :label="t('stepTemplates.type')">{{ kindLabel(detail.kind) }}</el-descriptions-item>
+            <el-descriptions-item :label="t('stepTemplates.description')">{{ detail.description || '—' }}</el-descriptions-item>
+            <el-descriptions-item v-if="detail.source_prompt" :label="t('stepTemplates.sourcePrompt')">{{ detail.source_prompt }}</el-descriptions-item>
+            <el-descriptions-item :label="t('stepTemplates.source')">{{ detail.ai_generated ? t('stepTemplates.aiGenerated') : t('stepTemplates.manuallyCreated') }}</el-descriptions-item>
+            <el-descriptions-item :label="t('stepTemplates.createdAt')">{{ fmtTime(detail.created_at) }}</el-descriptions-item>
           </el-descriptions>
           <el-table :data="sortedItems(detail)" size="small">
             <el-table-column label="#" width="50" align="center">
               <template #default="{ row }">{{ row.step_order }}</template>
             </el-table-column>
-            <el-table-column label="名称" min-width="150">
+            <el-table-column :label="t('stepTemplates.name')" min-width="150">
               <template #default="{ row }">{{ row.name }}</template>
             </el-table-column>
-            <el-table-column label="描述" min-width="180">
+            <el-table-column :label="t('stepTemplates.description')" min-width="180">
               <template #default="{ row }">{{ row.description || '—' }}</template>
             </el-table-column>
-            <el-table-column label="依赖" width="80" align="center">
+            <el-table-column :label="t('stepTemplates.dependsOn')" width="80" align="center">
               <template #default="{ row }">{{ row.depends_on_order ?? '—' }}</template>
             </el-table-column>
           </el-table>
@@ -88,47 +88,47 @@
       </div>
     </el-dialog>
 
-    <el-dialog v-model="editDialog" title="编辑模板" width="760">
+    <el-dialog v-model="editDialog" :title="t('stepTemplates.editTemplate')" width="760">
       <el-form label-position="top">
-        <el-form-item label="名称" required><el-input v-model="editForm.name" maxlength="256" /></el-form-item>
-        <el-form-item label="描述"><el-input v-model="editForm.description" type="textarea" :rows="2" maxlength="2000" /></el-form-item>
-        <el-form-item label="步骤">
+        <el-form-item :label="t('stepTemplates.name')" required><el-input v-model="editForm.name" maxlength="256" /></el-form-item>
+        <el-form-item :label="t('stepTemplates.description')"><el-input v-model="editForm.description" type="textarea" :rows="2" maxlength="2000" /></el-form-item>
+        <el-form-item :label="t('stepTemplates.steps')">
           <StepItemsEditor :key="editKey" v-model="editItems" />
         </el-form-item>
       </el-form>
       <template #footer>
-        <el-button @click="editDialog = false">取消</el-button>
-        <el-button type="primary" :loading="saving" @click="saveEdit">保存</el-button>
+        <el-button @click="editDialog = false">{{ t('stepTemplates.cancel') }}</el-button>
+        <el-button type="primary" :loading="saving" @click="saveEdit">{{ t('stepTemplates.save') }}</el-button>
       </template>
     </el-dialog>
 
-    <el-dialog v-model="createDialog" title="新建模板" width="760">
+    <el-dialog v-model="createDialog" :title="t('stepTemplates.createTemplate')" width="760">
       <el-form label-position="top">
-        <el-form-item label="名称" required><el-input v-model="createForm.name" maxlength="256" /></el-form-item>
-        <el-form-item label="类型" required>
+        <el-form-item :label="t('stepTemplates.name')" required><el-input v-model="createForm.name" maxlength="256" /></el-form-item>
+        <el-form-item :label="t('stepTemplates.type')" required>
           <el-select v-model="createForm.kind">
-            <el-option label="装配" value="assembly" />
-            <el-option label="实验" value="experiment" />
+            <el-option :label="t('stepTemplates.assembly')" value="assembly" />
+            <el-option :label="t('stepTemplates.experiment')" value="experiment" />
           </el-select>
         </el-form-item>
-        <el-form-item label="描述"><el-input v-model="createForm.description" type="textarea" :rows="2" maxlength="2000" /></el-form-item>
-        <el-form-item label="步骤" required>
+        <el-form-item :label="t('stepTemplates.description')"><el-input v-model="createForm.description" type="textarea" :rows="2" maxlength="2000" /></el-form-item>
+        <el-form-item :label="t('stepTemplates.steps')" required>
           <StepItemsEditor :key="createKey" v-model="createItems" />
         </el-form-item>
       </el-form>
       <template #footer>
-        <el-button @click="createDialog = false">取消</el-button>
-        <el-button type="primary" :loading="saving" @click="saveCreate">保存</el-button>
+        <el-button @click="createDialog = false">{{ t('stepTemplates.cancel') }}</el-button>
+        <el-button type="primary" :loading="saving" @click="saveCreate">{{ t('stepTemplates.save') }}</el-button>
       </template>
     </el-dialog>
 
-    <el-dialog v-model="applyDialog" title="应用到项目" width="480">
+    <el-dialog v-model="applyDialog" :title="t('stepTemplates.applyToProjectTitle')" width="480">
       <div class="grid">
         <p class="apply-tip">{{ applyTip }}</p>
         <el-select
           v-model="applyProjectId"
           v-loading="projectsLoading"
-          placeholder="选择项目（需 member 及以上角色）"
+          :placeholder="t('stepTemplates.selectProject')"
           class="apply-select"
           @change="onApplyProjectChange"
         >
@@ -138,7 +138,7 @@
           v-if="applyTarget?.kind === 'experiment'"
           v-model="applyRunId"
           v-loading="runsLoading"
-          placeholder="选择实验批次"
+          :placeholder="t('stepTemplates.selectRun')"
           class="apply-select"
           :disabled="!applyProjectId"
         >
@@ -146,14 +146,14 @@
         </el-select>
       </div>
       <template #footer>
-        <el-button @click="applyDialog = false">取消</el-button>
+        <el-button @click="applyDialog = false">{{ t('stepTemplates.cancel') }}</el-button>
         <el-button
           type="primary"
           :loading="applying"
           :disabled="!applyProjectId || (applyTarget?.kind === 'experiment' && !applyRunId)"
           @click="confirmApply"
         >
-          确认应用
+          {{ t('stepTemplates.confirmApply') }}
         </el-button>
       </template>
     </el-dialog>
@@ -162,6 +162,7 @@
 
 <script setup lang="ts">
 import { computed, onMounted, reactive, ref } from 'vue'
+import { useI18n } from 'vue-i18n'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import StepItemsEditor from '../components/StepItemsEditor.vue'
 import {
@@ -180,6 +181,7 @@ import { listMembers, listProjects, type Project } from '../api/projects'
 import { useAuthStore } from '../stores/auth'
 import { showApiError } from '../composables/useNotify'
 
+const { t } = useI18n()
 const auth = useAuthStore()
 const items = ref<StepTemplate[]>([])
 const loading = ref(false)
@@ -224,8 +226,8 @@ const applyTip = computed(() => {
   if (!applyTarget.value) return ''
   const count = applyTarget.value._item_count ?? ''
   return applyTarget.value.kind === 'experiment'
-    ? `将模板「${applyTarget.value.name}」的 ${count} 个步骤追加到目标实验批次的步骤。`
-    : `将模板「${applyTarget.value.name}」的 ${count} 个步骤追加到目标项目的装配步骤。`
+    ? t('stepTemplates.applyTipExperiment', { name: applyTarget.value.name, count })
+    : t('stepTemplates.applyTipAssembly', { name: applyTarget.value.name, count })
 })
 
 onMounted(load)
@@ -239,7 +241,7 @@ async function load() {
     total.value = res.total ?? 0
     fillItemCounts()
   } catch (err) {
-    loadError.value = err instanceof Error ? err.message : '模板列表加载失败'
+    loadError.value = err instanceof Error ? err.message : t('stepTemplates.loadFailed')
   } finally {
     loading.value = false
   }
@@ -265,7 +267,7 @@ function onFilter() {
 }
 
 function kindLabel(kind: string) {
-  return kind === 'assembly' ? '装配' : kind === 'experiment' ? '实验' : kind
+  return kind === 'assembly' ? t('stepTemplates.assembly') : kind === 'experiment' ? t('stepTemplates.experiment') : kind
 }
 
 function fmtTime(t?: string) {
@@ -283,11 +285,11 @@ function canManage(row: StepTemplate) {
 
 function validItems(items: StepTemplateItem[]) {
   if (items.length < 1 || items.length > 30) {
-    ElMessage.warning('步骤数需在 1-30 之间')
+    ElMessage.warning(t('stepTemplates.itemsCountRange'))
     return false
   }
   if (items.some((s) => !s.name.trim())) {
-    ElMessage.warning('请填写所有步骤名称')
+    ElMessage.warning(t('stepTemplates.allNamesRequired'))
     return false
   }
   return true
@@ -300,7 +302,7 @@ async function openDetail(row: StepTemplate) {
   try {
     detail.value = await getTemplate(row.id)
   } catch (err) {
-    showApiError(err, '模板详情加载失败')
+    showApiError(err, t('stepTemplates.detailLoadFailed'))
   } finally {
     detailLoading.value = false
   }
@@ -316,14 +318,14 @@ async function openEdit(row: StepTemplate) {
     editKey.value += 1
     editDialog.value = true
   } catch (err) {
-    showApiError(err, '模板详情加载失败')
+    showApiError(err, t('stepTemplates.detailLoadFailed'))
   }
 }
 
 async function saveEdit() {
   if (!editTarget.value) return
   if (!editForm.name.trim()) {
-    ElMessage.warning('请填写模板名称')
+    ElMessage.warning(t('stepTemplates.nameRequired'))
     return
   }
   if (!validItems(editItems.value)) return
@@ -332,10 +334,10 @@ async function saveEdit() {
     await updateTemplate(editTarget.value.id, { name: editForm.name.trim(), description: editForm.description.trim() })
     await replaceTemplateItems(editTarget.value.id, editItems.value)
     editDialog.value = false
-    ElMessage.success('模板已保存')
+    ElMessage.success(t('stepTemplates.saved'))
     await load()
   } catch (err) {
-    showApiError(err, '模板保存失败')
+    showApiError(err, t('stepTemplates.saveFailed'))
   } finally {
     saving.value = false
   }
@@ -352,7 +354,7 @@ function openCreate() {
 
 async function saveCreate() {
   if (!createForm.name.trim()) {
-    ElMessage.warning('请填写模板名称')
+    ElMessage.warning(t('stepTemplates.nameRequired'))
     return
   }
   if (!validItems(createItems.value)) return
@@ -365,10 +367,10 @@ async function saveCreate() {
       items: createItems.value
     })
     createDialog.value = false
-    ElMessage.success('模板已创建')
+    ElMessage.success(t('stepTemplates.created'))
     await load()
   } catch (err) {
-    showApiError(err, '模板创建失败')
+    showApiError(err, t('stepTemplates.createFailed'))
   } finally {
     saving.value = false
   }
@@ -393,7 +395,7 @@ async function openApply(row: StepTemplate) {
     const all = await listProjects()
     projectOptions.value = await filterMemberPlus(all ?? [])
   } catch (err) {
-    showApiError(err, '项目列表加载失败')
+    showApiError(err, t('stepTemplates.projectsLoadFailed'))
   } finally {
     projectsLoading.value = false
   }
@@ -428,7 +430,7 @@ async function onApplyProjectChange() {
     const res = await listRuns(applyProjectId.value, { per_page: 100 })
     runOptions.value = res.items ?? []
   } catch (err) {
-    showApiError(err, '实验批次列表加载失败')
+    showApiError(err, t('stepTemplates.runsLoadFailed'))
   } finally {
     runsLoading.value = false
   }
@@ -441,14 +443,14 @@ async function confirmApply() {
     if (applyTarget.value.kind === 'experiment') {
       if (!applyRunId.value) return
       await applyRunTemplate(applyRunId.value, { template_id: applyTarget.value.id })
-      ElMessage.success('模板已应用到实验批次步骤')
+      ElMessage.success(t('stepTemplates.appliedToRun'))
     } else {
       await applyAssemblyTemplate(applyProjectId.value, { template_id: applyTarget.value.id })
-      ElMessage.success('模板已应用到项目装配步骤')
+      ElMessage.success(t('stepTemplates.appliedToAssembly'))
     }
     applyDialog.value = false
   } catch (err) {
-    showApiError(err, '应用模板失败')
+    showApiError(err, t('stepTemplates.applyFailed'))
   } finally {
     applying.value = false
   }
@@ -456,16 +458,16 @@ async function confirmApply() {
 
 async function remove(row: StepTemplate) {
   try {
-    await ElMessageBox.confirm(`确认删除模板「${row.name}」？`, '删除模板', { type: 'warning' })
+    await ElMessageBox.confirm(t('stepTemplates.confirmDelete', { name: row.name }), t('stepTemplates.deleteTitle'), { type: 'warning' })
   } catch {
     return
   }
   try {
     await deleteTemplate(row.id)
-    ElMessage.success('模板已删除')
+    ElMessage.success(t('stepTemplates.deleted'))
     await load()
   } catch (err) {
-    showApiError(err, '模板删除失败')
+    showApiError(err, t('stepTemplates.deleteFailed'))
   }
 }
 </script>
