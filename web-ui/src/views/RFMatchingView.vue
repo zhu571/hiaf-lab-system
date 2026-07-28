@@ -1,54 +1,54 @@
 <template>
   <div class="page">
     <div class="toolbar">
-      <h2>RF 匹配</h2>
-      <el-select v-model="device" class="filter-select" placeholder="设备" @change="onFilter">
-        <el-option label="全部设备" value="" />
+      <h2>{{ t('rfMatching.title') }}</h2>
+      <el-select v-model="device" class="filter-select" :placeholder="t('rfMatching.device')" @change="onFilter">
+        <el-option :label="t('rfMatching.allDevices')" value="" />
         <el-option v-for="d in devices" :key="d" :label="d" :value="d" />
       </el-select>
-      <el-select v-model="status" class="filter-select" placeholder="状态" @change="onFilter">
-        <el-option label="全部状态" value="" />
+      <el-select v-model="status" class="filter-select" :placeholder="t('rfMatching.status')" @change="onFilter">
+        <el-option :label="t('rfMatching.allStatuses')" value="" />
         <el-option v-for="s in statuses" :key="s" :label="s" :value="s" />
       </el-select>
-      <el-button v-if="!isViewer" type="primary" @click="openDialog">新增记录</el-button>
+      <el-button v-if="!isViewer" type="primary" @click="openDialog">{{ t('rfMatching.create') }}</el-button>
     </div>
 
     <section class="panel">
       <el-alert v-if="error" :title="error" type="error" show-icon :closable="false">
-        <el-button size="small" @click="load">重试</el-button>
+        <el-button size="small" @click="load">{{ t('rfMatching.retry') }}</el-button>
       </el-alert>
       <template v-else>
         <el-table v-loading="loading" :data="items" :row-class-name="rowClass">
-          <el-table-column prop="device" label="设备" width="120" />
-          <el-table-column prop="frequency_mhz" label="频率 (MHz)" width="110" />
-          <el-table-column label="S11" width="90">
+          <el-table-column prop="device" :label="t('rfMatching.device')" width="120" />
+          <el-table-column prop="frequency_mhz" :label="t('rfMatching.frequency')" width="110" />
+          <el-table-column :label="t('rfMatching.s11')" width="90">
             <template #default="{ row }">{{ row.s11 == null ? '—' : row.s11 }}</template>
           </el-table-column>
-          <el-table-column label="电容" min-width="120" show-overflow-tooltip>
+          <el-table-column :label="t('rfMatching.capacitance')" min-width="120" show-overflow-tooltip>
             <template #default="{ row }">{{ row.capacitance_text || '—' }}</template>
           </el-table-column>
-          <el-table-column label="状态" width="150">
+          <el-table-column :label="t('rfMatching.status')" width="150">
             <template #default="{ row }">
               <el-tag v-if="row.status" :type="statusTag(row.status)" size="small" effect="light">{{ row.status }}</el-tag>
               <span v-else>—</span>
-              <el-tooltip v-if="row.is_void" :content="row.void_reason ? `作废原因：${row.void_reason}` : '该记录已作废'" placement="top">
-                <el-tag class="void-tag" type="info" size="small" effect="plain">已作废</el-tag>
+              <el-tooltip v-if="row.is_void" :content="row.void_reason ? t('rfMatching.voidReason', { reason: row.void_reason }) : t('rfMatching.voidedRecord')" placement="top">
+                <el-tag class="void-tag" type="info" size="small" effect="plain">{{ t('rfMatching.voided') }}</el-tag>
               </el-tooltip>
             </template>
           </el-table-column>
-          <el-table-column label="测量时间" width="170">
+          <el-table-column :label="t('rfMatching.measuredAt')" width="170">
             <template #default="{ row }">{{ formatTime(row.measured_at) }}</template>
           </el-table-column>
-          <el-table-column label="测量人" width="110">
+          <el-table-column :label="t('rfMatching.measuredBy')" width="110">
             <template #default="{ row }">{{ row.measured_by || '—' }}</template>
           </el-table-column>
-          <el-table-column v-if="!isViewer" label="操作" width="100">
+          <el-table-column v-if="!isViewer" :label="t('rfMatching.actions')" width="100">
             <template #default="{ row }">
-              <el-button size="small" type="danger" plain :disabled="row.is_void" @click="voidRecord(row)">作废</el-button>
+              <el-button size="small" type="danger" plain :disabled="row.is_void" @click="voidRecord(row)">{{ t('rfMatching.void') }}</el-button>
             </template>
           </el-table-column>
           <template #empty>
-            <el-empty description="暂无记录" />
+            <el-empty :description="t('rfMatching.empty')" />
           </template>
         </el-table>
         <el-pagination
@@ -62,81 +62,81 @@
       </template>
     </section>
 
-    <el-dialog v-model="dialog" title="新增 RF 匹配记录" width="640">
+    <el-dialog v-model="dialog" :title="t('rfMatching.dialogTitle')" width="640">
       <el-form label-position="top" @submit.prevent>
         <div class="form-grid">
-          <el-form-item label="设备" required>
-            <el-select v-model="draft.device" placeholder="选择设备">
+          <el-form-item :label="t('rfMatching.device')" required>
+            <el-select v-model="draft.device" :placeholder="t('rfMatching.selectDevice')">
               <el-option v-for="d in devices" :key="d" :label="d" :value="d" />
             </el-select>
           </el-form-item>
-          <el-form-item label="频率 (MHz)" required>
-            <el-input-number v-model="draft.frequency_mhz" :controls="false" :min="0" placeholder="必须大于 0" />
+          <el-form-item :label="t('rfMatching.frequency')" required>
+            <el-input-number v-model="draft.frequency_mhz" :controls="false" :min="0" :placeholder="t('rfMatching.mustBePositive')" />
           </el-form-item>
-          <el-form-item label="状态" required>
-            <el-select v-model="draft.status" placeholder="选择状态">
+          <el-form-item :label="t('rfMatching.status')" required>
+            <el-select v-model="draft.status" :placeholder="t('rfMatching.selectStatus')">
               <el-option v-for="s in statuses" :key="s" :label="s" :value="s" />
             </el-select>
           </el-form-item>
         </div>
         <el-collapse v-model="activeMore">
-          <el-collapse-item title="更多参数（可选）" name="more">
+          <el-collapse-item :title="t('rfMatching.moreParams')" name="more">
             <div class="form-grid more-grid">
-              <el-form-item label="S11">
+              <el-form-item :label="t('rfMatching.s11')">
                 <el-input-number v-model="draft.s11" :controls="false" />
               </el-form-item>
-              <el-form-item label="输入频率">
+              <el-form-item :label="t('rfMatching.inputFreq')">
                 <el-input-number v-model="draft.input_freq" :controls="false" />
               </el-form-item>
-              <el-form-item label="输入电压">
+              <el-form-item :label="t('rfMatching.inputVoltage')">
                 <el-input-number v-model="draft.input_voltage" :controls="false" />
               </el-form-item>
-              <el-form-item label="输入功率">
+              <el-form-item :label="t('rfMatching.inputPower')">
                 <el-input-number v-model="draft.input_power" :controls="false" />
               </el-form-item>
-              <el-form-item label="输入描述">
+              <el-form-item :label="t('rfMatching.inputDesc')">
                 <el-input v-model="draft.input_desc" />
               </el-form-item>
-              <el-form-item label="输出频率">
+              <el-form-item :label="t('rfMatching.outputFreq')">
                 <el-input-number v-model="draft.output_freq" :controls="false" />
               </el-form-item>
-              <el-form-item label="输出电压">
+              <el-form-item :label="t('rfMatching.outputVoltage')">
                 <el-input-number v-model="draft.output_voltage" :controls="false" />
               </el-form-item>
-              <el-form-item label="输出功率">
+              <el-form-item :label="t('rfMatching.outputPower')">
                 <el-input-number v-model="draft.output_power" :controls="false" />
               </el-form-item>
-              <el-form-item label="输出描述">
+              <el-form-item :label="t('rfMatching.outputDesc')">
                 <el-input v-model="draft.output_desc" />
               </el-form-item>
-              <el-form-item label="变压器匝数">
+              <el-form-item :label="t('rfMatching.transformerTurns')">
                 <el-input v-model="draft.transformer_turns" />
               </el-form-item>
-              <el-form-item label="电容">
+              <el-form-item :label="t('rfMatching.capacitance')">
                 <el-input v-model="draft.capacitance_text" />
               </el-form-item>
-              <el-form-item label="变压器材料">
+              <el-form-item :label="t('rfMatching.transformerMaterial')">
                 <el-input v-model="draft.transformer_material" />
               </el-form-item>
-              <el-form-item label="并联电感">
+              <el-form-item :label="t('rfMatching.shuntInductance')">
                 <el-input v-model="draft.shunt_inductance" />
               </el-form-item>
-              <el-form-item label="串联电容">
+              <el-form-item :label="t('rfMatching.seriesCapacitor')">
                 <el-input v-model="draft.series_capacitor" />
               </el-form-item>
-              <el-form-item label="测量时间">
-                <el-date-picker v-model="draft.measured_at" type="datetime" placeholder="选择时间（可选）" />
+              <el-form-item :label="t('rfMatching.measuredAt')">
+                <el-date-picker v-model="draft.measured_at" type="datetime" :placeholder="t('rfMatching.selectTime')" />
               </el-form-item>
             </div>
-            <el-form-item label="备注">
+            <el-form-item :label="t('rfMatching.notes')">
               <el-input v-model="draft.notes" type="textarea" :rows="3" />
             </el-form-item>
           </el-collapse-item>
         </el-collapse>
       </el-form>
       <template #footer>
-        <el-button @click="dialog = false">取消</el-button>
-        <el-button type="primary" :loading="submitting" @click="create">保存</el-button>
+        <el-button @click="dialog = false">{{ t('common.cancel') }}</el-button>
+        <el-button type="primary" :loading="submitting" @click="create">{{ t('rfMatching.save') }}</el-button>
       </template>
     </el-dialog>
   </div>
@@ -145,6 +145,7 @@
 <script setup lang="ts">
 import { computed, onMounted, reactive, ref, watch } from 'vue'
 import { useRoute } from 'vue-router'
+import { useI18n } from 'vue-i18n'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { createRFMatching, deleteRFMatching, listRFMatching, type RFMatchingPayload, type RFMatchingRecord } from '../api/rfmatch'
 import { useAuthStore } from '../stores/auth'
@@ -152,6 +153,7 @@ import { showApiError } from '../composables/useNotify'
 
 const route = useRoute()
 const auth = useAuthStore()
+const { t } = useI18n()
 
 const items = ref<RFMatchingRecord[]>([])
 const loading = ref(false)
@@ -194,7 +196,7 @@ const numericKeys = ['s11', 'input_freq', 'input_voltage', 'input_power', 'outpu
 const textKeys = ['input_desc', 'output_desc', 'transformer_turns', 'capacitance_text', 'transformer_material', 'shunt_inductance', 'series_capacitor'] as const
 
 const isViewer = computed(() => auth.user?.role === 'viewer')
-// projectId 的唯一事实来源是路由参数（由 ProjectLayout 保证存在）
+// single source of truth for projectId is the route param (guaranteed by ProjectLayout)
 const projectId = computed(() => String(route.params.id || ''))
 
 onMounted(load)
@@ -212,8 +214,8 @@ async function load() {
     items.value = data.items ?? []
     total.value = data.total
   } catch (err) {
-    error.value = err instanceof Error ? err.message : 'RF 匹配记录加载失败'
-    showApiError(err, 'RF 匹配记录加载失败')
+    error.value = err instanceof Error ? err.message : t('rfMatching.loadFailed')
+    showApiError(err, t('rfMatching.loadFailed'))
   } finally {
     loading.value = false
   }
@@ -246,19 +248,19 @@ function resetDraft() {
 
 async function create() {
   if (!draft.device) {
-    ElMessage.warning('请选择设备')
+    ElMessage.warning(t('rfMatching.selectDeviceWarning'))
     return
   }
   const freq = num(draft.frequency_mhz)
   if (freq === undefined || freq <= 0) {
-    ElMessage.warning('频率必须大于 0')
+    ElMessage.warning(t('rfMatching.frequencyPositive'))
     return
   }
   if (!draft.status) {
-    ElMessage.warning('请选择状态')
+    ElMessage.warning(t('rfMatching.selectStatusWarning'))
     return
   }
-  // 后端开启 DisallowUnknownFields，只提交白名单内字段；空值剔除
+  // the backend has DisallowUnknownFields enabled; only submit whitelisted fields; drop empty values
   const payload: RFMatchingPayload = { device: draft.device, frequency_mhz: freq, status: draft.status }
   for (const key of numericKeys) {
     const v = num(draft[key])
@@ -274,11 +276,11 @@ async function create() {
   submitting.value = true
   try {
     await createRFMatching(projectId.value, payload)
-    ElMessage.success('记录已保存')
+    ElMessage.success(t('rfMatching.saved'))
     dialog.value = false
     await load()
   } catch (err) {
-    showApiError(err, '保存失败')
+    showApiError(err, t('rfMatching.saveFailed'))
   } finally {
     submitting.value = false
   }
@@ -287,10 +289,10 @@ async function create() {
 async function voidRecord(row: RFMatchingRecord) {
   let reason = ''
   try {
-    const { value } = await ElMessageBox.prompt('请输入作废原因（可留空）', '作废记录', {
-      confirmButtonText: '确认作废',
-      cancelButtonText: '取消',
-      inputPlaceholder: '作废原因（可留空）'
+    const { value } = await ElMessageBox.prompt(t('rfMatching.voidReasonPrompt'), t('rfMatching.voidRecordTitle'), {
+      confirmButtonText: t('rfMatching.confirmVoid'),
+      cancelButtonText: t('common.cancel'),
+      inputPlaceholder: t('rfMatching.voidReasonPlaceholder')
     })
     reason = (value || '').trim()
   } catch {
@@ -298,10 +300,10 @@ async function voidRecord(row: RFMatchingRecord) {
   }
   try {
     await deleteRFMatching(row.id, reason)
-    ElMessage.success('记录已作废')
+    ElMessage.success(t('rfMatching.voidedSuccess'))
     await load()
   } catch (err) {
-    showApiError(err, '作废失败')
+    showApiError(err, t('rfMatching.voidFailed'))
   }
 }
 
