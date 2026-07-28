@@ -91,6 +91,7 @@ func main() {
 	templatesSvc.AutoConfigure()
 	templatesHandler := steptemplates.NewHandler(templatesSvc)
 	assemblySvc.ConfigureTemplates(templateReaderBridge{repo: templatesRepo})
+	runsSvc.ConfigureTemplates(runTemplateReaderBridge{repo: templatesRepo})
 	testDataRepo := testdata.NewRepository(db)
 	selfBase := commonEnv("SELF_BASE_URL", "http://127.0.0.1:"+port)
 	testDataSvc := testdata.NewService(testDataRepo, testdata.ProjectAccessAdapter{Repo: projectsRepo},
@@ -261,6 +262,20 @@ func main() {
 			r.Delete("/", runsHandler.SoftDelete)
 			r.Post("/daily-reports/{report_id}", runsHandler.AddReportLink)
 			r.Delete("/daily-reports/{report_id}", runsHandler.RemoveReportLink)
+			r.Get("/steps", runsHandler.HandleListSteps)
+			r.Post("/steps", runsHandler.HandleCreateStep)
+			r.Post("/steps/apply-template", runsHandler.HandleApplyTemplate)
+		})
+	})
+	r.Route("/api/v1/run-steps", func(r chi.Router) {
+		r.Use(mw.AuthRequired)
+		r.Use(mw.AgentContext(db))
+		r.Use(mw.Audit(db))
+		r.Use(mw.RequireIdempotencyKey(db))
+		r.Post("/reorder", runsHandler.HandleReorderSteps)
+		r.Route("/{id}", func(r chi.Router) {
+			r.Patch("/", runsHandler.HandleUpdateStep)
+			r.Delete("/", runsHandler.HandleDeleteStep)
 		})
 	})
 	r.Route("/api/v1/assembly", func(r chi.Router) {
@@ -550,4 +565,34 @@ func (b templateReaderBridge) GetTemplateWithItems(id string) (*assembly.Steptem
 		}
 	}
 	return t, assemblyItems, nil
+}
+
+type runTemplateReaderBridge struct {
+	repo *steptemplates.Repository
+}
+
+func (b runTemplateReaderBridge) GetTemplateWithItems(id string) (*runs.SteptemplatesTemplate, []runs.SteptemplatesItem, error) {
+	tmpl, items, err := b.repo.GetTemplateWithItems(id)
+	if err != nil {
+		return nil, nil, err
+	}
+	if tmpl == nil {
+		return nil, nil, nil
+	}
+	t := &runs.SteptemplatesTemplate{
+		ID:   tmpl.ID,
+		Name: tmpl.Name,
+		Kind: tmpl.Kind,
+	}
+	runItems := make([]runs.SteptemplatesItem, len(items))
+	for i, item := range items {
+		runItems[i] = runs.SteptemplatesItem{
+			ID:             item.ID,
+			Name:           item.Name,
+			Description:    item.Description,
+			StepOrder:      item.StepOrder,
+			DependsOnOrder: item.DependsOnOrder,
+		}
+	}
+	return t, runItems, nil
 }

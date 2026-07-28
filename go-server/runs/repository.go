@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/lib/pq"
 )
@@ -12,6 +13,9 @@ import (
 const runColumns = `id, project_id, name, campaign, run_type, status, gas_type,
 target_temp, min_temp, pressure_min, pressure_max, pressure_unit, has_beam, devices,
 started_at, ended_at, description, created_at, updated_at, created_by`
+
+const stepColumns = `id, run_id, name, description, depends_on, status, step_order,
+started_at, completed_at, source_template_id, created_by, created_at, updated_at`
 
 type Repository struct{ db *sql.DB }
 
@@ -161,13 +165,29 @@ func (r *Repository) UpdateStatus(id, fromStatus, toStatus string, shouldHaveSta
 }
 
 func (r *Repository) SoftDelete(id string) error {
-	result, err := r.db.Exec(
+	tx, err := r.db.Begin()
+	if err != nil {
+		return fmt.Errorf("begin delete experiment run: %w", err)
+	}
+	defer tx.Rollback()
+	result, err := tx.Exec(
 		`UPDATE experiment_runs SET deleted_at = now(), updated_at = now() WHERE id = $1 AND deleted_at IS NULL`, id,
 	)
 	if err != nil {
 		return fmt.Errorf("delete experiment run: %w", err)
 	}
-	return requireAffected(result, ErrRunNotFound)
+	if err := requireAffected(result, ErrRunNotFound); err != nil {
+		return err
+	}
+	if _, err := tx.Exec(
+		`UPDATE run_steps SET deleted_at = now(), updated_at = now() WHERE run_id = $1 AND deleted_at IS NULL`, id,
+	); err != nil {
+		return fmt.Errorf("cascade delete run steps: %w", err)
+	}
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("commit delete experiment run: %w", err)
+	}
+	return nil
 }
 
 func (r *Repository) AddReportLink(runID, reportID string) error {
@@ -273,4 +293,238 @@ func requireAffected(result sql.Result, onZero error) error {
 		return onZero
 	}
 	return nil
+}
+
+func (r *Repository) ListSteps(runID string) ([]RunStep, error) {
+	rows, err := r.db.Query(
+		`SELECT `+stepColumns+` FROM run_steps WHERE run_id = $1 AND deleted_at IS NULL ORDER BY step_order ASC`, runID,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("list run steps: %w", err)
+	}
+	defer rows.Close()
+	items := []RunStep{}
+	for rows.Next() {
+		var step RunStep
+		if err := scanStep(rows, &step); err != nil {
+			return nil, fmt.Errorf("scan run step: %w", err)
+		}
+		items = append(items, step)
+	}
+	return items, rows.Err()
+}
+
+func (r *Repository) CreateStep(step *RunStep) error {
+	if step.StepOrder <= 0 {
+		max, err := r.MaxStepOrder(step.RunID)
+		if err != nil {
+			return err
+		}
+		step.StepOrder = max + 1
+	}
+	err := scanStep(r.db.QueryRow(
+		`INSERT INTO run_steps
+		 (run_id, name, description, depends_on, status, step_order, created_by)
+		 VALUES ($1,$2,$3,$4,$5,$6,$7) RETURNING `+stepColumns,
+		step.RunID, step.Name, nullText(step.Description), step.DependsOn, step.Status,
+		step.StepOrder, step.CreatedBy,
+	), step)
+	if err != nil {
+		return fmt.Errorf("create run step: %w", err)
+	}
+	return nil
+}
+
+func (r *Repository) CreateStepsMany(runID, userID string, steps []StepDef, startOrder int) ([]RunStep, error) {
+	tx, err := r.db.Begin()
+	if err != nil {
+		return nil, fmt.Errorf("begin create many run steps: %w", err)
+	}
+	defer tx.Rollback()
+
+	sortSteps(steps)
+	remap := make(map[int]int, len(steps))
+	for i := range steps {
+		remap[steps[i].StepOrder] = startOrder + i + 1
+	}
+
+	result := make([]RunStep, 0, len(steps))
+	stepIDs := make([]string, len(steps))
+	for i, s := range steps {
+		newOrder := startOrder + i + 1
+		var dependsOn *string
+		if s.DependsOnOrder != nil {
+			if mappedIdx, ok := remap[*s.DependsOnOrder]; ok && mappedIdx <= newOrder {
+				if mappedIdx-1-startOrder >= 0 && mappedIdx-1-startOrder < i {
+					dependsOn = &stepIDs[mappedIdx-1-startOrder]
+				}
+			}
+		}
+		var step RunStep
+		err := scanStep(tx.QueryRow(
+			`INSERT INTO run_steps
+			 (run_id, name, description, depends_on, status, step_order, created_by)
+			 VALUES ($1,$2,$3,$4,$5,$6,$7) RETURNING `+stepColumns,
+			runID, s.Name, nullText(s.Description), dependsOn, StepStatusPlanned, newOrder, &userID,
+		), &step)
+		if err != nil {
+			return nil, fmt.Errorf("insert run step in batch: %w", err)
+		}
+		stepIDs[i] = step.ID
+		result = append(result, step)
+	}
+
+	if err := tx.Commit(); err != nil {
+		return nil, fmt.Errorf("commit create many run steps: %w", err)
+	}
+	return result, nil
+}
+
+func (r *Repository) GetStepByID(id string) (*RunStep, error) {
+	var step RunStep
+	err := scanStep(r.db.QueryRow(
+		`SELECT `+stepColumns+` FROM run_steps WHERE id = $1 AND deleted_at IS NULL`, id,
+	), &step)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("get run step: %w", err)
+	}
+	return &step, nil
+}
+
+func (r *Repository) UpdateStep(id string, req UpdateStepRequest) error {
+	result, err := r.db.Exec(
+		`UPDATE run_steps SET
+		 name = COALESCE($2, name), description = COALESCE($3, description),
+		 depends_on = COALESCE($4, depends_on), updated_at = now()
+		 WHERE id = $1 AND deleted_at IS NULL`,
+		id, req.Name, req.Description, req.DependsOn,
+	)
+	if err != nil {
+		return fmt.Errorf("update run step: %w", err)
+	}
+	return requireAffected(result, ErrStepNotFound)
+}
+
+func (r *Repository) UpdateStepStatus(id, fromStatus, toStatus string, startedAt, completedAt *time.Time) error {
+	result, err := r.db.Exec(
+		`UPDATE run_steps SET status = $3, started_at = $4, completed_at = $5, updated_at = now()
+		 WHERE id = $1 AND status = $2 AND deleted_at IS NULL`,
+		id, fromStatus, toStatus, startedAt, completedAt,
+	)
+	if err != nil {
+		return fmt.Errorf("transition run step: %w", err)
+	}
+	return requireAffected(result, ErrStepConflict)
+}
+
+func (r *Repository) SoftDeleteStep(id string) error {
+	result, err := r.db.Exec(
+		`UPDATE run_steps SET deleted_at = now(), updated_at = now() WHERE id = $1 AND deleted_at IS NULL`, id,
+	)
+	if err != nil {
+		return fmt.Errorf("delete run step: %w", err)
+	}
+	return requireAffected(result, ErrStepNotFound)
+}
+
+func (r *Repository) Reorder(runID string, items []ReorderItem) error {
+	tx, err := r.db.Begin()
+	if err != nil {
+		return fmt.Errorf("begin run step reorder: %w", err)
+	}
+	defer tx.Rollback()
+	for _, item := range items {
+		result, err := tx.Exec(
+			`UPDATE run_steps SET step_order = $3, updated_at = now()
+			 WHERE id = $1 AND run_id = $2 AND deleted_at IS NULL`,
+			item.ID, runID, -(item.StepOrder + 10000),
+		)
+		if err != nil {
+			return fmt.Errorf("stage run step reorder: %w", err)
+		}
+		if err := requireAffected(result, ErrStepNotFound); err != nil {
+			return err
+		}
+	}
+	for _, item := range items {
+		if _, err := tx.Exec(
+			`UPDATE run_steps SET step_order = $3, updated_at = now()
+			 WHERE id = $1 AND run_id = $2 AND deleted_at IS NULL`,
+			item.ID, runID, item.StepOrder,
+		); err != nil {
+			return fmt.Errorf("finish run step reorder: %w", err)
+		}
+	}
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("commit run step reorder: %w", err)
+	}
+	return nil
+}
+
+func (r *Repository) MaxStepOrder(runID string) (int, error) {
+	var max int
+	if err := r.db.QueryRow(
+		`SELECT COALESCE(MAX(step_order), 0) FROM run_steps WHERE run_id = $1 AND deleted_at IS NULL`, runID,
+	).Scan(&max); err != nil {
+		return 0, fmt.Errorf("get max run step order: %w", err)
+	}
+	return max, nil
+}
+
+func (r *Repository) SetSourceTemplateID(stepID, templateID string) error {
+	_, err := r.db.Exec(`UPDATE run_steps SET source_template_id = $2 WHERE id = $1`, stepID, templateID)
+	if err != nil {
+		return fmt.Errorf("set run step source template id: %w", err)
+	}
+	return nil
+}
+
+func sortSteps(steps []StepDef) {
+	for i := 0; i < len(steps); i++ {
+		for j := i + 1; j < len(steps); j++ {
+			if steps[i].StepOrder > steps[j].StepOrder {
+				steps[i], steps[j] = steps[j], steps[i]
+			}
+		}
+	}
+}
+
+func scanStep(row rowScanner, step *RunStep) error {
+	var description, dependsOn, sourceTemplateID, createdBy sql.NullString
+	var startedAt, completedAt sql.NullTime
+	if err := row.Scan(
+		&step.ID, &step.RunID, &step.Name, &description, &dependsOn, &step.Status,
+		&step.StepOrder, &startedAt, &completedAt, &sourceTemplateID, &createdBy,
+		&step.CreatedAt, &step.UpdatedAt,
+	); err != nil {
+		return err
+	}
+	step.Description = description.String
+	step.DependsOn = stringPtr(dependsOn)
+	step.SourceTemplateID = stringPtr(sourceTemplateID)
+	step.CreatedBy = stringPtr(createdBy)
+	step.StartedAt = timePtr(startedAt)
+	step.CompletedAt = timePtr(completedAt)
+	return nil
+}
+
+func stringPtr(value sql.NullString) *string {
+	if !value.Valid {
+		return nil
+	}
+	return &value.String
+}
+
+func timePtr(value sql.NullTime) *time.Time {
+	if !value.Valid {
+		return nil
+	}
+	return &value.Time
+}
+
+func nullText(value string) sql.NullString {
+	return sql.NullString{String: value, Valid: value != ""}
 }

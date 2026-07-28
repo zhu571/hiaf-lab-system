@@ -120,6 +120,132 @@ func (h *Handler) RemoveReportLink(w http.ResponseWriter, r *http.Request) {
 	h.changeReportLink(w, r, false)
 }
 
+func (h *Handler) HandleListSteps(w http.ResponseWriter, r *http.Request) {
+	claims := middleware.GetUserClaims(r.Context())
+	if claims == nil {
+		common.WriteError(w, r, http.StatusUnauthorized, "unauthorized", "未登录", nil)
+		return
+	}
+	result, err := h.svc.ListSteps(chi.URLParam(r, "id"), middleware.EffectiveUserID(r.Context()), claims.Role)
+	if err != nil {
+		h.writeError(w, r, err)
+		return
+	}
+	common.WriteSuccess(w, r, result)
+}
+
+func (h *Handler) HandleCreateStep(w http.ResponseWriter, r *http.Request) {
+	middleware.SetAuditAction(r.Context(), "run_step.create")
+	if !requireIdempotencyKey(w, r) {
+		return
+	}
+	claims := middleware.GetUserClaims(r.Context())
+	if claims == nil {
+		common.WriteError(w, r, http.StatusUnauthorized, "unauthorized", "未登录", nil)
+		return
+	}
+	var req CreateStepRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		common.WriteError(w, r, http.StatusBadRequest, "bad_request", "请求体解析失败", nil)
+		return
+	}
+	step, err := h.svc.CreateStep(chi.URLParam(r, "id"), middleware.EffectiveUserID(r.Context()), claims.Role, req)
+	if err != nil {
+		h.writeError(w, r, err)
+		return
+	}
+	common.WriteCreated(w, r, step)
+}
+
+func (h *Handler) HandleApplyTemplate(w http.ResponseWriter, r *http.Request) {
+	middleware.SetAuditAction(r.Context(), "run_step.template_applied")
+	if !requireIdempotencyKey(w, r) {
+		return
+	}
+	claims := middleware.GetUserClaims(r.Context())
+	if claims == nil {
+		common.WriteError(w, r, http.StatusUnauthorized, "unauthorized", "未登录", nil)
+		return
+	}
+	var req ApplyTemplateRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		common.WriteError(w, r, http.StatusBadRequest, "bad_request", "请求体解析失败", nil)
+		return
+	}
+	steps, err := h.svc.ApplyTemplate(chi.URLParam(r, "id"), middleware.EffectiveUserID(r.Context()), claims.Role, req)
+	if err != nil {
+		h.writeError(w, r, err)
+		return
+	}
+	common.WriteCreated(w, r, steps)
+}
+
+func (h *Handler) HandleUpdateStep(w http.ResponseWriter, r *http.Request) {
+	middleware.SetAuditAction(r.Context(), "run_step.update")
+	if !requireIdempotencyKey(w, r) {
+		return
+	}
+	claims := middleware.GetUserClaims(r.Context())
+	if claims == nil {
+		common.WriteError(w, r, http.StatusUnauthorized, "unauthorized", "未登录", nil)
+		return
+	}
+	var req UpdateStepRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		common.WriteError(w, r, http.StatusBadRequest, "bad_request", "请求体解析失败", nil)
+		return
+	}
+	if req.Transition != nil {
+		middleware.SetAuditAction(r.Context(), "run_step.transition")
+	}
+	step, err := h.svc.UpdateStep(chi.URLParam(r, "id"), middleware.EffectiveUserID(r.Context()), claims.Role, req)
+	if err != nil {
+		h.writeError(w, r, err)
+		return
+	}
+	common.WriteSuccess(w, r, step)
+}
+
+func (h *Handler) HandleDeleteStep(w http.ResponseWriter, r *http.Request) {
+	middleware.SetAuditAction(r.Context(), "run_step.delete")
+	if !requireIdempotencyKey(w, r) {
+		return
+	}
+	claims := middleware.GetUserClaims(r.Context())
+	if claims == nil {
+		common.WriteError(w, r, http.StatusUnauthorized, "unauthorized", "未登录", nil)
+		return
+	}
+	id := chi.URLParam(r, "id")
+	if err := h.svc.DeleteStep(id, middleware.EffectiveUserID(r.Context()), claims.Role); err != nil {
+		h.writeError(w, r, err)
+		return
+	}
+	common.WriteSuccess(w, r, map[string]string{"id": id})
+}
+
+func (h *Handler) HandleReorderSteps(w http.ResponseWriter, r *http.Request) {
+	middleware.SetAuditAction(r.Context(), "run_step.reorder")
+	if !requireIdempotencyKey(w, r) {
+		return
+	}
+	claims := middleware.GetUserClaims(r.Context())
+	if claims == nil {
+		common.WriteError(w, r, http.StatusUnauthorized, "unauthorized", "未登录", nil)
+		return
+	}
+	var req ReorderRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		common.WriteError(w, r, http.StatusBadRequest, "bad_request", "请求体解析失败", nil)
+		return
+	}
+	if err := h.svc.ReorderSteps(req.RunID, middleware.EffectiveUserID(r.Context()), claims.Role, req.Steps); err != nil {
+		h.writeError(w, r, err)
+		return
+	}
+	common.WriteSuccess(w, r, req)
+}
+
 func (h *Handler) changeReportLink(w http.ResponseWriter, r *http.Request, add bool) {
 	action := "experiment_run.link.delete"
 	if add {
@@ -152,9 +278,14 @@ func (h *Handler) changeReportLink(w http.ResponseWriter, r *http.Request, add b
 }
 
 func (h *Handler) writeError(w http.ResponseWriter, r *http.Request, err error) {
+	var commonErr *common.Error
 	switch {
+	case errors.As(err, &commonErr):
+		common.WriteError(w, r, common.StatusForCode(commonErr.Code), commonErr.Code, commonErr.Message, commonErr.Details)
 	case errors.Is(err, ErrRunNotFound):
 		common.WriteError(w, r, http.StatusNotFound, "experiment_run_not_found", err.Error(), nil)
+	case errors.Is(err, ErrStepNotFound):
+		common.WriteError(w, r, http.StatusNotFound, "run_step_not_found", err.Error(), nil)
 	case errors.Is(err, ErrProjectNotFound):
 		common.WriteError(w, r, http.StatusNotFound, "project_not_found", err.Error(), nil)
 	case errors.Is(err, ErrReportLinkNotFound):
@@ -165,7 +296,7 @@ func (h *Handler) writeError(w http.ResponseWriter, r *http.Request, err error) 
 		common.WriteError(w, r, http.StatusBadRequest, "invalid_transition", err.Error(), nil)
 	case errors.Is(err, ErrForbidden):
 		common.WriteError(w, r, http.StatusForbidden, "permission_denied", err.Error(), nil)
-	case errors.Is(err, ErrRunConflict):
+	case errors.Is(err, ErrRunConflict), errors.Is(err, ErrStepConflict):
 		common.WriteError(w, r, http.StatusConflict, "status_conflict", err.Error(), nil)
 	default:
 		slog.Error("experiment runs request failed", "error", err, "request_id", common.GetRequestID(r.Context()))

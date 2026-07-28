@@ -7,6 +7,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/zhu571/hiaf-lab-system/go-server/auth"
+	"github.com/zhu571/hiaf-lab-system/go-server/common"
 	"github.com/zhu571/hiaf-lab-system/go-server/projects"
 )
 
@@ -363,6 +364,9 @@ func (s *Service) ApplyTemplate(projectID, userID, userRole string, req ApplyTem
 		}
 		if tmpl == nil {
 			return nil, errors.New("模板不存在")
+		}
+		if tmpl.Kind != "assembly" {
+			return nil, common.NewError("bad_request", "模板类型不匹配，期望 assembly", nil)
 		}
 		sourceTemplateID = &tmpl.ID
 		stepDefs = make([]StepDef, len(items))
