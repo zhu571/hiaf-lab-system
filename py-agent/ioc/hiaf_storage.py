@@ -8,10 +8,9 @@ HiafStorage — InfluxDB + SQLite persistence for HIAF Gas Cell IOC.
 from __future__ import annotations
 
 import asyncio
-import json
 import logging
 import time
-from collections import deque
+
 
 import aiosqlite
 from influxdb_client import InfluxDBClient, Point
@@ -46,9 +45,6 @@ class HiafStorage:
 
         self._influx_write_api = None
         self._last_influx_write = 0.0
-        self._pending_influx_points: list = []
-        self._pending_influx_batches = 0
-        self._MAX_PENDING_BATCHES = 2
         try:
             client = InfluxDBClient(
                 url=influx_url, token=influx_token, org=influx_org)
@@ -65,7 +61,7 @@ class HiafStorage:
             tag: 0.0 for tag, _ in sensor_tags
         }
 
-        self._write_backlog: deque[dict] = deque(maxlen=BACKLOG_MAX)
+        self._write_backlog: list[dict] = []
 
     async def init_db(self) -> None:
         if self._db is not None:
@@ -152,25 +148,6 @@ class HiafStorage:
             LOGGER.warning("InfluxDB write fail: %s", e)
             return False
 
-    async def _drain_backlog(self) -> int:
-        if not self._write_backlog:
-            return 0
-        drained = list(self._write_backlog)
-        self._write_backlog.clear()
-        flushed = []
-        for entry in drained:
-            if entry.get("type") == "influx_points":
-                flushed.extend(entry.get("points", []))
-        if not flushed:
-            return 0
-        ok = await asyncio.get_event_loop().run_in_executor(None, self._flush_influx, flushed)
-        if ok:
-            LOGGER.info("Backlog drained — %d points replayed", len(flushed))
-            return len(flushed)
-        self._write_backlog.extend(drained)
-        LOGGER.warning("Backlog drain failed — %d entries buffered", len(drained))
-        return 0
-
     async def maybe_write_influx(
         self,
         sensor_values: dict[str, float],
@@ -180,6 +157,10 @@ class HiafStorage:
         last_error: float,
     ) -> None:
         if self._influx_write_api is None:
+            return
+
+        now = time.monotonic()
+        if now - self._last_influx_write < INFLUX_WRITE_SEC:
             return
 
         points = []
@@ -233,31 +214,21 @@ class HiafStorage:
                     .field("value", float(val))
                 )
 
-        self._pending_influx_points.extend(points)
-        self._pending_influx_batches += 1
-
-        now = time.monotonic()
-        if now - self._last_influx_write < INFLUX_WRITE_SEC and self._pending_influx_batches < self._MAX_PENDING_BATCHES:
-            return
-
-        to_flush = self._pending_influx_points
-        self._pending_influx_points = []
-        self._pending_influx_batches = 0
-
         if self._write_backlog:
-            await self._drain_backlog()
+            points = self._write_backlog + points
+            self._write_backlog.clear()
 
         loop = asyncio.get_event_loop()
         try:
-            ok = await loop.run_in_executor(None, self._flush_influx, to_flush)
+            ok = await loop.run_in_executor(None, self._flush_influx, points)
             if ok:
                 self._last_influx_write = now
             else:
-                self._write_backlog.append({"type": "influx_points", "points": to_flush})
+                self._write_backlog = points
         except Exception as e:
             LOGGER.warning("InfluxDB write failed: %s — buffered to backlog (%d)",
-                           e, len(to_flush))
-            self._write_backlog.append({"type": "influx_points", "points": to_flush})
+                           e, len(points))
+            self._write_backlog = points
 
     async def close(self) -> None:
         if self._db is not None:
