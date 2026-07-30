@@ -19,12 +19,12 @@ from influxdb_client.client.write_api import SYNCHRONOUS
 
 LOGGER = logging.getLogger(__name__)
 
-INFLUX_WRITE_SEC = 10.0
+INFLUX_WRITE_SEC = 1.0
 SQLITE_FLUSH_SEC = 30.0
 SENSOR_CHANGE_REL = 0.005
 SENSOR_CHANGE_ABS = 0.1
 
-BACKLOG_MAX = 600  # R3: max entries in write-fail buffer (~100 min @ 10s)
+BACKLOG_MAX = 600  # R3: max entries in write-fail buffer (~10 min @ 1s)
 
 
 class HiafStorage:
@@ -200,23 +200,27 @@ class HiafStorage:
                 .field("value", float(val))
             )
 
+        ts_ns = int(time.time_ns())
         points.append(
             Point("control")
             .tag("tag", "ValveSP")
             .tag("location", "lab")
             .field("value", float(valve_sp))
+            .time(ts_ns)
         )
         points.append(
             Point("control")
             .tag("tag", "Setpoint")
             .tag("location", "lab")
             .field("value", float(setpoint))
+            .time(ts_ns)
         )
         points.append(
             Point("control")
             .tag("tag", "Error")
             .tag("location", "lab")
             .field("value", float(last_error))
+            .time(ts_ns)
         )
 
         for opc_tag, meas, ftag in self._pump_tags:
