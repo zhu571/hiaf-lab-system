@@ -43,12 +43,13 @@ class HiafStorage:
         self._influx_bucket = influx_bucket
         self._influx_org = influx_org
 
+        self._influx_client = None
         self._influx_write_api = None
         self._last_influx_write = 0.0
         try:
-            client = InfluxDBClient(
+            self._influx_client = InfluxDBClient(
                 url=influx_url, token=influx_token, org=influx_org)
-            self._influx_write_api = client.write_api(
+            self._influx_write_api = self._influx_client.write_api(
                 write_options=SYNCHRONOUS)
             LOGGER.info("InfluxDB connected — %s", influx_url)
         except Exception as e:
@@ -163,6 +164,7 @@ class HiafStorage:
         if now - self._last_influx_write < INFLUX_WRITE_SEC:
             return
 
+        ts_ns = int(time.time_ns())
         points = []
         for tag, pv_name in self._sensor_tags:
             val = sensor_values.get(tag, 0)
@@ -179,9 +181,8 @@ class HiafStorage:
                 .tag("tag", pv_name.split(":")[-1])
                 .tag("location", "lab")
                 .field("value", float(val))
+                .time(ts_ns)
             )
-
-        ts_ns = int(time.time_ns())
         points.append(
             Point("control")
             .tag("tag", "ValveSP")
@@ -235,5 +236,11 @@ class HiafStorage:
             try:
                 await self._db.close()
                 LOGGER.info("SQLite DB closed")
+            except Exception:
+                pass
+        if self._influx_client is not None:
+            try:
+                self._influx_client.close()
+                LOGGER.info("InfluxDB client closed")
             except Exception:
                 pass

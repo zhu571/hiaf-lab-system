@@ -436,6 +436,7 @@ class HiafGasCellIOC(PVGroup):
             await self._opc.connect()
             self._valve_node = self._opc.get_node(hiaf_config.VALVE_NODE_ID)
             # Rebuild all sensor node references (old handles are invalid)
+            self._dead_nodes.clear()
             for tag, _ in hiaf_config.ALL_SENSOR_TAGS:
                 node_id = f"ns=1;s=t|{tag}"
                 try:
@@ -454,8 +455,6 @@ class HiafGasCellIOC(PVGroup):
                 if any(s in k for s in ['DP3', 'DP4', '循环泵', '压缩机', '低温循环泵'])
             ]
             self._reconnect_backoff = 0.0
-            # P3.2: clear dead_nodes only after all nodes processed
-            self._dead_nodes.clear()
             # P1: re-create OPC UA subscription
             await self._setup_subscription()
             LOGGER.info("OPC UA connected — %d sensor nodes cached (%d dead)",
@@ -574,7 +573,7 @@ class HiafGasCellIOC(PVGroup):
                 failed_count = 0
                 total_count = len(active_tag_map)
                 for tag, val_or_err in zip(active_tag_map, results):
-                    if isinstance(val_or_err, Exception):
+                    if isinstance(val_or_err, Exception) or val_or_err is None:
                         self._sensor_values[tag] = float('nan')
                         self._sensor_error_count[tag] += 1
                         failed_count += 1
