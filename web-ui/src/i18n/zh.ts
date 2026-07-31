@@ -554,7 +554,23 @@ export default {
     passwordMismatch: '两次密码不一致',
     passwordChanged: '密码已修改',
     languageSaved: '语言偏好已保存',
-    languageSaveFailed: '语言偏好保存失败'
+    languageSaveFailed: '语言偏好保存失败',
+    // 系统更新
+    systemUpdate: '系统更新',
+    currentVersion: '当前版本',
+    latestVersion: '最新版本',
+    versionCheckFailed: '获取失败',
+    commitsBehind: '落后 {n} 个提交',
+    checkUpdate: '检查更新',
+    startUpdate: '开始更新',
+    cannotUpdate: '无法连接远程仓库',
+    updating: '更新中…',
+    updateSuccess: '更新成功',
+    updateFailed: '更新失败',
+    logLines: '共 {n} 行',
+    stepLabel: '步骤 {step}/{total}',
+    reconnecting: '连接中断，等待服务恢复…',
+    sessionExpired: '会话已过期，请重新登录'
   },
   stepTemplates: {
     title: '步骤模板',

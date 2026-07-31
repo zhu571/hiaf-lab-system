@@ -29,6 +29,7 @@ import (
 	"github.com/zhu571/hiaf-lab-system/go-server/runs"
 	"github.com/zhu571/hiaf-lab-system/go-server/sensors"
 	"github.com/zhu571/hiaf-lab-system/go-server/steptemplates"
+	"github.com/zhu571/hiaf-lab-system/go-server/system"
 	"github.com/zhu571/hiaf-lab-system/go-server/testdata"
 )
 
@@ -145,6 +146,10 @@ func main() {
 	instrumentsHandler := instruments.NewHandler(instrumentsSvc, db, workers)
 	sensorsHandler := sensors.NewHandler(sensorsSvc)
 
+	repoRoot := commonEnv("REPO_ROOT", "/opt/hiaf-lab-system")
+	systemSvc := system.NewService(repoRoot)
+	systemHandler := system.NewHandler(systemSvc)
+
 	r := chi.NewRouter()
 	r.Use(middleware.RealIP)
 	r.Use(mw.RequestID)
@@ -165,6 +170,24 @@ func main() {
 		r.Post("/", authHandler.AdminCreateUser)
 		r.Patch("/{id}", authHandler.AdminUpdateUser)
 		r.Post("/{id}/reset-password", authHandler.AdminResetPassword)
+	})
+	// 系统更新 — admin only
+	r.Route("/api/v1/admin/system", func(r chi.Router) {
+		r.Use(mw.AuthRequired)
+		r.Use(mw.RequireRole(auth.RoleAdmin))
+
+		// 版本查询 — 只读，无审计/幂等
+		r.Get("/version", systemHandler.GetVersion)
+
+		// 触发更新 — 写操作，需审计+幂等
+		r.Group(func(r chi.Router) {
+			r.Use(mw.Audit(db))
+			r.Use(mw.RequireIdempotencyKey(db))
+			r.Post("/update", systemHandler.TriggerUpdate)
+		})
+
+		// SSE 日志流 — 流式，无审计/幂等
+		r.Get("/update/stream/{sessionId}", systemHandler.UpdateStream)
 	})
 	r.Route("/api/v1/audit", func(r chi.Router) {
 		r.Use(mw.AuthRequired)

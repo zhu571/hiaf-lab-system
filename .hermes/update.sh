@@ -32,6 +32,33 @@ log()  { echo -e "${GREEN}[UPDATE]${NC} $*"; }
 warn() { echo -e "${YELLOW}[WARN]${NC}  $*"; }
 err()  { echo -e "${RED}[ERROR]${NC} $*"; }
 
+# ---- 会话日志（由 Go system 模块经 setsid 启动时启用）----
+# 脚本自身以"行缓冲"把每行输出 tee 到 UPDATE_LOG_FILE（Go 侧 tail 该文件推送 SSE）。
+# 脚本脱离 Go 进程/容器运行后，日志与结果 marker 仍由脚本自己落盘，不依赖父进程存活。
+if [ -n "${UPDATE_SESSION_ID:-}" ]; then
+  : "${UPDATE_LOG_FILE:=/tmp/lab-update-${UPDATE_SESSION_ID}.log}"
+  : "${UPDATE_DONE_FILE:=/tmp/lab-update-${UPDATE_SESSION_ID}.done}"
+  exec > >(stdbuf -oL tee -a "$UPDATE_LOG_FILE")
+  exec 2>&1
+
+  # EXIT trap 写 done marker（成功/失败/回滚/被 kill 前都会执行，exit_code=$?）
+  _write_marker() {
+    local code=$?
+    local sha_old="${OLD_SHA:-}"
+    local sha_new="${NEW_SHA:-}"
+    printf '{"exit_code":%d,"old_sha":"%s","new_sha":"%s","ended_at":"%s"}' \
+      "$code" "$sha_old" "$sha_new" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" > "$UPDATE_DONE_FILE"
+    exit "$code"
+  }
+  trap _write_marker EXIT
+fi
+
+# ---- git 网络保护：禁止交互式凭据提示，低网速超时兜底 ----
+export GIT_TERMINAL_PROMPT=0
+export GIT_HTTP_LOW_SPEED_LIMIT=1024   # <1KB/s 视为低网速
+export GIT_HTTP_LOW_SPEED_TIME=30      # 持续 30s 则 git 主动失败（不挂死）
+GIT_TIMEOUT=120                        # 单条 git 命令上限（秒）
+
 # ---- 回滚函数 ----
 rollback() {
   log ""
@@ -128,10 +155,10 @@ fi
 # ---- 步骤 3：拉取代码 ----
 log "===== 步骤 3/7：git pull ====="
 
-git fetch origin
+timeout "$GIT_TIMEOUT" git fetch origin
 BEFORE_PULL=$(git rev-parse HEAD)
 
-if git pull --ff-only origin main 2>&1; then
+if timeout "$GIT_TIMEOUT" git pull --ff-only origin main 2>&1; then
   NEW_SHA=$(git rev-parse HEAD)
   NEW_SHORT="${NEW_SHA:0:7}"
   log "已更新: ${OLD_SHORT} → ${NEW_SHORT}"

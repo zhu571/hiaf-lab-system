@@ -585,7 +585,23 @@ export default {
     passwordMismatch: 'Passwords do not match',
     passwordChanged: 'Password updated',
     languageSaved: 'Language preference saved',
-    languageSaveFailed: 'Failed to save language preference'
+    languageSaveFailed: 'Failed to save language preference',
+    // System update
+    systemUpdate: 'System Update',
+    currentVersion: 'Current version',
+    latestVersion: 'Latest version',
+    versionCheckFailed: 'Unavailable',
+    commitsBehind: '{n} commits behind',
+    checkUpdate: 'Check for updates',
+    startUpdate: 'Start update',
+    cannotUpdate: 'Cannot reach remote',
+    updating: 'Updating…',
+    updateSuccess: 'Update successful',
+    updateFailed: 'Update failed',
+    logLines: '{n} lines',
+    stepLabel: 'Step {step}/{total}',
+    reconnecting: 'Connection lost, waiting for server…',
+    sessionExpired: 'Session expired, please log in again'
   },
   stepTemplates: {
     title: 'Step Templates',

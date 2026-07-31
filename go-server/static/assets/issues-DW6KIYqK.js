@@ -1,0 +1,5 @@
+<<<<<<<< HEAD:go-server/static/assets/issues-yhNAfoS3.js
+import{b as e}from"./index-BOY7dnTD.js";function r(s,t={}){return e({url:`/projects/${s}/issues`,params:t})}const o=r;function a(s){return e({url:`/issues/${s}`})}function i(s,t){return e({url:`/projects/${s}/issues`,method:"POST",data:t})}function c(s,t,u=""){return e({url:`/issues/${s}/transition`,method:"POST",data:{target_status:t,reason:u,add_comment:!!u}})}function m(s,t){return e({url:`/issues/${s}/comments`,method:"POST",data:{content:t}})}export{m as a,o as b,i as c,a as g,r as l,c as t};
+========
+import{b as e}from"./index-BHSH-kGB.js";function r(s,t={}){return e({url:`/projects/${s}/issues`,params:t})}const o=r;function a(s){return e({url:`/issues/${s}`})}function i(s,t){return e({url:`/projects/${s}/issues`,method:"POST",data:t})}function c(s,t,u=""){return e({url:`/issues/${s}/transition`,method:"POST",data:{target_status:t,reason:u,add_comment:!!u}})}function m(s,t){return e({url:`/issues/${s}/comments`,method:"POST",data:{content:t}})}export{m as a,o as b,i as c,a as g,r as l,c as t};
+>>>>>>>> 9af36b7 (feat: 系统更新 — Settings 页一键更新 + SSE 日志终端):go-server/static/assets/issues-DW6KIYqK.js
