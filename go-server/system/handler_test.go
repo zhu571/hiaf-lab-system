@@ -4,6 +4,8 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"testing"
@@ -39,16 +41,42 @@ func TestStepRegexParsesStepLine(t *testing.T) {
 func TestRingBufferKeepsWriteOrder(t *testing.T) {
 	rb := NewRingBuffer(5)
 	for i := 0; i < 12; i++ {
-		rb.Append(strings.Repeat("x", 1))
+		rb.Append(i+1, time.Now().Format(time.RFC3339Nano), "x")
 	}
 	snap := rb.Snapshot()
 	if len(snap) != 5 {
 		t.Fatalf("expected 5 buffered lines, got %d", len(snap))
 	}
-	for i, line := range snap {
-		if line != "x" {
+	for i, ln := range snap {
+		if ln.text != "x" {
 			t.Errorf("line %d corrupted", i)
 		}
+		if want := i + 8; ln.seq != want { // 12 条中保留最后 5 条，seq 8..12
+			t.Errorf("line %d seq = %d, want %d", i, ln.seq, want)
+		}
+	}
+}
+
+func TestReplayPreservesSeqAndTS(t *testing.T) {
+	sess := &UpdateSession{
+		ID:        "upd_replayseq",
+		Status:    "running",
+		LogBuffer: NewRingBuffer(ringBufferCap),
+		subs:      make(map[chan SSEEvent]struct{}),
+		done:      make(chan struct{}),
+		maxSubs:   4,
+	}
+	sess.ingestLine("first")
+	sess.ingestLine("===== 步骤 1/2：预检 =====")
+	evts := sess.replaySnapshot()
+	if len(evts) != 2 {
+		t.Fatalf("expected 2 replayed events, got %d", len(evts))
+	}
+	if evts[0].Seq != 1 || evts[0].Text != "first" || evts[0].Timestamp == "" {
+		t.Errorf("bad first event: %+v", evts[0])
+	}
+	if evts[1].Seq != 2 || evts[1].Type != "step" || evts[1].Step != 1 || evts[1].StepTotal != 2 {
+		t.Errorf("bad step event: %+v", evts[1])
 	}
 }
 
@@ -169,13 +197,13 @@ func TestGetVersionDegradesGracefully(t *testing.T) {
 func TestHandlerUpdateStreamEmitsFrames(t *testing.T) {
 	svc := NewService(t.TempDir())
 	sess := &UpdateSession{
-		ID:        "upd_httptest",
+		ID:        "upd_1234567890",
 		Status:    "running",
 		LogBuffer: NewRingBuffer(ringBufferCap),
 		subs:      make(map[chan SSEEvent]struct{}),
 		done:      make(chan struct{}),
-		logFile:   t.TempDir() + "/lab-update-upd_httptest.log",
-		doneFile:  t.TempDir() + "/lab-update-upd_httptest.done",
+		logFile:   t.TempDir() + "/lab-update-upd_1234567890.log",
+		doneFile:  t.TempDir() + "/lab-update-upd_1234567890.done",
 		maxSubs:   4,
 	}
 	svc.mu.Lock()
@@ -270,6 +298,260 @@ func TestBroadcastConcurrent(t *testing.T) {
 		case <-ch:
 		case <-time.After(time.Second):
 			t.Fatal("expected buffered event")
+		}
+	}
+}
+
+// sessionID 必须匹配白名单 upd_[a-z0-9]{10}，否则一律 404（路径穿越防护）。
+func TestSubscribeRejectsInvalidSessionID(t *testing.T) {
+	svc := NewService(t.TempDir())
+	for _, id := range []string{"..%2F..", "upd_bb", "../../etc/passwd", "upd_ABCDEFGHIJ", "upd_12345678901"} {
+		if _, _, err := svc.Subscribe(id); err != ErrSessionNotFound {
+			t.Errorf("Subscribe(%q) error = %v, want ErrSessionNotFound", id, err)
+		}
+	}
+}
+
+func TestHandlerUpdateStreamRejectsPathTraversal(t *testing.T) {
+	svc := NewService(t.TempDir())
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/admin/system/update/stream/..%2F..%2Fsecret", nil)
+	w := httptest.NewRecorder()
+	NewHandler(svc).UpdateStream(w, req)
+	if w.Code != http.StatusNotFound {
+		t.Errorf("expected 404, got %d", w.Code)
+	}
+}
+
+func TestNanoid(t *testing.T) {
+	seen := map[string]bool{}
+	for i := 0; i < 200; i++ {
+		id, err := nanoid(10)
+		if err != nil {
+			t.Fatalf("nanoid error: %v", err)
+		}
+		if len(id) != 10 {
+			t.Fatalf("nanoid length = %d, want 10", len(id))
+		}
+		if !sessionIDRe.MatchString("upd_" + id) {
+			t.Errorf("nanoid produced invalid charset: %q", id)
+		}
+		if seen[id] {
+			t.Fatalf("duplicate nanoid: %q", id)
+		}
+		seen[id] = true
+	}
+}
+
+// 并发订阅同一个磁盘 session：只恢复一次，后到者复用先到者的内存 session。
+func TestConcurrentSubscribeRecoversOnce(t *testing.T) {
+	svc := NewService(t.TempDir())
+	svc.logDir = t.TempDir()
+	id := "upd_recover123"
+	logPath := filepath.Join(svc.logDir, "lab-update-"+id+".log")
+	donePath := logPath + ".done"
+	if err := os.WriteFile(logPath, []byte("[UPDATE] line1\n[UPDATE] line2\n"), 0o644); err != nil {
+		t.Fatalf("write log: %v", err)
+	}
+	marker, _ := json.Marshal(map[string]any{"exit_code": 0, "ended_at": time.Now().Format(time.RFC3339)})
+	if err := os.WriteFile(donePath, marker, 0o644); err != nil {
+		t.Fatalf("write marker: %v", err)
+	}
+
+	const n = 8
+	var wg sync.WaitGroup
+	ptrs := make([]*UpdateSession, n)
+	for i := 0; i < n; i++ {
+		wg.Add(1)
+		go func(i int) {
+			defer wg.Done()
+			ch, _, err := svc.Subscribe(id)
+			if err != nil {
+				t.Errorf("Subscribe %d: %v", i, err)
+				return
+			}
+			for evt := range ch {
+				if evt.Type == "done" {
+					break
+				}
+			}
+			sess, ok := svc.SessionStatus(id)
+			if ok {
+				ptrs[i] = sess
+			}
+		}(i)
+	}
+	wg.Wait()
+	for i := 1; i < n; i++ {
+		if ptrs[i] == nil || ptrs[i] != ptrs[0] {
+			t.Errorf("subscriber %d got a different session than subscriber 0", i)
+		}
+	}
+}
+
+// sweep 只清已完成且超期的 session，并删除日志/marker/pid 文件。
+func TestSweepOnceRemovesFiles(t *testing.T) {
+	svc := NewService(t.TempDir())
+	svc.logDir = t.TempDir()
+	id := "upd_sweep12345"
+	sess := &UpdateSession{
+		ID:        id,
+		Status:    "done",
+		DoneAt:    time.Now().Add(-2 * historyTTL),
+		LogBuffer: NewRingBuffer(ringBufferCap),
+		subs:      make(map[chan SSEEvent]struct{}),
+		done:      make(chan struct{}),
+		logFile:   filepath.Join(svc.logDir, "lab-update-"+id+".log"),
+		doneFile:  filepath.Join(svc.logDir, "lab-update-"+id+".done"),
+		pidFile:   filepath.Join(svc.logDir, "lab-update-"+id+".pid"),
+		maxSubs:   4,
+	}
+	files := []string{sess.logFile, sess.doneFile, sess.pidFile}
+	for _, p := range files {
+		if err := os.WriteFile(p, []byte("x"), 0o644); err != nil {
+			t.Fatalf("write %s: %v", p, err)
+		}
+	}
+	svc.mu.Lock()
+	svc.sessions[id] = sess
+	svc.active = sess
+	svc.mu.Unlock()
+
+	svc.sweepOnce()
+
+	svc.mu.Lock()
+	_, ok := svc.sessions[id]
+	activeNil := svc.active == nil
+	svc.mu.Unlock()
+	if ok {
+		t.Error("session was not swept")
+	}
+	if !activeNil {
+		t.Error("active pointer not cleared")
+	}
+	for _, p := range files {
+		if _, err := os.Stat(p); !os.IsNotExist(err) {
+			t.Errorf("file not removed: %s", p)
+		}
+	}
+}
+
+// 磁盘存在 .log + .done marker：恢复为 done，历史含 done 事件。
+func TestRecoverFromDiskDoneMarker(t *testing.T) {
+	svc := NewService(t.TempDir())
+	svc.logDir = t.TempDir()
+	id := "upd_done123456"
+	logPath := filepath.Join(svc.logDir, "lab-update-"+id+".log")
+	donePath := logPath + ".done"
+	if err := os.WriteFile(logPath, []byte("[UPDATE] 步骤一\n[UPDATE] 步骤二\n"), 0o644); err != nil {
+		t.Fatalf("write log: %v", err)
+	}
+	marker, _ := json.Marshal(map[string]any{"exit_code": 0, "old_sha": "aaa", "new_sha": "bbb"})
+	if err := os.WriteFile(donePath, marker, 0o644); err != nil {
+		t.Fatalf("write marker: %v", err)
+	}
+
+	sess := svc.recoverFromDisk(id)
+	if sess == nil {
+		t.Fatal("recoverFromDisk returned nil")
+	}
+	if sess.Status != "done" {
+		t.Errorf("status = %q, want done", sess.Status)
+	}
+	if sess.ExitCode != 0 || sess.OldSHA != "aaa" || sess.NewSHA != "bbb" {
+		t.Errorf("bad recovery fields: %+v", sess)
+	}
+	evts := sess.replaySnapshot()
+	if len(evts) != 3 {
+		t.Fatalf("expected 3 events (2 lines + done), got %d", len(evts))
+	}
+	if evts[2].Type != "done" || !evts[2].Success {
+		t.Errorf("expected done event, got %+v", evts[2])
+	}
+}
+
+// marker 损坏 → 判中断并投 error 事件。
+func TestRecoverFromDiskCorruptedMarker(t *testing.T) {
+	svc := NewService(t.TempDir())
+	svc.logDir = t.TempDir()
+	id := "upd_corrupt123"
+	logPath := filepath.Join(svc.logDir, "lab-update-"+id+".log")
+	if err := os.WriteFile(logPath, []byte("[UPDATE] 某行\n"), 0o644); err != nil {
+		t.Fatalf("write log: %v", err)
+	}
+	if err := os.WriteFile(logPath+".done", []byte("not-json"), 0o644); err != nil {
+		t.Fatalf("write marker: %v", err)
+	}
+
+	sess := svc.recoverFromDisk(id)
+	if sess == nil {
+		t.Fatal("recoverFromDisk returned nil")
+	}
+	if sess.Status != "done" {
+		t.Errorf("status = %q, want done", sess.Status)
+	}
+	evts := sess.replaySnapshot()
+	if len(evts) != 2 || evts[1].Type != "error" {
+		t.Fatalf("expected error event for corrupted marker, got %+v", evts)
+	}
+}
+
+// 无 marker 且 runner 已死 → 判中断并投 error 事件。
+func TestRecoverFromDiskInterrupted(t *testing.T) {
+	svc := NewService(t.TempDir())
+	svc.logDir = t.TempDir()
+	id := "upd_interrupt0"
+	logPath := filepath.Join(svc.logDir, "lab-update-"+id+".log")
+	if err := os.WriteFile(logPath, []byte("[UPDATE] 某行\n"), 0o644); err != nil {
+		t.Fatalf("write log: %v", err)
+	}
+
+	sess := svc.recoverFromDisk(id)
+	if sess == nil {
+		t.Fatal("recoverFromDisk returned nil")
+	}
+	if sess.Status != "done" {
+		t.Errorf("status = %q, want done (interrupted)", sess.Status)
+	}
+	evts := sess.replaySnapshot()
+	if len(evts) != 2 || evts[1].Type != "error" {
+		t.Fatalf("expected interrupted error event, got %+v", evts)
+	}
+}
+
+func TestPIDFileHelpers(t *testing.T) {
+	svc := NewService(t.TempDir())
+	svc.logDir = t.TempDir()
+	id := "upd_pidfile000"
+	sess := &UpdateSession{
+		ID:       id,
+		logFile:  filepath.Join(svc.logDir, "lab-update-"+id+".log"),
+		doneFile: filepath.Join(svc.logDir, "lab-update-"+id+".done"),
+		pidFile:  filepath.Join(svc.logDir, "lab-update-"+id+".pid"),
+	}
+	if got := svc.readPIDFile(sess); got != 0 {
+		t.Fatalf("readPIDFile on missing file = %d, want 0", got)
+	}
+	svc.writePIDFile(sess, 4242)
+	if got := svc.readPIDFile(sess); got != 4242 {
+		t.Fatalf("readPIDFile = %d, want 4242", got)
+	}
+	svc.removePIDFile(sess)
+	if _, err := os.Stat(sess.pidFile); !os.IsNotExist(err) {
+		t.Error("pid file not removed by removePIDFile")
+	}
+	if got := svc.readPIDFile(sess); got != 0 {
+		t.Errorf("readPIDFile after remove = %d, want 0", got)
+	}
+
+	for _, p := range []string{sess.logFile, sess.doneFile, sess.pidFile} {
+		if err := os.WriteFile(p, []byte("x"), 0o644); err != nil {
+			t.Fatalf("write %s: %v", p, err)
+		}
+	}
+	svc.removeSessionFiles(sess)
+	for _, p := range []string{sess.logFile, sess.doneFile, sess.pidFile} {
+		if _, err := os.Stat(p); !os.IsNotExist(err) {
+			t.Errorf("file not removed by removeSessionFiles: %s", p)
 		}
 	}
 }

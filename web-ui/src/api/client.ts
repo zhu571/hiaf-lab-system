@@ -66,6 +66,12 @@ function refreshSession(): Promise<boolean> {
   return refreshPromise
 }
 
+/** 单飞刷新 access_token：axios 401 重试与 SSE 401 恢复共用同一个 Promise，
+ *  避免并发 401 触发多次 refresh；成功时同步更新 CSRF token。 */
+export function refreshAuthSession(): Promise<boolean> {
+  return refreshSession()
+}
+
 function redirectToLogin() {
   if (window.location.pathname !== '/login') {
     window.location.assign('/login')

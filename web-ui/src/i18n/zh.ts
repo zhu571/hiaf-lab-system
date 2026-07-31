@@ -553,6 +553,7 @@ export default {
     quickLinks: '快捷入口',
     passwordMismatch: '两次密码不一致',
     passwordChanged: '密码已修改',
+    passwordChangeFailed: '密码修改失败',
     languageSaved: '语言偏好已保存',
     languageSaveFailed: '语言偏好保存失败',
     // 系统更新

@@ -116,6 +116,7 @@ import { useI18n } from 'vue-i18n'
 import { ElMessage } from 'element-plus'
 import { ArrowRight, CircleCheckFilled, CircleCloseFilled, DataBoard, Tickets, User } from '@element-plus/icons-vue'
 import { changePassword } from '../api/auth'
+import { refreshAuthSession } from '../api/client'
 import * as systemApi from '../api/system'
 import type { SSEEvent, VersionInfo } from '../api/system'
 import { useAuthStore } from '../stores/auth'
@@ -148,17 +149,6 @@ const RECONNECT_MAX_MS = 15000 // 上限 15s
 const RECONNECT_ATTEMPTS = 10 // 最多 10 次
 let reconnectAttempts = 0
 let authFailed = false // 仅 401 时置位，重连前才刷新 token
-
-// refreshPromise 单例：并发多次 401 共享同一次 refresh，避免刷新风暴
-let refreshPromise: Promise<{ csrf_token?: string }> | null = null
-function refreshTokenOnce(): Promise<{ csrf_token?: string }> {
-  if (!refreshPromise) {
-    refreshPromise = systemApi.refreshSession().finally(() => {
-      refreshPromise = null
-    })
-  }
-  return refreshPromise
-}
 
 interface QuickLink { label: string; path: string; icon: any }
 
@@ -233,10 +223,11 @@ function connectStream(sessionId: string) {
       } else if (event.type === 'done') {
         updateRunning.value = false
         updateResult.value = event.success ? 'success' : 'failed'
+        void refreshVersion() // 更新完成后自动刷新版本信息
       }
     },
     onAuthError: () => {
-      // 401：token 过期。置位标记，重连前先走 refreshPromise 单例刷新 Cookie
+      // 401：token 过期。置位标记，重连前先走 client 单飞 refresh 刷新 Cookie
       if (updateRunning.value) {
         streamDisconnected.value = true
         authFailed = true
@@ -268,16 +259,20 @@ function scheduleReconnect(sessionId: string) {
 }
 
 async function reconnectStream(sessionId: string) {
-  // 仅 401 才刷新 token（authFailed 由 onAuthError 置位）；网络中断直接重连
+  // 仅 401 才刷新 token（authFailed 由 onAuthError 置位）；网络中断直接重连。
+  // 复用 client.ts 的单飞 refresh（与 axios 401 重试共享，避免双 refresh 竞态），
+  // 成功时同步更新 CSRF token。
   if (authFailed) {
     authFailed = false
     try {
-      await refreshTokenOnce() // 单例：并发 401 共享同一次 refresh
+      if (!(await refreshAuthSession())) throw new Error('refresh failed')
     } catch {
       updateRunning.value = false
       updateResult.value = 'failed'
       streamDisconnected.value = true
+      // token 已彻底失效：整页跳登录（清空内存态，路由守卫重新鉴权）
       ElMessage.error(t('settings.sessionExpired'))
+      window.location.assign('/login')
       return
     }
   }
@@ -313,13 +308,24 @@ async function submit() {
     ElMessage.error(t('settings.passwordMismatch'))
     return
   }
-  await changePassword(form.oldPassword, form.newPassword)
-  await auth.loadMe()
-  ElMessage.success(t('settings.passwordChanged'))
+  try {
+    await changePassword(form.oldPassword, form.newPassword)
+    await auth.loadMe()
+    ElMessage.success(t('settings.passwordChanged'))
+  } catch (err) {
+    const e = err as Error & { requestId?: string }
+    // 展示后端错误信息 + request_id，便于对齐审计日志
+    const detail = e.message || t('settings.passwordChangeFailed')
+    ElMessage.error(e.requestId ? `${detail} (request_id: ${e.requestId})` : detail)
+  }
 }
 
 async function doLogout() {
-  await auth.logout()
+  try {
+    await auth.logout()
+  } catch {
+    // 后端登出失败也强制回登录页，前端态由路由守卫重置
+  }
   await router.push('/login')
 }
 </script>

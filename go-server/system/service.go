@@ -19,12 +19,18 @@ import (
 )
 
 var (
-	stepRe = regexp.MustCompile(`===== 步骤 (\d+)/(\d+)：(.+) =====`)
-	ansiRe = regexp.MustCompile(`\x1b\[[0-9;]*[a-zA-Z]`)
+	stepRe      = regexp.MustCompile(`===== 步骤 (\d+)/(\d+)：(.+) =====`)
+	ansiRe      = regexp.MustCompile(`\x1b\[[0-9;]*[a-zA-Z]`)
+	sessionIDRe = regexp.MustCompile(`^upd_[a-z0-9]{10}$`)
 )
 
 func stripANSI(s string) string {
 	return ansiRe.ReplaceAllString(s, "")
+}
+
+// validSessionID 校验 sessionID 白名单格式，防止把任意 URL 参数拼进文件路径。
+func validSessionID(id string) bool {
+	return sessionIDRe.MatchString(id)
 }
 
 type Service struct {
@@ -120,16 +126,27 @@ func (s *Service) gitRevListCount(a, b string) int {
 // Trigger 触发一次更新：单例互斥 + 生成 session 并脱离运行脚本。返回 sessionID。
 func (s *Service) Trigger() (string, error) {
 	s.mu.Lock()
-	if s.active != nil && s.active.Status == "running" {
+	if s.active != nil {
+		// Status 由 finish 在 sess.mu 下写入，读状态必须持 sess.mu，避免数据竞争
+		s.active.mu.Lock()
+		running := s.active.Status == "running"
 		sid := s.active.ID
-		s.mu.Unlock()
-		return "", fmt.Errorf("%w（当前 session: %s）", ErrUpdateInProgress, sid)
+		s.active.mu.Unlock()
+		if running {
+			s.mu.Unlock()
+			return "", fmt.Errorf("%w（当前 session: %s）", ErrUpdateInProgress, sid)
+		}
 	}
 	if _, err := os.Stat(s.scriptPath); err != nil {
 		s.mu.Unlock()
 		return "", ErrScriptMissing
 	}
-	id := "upd_" + nanoid(10)
+	rawID, err := nanoid(10)
+	if err != nil {
+		s.mu.Unlock()
+		return "", fmt.Errorf("生成 session ID 失败: %w", err)
+	}
+	id := "upd_" + rawID
 	sess := &UpdateSession{
 		ID:        id,
 		Status:    "running",
@@ -138,6 +155,7 @@ func (s *Service) Trigger() (string, error) {
 		done:      make(chan struct{}),
 		logFile:   filepath.Join(s.logDir, "lab-update-"+id+".log"),
 		doneFile:  filepath.Join(s.logDir, "lab-update-"+id+".done"),
+		pidFile:   filepath.Join(s.logDir, "lab-update-"+id+".pid"),
 		maxSubs:   s.maxSubs,
 	}
 	s.sessions[id] = sess
@@ -148,24 +166,35 @@ func (s *Service) Trigger() (string, error) {
 	return id, nil
 }
 
-func nanoid(n int) string {
+// nanoid 生成 n 位随机 ID（crypto/rand + 拒绝采样，避免取模偏差；错误向上传播）。
+func nanoid(n int) (string, error) {
 	const chars = "abcdefghijklmnopqrstuvwxyz0123456789"
-	var buf [4]byte
-	_, _ = rand.Read(buf[:])
-	seed := uint64(time.Now().UnixNano())<<32 ^ uint64(buf[0])<<24 ^ uint64(buf[1])<<16 ^ uint64(buf[2])<<8 ^ uint64(buf[3])
+	// 拒绝采样：跳过 >= maxByte 的字节，保证各字符均匀（256 非 36 的整数倍）
+	const maxByte = 256 - (256 % 36) // 36 = len(chars)，拒绝采样边界
+	raw := make([]byte, n)
+	if _, err := rand.Read(raw); err != nil {
+		return "", err
+	}
 	b := make([]byte, n)
 	for i := range b {
-		seed ^= seed << 13
-		seed ^= seed >> 7
-		seed ^= seed << 17
-		b[i] = chars[seed%uint64(len(chars))]
+		v := raw[i]
+		for v >= maxByte {
+			if _, err := rand.Read(raw[i : i+1]); err != nil {
+				return "", err
+			}
+			v = raw[i]
+		}
+		b[i] = chars[int(v)%len(chars)]
 	}
-	return string(b)
+	return string(b), nil
 }
 
 // Subscribe 订阅指定 session 的日志流，返回 channel 和断开函数。
 // 内存无该 session 时从磁盘文件重建；先回放历史，再转发实时事件。
 func (s *Service) Subscribe(sessionID string) (<-chan SSEEvent, func(), error) {
+	if !validSessionID(sessionID) {
+		return nil, nil, ErrSessionNotFound
+	}
 	sess, ok := s.session(sessionID)
 	if !ok {
 		sess = s.recoverFromDisk(sessionID)
@@ -192,25 +221,41 @@ func (s *Service) Subscribe(sessionID string) (<-chan SSEEvent, func(), error) {
 				return
 			}
 		}
-		// 回放完成后确认状态：若已 done，把 done 事件阻塞式补投（修复 #2）。
-		sess.mu.Lock()
-		doneEvt := sess.doneEvent
-		isDone := sess.Status == "done"
-		sess.mu.Unlock()
-		if isDone {
-			if doneEvt.Seq > last {
-				select {
-				case ch <- doneEvt:
-				case <-stop:
-					return
-				}
+		// 回放完成后确认状态：若已 done，把 done 事件阻塞式补投。
+		// 循环处理"finish 恰在回放与检查之间发生"的竞态，广播丢帧由这里兜底。
+		for {
+			sess.mu.Lock()
+			doneEvt := sess.doneEvent
+			isDone := sess.Status == "done"
+			sess.mu.Unlock()
+			if !isDone {
+				break
 			}
-			return
+			if doneEvt.Seq <= last {
+				return // done 已在回放历史中投递
+			}
+			select {
+			case ch <- doneEvt:
+				last = doneEvt.Seq
+			case <-stop:
+				return
+			}
 		}
-		// running：继续从 broadcast 收实时帧，直到 stop/done 关闭
+		// running：实时帧由 broadcast 投递；等待 stop 或 done。
+		// done 后再次补投一次，覆盖"finish 在回放检查之后发生"的窗口。
 		select {
 		case <-stop:
+			return
 		case <-sess.done:
+		}
+		sess.mu.Lock()
+		doneEvt := sess.doneEvent
+		sess.mu.Unlock()
+		if doneEvt.Seq > last {
+			select {
+			case ch <- doneEvt:
+			case <-stop:
+			}
 		}
 	}()
 
@@ -248,17 +293,18 @@ func (s *Service) runScript(session *UpdateSession) {
 		s.finish(session, -1, false)
 		return
 	}
-	session.runnerPID = pid
+	session.setRunnerPID(pid)
+	s.writePIDFile(session, pid)
 
 	timer := time.AfterFunc(s.timeout, func() {
 		s.killRunner(session)
 		session.broadcast(SSEEvent{Type: "error", Message: "更新超时已终止"})
 		s.finish(session, -2, false)
 	})
-	session.timeoutTimer = timer
+	session.setTimeoutTimer(timer)
 
 	// tail goroutine：增量读日志文件 + 轮询 done marker
-	session.tailing = true
+	session.setTailing(true)
 	go s.tailSessionLog(session, 0)
 }
 
@@ -291,19 +337,21 @@ func (s *Service) spawnDetached(session *UpdateSession) (int, error) {
 
 // killRunner 杀掉整个进程组（Setsid 后脚本不是 Go 直系子进程）。
 func (s *Service) killRunner(session *UpdateSession) {
-	if session.runnerPID > 0 {
+	pid := session.getRunnerPID()
+	if pid > 0 {
 		// 先杀进程组，再兜底杀单进程
-		_ = syscall.Kill(-session.runnerPID, syscall.SIGKILL)
-		_ = syscall.Kill(session.runnerPID, syscall.SIGKILL)
+		_ = syscall.Kill(-pid, syscall.SIGKILL)
+		_ = syscall.Kill(pid, syscall.SIGKILL)
 	}
 }
 
 // runnerAlive 判断脚本进程是否仍在运行（进程组存在即视为存活）。
 func (s *Service) runnerAlive(sess *UpdateSession) bool {
-	if sess.runnerPID <= 0 {
+	pid := sess.getRunnerPID()
+	if pid <= 0 {
 		return false
 	}
-	return syscall.Kill(-sess.runnerPID, 0) == nil || syscall.Kill(sess.runnerPID, 0) == nil
+	return syscall.Kill(-pid, 0) == nil || syscall.Kill(pid, 0) == nil
 }
 
 // tailSessionLog 每 200ms 增量读日志文件，把新行推入 RingBuffer + 广播；
@@ -317,6 +365,7 @@ func (s *Service) tailSessionLog(session *UpdateSession, startOffset int64) {
 	defer f.Close()
 	offset := startOffset
 	var lastLineAt time.Time
+	var partial []byte // 跨 chunk 的未完成行，避免长行被拆成两条事件
 
 	ticker := time.NewTicker(tailPollInterval)
 	defer ticker.Stop()
@@ -326,7 +375,10 @@ func (s *Service) tailSessionLog(session *UpdateSession, startOffset int64) {
 		n, rerr := f.ReadAt(buf, offset)
 		if n > 0 {
 			offset += int64(n)
-			for _, line := range strings.Split(string(buf[:n]), "\n") {
+			chunk := append(partial, buf[:n]...)
+			parts := strings.Split(string(chunk), "\n")
+			partial = []byte(parts[len(parts)-1])
+			for _, line := range parts[:len(parts)-1] {
 				line = stripANSI(line)
 				if line == "" {
 					continue
@@ -338,6 +390,14 @@ func (s *Service) tailSessionLog(session *UpdateSession, startOffset int64) {
 		if rerr == io.EOF {
 			// 检查 done marker：脚本 EXIT trap 写入
 			if _, err := os.Stat(session.doneFile); err == nil {
+				// 末尾无换行的最后一行在 marker 出现时补投
+				if len(partial) > 0 {
+					line := stripANSI(string(partial))
+					if line != "" {
+						session.ingestLine(line)
+					}
+					partial = nil
+				}
 				s.finishFromMarker(session)
 				return
 			}
@@ -382,10 +442,11 @@ func (s *Service) finishFromMarker(session *UpdateSession) {
 // finish 广播 done 事件并标记 session 为 done；sync.Once 保证只执行一次。
 func (s *Service) finish(session *UpdateSession, exitCode int, success bool) {
 	session.once.Do(func() {
+		session.mu.Lock()
 		if session.timeoutTimer != nil {
 			session.timeoutTimer.Stop()
+			session.timeoutTimer = nil
 		}
-		session.mu.Lock()
 		session.Status = "done"
 		session.ExitCode = exitCode
 		session.DoneAt = time.Now()
@@ -402,6 +463,7 @@ func (s *Service) finish(session *UpdateSession, exitCode int, success bool) {
 		session.mu.Unlock()
 
 		session.writeMarker(exitCode)
+		s.removePIDFile(session)
 		session.broadcast(doneEvent)
 		close(session.done)
 	})
@@ -445,9 +507,11 @@ func (s *UpdateSession) unsubscribe(ch chan SSEEvent) {
 
 // ingestLine 把一行日志写入内存 RingBuffer、分配 seq 并广播。
 func (s *UpdateSession) ingestLine(line string) {
+	seq := s.nextSeq()
+	ts := time.Now().Format(time.RFC3339Nano)
 	evt := SSEEvent{
-		Seq:       s.nextSeq(),
-		Timestamp: time.Now().Format(time.RFC3339Nano),
+		Seq:       seq,
+		Timestamp: ts,
 		Type:      "line",
 		Text:      line,
 	}
@@ -457,7 +521,7 @@ func (s *UpdateSession) ingestLine(line string) {
 		evt.StepTotal, _ = strconv.Atoi(m[2])
 		evt.Title = m[3]
 	}
-	s.LogBuffer.Append(line)
+	s.LogBuffer.Append(seq, ts, line)
 	s.broadcast(evt)
 }
 
@@ -472,111 +536,200 @@ func (s *UpdateSession) writeMarker(exitCode int) {
 	_ = os.WriteFile(s.doneFile, marker, 0o644)
 }
 
+// writePIDFile 持久化 runner 进程组 PID，供进程重启后 recoverFromDisk 判断存活。
+func (s *Service) writePIDFile(session *UpdateSession, pid int) {
+	_ = os.WriteFile(session.pidFile, []byte(strconv.Itoa(pid)+"\n"), 0o644)
+}
+
+// readPIDFile 读取持久化的 runner PID；不存在或非法时返回 0。
+func (s *Service) readPIDFile(session *UpdateSession) int {
+	data, err := os.ReadFile(session.pidFile)
+	if err != nil {
+		return 0
+	}
+	pid, err := strconv.Atoi(strings.TrimSpace(string(data)))
+	if err != nil || pid <= 0 {
+		return 0
+	}
+	return pid
+}
+
+// removePIDFile 移除 runner PID 文件（finish 时调用，防陈旧 PID 误杀/误判）。
+func (s *Service) removePIDFile(session *UpdateSession) {
+	if session.pidFile != "" {
+		_ = os.Remove(session.pidFile)
+	}
+}
+
+// removeSessionFiles 清理该 session 的全部临时文件（TTL sweep 时调用）。
+func (s *Service) removeSessionFiles(session *UpdateSession) {
+	for _, p := range []string{session.logFile, session.doneFile, session.pidFile} {
+		if p != "" {
+			_ = os.Remove(p)
+		}
+	}
+}
+
 // recoverFromDisk 进程重启后根据日志文件 + marker 重建 session。
 func (s *Service) recoverFromDisk(sessionID string) *UpdateSession {
+	if !validSessionID(sessionID) {
+		return nil
+	}
 	logPath := filepath.Join(s.logDir, "lab-update-"+sessionID+".log")
 	donePath := logPath + ".done"
+	pidPath := logPath + ".pid"
+
+	// 并发恢复双重检查：已有内存 session 直接复用，避免重复 tail
+	s.mu.Lock()
+	if existing, ok := s.sessions[sessionID]; ok {
+		s.mu.Unlock()
+		return existing
+	}
+	s.mu.Unlock()
+
 	if _, err := os.Stat(logPath); err != nil {
 		return nil // 磁盘也没有 → 404
 	}
 
 	sess := &UpdateSession{
-		ID:       sessionID,
-		subs:     make(map[chan SSEEvent]struct{}),
-		done:     make(chan struct{}),
-		logFile:  logPath,
-		doneFile: donePath,
-		maxSubs:  s.maxSubs,
+		ID:        sessionID,
+		LogBuffer: NewRingBuffer(ringBufferCap),
+		subs:      make(map[chan SSEEvent]struct{}),
+		done:      make(chan struct{}),
+		logFile:   logPath,
+		doneFile:  donePath,
+		pidFile:   pidPath,
+		maxSubs:   s.maxSubs,
 	}
 
-	if data, err := os.ReadFile(logPath); err == nil {
-		lines := strings.Split(string(data), "\n")
-		if len(lines) > logFileMaxLines {
-			lines = lines[len(lines)-logFileMaxLines:]
+	data, _ := os.ReadFile(logPath)
+	lines := strings.Split(string(data), "\n")
+	if len(lines) > logFileMaxLines {
+		lines = lines[len(lines)-logFileMaxLines:]
+	}
+	for _, ln := range lines {
+		if ln == "" {
+			continue
 		}
-		for _, ln := range lines {
-			if ln == "" {
-				continue
-			}
-			ln = stripANSI(ln)
-			evt := SSEEvent{Seq: len(sess.history) + 1, Type: "line", Text: ln}
-			if m := stepRe.FindStringSubmatch(ln); m != nil {
-				evt.Type = "step"
-				evt.Step, _ = strconv.Atoi(m[1])
-				evt.StepTotal, _ = strconv.Atoi(m[2])
-				evt.Title = m[3]
-			}
-			sess.history = append(sess.history, evt)
+		ln = stripANSI(ln)
+		evt := SSEEvent{Seq: len(sess.history) + 1, Type: "line", Text: ln}
+		if m := stepRe.FindStringSubmatch(ln); m != nil {
+			evt.Type = "step"
+			evt.Step, _ = strconv.Atoi(m[1])
+			evt.StepTotal, _ = strconv.Atoi(m[2])
+			evt.Title = m[3]
 		}
+		sess.history = append(sess.history, evt)
+	}
+
+	// 无锁阶段读取 pid/存活状态：sess 尚未发布到 map，无并发读者，
+	// 而 runnerAlive 内部会再持 sess.mu，不能在持有锁时调用（防自死锁）。
+	pid := s.readPIDFile(sess)
+	alive := false
+	if pid > 0 {
+		sess.runnerPID = pid
+		alive = s.runnerAlive(sess)
 	}
 
 	sess.mu.Lock()
-	if data, err := os.ReadFile(donePath); err == nil {
+	if marker, err := os.ReadFile(donePath); err == nil {
 		var m struct {
 			ExitCode int    `json:"exit_code"`
 			OldSHA   string `json:"old_sha"`
 			NewSHA   string `json:"new_sha"`
+			EndedAt  string `json:"ended_at"`
 		}
-		if json.Unmarshal(data, &m) == nil {
+		if json.Unmarshal(marker, &m) == nil {
 			sess.ExitCode = m.ExitCode
 			sess.OldSHA = m.OldSHA
 			sess.NewSHA = m.NewSHA
 			sess.Status = "done"
-			sess.DoneAt = time.Now()
+			if ended, err := time.Parse(time.RFC3339, m.EndedAt); err == nil {
+				sess.DoneAt = ended
+			} else {
+				sess.DoneAt = time.Now()
+			}
 			sess.doneEvent = SSEEvent{
-				Seq:       len(sess.history) + 1,
-				Type:      "done",
-				ExitCode:  m.ExitCode,
-				Success:   m.ExitCode == 0,
-				OldSHA:    m.OldSHA,
-				NewSHA:    m.NewSHA,
+				Seq:      len(sess.history) + 1,
+				Type:     "done",
+				ExitCode: m.ExitCode,
+				Success:  m.ExitCode == 0,
+				OldSHA:   m.OldSHA,
+				NewSHA:   m.NewSHA,
 			}
 			sess.history = append(sess.history, sess.doneEvent)
+		} else {
+			// marker 损坏 → 判中断
+			sess.Status = "done"
+			sess.DoneAt = time.Now()
+			sess.history = append(sess.history, SSEEvent{
+				Seq:     len(sess.history) + 1,
+				Type:    "error",
+				Message: "更新状态文件损坏，请重新触发",
+			})
 		}
-	} else if s.runnerAlive(sess) {
-		// 脚本因 setsid 脱离仍在运行 → 继续 tail
-		sess.Status = "running"
 	} else {
-		// 进程被 kill、脚本中断
-		sess.Status = "done"
-		sess.DoneAt = time.Now()
-		sess.history = append(sess.history, SSEEvent{
-			Seq:     len(sess.history) + 1,
-			Type:    "error",
-			Message: "服务重启导致更新中断，请重新触发",
-		})
+		// 无 marker：从 pid 文件恢复 runner PID，判断脚本是否仍在运行
+		sess.runnerPID = pid
+		if alive {
+			// 脚本因 setsid 脱离仍在运行 → 继续 tail
+			sess.Status = "running"
+			sess.seq = len(sess.history)
+		} else {
+			// 进程被 kill、脚本中断
+			sess.Status = "done"
+			sess.DoneAt = time.Now()
+			sess.history = append(sess.history, SSEEvent{
+				Seq:     len(sess.history) + 1,
+				Type:    "error",
+				Message: "服务重启导致更新中断，请重新触发",
+			})
+		}
 	}
 	sess.mu.Unlock()
 
-	// 恢复的 running session：seq 接续历史
-	if sess.Status == "running" {
-		sess.mu.Lock()
-		sess.seq = len(sess.history)
-		sess.mu.Unlock()
-	}
-
+	// 注册进内存 map；并发恢复时后到者复用先到者的 session
+	var shouldTail bool
 	s.mu.Lock()
+	if existing, ok := s.sessions[sessionID]; ok && existing != sess {
+		s.mu.Unlock()
+		return existing
+	}
+	if sess.Status == "running" && (s.active == nil || s.active == sess) {
+		s.active = sess
+	}
 	s.sessions[sessionID] = sess
 	s.mu.Unlock()
 
-	// runner 仍存活 → 恢复 tail（从文件末尾续读）
 	sess.mu.Lock()
-	shouldTail := sess.Status == "running" && !sess.tailing
-	if shouldTail {
+	if sess.Status == "running" && !sess.tailing {
 		sess.tailing = true
+		shouldTail = true
 	}
 	sess.mu.Unlock()
+
 	if shouldTail {
-		var size int64
-		if st, err := os.Stat(logPath); err == nil {
-			size = st.Size()
+		// 从"已读字节数"处续读，避免 ReadFile 与重新 Stat 之间新增的行丢失
+		startOffset := int64(len(data))
+		// 重启后原超时看门狗已丢，重新挂载；期间若已 finish 则停止
+		timer := time.AfterFunc(s.timeout, func() {
+			s.killRunner(sess)
+			sess.broadcast(SSEEvent{Type: "error", Message: "更新超时已终止"})
+			s.finish(sess, -2, false)
+		})
+		sess.mu.Lock()
+		if sess.Status == "done" {
+			timer.Stop()
+		} else {
+			sess.timeoutTimer = timer
 		}
-		go s.tailSessionLog(sess, size)
+		sess.mu.Unlock()
+		go s.tailSessionLog(sess, startOffset)
 	}
 	return sess
 }
 
-// replaySnapshot 返回按 seq 排序的历史事件快照。
+// replaySnapshot 返回按真实 seq 排序的历史事件快照。
 func (s *UpdateSession) replaySnapshot() []SSEEvent {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -584,9 +737,9 @@ func (s *UpdateSession) replaySnapshot() []SSEEvent {
 		return append([]SSEEvent{}, s.history...)
 	}
 	var out []SSEEvent
-	for i, line := range s.LogBuffer.Snapshot() {
-		evt := SSEEvent{Seq: i + 1, Timestamp: "", Type: "line", Text: line}
-		if m := stepRe.FindStringSubmatch(line); m != nil {
+	for _, ln := range s.LogBuffer.Snapshot() {
+		evt := SSEEvent{Seq: ln.seq, Timestamp: ln.ts, Type: "line", Text: ln.text}
+		if m := stepRe.FindStringSubmatch(ln.text); m != nil {
 			evt.Type = "step"
 			evt.Step, _ = strconv.Atoi(m[1])
 			evt.StepTotal, _ = strconv.Atoi(m[2])
@@ -606,20 +759,26 @@ func (s *Service) sweepSessions() {
 	ticker := time.NewTicker(sweepInterval)
 	defer ticker.Stop()
 	for range ticker.C {
-		now := time.Now()
-		s.mu.Lock()
-		for id, sess := range s.sessions {
-			sess.mu.Lock()
-			expired := sess.Status == "done" && now.Sub(sess.DoneAt) > historyTTL
-			sess.mu.Unlock()
-			if expired {
-				slog.Info("sweep expired update session", "session", id)
-				if s.active == sess {
-					s.active = nil
-				}
-				delete(s.sessions, id)
-			}
-		}
-		s.mu.Unlock()
+		s.sweepOnce()
 	}
+}
+
+// sweepOnce 清理超期的已完成 session，并删除其日志/marker/pid 临时文件。
+func (s *Service) sweepOnce() {
+	now := time.Now()
+	s.mu.Lock()
+	for id, sess := range s.sessions {
+		sess.mu.Lock()
+		expired := sess.Status == "done" && now.Sub(sess.DoneAt) > historyTTL
+		sess.mu.Unlock()
+		if expired {
+			slog.Info("sweep expired update session", "session", id)
+			if s.active == sess {
+				s.active = nil
+			}
+			delete(s.sessions, id)
+			s.removeSessionFiles(sess)
+		}
+	}
+	s.mu.Unlock()
 }

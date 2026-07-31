@@ -72,6 +72,7 @@ type UpdateSession struct {
 	doneEvent SSEEvent    // finish 时记录的最终 done 事件
 	logFile   string      // /tmp/lab-update-{id}.log（脚本 tee 写入）
 	doneFile  string      // /tmp/lab-update-{id}.done
+	pidFile   string      // /tmp/lab-update-{id}.pid（runner 进程组 PID，重启恢复用）
 	subs      map[chan SSEEvent]struct{}
 	subsCount int
 	maxSubs   int
@@ -94,9 +95,51 @@ func (s *UpdateSession) nextSeq() int {
 	return s.seq
 }
 
+// setRunnerPID 记录 runner 进程组 PID（线程安全，供 killRunner/runnerAlive 读取）。
+func (s *UpdateSession) setRunnerPID(pid int) {
+	s.mu.Lock()
+	s.runnerPID = pid
+	s.mu.Unlock()
+}
+
+// getRunnerPID 读取 runner 进程组 PID（线程安全）。
+func (s *UpdateSession) getRunnerPID() int {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.runnerPID
+}
+
+// setTimeoutTimer 设置超时看门狗（线程安全，finish 时读取并 Stop）。
+func (s *UpdateSession) setTimeoutTimer(t *time.Timer) {
+	s.mu.Lock()
+	s.timeoutTimer = t
+	s.mu.Unlock()
+}
+
+// getTimeoutTimer 读取超时看门狗（线程安全）。
+func (s *UpdateSession) getTimeoutTimer() *time.Timer {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.timeoutTimer
+}
+
+// setTailing 标记 tail goroutine 是否已在跑（线程安全，防重复启动）。
+func (s *UpdateSession) setTailing(on bool) {
+	s.mu.Lock()
+	s.tailing = on
+	s.mu.Unlock()
+}
+
 // RingBuffer 固定大小的环形日志缓冲（内存回放用）。
+// 保存真实 seq/timestamp，重连回放时按原序号投递，前端可按 seq 精确去重。
+type ringLine struct {
+	seq  int
+	ts   string
+	text string
+}
+
 type RingBuffer struct {
-	lines []string
+	lines []ringLine
 	head  int
 	size  int
 	cap   int
@@ -104,25 +147,25 @@ type RingBuffer struct {
 }
 
 func NewRingBuffer(capacity int) *RingBuffer {
-	return &RingBuffer{lines: make([]string, capacity), cap: capacity}
+	return &RingBuffer{lines: make([]ringLine, capacity), cap: capacity}
 }
 
-// Append 追加一行，覆盖最旧行。
-func (rb *RingBuffer) Append(line string) {
+// Append 追加一行（携带真实 seq/timestamp），覆盖最旧行。
+func (rb *RingBuffer) Append(seq int, ts, line string) {
 	rb.mu.Lock()
 	defer rb.mu.Unlock()
-	rb.lines[rb.head] = line
+	rb.lines[rb.head] = ringLine{seq: seq, ts: ts, text: line}
 	rb.head = (rb.head + 1) % rb.cap
 	if rb.size < rb.cap {
 		rb.size++
 	}
 }
 
-// Snapshot 返回按写入顺序的原始行切片（重连回放用）。
-func (rb *RingBuffer) Snapshot() []string {
+// Snapshot 返回按写入顺序的行切片（重连回放用），包含真实 seq/timestamp。
+func (rb *RingBuffer) Snapshot() []ringLine {
 	rb.mu.RLock()
 	defer rb.mu.RUnlock()
-	out := make([]string, 0, rb.size)
+	out := make([]ringLine, 0, rb.size)
 	for i := 0; i < rb.size; i++ {
 		idx := (rb.head - rb.size + i + rb.cap) % rb.cap
 		out = append(out, rb.lines[idx])

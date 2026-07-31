@@ -62,11 +62,6 @@ export function triggerUpdate() {
   })
 }
 
-/** 刷新会话：旋转 access_token Cookie（仅在 SSE 401 时调用，见 connectUpdateStream） */
-export function refreshSession() {
-  return request<{ csrf_token?: string }>({ url: '/auth/refresh', method: 'POST' })
-}
-
 /** SSE 连接句柄 */
 export interface UpdateStreamHandlers {
   onEvent: (event: SSEEvent) => void
@@ -99,8 +94,10 @@ export function connectUpdateStream(
         credentials: 'include',
         signal: controller.signal
       })
+      if (closed) return // 等待响应期间已被 unmount/close，不再触发任何回调
       if (res.status === 401) {
         // token 过期 —— 唯一需要刷新 token 的场景
+        controller.abort() // 终止本次连接，交由调用方刷新 token 后重连
         handlers.onAuthError()
         return
       }
@@ -112,25 +109,30 @@ export function connectUpdateStream(
       const reader = res.body.getReader()
       const decoder = new TextDecoder()
       let buf = ''
-      while (!closed) {
-        const { done, value } = await reader.read()
-        if (done) break
-        buf += decoder.decode(value, { stream: true })
-        let idx
-        while ((idx = buf.indexOf('\n\n')) >= 0) {
-          // SSE 帧以空行分隔
-          const frame = buf.slice(0, idx)
-          buf = buf.slice(idx + 2)
-          const dataLine = frame.split('\n').find((l) => l.startsWith('data:'))
-          if (!dataLine) continue // 跳过 keepalive 注释帧 / id: / event: 行
-          try {
-            handlers.onEvent(JSON.parse(dataLine.slice(5).trim()) as SSEEvent)
-          } catch {
-            /* 忽略解析失败的帧 */
+      try {
+        while (!closed) {
+          const { done, value } = await reader.read()
+          if (done) break
+          buf += decoder.decode(value, { stream: true })
+          let idx
+          while ((idx = buf.indexOf('\n\n')) >= 0) {
+            // SSE 帧以空行分隔
+            const frame = buf.slice(0, idx)
+            buf = buf.slice(idx + 2)
+            const dataLine = frame.split('\n').find((l) => l.startsWith('data:'))
+            if (!dataLine) continue // 跳过 keepalive 注释帧 / id: / event: 行
+            try {
+              handlers.onEvent(JSON.parse(dataLine.slice(5).trim()) as SSEEvent)
+            } catch {
+              /* 忽略解析失败的帧 */
+            }
           }
         }
+      } catch (e) {
+        if (!closed && (e as Error).name !== 'AbortError') handlers.onNetworkError()
+        return
       }
-      handlers.onNetworkError() // 流被服务端关闭（服务重启/脚本结束但未收到 done）
+      if (!closed) handlers.onNetworkError() // 流被服务端关闭（服务重启/脚本结束但未收到 done）
     } catch (e) {
       if (!closed && (e as Error).name !== 'AbortError') handlers.onNetworkError()
     }

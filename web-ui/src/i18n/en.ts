@@ -584,6 +584,7 @@ export default {
     quickLinks: 'Quick Links',
     passwordMismatch: 'Passwords do not match',
     passwordChanged: 'Password updated',
+    passwordChangeFailed: 'Password change failed',
     languageSaved: 'Language preference saved',
     languageSaveFailed: 'Failed to save language preference',
     // System update
