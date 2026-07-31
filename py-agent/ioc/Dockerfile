@@ -1,7 +1,7 @@
 FROM docker.m.daocloud.io/library/python:3.11-slim
 
 RUN pip install -i https://pypi.tuna.tsinghua.edu.cn/simple \
-    caproto asyncua aiosqlite influxdb-client
+    caproto asyncua aiosqlite influxdb-client aiohttp
 
 WORKDIR /app
 COPY hiaf_config.py hiaf_storage.py hiaf_ioc_final.py ./
