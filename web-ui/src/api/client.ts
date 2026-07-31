@@ -83,8 +83,10 @@ api.interceptors.response.use(
   async (error) => {
     const config = error.config as (AxiosRequestConfig & { _retriedAfterRefresh?: boolean }) | undefined
     const url = config?.url ?? ''
-    // /auth/* 自身 401（登录密码错、refresh 失效）直接抛给调用方，不参与刷新重试
-    if (error.response?.status === 401 && config && !url.startsWith('/auth/') && !config._retriedAfterRefresh) {
+    // 仅 /auth/login、/auth/refresh 的 401 是预期业务响应（密码错误/刷新失效），不参与刷新重试；
+    // 其它 /auth/*（me/change-password/profile 等受保护端点）token 过期时同样参与单飞 refresh 后原样重试。
+    const noRefresh = ['/auth/login', '/auth/refresh'].includes(url)
+    if (error.response?.status === 401 && config && !noRefresh && !config._retriedAfterRefresh) {
       config._retriedAfterRefresh = true
       if (await refreshSession()) {
         return api.request(config)

@@ -143,6 +143,14 @@ let streamClose: (() => void) | undefined
 let reconnectTimer: ReturnType<typeof setTimeout> | undefined
 let lastSeq = 0 // 已消费的最大 seq，用于重连去重
 
+// ---- session 持久化：页面刷新后可恢复同一更新会话的日志流 ----
+const SESSION_KEY = 'lab.system.update.session_id'
+
+function persistSession(id: string | null) {
+  if (id) localStorage.setItem(SESSION_KEY, id)
+  else localStorage.removeItem(SESSION_KEY)
+}
+
 // ---- 重连退避参数（指数退避 + 抖动） ----
 const RECONNECT_BASE_MS = 500 // 初始 500ms
 const RECONNECT_MAX_MS = 15000 // 上限 15s
@@ -162,6 +170,18 @@ const quickLinks = computed<QuickLink[]>(() => {
 
 onMounted(async () => {
   if (auth.isAdmin) await refreshVersion()
+  // 页面刷新后恢复上次未结束的更新会话（localStorage 持久化 session_id）
+  const saved = localStorage.getItem(SESSION_KEY)
+  if (saved) {
+    updateSessionId.value = saved
+    updateRunning.value = true
+    updateResult.value = null
+    logLines.value = []
+    lastSeq = 0
+    reconnectAttempts = 0
+    streamDisconnected.value = false
+    connectStream(saved)
+  }
 })
 
 onBeforeUnmount(() => {
@@ -187,6 +207,7 @@ async function startUpdate() {
   try {
     const { data } = await systemApi.triggerUpdate()
     updateSessionId.value = data.session_id
+    persistSession(data.session_id)
     updateRunning.value = true
     updateResult.value = null
     logLines.value = []
@@ -224,6 +245,9 @@ function connectStream(sessionId: string) {
         updateRunning.value = false
         updateResult.value = event.success ? 'success' : 'failed'
         void refreshVersion() // 更新完成后自动刷新版本信息
+        clearTimeout(reconnectTimer)
+        persistSession(null) // done 后终止：清除持久化 session，避免刷新后误恢复
+        streamClose?.() // done 后主动关闭 SSE 连接（服务端随即断开）
       }
     },
     onAuthError: () => {
@@ -234,8 +258,24 @@ function connectStream(sessionId: string) {
         scheduleReconnect(sessionId)
       }
     },
+    onHttpError: (status: number) => {
+      // 非 401 的 HTTP 层错误，不当作网络错误盲重连：
+      // 404 = session 已不存在（sweep/重启丢失），重连无意义，直接终止；
+      // 409 = 订阅者过多，非网络问题，退避后重试（仍受总次数上限约束）。
+      if (!updateRunning.value) return
+      if (status === 404) {
+        updateRunning.value = false
+        updateResult.value = 'failed'
+        streamDisconnected.value = false
+        clearTimeout(reconnectTimer)
+        persistSession(null)
+      } else {
+        streamDisconnected.value = true
+        scheduleReconnect(sessionId)
+      }
+    },
     onNetworkError: () => {
-      // 网络/服务中断（非 401）：不刷新 token，直接按退避重连
+      // 网络/服务中断（非 HTTP 层错误）：不刷新 token，直接按退避重连
       if (updateRunning.value) {
         streamDisconnected.value = true
         scheduleReconnect(sessionId)
@@ -249,6 +289,7 @@ function scheduleReconnect(sessionId: string) {
   if (reconnectAttempts >= RECONNECT_ATTEMPTS) {
     updateRunning.value = false
     updateResult.value = 'failed'
+    persistSession(null)
     return
   }
   clearTimeout(reconnectTimer)
@@ -270,6 +311,7 @@ async function reconnectStream(sessionId: string) {
       updateRunning.value = false
       updateResult.value = 'failed'
       streamDisconnected.value = true
+      persistSession(null) // 防页面刷新后 onMounted 恢复 → 401 → 刷新失败 → 再次跳登录的循环
       // token 已彻底失效：整页跳登录（清空内存态，路由守卫重新鉴权）
       ElMessage.error(t('settings.sessionExpired'))
       window.location.assign('/login')

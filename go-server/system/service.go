@@ -215,9 +215,7 @@ func (s *Service) Subscribe(sessionID string) (<-chan SSEEvent, func(), error) {
 		last := 0
 		for _, evt := range history {
 			last = evt.Seq
-			select {
-			case ch <- evt:
-			case <-stop:
+			if !sess.sendLocked(ch, evt, stop) {
 				return
 			}
 		}
@@ -234,12 +232,10 @@ func (s *Service) Subscribe(sessionID string) (<-chan SSEEvent, func(), error) {
 			if doneEvt.Seq <= last {
 				return // done 已在回放历史中投递
 			}
-			select {
-			case ch <- doneEvt:
-				last = doneEvt.Seq
-			case <-stop:
+			if !sess.sendLocked(ch, doneEvt, stop) {
 				return
 			}
+			last = doneEvt.Seq
 		}
 		// running：实时帧由 broadcast 投递；等待 stop 或 done。
 		// done 后再次补投一次，覆盖"finish 在回放检查之后发生"的窗口。
@@ -252,10 +248,7 @@ func (s *Service) Subscribe(sessionID string) (<-chan SSEEvent, func(), error) {
 		doneEvt := sess.doneEvent
 		sess.mu.Unlock()
 		if doneEvt.Seq > last {
-			select {
-			case ch <- doneEvt:
-			case <-stop:
-			}
+			sess.sendLocked(ch, doneEvt, stop)
 		}
 	}()
 
@@ -450,8 +443,11 @@ func (s *Service) finish(session *UpdateSession, exitCode int, success bool) {
 		session.Status = "done"
 		session.ExitCode = exitCode
 		session.DoneAt = time.Now()
+		// 与 ingestLine 同锁内联递增 seq（等价 nextSeq()），真正消费序号计数器：
+		// 原 seq+1 不递增，会与并发日志行拿到相同 seq，回放时前端按 seq 去重会丢 done。
+		session.seq++
 		doneEvent := SSEEvent{
-			Seq:       session.seq + 1,
+			Seq:       session.seq,
 			Timestamp: time.Now().Format(time.RFC3339Nano),
 			Type:      "done",
 			ExitCode:  exitCode,
@@ -481,6 +477,21 @@ func (s *UpdateSession) broadcast(evt SSEEvent) {
 	}
 }
 
+// sendLocked 与 broadcast 共用 sess.mu，串行化"回放补投"与"实时广播"对同一 channel 的写入，
+// 保证事件按 seq 有序送达（前端按 seq 去重，回放与实时交错会导致丢帧）。
+// 持锁期间 select 只会在 send 可立即完成时选中（缓冲有余位或有接收者），
+// 不会因慢客户端无限持锁；stop 关闭后立即让出并由 unsubscribe 收尾。
+func (s *UpdateSession) sendLocked(ch chan SSEEvent, evt SSEEvent, stop <-chan struct{}) bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	select {
+	case ch <- evt:
+		return true
+	case <-stop:
+		return false
+	}
+}
+
 // subscribe 为每个连接创建独立带缓冲 channel，超限返回错误。
 func (s *UpdateSession) subscribe() (chan SSEEvent, error) {
 	s.mu.Lock()
@@ -506,8 +517,17 @@ func (s *UpdateSession) unsubscribe(ch chan SSEEvent) {
 }
 
 // ingestLine 把一行日志写入内存 RingBuffer、分配 seq 并广播。
+// 与 finish 同锁内联递增 seq（等价 nextSeq()）；已 done 时丢弃迟到行，
+// 防止行事件 seq 反超 done 事件导致回放时前端按 seq 去重丢掉 done。
 func (s *UpdateSession) ingestLine(line string) {
-	seq := s.nextSeq()
+	s.mu.Lock()
+	if s.Status == "done" {
+		s.mu.Unlock()
+		return
+	}
+	s.seq++
+	seq := s.seq
+	s.mu.Unlock()
 	ts := time.Now().Format(time.RFC3339Nano)
 	evt := SSEEvent{
 		Seq:       seq,
@@ -603,7 +623,13 @@ func (s *Service) recoverFromDisk(sessionID string) *UpdateSession {
 	}
 
 	data, _ := os.ReadFile(logPath)
-	lines := strings.Split(string(data), "\n")
+	raw := string(data)
+	lines := strings.Split(raw, "\n")
+	// 文件末尾无换行的最后一段是中断写入的 partial 行（未写完），恢复时丢弃，
+	// 避免半个残缺行被当作完整日志事件回放。
+	if !strings.HasSuffix(raw, "\n") && len(lines) > 0 {
+		lines = lines[:len(lines)-1]
+	}
 	if len(lines) > logFileMaxLines {
 		lines = lines[len(lines)-logFileMaxLines:]
 	}
@@ -650,12 +676,13 @@ func (s *Service) recoverFromDisk(sessionID string) *UpdateSession {
 				sess.DoneAt = time.Now()
 			}
 			sess.doneEvent = SSEEvent{
-				Seq:      len(sess.history) + 1,
-				Type:     "done",
-				ExitCode: m.ExitCode,
-				Success:  m.ExitCode == 0,
-				OldSHA:   m.OldSHA,
-				NewSHA:   m.NewSHA,
+				Seq:       len(sess.history) + 1,
+				Timestamp: sess.DoneAt.Format(time.RFC3339Nano),
+				Type:      "done",
+				ExitCode:  m.ExitCode,
+				Success:   m.ExitCode == 0,
+				OldSHA:    m.OldSHA,
+				NewSHA:    m.NewSHA,
 			}
 			sess.history = append(sess.history, sess.doneEvent)
 		} else {
@@ -663,9 +690,10 @@ func (s *Service) recoverFromDisk(sessionID string) *UpdateSession {
 			sess.Status = "done"
 			sess.DoneAt = time.Now()
 			sess.history = append(sess.history, SSEEvent{
-				Seq:     len(sess.history) + 1,
-				Type:    "error",
-				Message: "更新状态文件损坏，请重新触发",
+				Seq:       len(sess.history) + 1,
+				Timestamp: sess.DoneAt.Format(time.RFC3339Nano),
+				Type:      "error",
+				Message:   "更新状态文件损坏，请重新触发",
 			})
 		}
 	} else {
@@ -680,9 +708,10 @@ func (s *Service) recoverFromDisk(sessionID string) *UpdateSession {
 			sess.Status = "done"
 			sess.DoneAt = time.Now()
 			sess.history = append(sess.history, SSEEvent{
-				Seq:     len(sess.history) + 1,
-				Type:    "error",
-				Message: "服务重启导致更新中断，请重新触发",
+				Seq:       len(sess.history) + 1,
+				Timestamp: sess.DoneAt.Format(time.RFC3339Nano),
+				Type:      "error",
+				Message:   "服务重启导致更新中断，请重新触发",
 			})
 		}
 	}

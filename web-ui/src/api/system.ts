@@ -67,7 +67,9 @@ export interface UpdateStreamHandlers {
   onEvent: (event: SSEEvent) => void
   /** 服务端返回 401 —— 仅此时才需要刷新 token */
   onAuthError: () => void
-  /** 网络/服务中断（非 401），无需刷新 token，直接按退避重连 */
+  /** HTTP 层错误（非 401、非 2xx）：如 404 session 不存在、409 订阅者过多。调用方按状态码决策，不当作网络错误盲重连 */
+  onHttpError: (status: number) => void
+  /** 网络/服务中断（非 HTTP 层错误），无需刷新 token，直接按退避重连 */
   onNetworkError: () => void
 }
 
@@ -102,8 +104,9 @@ export function connectUpdateStream(
         return
       }
       if (!res.ok || !res.body) {
-        // 409 等其它错误按网络层处理
-        handlers.onNetworkError()
+        // 404 session 不存在 / 409 订阅者过多等：交给 onHttpError 按状态码决策，
+        // 404 不应盲重连（session 已不存在），409 也非网络层问题。
+        handlers.onHttpError(res.status)
         return
       }
       const reader = res.body.getReader()

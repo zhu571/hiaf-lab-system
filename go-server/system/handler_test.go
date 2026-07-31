@@ -358,6 +358,9 @@ func TestConcurrentSubscribeRecoversOnce(t *testing.T) {
 	}
 
 	const n = 8
+	// 并发订阅数超过默认 maxSubs(4)：放宽到 n，否则部分并发订阅会撞上限导致测试抖动。
+	// 本测试验证的是"并发恢复只产生一个 session 指针"，不是订阅上限。
+	svc.maxSubs = n
 	var wg sync.WaitGroup
 	ptrs := make([]*UpdateSession, n)
 	for i := 0; i < n; i++ {
@@ -515,6 +518,76 @@ func TestRecoverFromDiskInterrupted(t *testing.T) {
 	evts := sess.replaySnapshot()
 	if len(evts) != 2 || evts[1].Type != "error" {
 		t.Fatalf("expected interrupted error event, got %+v", evts)
+	}
+}
+
+// 磁盘日志末尾无换行的 partial 行（中断写入的残缺行）恢复时丢弃，且恢复的 done 事件带 Timestamp。
+func TestRecoverFromDiskDropsPartialLine(t *testing.T) {
+	svc := NewService(t.TempDir())
+	svc.logDir = t.TempDir()
+	id := "upd_partial123"
+	logPath := filepath.Join(svc.logDir, "lab-update-"+id+".log")
+	if err := os.WriteFile(logPath, []byte("[UPDATE] 第一行\n[UPDATE] 第二行\n[UPDATE] 残缺部分"), 0o644); err != nil {
+		t.Fatalf("write log: %v", err)
+	}
+	if err := os.WriteFile(logPath+".done", []byte(`{"exit_code":0}`), 0o644); err != nil {
+		t.Fatalf("write marker: %v", err)
+	}
+
+	sess := svc.recoverFromDisk(id)
+	if sess == nil {
+		t.Fatal("recoverFromDisk returned nil")
+	}
+	evts := sess.replaySnapshot()
+	if len(evts) != 3 { // 2 完整行 + done；partial 行不得出现
+		t.Fatalf("expected 3 events, got %d: %+v", len(evts), evts)
+	}
+	if evts[0].Text != "[UPDATE] 第一行" || evts[1].Text != "[UPDATE] 第二行" {
+		t.Errorf("unexpected replayed lines: %+v", evts)
+	}
+	if evts[2].Type != "done" {
+		t.Fatalf("expected done event, got %+v", evts[2])
+	}
+	if evts[2].Timestamp == "" {
+		t.Error("recovered done event missing Timestamp")
+	}
+}
+
+// done 事件序号必须真正消费共享计数器：大于此前所有日志行的 seq，且不与之重复。
+func TestFinishDoneSeqAfterAllLines(t *testing.T) {
+	svc := NewService(t.TempDir())
+	sess := &UpdateSession{
+		ID:        "upd_seqtest000",
+		Status:    "running",
+		LogBuffer: NewRingBuffer(ringBufferCap),
+		subs:      make(map[chan SSEEvent]struct{}),
+		done:      make(chan struct{}),
+		maxSubs:   4,
+	}
+	svc.mu.Lock()
+	svc.sessions[sess.ID] = sess
+	svc.mu.Unlock()
+	for i := 0; i < 10; i++ {
+		sess.ingestLine("line")
+	}
+	svc.finish(sess, 0, true)
+
+	maxLineSeq := 0
+	for _, ln := range sess.LogBuffer.Snapshot() {
+		if ln.seq > maxLineSeq {
+			maxLineSeq = ln.seq
+		}
+	}
+	sess.mu.Lock()
+	doneSeq := sess.doneEvent.Seq
+	sess.mu.Unlock()
+	if doneSeq <= maxLineSeq {
+		t.Errorf("done seq %d must be > max line seq %d", doneSeq, maxLineSeq)
+	}
+	// done 后到达的迟到行必须被丢弃，防止其 seq 反超 done（回放时前端按 seq 去重会丢 done）
+	sess.ingestLine("late line")
+	if n := sess.LogBuffer.Snapshot(); len(n) != 10 {
+		t.Errorf("late line was not dropped, buffer size = %d", len(n))
 	}
 }
 

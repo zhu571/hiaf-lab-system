@@ -87,14 +87,6 @@ type UpdateSession struct {
 	tailing      bool        // tail goroutine 是否已在跑
 }
 
-// nextSeq 生成递增事件序号（线程安全）。
-func (s *UpdateSession) nextSeq() int {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	s.seq++
-	return s.seq
-}
-
 // setRunnerPID 记录 runner 进程组 PID（线程安全，供 killRunner/runnerAlive 读取）。
 func (s *UpdateSession) setRunnerPID(pid int) {
 	s.mu.Lock()
@@ -114,13 +106,6 @@ func (s *UpdateSession) setTimeoutTimer(t *time.Timer) {
 	s.mu.Lock()
 	s.timeoutTimer = t
 	s.mu.Unlock()
-}
-
-// getTimeoutTimer 读取超时看门狗（线程安全）。
-func (s *UpdateSession) getTimeoutTimer() *time.Timer {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	return s.timeoutTimer
 }
 
 // setTailing 标记 tail goroutine 是否已在跑（线程安全，防重复启动）。
