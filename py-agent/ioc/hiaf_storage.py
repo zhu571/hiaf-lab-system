@@ -213,6 +213,7 @@ class HiafStorage:
                     .tag("tag", ftag)
                     .tag("location", "lab")
                     .field("value", float(val))
+                    .time(ts_ns)
                 )
 
         if self._write_backlog:

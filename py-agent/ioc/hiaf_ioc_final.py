@@ -25,7 +25,7 @@ import time
 from collections import defaultdict
 from datetime import datetime
 from typing import Any
-from urllib.request import urlopen
+import aiohttp
 from urllib.parse import quote
 
 from caproto import AlarmSeverity, AlarmStatus
@@ -618,7 +618,7 @@ class HiafGasCellIOC(PVGroup):
                             )
                             self._last_ntfy_failrate_warn = now_w
 
-                # Also update Piezo:A1 with the Vac:A1 reading
+                # Also update Vac_A1 with the Vac:A1 reading
                 a1_val = self._sensor_values.get("直采数据_A1", 0.0)
                 if not sub_healthy:
                     self._a1_from_opc = a1_val
@@ -664,11 +664,11 @@ class HiafGasCellIOC(PVGroup):
                     if hiaf_config.MEOW_NAME:
                         try:
                             msg = f"A5超压 {a5_val:.1f}Pa 阀门已关闭"
-                            await asyncio.to_thread(
-                                urlopen,
-                                f"https://api.chuckfang.com/{hiaf_config.MEOW_NAME}/A5超压/{quote(msg)}",
-                                timeout=5,
-                            )
+                            async with aiohttp.ClientSession() as session:
+                                await session.get(
+                                    f"https://api.chuckfang.com/{hiaf_config.MEOW_NAME}/A5超压/{quote(msg)}",
+                                    timeout=aiohttp.ClientTimeout(total=5),
+                                )
                         except Exception:
                             pass
 
@@ -867,7 +867,6 @@ class HiafGasCellIOC(PVGroup):
         ntfy_url = os.getenv("NTFY_URL", "http://ntfy:80")
         topic = os.getenv("NTFY_TOPIC", "lab-system")
         try:
-            import aiohttp
             async with aiohttp.ClientSession() as session:
                 await session.post(
                     f"{ntfy_url}/{topic}",
@@ -875,12 +874,6 @@ class HiafGasCellIOC(PVGroup):
                     headers={"Title": "IOC", "Priority": "3"},
                     timeout=aiohttp.ClientTimeout(total=5),
                 )
-        except ImportError:
-            try:
-                req = urlopen(f"{ntfy_url}/{topic}", data=message.encode(), timeout=5)
-                req.close()
-            except Exception as e:
-                LOGGER.debug("ntfy send failed: %s", e)
         except Exception as e:
             LOGGER.debug("ntfy send failed: %s", e)
 
