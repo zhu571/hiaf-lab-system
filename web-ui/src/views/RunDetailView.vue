@@ -14,6 +14,9 @@
             <StatusBadge :value="run.status" />
           </div>
           <div v-if="canEdit" class="actions">
+            <el-button type="primary" plain @click="aiDialog = true">{{ t('runDetail.aiGenerateSteps') }}</el-button>
+            <el-button plain @click="openImport">{{ t('runDetail.importFromTemplate') }}</el-button>
+            <el-button type="primary" @click="openCreateStep">{{ t('runDetail.createManually') }}</el-button>
             <el-button v-for="t in transitions" :key="t.value" :type="t.type" :loading="transitioning" @click="doTransition(t)">
               {{ t.label }}
             </el-button>
@@ -68,14 +71,7 @@
         </el-tab-pane>
         <el-tab-pane :label="t('runDetail.stepsTab')" name="steps">
           <section class="panel">
-            <div class="steps-toolbar">
-              <h3 class="panel-title">{{ t('runDetail.experimentSteps') }}</h3>
-              <div v-if="canEdit" class="steps-actions">
-                <el-button size="small" type="primary" plain @click="aiDialog = true">{{ t('runDetail.aiGenerateSteps') }}</el-button>
-                <el-button size="small" plain @click="openImport">{{ t('runDetail.importFromTemplate') }}</el-button>
-                <el-button size="small" type="primary" @click="openCreateStep">{{ t('runDetail.createManually') }}</el-button>
-              </div>
-            </div>
+            <h3 class="panel-title">{{ t('runDetail.experimentSteps') }}</h3>
             <el-table v-loading="stepsLoading" :data="steps" size="small">
               <el-table-column label="#" width="50" align="center">
                 <template #default="{ row }">{{ row.step_order }}</template>
@@ -896,29 +892,6 @@ function fmtTime(x?: string) {
 .panel-title {
   font-size: 15px;
   margin-bottom: 14px;
-}
-
-.steps-toolbar {
-  align-items: center;
-  display: flex;
-  flex-wrap: wrap;
-  gap: 10px;
-  justify-content: space-between;
-  margin-bottom: 14px;
-}
-
-.steps-toolbar .panel-title {
-  margin-bottom: 0;
-}
-
-.steps-actions {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
-}
-
-.steps-actions .el-button + .el-button {
-  margin-left: 0;
 }
 
 .import-tip {
