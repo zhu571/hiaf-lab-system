@@ -8,6 +8,7 @@
           <el-option v-for="s in statuses" :key="s.value" :label="s.label" :value="s.value" />
         </el-select>
         <el-input v-model="campaign" class="campaign-input" :placeholder="t('runList.searchCampaign')" clearable @change="search" @clear="search" />
+        <el-button v-if="canEdit" type="primary" plain @click="openAi">{{ t('runList.aiGenerateSteps') }}</el-button>
         <el-button v-if="canEdit" type="primary" @click="createDialog = true">{{ t('runList.create') }}</el-button>
       </div>
     </div>
@@ -83,6 +84,47 @@
         <el-button type="primary" :loading="creating" @click="create">{{ t('runList.save') }}</el-button>
       </template>
     </el-dialog>
+    <el-dialog v-model="aiDialog" :title="t('runList.aiGenerateSteps')" width="760" @closed="resetAi">
+      <div v-if="aiStage === 'input'" class="grid">
+        <el-alert v-if="aiNotice" :type="aiNoticeType" :title="aiNotice" show-icon :closable="false" />
+        <el-input
+          v-model="aiPrompt"
+          type="textarea"
+          :rows="4"
+          maxlength="4000"
+          :placeholder="t('runList.aiPlaceholder')"
+        />
+      </div>
+      <div v-else class="grid">
+        <el-form label-position="top">
+          <el-form-item :label="t('runList.targetRun')">
+            <el-select v-model="aiTarget" :placeholder="t('runList.selectTarget')" class="target-select">
+              <el-option :label="t('runList.newRunOption')" value="__new__" />
+              <el-option v-for="r in aiRunOptions" :key="r.id" :label="r.name" :value="r.id" />
+            </el-select>
+          </el-form-item>
+          <el-form-item v-if="aiTarget === '__new__'" :label="t('runList.newRunName')">
+            <el-input v-model="aiNewRunName" maxlength="256" />
+          </el-form-item>
+          <el-form-item :label="t('runList.templateName')">
+            <el-input v-model="aiName" maxlength="256" />
+          </el-form-item>
+        </el-form>
+        <StepItemsEditor :key="aiKey" v-model="aiItems" />
+      </div>
+      <template #footer>
+        <template v-if="aiStage === 'input'">
+          <el-button @click="aiDialog = false">{{ t('common.cancel') }}</el-button>
+          <el-button type="primary" :loading="aiGenerating" :disabled="!aiPrompt.trim()" @click="generateAiSteps">{{ t('runList.generate') }}</el-button>
+        </template>
+        <template v-else>
+          <el-button @click="aiStage = 'input'">{{ t('runList.backToEdit') }}</el-button>
+          <el-button :loading="aiSubmitting" :disabled="!aiTargetReady" @click="applyInline">{{ t('runList.apply') }}</el-button>
+          <el-button v-if="canSaveTemplate" :loading="aiSubmitting" @click="saveTemplateOnly">{{ t('runList.saveTemplate') }}</el-button>
+          <el-button v-if="canSaveTemplate" type="primary" :loading="aiSubmitting" :disabled="!aiTargetReady" @click="saveAndApplyTemplate">{{ t('runList.saveAndApply') }}</el-button>
+        </template>
+      </template>
+    </el-dialog>
   </div>
 </template>
 
@@ -92,7 +134,9 @@ import { useRoute, useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import { ElMessage } from 'element-plus'
 import StatusBadge from '../components/StatusBadge.vue'
-import { createRun, listRuns, type ExperimentRun, type RunPayload } from '../api/runs'
+import StepItemsEditor from '../components/StepItemsEditor.vue'
+import { applyRunTemplate, createRun, listRuns, type ExperimentRun, type RunPayload } from '../api/runs'
+import { createTemplate, generateSteps, type StepTemplateItem } from '../api/stepTemplates'
 import { useAuthStore } from '../stores/auth'
 import { showApiError } from '../composables/useNotify'
 
@@ -247,6 +291,165 @@ async function create() {
     creating.value = false
   }
 }
+
+// ---- AI 生成步骤：列表页常驻入口，不依赖已有批次数据 ----
+const aiDialog = ref(false)
+const aiStage = ref<'input' | 'result'>('input')
+const aiPrompt = ref('')
+const aiNotice = ref('')
+const aiNoticeType = ref<'warning' | 'error'>('warning')
+const aiGenerating = ref(false)
+const aiSubmitting = ref(false)
+const aiName = ref('')
+const aiItems = ref<StepTemplateItem[]>([])
+const aiKey = ref(0)
+// __new__ 表示“新建批次并应用”，否则为已有批次 id
+const aiTarget = ref('')
+const aiNewRunName = ref('')
+const aiRunOptions = ref<ExperimentRun[]>([])
+
+// 后端 steptemplates 创建模板仅允许 admin/maintainer
+const canSaveTemplate = computed(() => ['admin', 'maintainer'].includes(auth.user?.role || ''))
+// 应用前置条件：已选目标批次；若新建批次则必须填名称
+const aiTargetReady = computed(() => (aiTarget.value === '__new__' ? !!aiNewRunName.value.trim() : !!aiTarget.value))
+
+async function openAi() {
+  aiDialog.value = true
+  // 目标批次候选单独拉取（最多 100 条），避免只显示当前分页
+  try {
+    const data = await listRuns(projectId.value, { per_page: 100 })
+    aiRunOptions.value = data.items ?? []
+  } catch {
+    aiRunOptions.value = []
+  }
+  aiTarget.value = aiRunOptions.value.length ? '' : '__new__'
+}
+
+function resetAi() {
+  aiStage.value = 'input'
+  aiPrompt.value = ''
+  aiNotice.value = ''
+  aiName.value = ''
+  aiItems.value = []
+  aiTarget.value = ''
+  aiNewRunName.value = ''
+}
+
+async function generateAiSteps() {
+  aiGenerating.value = true
+  aiNotice.value = ''
+  try {
+    const res = await generateSteps('experiment', aiPrompt.value.trim())
+    if (res.status === 'ok') {
+      aiItems.value = res.steps ?? []
+      aiName.value = res.name_suggestion || ''
+      aiNewRunName.value = res.name_suggestion || ''
+      aiKey.value += 1
+      aiStage.value = 'result'
+    } else if (res.status === 'clarify') {
+      aiNoticeType.value = 'warning'
+      aiNotice.value = res.question ? t('runList.clarifyNeeded', { question: res.question }) : t('runList.clarifyMore')
+    } else {
+      aiNoticeType.value = 'error'
+      aiNotice.value = res.reason ? t('runList.generateFailedReason', { reason: res.reason }) : t('runList.generateFailed')
+    }
+  } catch (err) {
+    showApiError(err, t('runList.aiFailed'))
+  } finally {
+    aiGenerating.value = false
+  }
+}
+
+function validAiItems() {
+  if (aiItems.value.length < 1 || aiItems.value.length > 30) {
+    ElMessage.warning(t('runList.itemsCount'))
+    return false
+  }
+  if (aiItems.value.some((s) => !s.name.trim())) {
+    ElMessage.warning(t('runList.allNamesRequired'))
+    return false
+  }
+  return true
+}
+
+// 目标为 __new__ 时先创建批次（元数据用默认值，之后可在详情页编辑）
+async function resolveTargetRunId(): Promise<string | null> {
+  if (aiTarget.value !== '__new__') return aiTarget.value || null
+  const name = aiNewRunName.value.trim()
+  if (!name) {
+    ElMessage.warning(t('runList.runNameRequired'))
+    return null
+  }
+  const created = await createRun(projectId.value, { name, run_type: 'test', gas_type: 'He' })
+  return created.id
+}
+
+async function applyInline() {
+  if (!validAiItems()) return
+  aiSubmitting.value = true
+  try {
+    const runId = await resolveTargetRunId()
+    if (!runId) return
+    await applyRunTemplate(runId, { steps: aiItems.value, source_prompt: aiPrompt.value.trim() })
+    ElMessage.success(t('runList.stepsApplied'))
+    aiDialog.value = false
+    await load()
+    router.push(`/experiment-runs/${runId}`)
+  } catch (err) {
+    showApiError(err, t('runList.applyFailed'))
+  } finally {
+    aiSubmitting.value = false
+  }
+}
+
+async function createTemplateFromAi() {
+  if (!aiName.value.trim()) {
+    ElMessage.warning(t('runList.templateNameRequired'))
+    return null
+  }
+  if (!validAiItems()) return null
+  return createTemplate({
+    name: aiName.value.trim(),
+    kind: 'experiment',
+    items: aiItems.value,
+    source_prompt: aiPrompt.value.trim(),
+    ai_generated: true
+  })
+}
+
+async function saveTemplateOnly() {
+  aiSubmitting.value = true
+  try {
+    const tpl = await createTemplateFromAi()
+    if (tpl) {
+      ElMessage.success(t('runList.templateSaved'))
+      aiDialog.value = false
+    }
+  } catch (err) {
+    showApiError(err, t('runList.templateSaveFailed'))
+  } finally {
+    aiSubmitting.value = false
+  }
+}
+
+async function saveAndApplyTemplate() {
+  aiSubmitting.value = true
+  try {
+    const tpl = await createTemplateFromAi()
+    if (!tpl) return
+    const runId = await resolveTargetRunId()
+    if (!runId) return
+    await applyRunTemplate(runId, { template_id: tpl.id })
+    ElMessage.success(t('runList.savedAndApplied'))
+    aiDialog.value = false
+    await load()
+    router.push(`/experiment-runs/${runId}`)
+  } catch (err) {
+    showApiError(err, t('runList.saveAndApplyFailed'))
+  } finally {
+    aiSubmitting.value = false
+  }
+}
 </script>
 
 <style scoped>
@@ -263,6 +466,10 @@ async function create() {
 
 .campaign-input {
   max-width: 220px;
+}
+
+.target-select {
+  width: 100%;
 }
 
 .list-panel {
