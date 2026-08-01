@@ -24,9 +24,13 @@ RUN CGO_ENABLED=0 go build -o /lab-server .
 
 FROM alpine:3.20
 
-RUN apk add --no-cache ca-certificates tzdata
+RUN apk add --no-cache ca-certificates tzdata docker-cli git
 
 COPY --from=builder /lab-server /lab-server
+
+# 非 root 运行；UID/GID 由 compose 的 UPDATE_RUN_UID/UPDATE_RUN_GID 覆盖，
+# docker.sock 访问依赖 compose 的 group_add（UPDATE_DOCKER_GID）。
+USER 1000:1000
 
 EXPOSE 8000
 
