@@ -571,6 +571,9 @@ export default {
     logLines: '共 {n} 行',
     stepLabel: '步骤 {step}/{total}',
     reconnecting: '连接中断，等待服务恢复…',
+    reconnectExhausted: '多次重连失败，已停止自动重连；若更新仍在执行，可刷新页面重新连接',
+    sessionNotFound: '会话已过期或不存在，无法恢复日志；若更新当时正在执行，请检查版本号确认结果',
+    streamHttpError: '连接被拒绝（HTTP {status}），已停止重连',
     sessionExpired: '会话已过期，请重新登录'
   },
   stepTemplates: {

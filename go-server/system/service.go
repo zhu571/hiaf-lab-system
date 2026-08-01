@@ -11,7 +11,6 @@ import (
 	"os/exec"
 	"path/filepath"
 	"regexp"
-	"runtime"
 	"strconv"
 	"strings"
 	"sync"
@@ -39,13 +38,18 @@ type Service struct {
 	mu         sync.Mutex
 	active     *UpdateSession
 	sessions   map[string]*UpdateSession // 全部 session（含已完成，TTL 后 sweep）
-	logDir     string                    // 日志目录，默认 /tmp（UPDATE_LOG_DIR 可覆盖）
+	logDir     string                    // 日志目录，默认 os.TempDir()（UPDATE_LOG_DIR 可覆盖）
 	maxSubs    int                       // 单 session 订阅上限，默认 4
 	timeout    time.Duration             // 脚本超时，默认 30min
 
-	// UPDATE_ENGINE 开关：go → 新流水线（Step 表驱动）；shell → 原 update.sh 兜底（默认）。
+	// UPDATE_ENGINE 开关：go → 新流水线（Step 表驱动，默认）；shell → 原 update.sh 兜底。
 	engine string
 	runner SessionRunner
+
+	// GetVersion 结果缓存（git 子进程含网络超时，不能每次请求都跑）
+	versionMu        sync.Mutex
+	cachedVersion    *VersionInfo
+	versionFetchedAt time.Time
 
 	// Go 引擎 runner 派发参数（从 UPDATE_* env 读取，为空/0 时使用合理默认）。
 	composeFile string
@@ -67,7 +71,7 @@ func NewService(repoRoot string) *Service {
 		repoRoot:    repoRoot,
 		scriptPath:  filepath.Join(repoRoot, ".hermes", "update.sh"),
 		sessions:    make(map[string]*UpdateSession),
-		logDir:      envOrStr("UPDATE_LOG_DIR", defaultLogDir),
+		logDir:      envOrStr("UPDATE_LOG_DIR", defaultLogDir()),
 		maxSubs:     defaultMaxSubs,
 		timeout:     defaultTimeout,
 		composeFile: "deploy/docker-compose.yml",
@@ -83,16 +87,49 @@ func NewService(repoRoot string) *Service {
 	s.applyUpdateFlags(envOrStr("UPDATE_FLAGS", ""))
 	s.engine = envOrStr("UPDATE_ENGINE", "")
 	if s.engine == "" {
-		if runtime.GOOS == "windows" {
-			s.engine = "go" // Windows 无 bash setsid，默认走进程内流水线
-		} else {
-			s.engine = "shell" // 灰度开关：默认保持原 update.sh，P3 起切 go
-		}
+		// 默认 go 引擎（unix 派发独立 runner 容器，Windows 进程内流水线）；
+		// UPDATE_ENGINE=shell 显式回退 update.sh 兜底。
+		s.engine = "go"
 	}
 	s.runner = newRunner(s, s.engine)
+	// 启动恢复：重建进程重启前中断的 session（运行中的挂到 s.active，防双更新并发）
+	s.recoverInterruptedSessions()
 	// 后台 TTL sweep：只清"已完成且超期"的 session，运行中的 session 永不回收
 	go s.sweepSessions()
 	return s
+}
+
+// sessionPaths 返回某 session 的三个磁盘文件路径（log/done marker/runner 标识），
+// Trigger 写入侧与 recoverFromDisk 恢复侧必须统一从这儿取，防止命名漂移。
+func sessionPaths(logDir, id string) (log, done, runner string) {
+	base := filepath.Join(logDir, "lab-update-"+id)
+	return base + ".log", base + ".done", base + ".runner"
+}
+
+// recoverInterruptedSessions 启动时扫描 logDir：存在 .log + .runner 但无 .done 的 session
+// 说明进程重启前更新可能仍在进行，调 recoverFromDisk 重建（runner 存活则恢复 running 并挂到
+// s.active，使重启后的 Trigger 收到 ErrUpdateInProgress；已死则判中断 done）。
+func (s *Service) recoverInterruptedSessions() {
+	matches, err := filepath.Glob(filepath.Join(s.logDir, "lab-update-upd_*.log"))
+	if err != nil {
+		return
+	}
+	for _, logPath := range matches {
+		base := filepath.Base(logPath)
+		id := strings.TrimSuffix(strings.TrimPrefix(base, "lab-update-"), ".log")
+		if !validSessionID(id) {
+			continue
+		}
+		_, donePath, runnerPath := sessionPaths(s.logDir, id)
+		if _, err := os.Stat(runnerPath); err != nil {
+			continue // 无 runner 标识：不是 runner 派发的会话或已收尾
+		}
+		if _, err := os.Stat(donePath); err == nil {
+			continue // 已有 done marker：已完成，按需由 Subscribe 恢复
+		}
+		slog.Info("恢复中断的更新 session", "session", id)
+		s.recoverFromDisk(id)
+	}
 }
 
 // applyUpdateFlags 解析 UPDATE_FLAGS（空格分隔的 --force/--dry-run/--no-rollback）。
@@ -126,21 +163,30 @@ func envOrInt(key string, def int) int {
 }
 
 // GetVersion 获取当前与远程版本信息。git 不可用/网络不可达时降级返回空值。
+// 结果缓存 versionCacheTTL：每次请求都跑 3 个 git 子进程（含 5s 网络超时）太贵。
 func (s *Service) GetVersion() (*VersionInfo, error) {
+	s.versionMu.Lock()
+	defer s.versionMu.Unlock()
+	if s.cachedVersion != nil && time.Since(s.versionFetchedAt) < versionCacheTTL {
+		return s.cachedVersion, nil
+	}
 	current := s.gitRevParse("HEAD")
 	latest := s.gitLsRemote()
 	behind := 0
 	if current != "" && latest != "" {
 		behind = s.gitRevListCount(current, "origin/main")
 	}
-	return &VersionInfo{
+	info := &VersionInfo{
 		Current:      current,
 		CurrentShort: shortSHA(current),
 		Latest:       latest,
 		LatestShort:  shortSHA(latest),
 		Behind:       behind,
 		CanUpdate:    latest != "" && latest != current,
-	}, nil
+	}
+	s.cachedVersion = info
+	s.versionFetchedAt = time.Now()
+	return info, nil
 }
 
 func shortSHA(sha string) string {
@@ -216,16 +262,17 @@ func (s *Service) Trigger() (string, error) {
 		return "", fmt.Errorf("生成 session ID 失败: %w", err)
 	}
 	id := "upd_" + rawID
+	logPath, donePath, runnerPath := sessionPaths(s.logDir, id)
 	sess := &UpdateSession{
-		ID:        id,
-		Status:    "running",
-		LogBuffer: NewRingBuffer(ringBufferCap),
-		subs:      make(map[chan SSEEvent]struct{}),
-		done:      make(chan struct{}),
-		logFile:   filepath.Join(s.logDir, "lab-update-"+id+".log"),
-		doneFile:  filepath.Join(s.logDir, "lab-update-"+id+".done"),
-		runnerFile: filepath.Join(s.logDir, "lab-update-"+id+".runner"),
-		maxSubs:   s.maxSubs,
+		ID:         id,
+		Status:     "running",
+		LogBuffer:  NewRingBuffer(ringBufferCap),
+		subs:       make(map[chan SSEEvent]struct{}),
+		done:       make(chan struct{}),
+		logFile:    logPath,
+		doneFile:   donePath,
+		runnerFile: runnerPath,
+		maxSubs:    s.maxSubs,
 	}
 	s.sessions[id] = sess
 	s.active = sess
@@ -363,7 +410,15 @@ func (s *Service) runScript(session *UpdateSession) {
 		session.broadcast(SSEEvent{Type: "error", Message: "更新超时已终止"})
 		s.finish(session, -2, false)
 	})
-	session.setTimeoutTimer(timer)
+	// 与 finish 竞态：Spawn 返回时 runner 可能已瞬间结束并 finish（finish 只 Stop 当时
+	// 已登记的 timer），这里在同一把锁下补检，已 done 则立即 Stop，避免看门狗悬空触发。
+	session.mu.Lock()
+	if session.Status == "done" {
+		timer.Stop()
+	} else {
+		session.timeoutTimer = timer
+	}
+	session.mu.Unlock()
 
 	// tail goroutine：增量读日志文件 + 轮询 done marker
 	session.setTailing(true)
@@ -385,11 +440,43 @@ func (s *Service) runnerAlive(sess *UpdateSession) bool {
 	return false
 }
 
+// runnerGone 连续 3 次确认 runner 死亡（间隔 1s 都 false 才宣判），
+// 避免 docker inspect / kill(0) 单次瞬态失败把存活 runner 误判为中断。
+// 期间 session 被其它路径 finish（done 关闭）时提前返回，由主循环的 done 分支收尾。
+func (s *Service) runnerGone(session *UpdateSession) bool {
+	for i := 0; i < 3; i++ {
+		if s.runnerAlive(session) {
+			return false
+		}
+		if i < 2 {
+			select {
+			case <-session.done:
+				return false
+			case <-time.After(time.Second):
+			}
+		}
+	}
+	return true
+}
+
 // tailSessionLog 每 200ms 增量读日志文件，把新行推入 RingBuffer + 广播；
 // 同时轮询 done marker，出现即收尾。
 func (s *Service) tailSessionLog(session *UpdateSession, startOffset int64) {
+	defer session.setTailing(false)
+
+	// runner 容器/进程启动后才能创建日志文件：短暂重试，避免"文件尚未出现"被误判为启动失败。
+	// 期间若 session 已被其它路径 finish（如超时 kill），直接退出。
 	f, err := os.Open(session.logFile)
+	for i := 0; err != nil && i < tailOpenRetries; i++ {
+		select {
+		case <-session.done:
+			return
+		case <-time.After(tailPollInterval):
+		}
+		f, err = os.Open(session.logFile)
+	}
 	if err != nil {
+		slog.Error("打开更新日志文件失败", "session", session.ID, "error", err)
 		s.finish(session, -1, false)
 		return
 	}
@@ -433,7 +520,7 @@ func (s *Service) tailSessionLog(session *UpdateSession, startOffset int64) {
 				return
 			}
 			// 无 marker 但 runner 已消亡（被 kill，未走 EXIT trap）→ 判中断
-			if time.Since(lastLineAt) > 30*time.Second && !s.runnerAlive(session) {
+			if time.Since(lastLineAt) > 30*time.Second && s.runnerGone(session) {
 				session.broadcast(SSEEvent{Type: "error", Message: "更新进程异常终止"})
 				s.finish(session, -1, false)
 				return
@@ -500,6 +587,9 @@ func (s *Service) finish(session *UpdateSession, exitCode int, success bool) {
 		s.removeRunnerFile(session)
 		session.broadcast(doneEvent)
 		close(session.done)
+		slog.Info("update finished",
+			"session", session.ID, "exit_code", exitCode, "success", success,
+			"old_sha", doneEvent.OldSHA, "new_sha", doneEvent.NewSHA)
 	})
 }
 
@@ -517,8 +607,8 @@ func (s *UpdateSession) broadcast(evt SSEEvent) {
 
 // sendLocked 与 broadcast 共用 sess.mu，串行化"回放补投"与"实时广播"对同一 channel 的写入，
 // 保证事件按 seq 有序送达（前端按 seq 去重，回放与实时交错会导致丢帧）。
-// 持锁期间 select 只会在 send 可立即完成时选中（缓冲有余位或有接收者），
-// 不会因慢客户端无限持锁；stop 关闭后立即让出并由 unsubscribe 收尾。
+// 持锁等待最长 sendTimeout：超时视为死客户端，直接摘除订阅（内联 unsubscribe 的 map 操作，
+// 二者同持 sess.mu 不能重入）并返回 false；stop 关闭后立即让出并由 unsubscribe 收尾。
 func (s *UpdateSession) sendLocked(ch chan SSEEvent, evt SSEEvent, stop <-chan struct{}) bool {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -526,6 +616,13 @@ func (s *UpdateSession) sendLocked(ch chan SSEEvent, evt SSEEvent, stop <-chan s
 	case ch <- evt:
 		return true
 	case <-stop:
+		return false
+	case <-time.After(sendTimeout):
+		if _, ok := s.subs[ch]; ok {
+			delete(s.subs, ch)
+			s.subsCount--
+			close(ch) // 通知 handler 退出
+		}
 		return false
 	}
 }
@@ -591,7 +688,7 @@ func (s *UpdateSession) writeMarker(exitCode int) {
 		"new_sha":   s.NewSHA,
 		"ended_at":  time.Now().Format(time.RFC3339),
 	})
-	_ = os.WriteFile(s.doneFile, marker, 0o644)
+	_ = writeFileAtomic(s.doneFile, marker, 0o644)
 }
 
 // writeRunnerFile 持久化 runner 标识（容器名/pid/local），供进程重启后 recoverFromDisk 判断存活。
@@ -636,9 +733,7 @@ func (s *Service) recoverFromDisk(sessionID string) *UpdateSession {
 	if !validSessionID(sessionID) {
 		return nil
 	}
-	logPath := filepath.Join(s.logDir, "lab-update-"+sessionID+".log")
-	donePath := logPath + ".done"
-	runnerPath := logPath + ".runner"
+	logPath, donePath, runnerPath := sessionPaths(s.logDir, sessionID)
 
 	// 并发恢复双重检查：已有内存 session 直接复用，避免重复 tail
 	s.mu.Lock()
@@ -653,14 +748,14 @@ func (s *Service) recoverFromDisk(sessionID string) *UpdateSession {
 	}
 
 	sess := &UpdateSession{
-		ID:        sessionID,
-		LogBuffer: NewRingBuffer(ringBufferCap),
-		subs:      make(map[chan SSEEvent]struct{}),
-		done:      make(chan struct{}),
-		logFile:   logPath,
-		doneFile:  donePath,
+		ID:         sessionID,
+		LogBuffer:  NewRingBuffer(ringBufferCap),
+		subs:       make(map[chan SSEEvent]struct{}),
+		done:       make(chan struct{}),
+		logFile:    logPath,
+		doneFile:   donePath,
 		runnerFile: runnerPath,
-		maxSubs:   s.maxSubs,
+		maxSubs:    s.maxSubs,
 	}
 
 	data, _ := os.ReadFile(logPath)
@@ -803,11 +898,8 @@ func (s *Service) recoverFromDisk(sessionID string) *UpdateSession {
 func (s *UpdateSession) replaySnapshot() []SSEEvent {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if s.history != nil {
-		return append([]SSEEvent{}, s.history...)
-	}
-	var out []SSEEvent
-	for _, ln := range s.LogBuffer.Snapshot() {
+	// ringLineToEvent 把内存行转成 SSE 事件（含步骤行识别）
+	ringLineToEvent := func(ln ringLine) SSEEvent {
 		evt := SSEEvent{Seq: ln.seq, Timestamp: ln.ts, Type: "line", Text: ln.text}
 		if m := stepRe.FindStringSubmatch(ln.text); m != nil {
 			evt.Type = "step"
@@ -815,7 +907,20 @@ func (s *UpdateSession) replaySnapshot() []SSEEvent {
 			evt.StepTotal, _ = strconv.Atoi(m[2])
 			evt.Title = m[3]
 		}
-		out = append(out, evt)
+		return evt
+	}
+	if s.history != nil {
+		out := append([]SSEEvent{}, s.history...)
+		// 恢复为 running 后继续 tail 的新行只进 LogBuffer，回放必须拼在冻结历史之后，
+		// 否则新订阅者丢失中间行（sess.seq 从 len(history) 续，序号与历史连续）。
+		for _, ln := range s.LogBuffer.Snapshot() {
+			out = append(out, ringLineToEvent(ln))
+		}
+		return out
+	}
+	var out []SSEEvent
+	for _, ln := range s.LogBuffer.Snapshot() {
+		out = append(out, ringLineToEvent(ln))
 	}
 	if s.Status == "done" && s.doneEvent.Seq != 0 {
 		out = append(out, s.doneEvent)

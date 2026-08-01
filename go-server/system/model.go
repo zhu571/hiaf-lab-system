@@ -2,6 +2,7 @@ package system
 
 import (
 	"errors"
+	"os"
 	"sync"
 	"time"
 )
@@ -49,7 +50,6 @@ var (
 )
 
 const (
-	defaultLogDir    = "/tmp"
 	defaultMaxSubs   = 4
 	subBufferSize    = 512
 	defaultTimeout   = 30 * time.Minute
@@ -58,29 +58,38 @@ const (
 	ringBufferCap    = 5000            // 内存环形缓冲最大行数
 	logFileMaxLines  = 5000            // 磁盘回放时最多重建行数
 	tailPollInterval = 200 * time.Millisecond
+	sendTimeout      = 5 * time.Second // sendLocked 持锁等待慢客户端的上限，超时判死客户端
+	versionCacheTTL  = time.Minute       // GetVersion 结果缓存时长（避免每次跑 3 个 git 子进程）
+	tailOpenRetries  = 50 // 等待 runner 创建日志文件的最多重试次数（50×200ms = 10s）
 )
+
+// defaultLogDir 返回默认日志目录（跨平台临时目录；UPDATE_LOG_DIR 可覆盖，
+// 生产部署要求 server 与 runner 容器以相同宿主机绝对路径挂载该目录）。
+func defaultLogDir() string {
+	return os.TempDir()
+}
 
 // UpdateSession 记录一次更新任务的内存状态，日志同时落盘到 logFile 供进程重启后回放。
 type UpdateSession struct {
-	ID        string
-	Status    string // "running" | "done"
-	ExitCode  int
-	OldSHA    string
-	NewSHA    string
-	LogBuffer *RingBuffer // 内存环形日志缓冲
-	history   []SSEEvent  // recoverFromDisk 重建的历史事件序列
-	doneEvent SSEEvent    // finish 时记录的最终 done 事件
-	logFile   string      // {logDir}/lab-update-{id}.log（runner 写入）
-	doneFile  string      // {logDir}/lab-update-{id}.done
-	runnerFile string     // {logDir}/lab-update-{id}.runner（持久化 runner ID，重启恢复用）
-	subs      map[chan SSEEvent]struct{}
-	subsCount int
-	maxSubs   int
-	seq       int
-	done      chan struct{}
-	once      sync.Once
-	DoneAt    time.Time
-	mu        sync.Mutex
+	ID         string
+	Status     string // "running" | "done"
+	ExitCode   int
+	OldSHA     string
+	NewSHA     string
+	LogBuffer  *RingBuffer // 内存环形日志缓冲
+	history    []SSEEvent  // recoverFromDisk 重建的历史事件序列
+	doneEvent  SSEEvent    // finish 时记录的最终 done 事件
+	logFile    string      // {logDir}/lab-update-{id}.log（runner 写入）
+	doneFile   string      // {logDir}/lab-update-{id}.done
+	runnerFile string      // {logDir}/lab-update-{id}.runner（持久化 runner ID，重启恢复用）
+	subs       map[chan SSEEvent]struct{}
+	subsCount  int
+	maxSubs    int
+	seq        int
+	done       chan struct{}
+	once       sync.Once
+	DoneAt     time.Time
+	mu         sync.Mutex
 
 	runnerID     RunnerID    // runner 标识（lab-updater-<id> / pid:N / local:<id>）
 	timeoutTimer *time.Timer // 超时看门狗，finish 时 Stop

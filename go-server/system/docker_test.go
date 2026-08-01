@@ -63,22 +63,9 @@ func TestContainerHealth(t *testing.T) {
 	}
 }
 
-func TestParseComposeServices(t *testing.T) {
-	data := []byte(`["server","postgres","migrate"]`)
-	svcs, err := parseComposeServices(data)
-	if err != nil {
-		t.Fatalf("parseComposeServices: %v", err)
-	}
-	if len(svcs) != 3 || svcs[0] != "server" {
-		t.Errorf("unexpected services: %v", svcs)
-	}
-	if _, err := parseComposeServices([]byte("[]")); err != nil {
-		t.Errorf("empty array should parse: %v", err)
-	}
-}
-
 func TestParseComposeImages(t *testing.T) {
-	data := []byte(`["deploy-server"]`)
+	// 真实 `compose config --images` 输出是纯文本逐行，不是 JSON 数组
+	data := []byte("deploy-server\n")
 	imgs, err := parseComposeImages(data)
 	if err != nil {
 		t.Fatalf("parseComposeImages: %v", err)
@@ -86,13 +73,18 @@ func TestParseComposeImages(t *testing.T) {
 	if len(imgs) != 1 || imgs[0] != "deploy-server" {
 		t.Errorf("unexpected images: %v", imgs)
 	}
-	// null 解析为空（不报错），由调用方按空结果处理
-	imgs, err = parseComposeImages([]byte("null"))
+	// 多行输出每行一个镜像，空行跳过
+	imgs, err = parseComposeImages([]byte("repo-server\n\nrepo-py-agent\n"))
+	if err != nil || len(imgs) != 2 || imgs[1] != "repo-py-agent" {
+		t.Errorf("多行解析异常: %v %v", imgs, err)
+	}
+	// 空输出解析为空（不报错），由调用方按空结果处理
+	imgs, err = parseComposeImages([]byte("\n"))
 	if err != nil {
-		t.Fatalf("null 应解析为空: %v", err)
+		t.Fatalf("空输出不应报错: %v", err)
 	}
 	if len(imgs) != 0 {
-		t.Errorf("null 应解析为空数组, got %v", imgs)
+		t.Errorf("空输出应解析为空, got %v", imgs)
 	}
 }
 

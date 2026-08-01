@@ -126,8 +126,9 @@ export function connectUpdateStream(
             if (!dataLine) continue // 跳过 keepalive 注释帧 / id: / event: 行
             try {
               handlers.onEvent(JSON.parse(dataLine.slice(5).trim()) as SSEEvent)
-            } catch {
-              /* 忽略解析失败的帧 */
+            } catch (e) {
+              // 解析失败的帧不中断流，但留痕便于排查（原始文本截断防刷屏）
+              console.warn('[system.update] SSE 帧解析失败:', dataLine.slice(5).trim().slice(0, 200), e)
             }
           }
         }

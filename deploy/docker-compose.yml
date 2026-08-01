@@ -140,12 +140,18 @@ services:
       PY_AGENT_INTERNAL_TOKEN_FILE: /run/secrets/agent_password
       KEYSIGHT_33210A_ADDR: ${KEYSIGHT_33210A_ADDR:-}
       REPO_ROOT: /opt/hiaf-lab-system
-      UPDATE_ENGINE: ${UPDATE_ENGINE:-shell}
+      UPDATE_ENGINE: ${UPDATE_ENGINE:-go}
       UPDATE_FLAGS: ${UPDATE_FLAGS:-}
       UPDATE_RUN_UID: ${UPDATE_RUN_UID:-1000}
       UPDATE_RUN_GID: ${UPDATE_RUN_GID:-1000}
       UPDATE_DOCKER_GID: ${UPDATE_DOCKER_GID:-993}
-      UPDATE_BACKUP_DIR: /backups
+      UPDATE_GIT_HOME: ${UPDATE_GIT_HOME:-}
+      # 必须是宿主机绝对路径（runner 容器经 docker.sock 以该路径挂载，容器内外路径一致）
+      UPDATE_BACKUP_DIR: ${UPDATE_BACKUP_DIR:-/opt/hiaf-lab-system/.hermes/backups}
+      # 会话日志目录：server 写 marker/tail 日志，runner 容器以同路径挂载写入
+      UPDATE_LOG_DIR: ${UPDATE_LOG_DIR:-/opt/hiaf-lab-system/.hermes/updates}
+      # 容器网络内可达的 ntfy 地址（localhost:8085 在容器内不通）
+      UPDATE_NTFY_URL: ${UPDATE_NTFY_URL:-http://ntfy:80/lab-system}
     secrets:
       - db_password
       - jwt_key
@@ -154,9 +160,12 @@ services:
     ports:
       - "8000:8000"
     volumes:
+      # 仓库只读挂载；server 不写仓库，更新由 runner 容器以可写方式自行挂载执行
       - /var/run/docker.sock:/var/run/docker.sock
       - /opt/hiaf-lab-system:/opt/hiaf-lab-system:ro
-      - /opt/hiaf-lab-system/.hermes/backups:/backups
+      # 更新日志/备份目录以相同路径 rw 挂载（子路径覆盖在 ro 仓库挂载之上），与 runner 容器共享
+      - /opt/hiaf-lab-system/.hermes/updates:/opt/hiaf-lab-system/.hermes/updates
+      - /opt/hiaf-lab-system/.hermes/backups:/opt/hiaf-lab-system/.hermes/backups
     depends_on:
       postgres:
         condition: service_healthy

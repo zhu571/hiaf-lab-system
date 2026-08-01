@@ -4,8 +4,11 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
+	"net/http"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -222,14 +225,21 @@ func (p *Pipeline) stepRecord(ctx context.Context) error {
 	p.backupFile = filepath.Join(dir, name)
 	p.log.Linef("[UPDATE] 备份数据库 → %s", p.backupFile)
 
-	out, _, err := p.cmds.Run(ctx, "docker", p.composeArgs("exec", "-T", "postgres", "pg_dump", "-U", "lab", "lab")...)
+	// pg_dump 输出流式写入备份文件，避免全量读进内存
+	f, err := os.Create(p.backupFile)
 	if err != nil {
+		p.log.Linef("[WARN]  创建备份文件失败: %v", err)
+		p.backupFile = ""
+		return nil
+	}
+	if err := p.cmds.RunStream(ctx, f, "docker", p.composeArgs("exec", "-T", "postgres", "pg_dump", "-U", "lab", "lab")...); err != nil {
+		_ = f.Close()
 		p.log.Linef("[WARN]  数据库备份失败（postgres 未运行？），继续…")
 		p.backupFile = ""
 		return nil
 	}
-	if werr := os.WriteFile(p.backupFile, []byte(out), 0o644); werr != nil {
-		p.log.Linef("[WARN]  写备份文件失败: %v", werr)
+	if err := f.Close(); err != nil {
+		p.log.Linef("[WARN]  写备份文件失败: %v", err)
 		p.backupFile = ""
 	}
 	return nil
@@ -293,6 +303,13 @@ func (p *Pipeline) stepDetect(ctx context.Context) error {
 	if aff.IsNone() {
 		p.log.Linef("[UPDATE] 无服务需要更新。")
 		return errNoChanges
+	}
+
+	// 迁移变更回滚会被阻塞（§6.1），没有备份就执行迁移风险不可接受 → 中止流水线。
+	// dry-run 与无变更路径已在上方提前退出，不受影响。
+	if p.affectedHas("migrate") && p.backupFile == "" {
+		p.log.Linef("[ERROR] 本次更新含数据库迁移，但数据库备份失败/缺失，中止。请先解决备份问题再重试。")
+		return errors.New("含迁移变更但无数据库备份")
 	}
 	return nil
 }
@@ -384,7 +401,12 @@ func (p *Pipeline) stepDeploy(ctx context.Context) error {
 	if p.affectedHas("server") {
 		if err := restart("server", 15); err != nil {
 			p.log.Linef("[ERROR] server 启动失败，查看日志:")
-			p.cmds.Run(ctx, "docker", p.composeArgs("logs", "--tail", "50", "server")...)
+			out, _, _ := p.cmds.Run(ctx, "docker", p.composeArgs("logs", "--tail", "50", "server")...)
+			for _, ln := range strings.Split(strings.TrimRight(out, "\n"), "\n") {
+				if ln != "" {
+					p.log.Linef("[server] %s", ln)
+				}
+			}
 			return err
 		}
 	}
@@ -461,7 +483,9 @@ func (p *Pipeline) rollback(ctx context.Context) {
 		p.log.Linef("[ERROR] ==============================================")
 		p.notify(ctx, "系统更新失败-迁移变更阻塞", "urgent", "warning,skull",
 			fmt.Sprintf("Rollback to %s blocked: schema may have changed. Manual migrate down required.", oldShort))
-		p.cmds.Run(ctx, "git", "-C", p.cfg.RepoRoot, "checkout", "main")
+		// 仓库停在 OLD_SHA（与当前运行的旧镜像一致）；若切回 main，
+		// 工作区是新代码而运行的是旧镜像，下次更新的 diff 检测会空转。
+		p.cmds.Run(ctx, "git", "-C", p.cfg.RepoRoot, "reset", "--hard", p.oldSHA)
 		return
 	}
 
@@ -484,7 +508,8 @@ func (p *Pipeline) rollback(ctx context.Context) {
 	p.notify(ctx, "系统更新失败-已回滚", "urgent", "warning",
 		fmt.Sprintf("Rollback to %s after update %s failed", oldShort, shortSHA(p.newSHA)))
 
-	p.cmds.Run(ctx, "git", "-C", p.cfg.RepoRoot, "checkout", "main")
+	// 同上：仓库与运行的旧镜像保持一致（OLD_SHA），不 checkout main 防止后续更新空转。
+	p.cmds.Run(ctx, "git", "-C", p.cfg.RepoRoot, "reset", "--hard", p.oldSHA)
 
 	p.log.Linef("[WARN] ========== 回滚完成 ==========")
 	p.log.Linef("[WARN] 请检查服务状态并排查失败原因。")
@@ -549,24 +574,29 @@ func (p *Pipeline) serviceState(ctx context.Context, svc string) (string, error)
 	return containerHealth(containers[0]), nil
 }
 
-// diskFreeKB 查询仓库所在磁盘可用空间（KB），解析 `df --output=avail -k` 最后一行。
+// diskFreeKB 查询仓库所在磁盘可用空间（KB），解析 `df -Pk` 输出。
+// POSIX `-Pk` 在 GNU coreutils 与 busybox（alpine runner 镜像）下都可用；
+// GNU 专属的 `df --output=avail` 在 busybox 中不存在，会导致磁盘检查静默失效。
+// 输出末行格式：Filesystem 1024-blocks Used Available Capacity Mounted on
 func (p *Pipeline) diskFreeKB(ctx context.Context) (int64, error) {
-	out, _, err := p.cmds.Run(ctx, "df", "--output=avail", "-k", p.cfg.RepoRoot)
+	out, _, err := p.cmds.Run(ctx, "df", "-Pk", p.cfg.RepoRoot)
 	if err != nil {
 		return 0, err
 	}
-	fields := strings.Fields(out)
-	if len(fields) == 0 {
+	lines_out := strings.Split(strings.TrimSpace(out), "\n")
+	if len(lines_out) == 0 {
 		return 0, errors.New("df 无输出")
 	}
-	var avail int64
-	if _, err := fmt.Sscanf(fields[len(fields)-1], "%d", &avail); err != nil {
+	fields := strings.Fields(lines_out[len(lines_out)-1])
+	if len(fields) < 4 {
+		return 0, fmt.Errorf("df 输出格式异常: %q", out)
+	}
+	avail, err := strconv.ParseInt(fields[3], 10, 64)
+	if err != nil {
 		return 0, err
 	}
 	return avail, nil
 }
-
-// resolveRunnerImage 用 compose config --images server 解析 runner 镜像（预检失败即中止）。
 func (p *Pipeline) resolveRunnerImage(ctx context.Context) (string, error) {
 	out, _, err := p.cmds.Run(ctx, "docker", p.composeArgs("config", "--images", "server")...)
 	if err != nil {
@@ -629,10 +659,25 @@ func (p *Pipeline) sleep(ctx context.Context, d time.Duration) error {
 	}
 }
 
+// notify 发送 ntfy 通知。runner 镜像（alpine）没有 curl，用 Go net/http 直发，5s 超时。
 func (p *Pipeline) notify(ctx context.Context, title, priority, tags, body string) {
 	if p.cfg.NtfyURL == "" {
 		return
 	}
-	_, _, _ = p.cmds.Run(ctx, "curl", "-s", "-X", "POST", p.cfg.NtfyURL,
-		"-H", "Title: "+title, "-H", "Priority: "+priority, "-H", "Tags: "+tags, "-d", body)
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, p.cfg.NtfyURL, strings.NewReader(body))
+	if err != nil {
+		p.log.Linef("[WARN]  ntfy 通知构造失败: %v", err)
+		return
+	}
+	req.Header.Set("Title", title)
+	req.Header.Set("Priority", priority)
+	req.Header.Set("Tags", tags)
+	client := &http.Client{Timeout: 5 * time.Second}
+	resp, err := client.Do(req)
+	if err != nil {
+		p.log.Linef("[WARN]  ntfy 通知发送失败: %v", err)
+		return
+	}
+	defer resp.Body.Close()
+	_, _ = io.Copy(io.Discard, resp.Body)
 }

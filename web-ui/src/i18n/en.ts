@@ -602,6 +602,9 @@ export default {
     logLines: '{n} lines',
     stepLabel: 'Step {step}/{total}',
     reconnecting: 'Connection lost, waiting for server…',
+    reconnectExhausted: 'Reconnection failed repeatedly; auto-reconnect stopped. Refresh the page to try again if the update is still running',
+    sessionNotFound: 'Session expired or not found; log cannot be restored. If an update was running, check the version number to confirm the result',
+    streamHttpError: 'Connection refused (HTTP {status}); reconnection stopped',
     sessionExpired: 'Session expired, please log in again'
   },
   stepTemplates: {

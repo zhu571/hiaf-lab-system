@@ -3,6 +3,8 @@ package system
 import (
 	"context"
 	"encoding/json"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -22,16 +24,13 @@ type pipelineHandler struct {
 	images     string
 	projects   string
 	onPull     func()
-	curlTitles []string
+	ntfyTitles []string
 }
 
 func (h *pipelineHandler) handle(c Call) (string, string, error) {
 	switch c.Name {
 	case "df":
-		return "Avail\n1234567890\n", "", nil
-	case "curl":
-		h.curlTitles = append(h.curlTitles, curlTitle(c.Args))
-		return "", "", nil
+		return "Filesystem 1024-blocks Used Available Capacity Mounted on\n/dev/root 12345678 1234567 1234567890 1% /opt\n", "", nil
 	case "git":
 		return h.git(c)
 	case "docker":
@@ -76,7 +75,7 @@ func (h *pipelineHandler) docker(c Call) (string, string, error) {
 		return h.projects, "", nil
 	case hasArg(args, "config") && hasArg(args, "--images"):
 		if h.images == "" {
-			h.images = `["repo-server"]`
+			h.images = "repo-server\n"
 		}
 		return h.images, "", nil
 	case hasArg(args, "ps"):
@@ -103,15 +102,6 @@ func (h *pipelineHandler) docker(c Call) (string, string, error) {
 	default: // up / logs
 		return "", "", nil
 	}
-}
-
-func curlTitle(args []string) string {
-	for _, a := range args {
-		if strings.HasPrefix(a, "Title: ") {
-			return strings.TrimPrefix(a, "Title: ")
-		}
-	}
-	return ""
 }
 
 func buildService(args []string) string {
@@ -146,6 +136,12 @@ func newTestPipeline(t *testing.T, mutate func(cfg *UpdateConfig), h *pipelineHa
 		}
 	}
 
+	// ntfy 通知走 Go net/http：起 httptest 捕获 Title 头（替代原 curl 命令拦截）
+	ntfy := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		h.ntfyTitles = append(h.ntfyTitles, r.Header.Get("Title"))
+	}))
+	t.Cleanup(ntfy.Close)
+
 	logPath := filepath.Join(dir, "session.log")
 	donePath := filepath.Join(dir, "session.done")
 	cfg := &UpdateConfig{
@@ -155,7 +151,7 @@ func newTestPipeline(t *testing.T, mutate func(cfg *UpdateConfig), h *pipelineHa
 		SessionID:       "upd_test000000",
 		LogFile:         logPath,
 		DoneFile:        donePath,
-		NtfyURL:         "http://localhost:8085/lab-system",
+		NtfyURL:         ntfy.URL,
 		UpdateTimeout:   0,
 		RollbackTimeout: 0,
 	}
@@ -166,6 +162,8 @@ func newTestPipeline(t *testing.T, mutate func(cfg *UpdateConfig), h *pipelineHa
 	if err != nil {
 		t.Fatalf("NewLogger: %v", err)
 	}
+	// Windows 上打开中的日志文件无法删除，必须在 TempDir 清理前关闭句柄。
+	t.Cleanup(func() { _ = logger.Close() })
 	fake := &fakeCmdRunner{fn: h.handle}
 	return NewPipeline(cfg, fake, logger), fake, logPath, donePath
 }
@@ -218,13 +216,20 @@ func TestPipelineSuccessFullRun(t *testing.T) {
 		t.Errorf("缺少 pg_dump 调用: %v", callNames(calls))
 	}
 	found := false
-	for _, title := range h.curlTitles {
+	for _, title := range h.ntfyTitles {
 		if title == "系统更新成功" {
 			found = true
 		}
 	}
 	if !found {
-		t.Errorf("缺少成功 ntfy: %v", h.curlTitles)
+		t.Errorf("缺少成功 ntfy: %v", h.ntfyTitles)
+	}
+	// pg_dump 输出应流式写入备份文件（不经内存缓冲）
+	backups, _ := filepath.Glob(filepath.Join(p.cfg.RepoRoot, ".hermes", "backups", "lab-db-backup-*.sql"))
+	if len(backups) != 1 {
+		t.Errorf("备份文件数 = %d, want 1", len(backups))
+	} else if data, _ := os.ReadFile(backups[0]); !strings.Contains(string(data), "DUMPDATA") {
+		t.Errorf("备份文件内容缺少 pg_dump 输出: %q", data)
 	}
 	if !rev.after {
 		t.Errorf("pull 后未解析新 SHA")
@@ -249,7 +254,7 @@ func TestPipelineBuildFailureNoRollback(t *testing.T) {
 	if containsCall(calls, "git", "checkout", "oldsha") {
 		t.Error("构建失败不应回滚")
 	}
-	if hasTitle(h.curlTitles, "系统更新失败-已回滚") {
+	if hasTitle(h.ntfyTitles, "系统更新失败-已回滚") {
 		t.Error("构建失败不应发已回滚通知")
 	}
 	data, _ := os.ReadFile(donePath)
@@ -283,12 +288,12 @@ func TestPipelineMigrateFailureBlocksRollback(t *testing.T) {
 	if containsCall(calls, "docker", "compose", "up", "-d") {
 		t.Errorf("迁移阻塞分支不应重建服务: %v", callNames(calls))
 	}
-	// 通知迁移阻塞 + 回退到 main
-	if !hasTitle(h.curlTitles, "系统更新失败-迁移变更阻塞") {
-		t.Errorf("缺少迁移阻塞通知: %v", h.curlTitles)
+	// 通知迁移阻塞 + 仓库 reset --hard 停在 OLD_SHA（与运行的旧镜像一致）
+	if !hasTitle(h.ntfyTitles, "系统更新失败-迁移变更阻塞") {
+		t.Errorf("缺少迁移阻塞通知: %v", h.ntfyTitles)
 	}
-	if !containsCall(calls, "git", "checkout", "main") {
-		t.Errorf("阻塞分支应 git checkout main: %v", callNames(calls))
+	if !containsCall(calls, "git", "reset", "--hard", "oldsha") {
+		t.Errorf("阻塞分支应 git reset --hard oldsha: %v", callNames(calls))
 	}
 	data, _ := os.ReadFile(donePath)
 	var m DoneMarker
@@ -322,11 +327,11 @@ func TestPipelineHealthFailureRollsBack(t *testing.T) {
 	if !containsCall(calls, "docker", "compose", "up", "-d", "--no-deps", "server") {
 		t.Errorf("回滚应重启受影响服务 server: %v", callNames(calls))
 	}
-	if !containsCall(calls, "git", "checkout", "main") {
-		t.Errorf("回滚完成应回退到 main: %v", callNames(calls))
+	if !containsCall(calls, "git", "reset", "--hard", "oldsha") {
+		t.Errorf("回滚完成应 git reset --hard oldsha: %v", callNames(calls))
 	}
-	if !hasTitle(h.curlTitles, "系统更新失败-已回滚") {
-		t.Errorf("缺少已回滚通知: %v", h.curlTitles)
+	if !hasTitle(h.ntfyTitles, "系统更新失败-已回滚") {
+		t.Errorf("缺少已回滚通知: %v", h.ntfyTitles)
 	}
 	if s := stepOrder(t, logPath); !equalInts(s, []int{1, 2, 3, 4, 5, 6, 7}) {
 		t.Errorf("回滚也应走完 7 步头部: %v", s)
@@ -557,4 +562,57 @@ func readMarker(t *testing.T, path string) DoneMarker {
 		t.Fatalf("parse marker: %v", err)
 	}
 	return m
+}
+
+// TestDiskFreeKB 解析 df -Pk 输出（busybox 兼容格式），验证可用空间取第 4 列。
+func TestDiskFreeKB(t *testing.T) {
+	fake := &fakeCmdRunner{fn: func(c Call) (string, string, error) {
+		return "Filesystem 1024-blocks Used Available Capacity Mounted on\n/dev/root 1000000 500000 2097151 50% /opt\n", "", nil
+	}}
+	p := &Pipeline{cfg: &UpdateConfig{RepoRoot: "/opt"}, cmds: fake}
+	avail, err := p.diskFreeKB(context.Background())
+	if err != nil {
+		t.Fatalf("diskFreeKB: %v", err)
+	}
+	if avail != 2097151 {
+		t.Errorf("avail = %d, want 2097151", avail)
+	}
+}
+
+// TestDiskFreeKBBadFormat df 输出异常时返回错误而非误读。
+func TestDiskFreeKBBadFormat(t *testing.T) {
+	fake := &fakeCmdRunner{fn: func(c Call) (string, string, error) {
+		return "no fields\n", "", nil
+	}}
+	p := &Pipeline{cfg: &UpdateConfig{RepoRoot: "/opt"}, cmds: fake}
+	if _, err := p.diskFreeKB(context.Background()); err == nil {
+		t.Error("expected error for malformed df output")
+	}
+}
+
+// TestPipelineMigrateWithoutBackupAborts 含迁移变更但备份失败 → 步骤 4 中止，不跑迁移。
+func TestPipelineMigrateWithoutBackupAborts(t *testing.T) {
+	rev := &struct{ after bool }{}
+	h := &pipelineHandler{
+		rev:     defaultRev(rev, "oldsha", "newsha"),
+		diff:    "migrations/002_alter.sql\n",
+		dumpErr: os.ErrPermission,
+		onPull:  func() { rev.after = true },
+	}
+	p, fake, logPath, donePath := newTestPipeline(t, nil, h)
+
+	if code := p.Run(context.Background()); code != 1 {
+		t.Fatalf("Run = %d, want 1（含迁移但无备份必须中止）", code)
+	}
+	calls := fake.callsSnapshot()
+	if containsCall(calls, "docker", "compose", "run", "--rm", "migrate") {
+		t.Errorf("备份缺失时不应执行迁移: %v", callNames(calls))
+	}
+	data, _ := os.ReadFile(logPath)
+	if !strings.Contains(string(data), "备份失败/缺失") {
+		t.Error("缺少备份缺失中止日志")
+	}
+	if m := readMarker(t, donePath); m.ExitCode != 1 {
+		t.Errorf("marker exit_code = %d, want 1", m.ExitCode)
+	}
 }

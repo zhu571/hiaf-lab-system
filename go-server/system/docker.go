@@ -44,22 +44,21 @@ func containerHealth(c composePSContainer) string {
 	return c.State
 }
 
-// parseComposeServices 解析 `compose config --services` 输出（JSON 字符串数组）。
-func parseComposeServices(data []byte) ([]string, error) {
-	var out []string
-	if err := json.Unmarshal(data, &out); err != nil {
-		return nil, fmt.Errorf("解析 compose config --services 失败: %w", err)
-	}
-	return out, nil
+// parseComposeImages 解析 `compose config --images` 输出（纯文本逐行，跳过空行）。
+// 真实 compose v2 输出不是 JSON 数组，每行一个镜像名。
+func parseComposeImages(data []byte) ([]string, error) {
+	return parseComposeLines(data), nil
 }
 
-// parseComposeImages 解析 `compose config --images` 输出（JSON 字符串数组）。
-func parseComposeImages(data []byte) ([]string, error) {
+// parseComposeLines 解析 compose config --images/--services 的纯文本逐行输出。
+func parseComposeLines(data []byte) []string {
 	var out []string
-	if err := json.Unmarshal(data, &out); err != nil {
-		return nil, fmt.Errorf("解析 compose config --images 失败: %w", err)
+	for _, ln := range strings.Split(string(data), "\n") {
+		if ln = strings.TrimSpace(ln); ln != "" {
+			out = append(out, ln)
+		}
 	}
-	return out, nil
+	return out
 }
 
 // composeProject 对应 `docker compose ls --format json` 的单个项目对象。

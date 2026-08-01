@@ -3,8 +3,11 @@ package system
 import (
 	"bytes"
 	"context"
+	"fmt"
+	"io"
 	"os"
 	"os/exec"
+	"strings"
 	"sync"
 )
 
@@ -21,6 +24,8 @@ type CmdRunner interface {
 	Run(ctx context.Context, name string, args ...string) (stdout, stderr string, err error)
 	// RunOK 只关心退出码，stdout/stderr 忽略。
 	RunOK(ctx context.Context, name string, args ...string) error
+	// RunStream 执行命令并把 stdout 流式写入 w（用于 pg_dump 等大输出，避免全量读进内存）。
+	RunStream(ctx context.Context, w io.Writer, name string, args ...string) error
 }
 
 // execRunner 真实执行器：在 dir 目录执行，叠加 env 环境变量。
@@ -50,6 +55,19 @@ func (r *execRunner) RunOK(ctx context.Context, name string, args ...string) err
 	return err
 }
 
+func (r *execRunner) RunStream(ctx context.Context, w io.Writer, name string, args ...string) error {
+	cmd := exec.CommandContext(ctx, name, args...)
+	cmd.Dir = r.dir
+	cmd.Env = append(os.Environ(), r.env...)
+	cmd.Stdout = w // stdout 直接落文件，不进内存
+	var stderr bytes.Buffer
+	cmd.Stderr = &stderr
+	if err := cmd.Run(); err != nil {
+		return fmt.Errorf("%w: %s", err, strings.TrimSpace(stderr.String()))
+	}
+	return nil
+}
+
 // fakeCmdRunner 测试注入：记录每次调用的命令与参数，可预设返回。
 type fakeCmdRunner struct {
 	mu    sync.Mutex
@@ -71,6 +89,15 @@ func (f *fakeCmdRunner) Run(ctx context.Context, name string, args ...string) (s
 func (f *fakeCmdRunner) RunOK(ctx context.Context, name string, args ...string) error {
 	_, _, err := f.Run(ctx, name, args...)
 	return err
+}
+
+func (f *fakeCmdRunner) RunStream(ctx context.Context, w io.Writer, name string, args ...string) error {
+	out, _, err := f.Run(ctx, name, args...)
+	if err != nil {
+		return err
+	}
+	_, werr := io.WriteString(w, out)
+	return werr
 }
 
 // callsSnapshot 返回已记录的命令调用副本。

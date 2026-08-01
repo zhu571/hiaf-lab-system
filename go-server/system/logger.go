@@ -78,10 +78,22 @@ func WriteDoneMarker(path string, m DoneMarker) error {
 	if err != nil {
 		return fmt.Errorf("序列化 marker 失败: %w", err)
 	}
-	if err := os.WriteFile(path, data, 0o644); err != nil {
+	if err := writeFileAtomic(path, data, 0o644); err != nil {
 		return fmt.Errorf("写 marker 失败: %w", err)
 	}
 	return nil
+}
+
+// writeFileAtomic 先写临时文件再 rename 原子替换，避免 tail/恢复方读到写一半的文件。
+func writeFileAtomic(path string, data []byte, perm os.FileMode) error {
+	if path == "" {
+		return nil
+	}
+	tmp := path + ".tmp"
+	if err := os.WriteFile(tmp, data, perm); err != nil {
+		return err
+	}
+	return os.Rename(tmp, path)
 }
 
 // nowUTC 返回 marker 使用的结束时间（与 update.sh date -u 一致，RFC3339 Z）。

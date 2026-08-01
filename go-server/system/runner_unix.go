@@ -5,80 +5,18 @@ package system
 import (
 	"context"
 	"fmt"
-	"os"
-	"os/exec"
 	"path/filepath"
 	"strconv"
 	"strings"
-	"syscall"
 )
 
-// newRunner 根据 UPDATE_ENGINE 构造平台 runner：
-//   - go：detached runner 容器（复用当前 server 镜像，I1）
-//   - shell：bash setsid 兜底（现状行为）
+// newRunner 根据 UPDATE_ENGINE 构造平台 runner。
+// go 引擎与 shell 兜底引擎都派发 detached runner 容器（I1：独立于 server 容器，
+// server 重建不影响它）；区别只在 entrypoint —— go 跑 lab-update 流水线，shell 跑
+// update.sh。shell 引擎不再在 server 容器内直接 bash（server 容器非 root 且仓库只读，
+// 无法写 .git，无法满足 I1），统一走 runner 容器 + 仓库 rw 挂载。
 func newRunner(s *Service, engine string) SessionRunner {
-	if engine == "go" {
-		return &dockerRunner{cmds: NewExecRunner("", nil), cfg: s.spawnConfig()}
-	}
-	return &shellRunner{repoRoot: s.repoRoot, scriptPath: s.scriptPath}
-}
-
-// shellRunner 保留现有 bash 兜底引擎：setsid 脱离启动 update.sh。
-type shellRunner struct {
-	repoRoot   string
-	scriptPath string
-}
-
-func (r *shellRunner) Spawn(_ context.Context, sess *UpdateSession) (RunnerID, error) {
-	if _, err := os.Stat(r.scriptPath); err != nil {
-		return "", ErrScriptMissing
-	}
-	cmd := exec.Command("/bin/bash", r.scriptPath)
-	cmd.Dir = r.repoRoot
-	cmd.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
-	cmd.Env = append(os.Environ(),
-		"UPDATE_SESSION_ID="+sess.ID,
-		"UPDATE_LOG_FILE="+sess.logFile,
-		"UPDATE_DONE_FILE="+sess.doneFile,
-	)
-	devNull, err := os.OpenFile(os.DevNull, os.O_WRONLY, 0)
-	if err != nil {
-		return "", fmt.Errorf("%w: %v", ErrScriptStartFailed, err)
-	}
-	defer devNull.Close()
-	cmd.Stdout = devNull
-	cmd.Stderr = devNull
-	if err := cmd.Start(); err != nil {
-		return "", fmt.Errorf("%w: %v", ErrScriptStartFailed, err)
-	}
-	return RunnerID(fmt.Sprintf("pid:%d", cmd.Process.Pid)), nil
-}
-
-func (r *shellRunner) Kill(id RunnerID) error {
-	pid := parsePID(id)
-	if pid <= 0 {
-		return nil
-	}
-	_ = syscall.Kill(-pid, syscall.SIGKILL) // 进程组
-	_ = syscall.Kill(pid, syscall.SIGKILL)  // 兜底单进程
-	return nil
-}
-
-func (r *shellRunner) Alive(id RunnerID) bool {
-	pid := parsePID(id)
-	if pid <= 0 {
-		return false
-	}
-	return syscall.Kill(-pid, 0) == nil || syscall.Kill(pid, 0) == nil
-}
-
-func parsePID(id RunnerID) int {
-	s := strings.TrimPrefix(string(id), "pid:")
-	n, err := strconv.Atoi(s)
-	if err != nil || n <= 0 {
-		return 0
-	}
-	return n
+	return &dockerRunner{cmds: NewExecRunner("", nil), cfg: s.spawnConfig()}
 }
 
 // dockerRunner 通过 docker CLI 以 `docker run -d` 派发独立 runner 容器。
@@ -156,6 +94,7 @@ func (c RunnerSpawnConfig) project() string {
 
 // buildRunnerCmd 组装 `docker run -d` 参数（纯函数，可单测）。
 // 仓库以宿主绝对路径挂载（git/secrets/migrations/构建上下文一致），git 凭据只读透传。
+// shell 引擎复用同一 runner 容器（I1），entrypoint 换成 bash update.sh。
 func buildRunnerCmd(cfg RunnerSpawnConfig) []string {
 	args := []string{
 		"run", "-d", "--rm",

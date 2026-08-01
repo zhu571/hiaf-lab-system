@@ -169,7 +169,9 @@ const quickLinks = computed<QuickLink[]>(() => {
 })
 
 onMounted(async () => {
-  if (auth.isAdmin) await refreshVersion()
+  // 非 admin 不发起任何系统更新相关请求（换账号后残留的 session_id 也必然 403）
+  if (!auth.isAdmin) return
+  await refreshVersion()
   // 页面刷新后恢复上次未结束的更新会话（localStorage 持久化 session_id）
   const saved = localStorage.getItem(SESSION_KEY)
   if (saved) {
@@ -194,8 +196,11 @@ async function refreshVersion() {
   versionLoading.value = true
   try {
     version.value = await systemApi.getVersion()
-  } catch {
+  } catch (err) {
     version.value = null
+    // 网络/后端错误也要给出提示（含 request_id，便于对齐审计日志）
+    const e = err as Error & { requestId?: string }
+    ElMessage.error(e.requestId ? `${e.message} (request_id: ${e.requestId})` : e.message)
   } finally {
     versionLoading.value = false
   }
@@ -229,9 +234,9 @@ function connectStream(sessionId: string) {
   const { close } = systemApi.connectUpdateStream(sessionId, {
     onEvent: (event: SSEEvent) => {
       streamDisconnected.value = false
-      reconnectAttempts = 0 // 收到任意帧即复位退避计数
       if (event.seq <= lastSeq) return // 历史回放 + 实时帧去重
       lastSeq = event.seq
+      reconnectAttempts = 0 // 仅收到真正的新帧才复位退避计数（回放帧不复位）
       if (event.type === 'line' || event.type === 'step') {
         const text = event.type === 'step'
           ? `\n===== ${t('settings.stepLabel', { step: event.step, total: event.step_total })}：${event.title} =====\n`
@@ -241,6 +246,7 @@ function connectStream(sessionId: string) {
         nextTick(() => scrollLogToBottom())
       } else if (event.type === 'error') {
         logLines.value.push(`[ERROR] ${event.message}`)
+        nextTick(() => scrollLogToBottom())
       } else if (event.type === 'done') {
         updateRunning.value = false
         updateResult.value = event.success ? 'success' : 'failed'
@@ -260,15 +266,23 @@ function connectStream(sessionId: string) {
     },
     onHttpError: (status: number) => {
       // 非 401 的 HTTP 层错误，不当作网络错误盲重连：
-      // 404 = session 已不存在（sweep/重启丢失），重连无意义，直接终止；
+      // 404 = session 已不存在（TTL 过期 sweep/重启丢失），重连无意义，直接终止；
+      //       但 404 不代表更新失败，只提示无法恢复日志；
+      // 其他 4xx（如 403 无权限）= 重试无意义，同样终止；
       // 409 = 订阅者过多，非网络问题，退避后重试（仍受总次数上限约束）。
       if (!updateRunning.value) return
       if (status === 404) {
         updateRunning.value = false
-        updateResult.value = 'failed'
         streamDisconnected.value = false
         clearTimeout(reconnectTimer)
         persistSession(null)
+        ElMessage.warning(t('settings.sessionNotFound'))
+      } else if (status >= 400 && status < 500 && status !== 409) {
+        updateRunning.value = false
+        streamDisconnected.value = false
+        clearTimeout(reconnectTimer)
+        persistSession(null)
+        ElMessage.error(t('settings.streamHttpError', { status }))
       } else {
         streamDisconnected.value = true
         scheduleReconnect(sessionId)
@@ -288,8 +302,8 @@ function connectStream(sessionId: string) {
 function scheduleReconnect(sessionId: string) {
   if (reconnectAttempts >= RECONNECT_ATTEMPTS) {
     updateRunning.value = false
-    updateResult.value = 'failed'
-    persistSession(null)
+    // 保留 session_id：服务端可能仍在执行，刷新页面可再次尝试恢复；仅停止自动重连并提示
+    ElMessage.warning(t('settings.reconnectExhausted'))
     return
   }
   clearTimeout(reconnectTimer)

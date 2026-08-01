@@ -20,6 +20,7 @@ HIAF 低温气体靶实验室的多人协作日志管理平台。系统已完成
 - InfluxDB 时序数据存储 + Grafana 监控仪表盘。
 - EPICS 通道访问网关 + 虚拟 IOC（pyEpics 模拟硬件 PV）。
 - ntfy 消息通知。
+- Web 触发系统更新：UPDATE_ENGINE=go 为默认（server 经 docker.sock 派发独立 runner 容器执行 git pull + compose 重建）；UPDATE_ENGINE=shell 时 runner 容器改跑 `.hermes/update.sh` 兜底，该脚本也可在宿主机手工执行。
 
 ## 2. 当前仓库状态
 
@@ -83,6 +84,8 @@ hiaf-lab-system/
 │   ├── assembly/           # 装配/组装模块
 │   ├── runs/               # 实验运行模块
 │   ├── rfmatch/            # RF 匹配模块
+│   ├── system/             # 系统更新模块（版本查询、更新触发、SSE 日志流）
+│   ├── cmd/update-runner/  # 更新 runner 入口（独立容器内执行 git pull + compose 重建）
 │   ├── agent/              # Agent 交互模块
 │   ├── audit/              # 审计日志模块
 │   ├── attachments/        # 附件管理模块

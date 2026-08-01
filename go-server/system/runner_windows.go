@@ -5,6 +5,8 @@ package system
 import (
 	"context"
 	"errors"
+	"log/slog"
+	"os"
 	"sync"
 )
 
@@ -62,13 +64,15 @@ func (r *localRunner) Spawn(ctx context.Context, sess *UpdateSession) (RunnerID,
 		UpdateTimeout:   defaultTimeout,
 		RollbackTimeout: defaultTimeout,
 	}
-	p := NewPipeline(cfg, localDevCmdRunner(r.repoRoot), newLocalLogger(sess.logFile))
+	log := newLocalLogger(sess.logFile)
+	p := NewPipeline(cfg, localDevCmdRunner(r.repoRoot), log)
 	go func() {
 		defer func() {
 			r.mu.Lock()
 			delete(r.active, string(id))
 			r.mu.Unlock()
 		}()
+		defer log.Close() // Windows 下打开中的日志文件无法删除，退出时关闭句柄
 		p.Run(runCtx)
 	}()
 	return id, nil
@@ -100,9 +104,7 @@ func localDevCmdRunner(repoRoot string) CmdRunner {
 		case "git":
 			return realGit.Run(context.Background(), c.Name, c.Args...)
 		case "df":
-			return "Avail\n1234567890\n", "", nil
-		case "curl":
-			return "", "", nil
+			return "Filesystem 1024-blocks Used Available Capacity Mounted on\n/dev/root 12345678 1234567 1234567890 1% /opt\n", "", nil
 		case "docker":
 			return "", "docker 不可用（Windows 本地模拟）", errors.New("docker 不可用")
 		default:
@@ -111,11 +113,12 @@ func localDevCmdRunner(repoRoot string) CmdRunner {
 	}}
 }
 
-// newLocalLogger 复用 Logger；日志文件不可用时退回 stdout 模式。
+// newLocalLogger 复用 Logger；日志文件不可用时退回 stdout，保证输出不蒸发。
 func newLocalLogger(path string) *Logger {
 	l, err := NewLogger(path, nil)
 	if err != nil {
-		l, _ = NewLogger("", nil)
+		slog.Warn("更新日志文件不可用，退回 stdout", "path", path, "error", err)
+		l, _ = NewLogger("", os.Stdout)
 	}
 	return l
 }

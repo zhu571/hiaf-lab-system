@@ -2,8 +2,8 @@ package system
 
 import "context"
 
-// RunnerID 标识一个 runner：容器名 lab-updater-<session>（unix go 引擎）、
-// 本地占位 local:<session>（windows）、或 pid:<n>（shell 兜底引擎）。
+// RunnerID 标识一个 runner：容器名 lab-updater-<session>（unix，go/shell 双引擎共用）、
+// 或本地占位 local:<session>（windows 进程内开发实现）。
 type RunnerID string
 
 // SessionRunner 抽象 runner 的启动/停止/存活判断。

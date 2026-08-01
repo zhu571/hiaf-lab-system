@@ -8,17 +8,23 @@ import (
 	"flag"
 	"os"
 	"os/signal"
+	"syscall"
 	"time"
 
 	"github.com/zhu571/hiaf-lab-system/go-server/system"
 )
 
 func main() {
+	os.Exit(run())
+}
+
+// run 返回进程退出码；用 return 代替直接 os.Exit，保证 defer（关闭日志文件等）执行。
+func run() int {
 	cfg := parseFlags(os.Args[1:])
 
 	log, err := system.NewLogger(cfg.LogFile, os.Stdout)
 	if err != nil {
-		os.Exit(3)
+		return 3
 	}
 	defer log.Close()
 
@@ -30,11 +36,11 @@ func main() {
 	}
 	cmds := system.NewExecRunner(cfg.RepoRoot, env)
 
-	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
+	// SIGINT/SIGTERM 都要响应：docker stop 默认发 SIGTERM
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
-	code := system.NewPipeline(cfg, cmds, log).Run(ctx)
-	os.Exit(code)
+	return system.NewPipeline(cfg, cmds, log).Run(ctx)
 }
 
 // parseFlags 解析 runner 入参，支持 flag 与 env 双来源（flag 优先）。
@@ -51,7 +57,9 @@ func parseFlags(args []string) *system.UpdateConfig {
 		dryRun     = fs.Bool("dry-run", false, "仅检测变更，不执行实际操作")
 		noRollback = fs.Bool("no-rollback", false, "失败时不回滚")
 	)
-	_ = fs.Parse(args)
+	if err := fs.Parse(args); err != nil {
+		os.Exit(2)
+	}
 
 	return &system.UpdateConfig{
 		RepoRoot:        *repo,

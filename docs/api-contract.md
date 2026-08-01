@@ -524,8 +524,18 @@ middleware 与 instruments service 双重校验；租约与独立 ACL 后续接�
 
 ## 3.12 系统管理模块（系统更新）
 
-仅 admin 角色可访问（路由挂 `RequireRole(admin)`）。系统更新由 Go 进程触发
-`.hermes/update.sh`（`setsid` 脱离进程组），脚本输出经日志文件回传，服务重启后可从磁盘恢复。
+仅 admin 角色可访问（路由挂 `RequireRole(admin)`）。更新由 Go 进程触发，执行引擎由
+`UPDATE_ENGINE` 环境变量决定：
+
+- `go`（推荐，容器部署默认）：Step 表驱动流水线（`go-server/system/`），派发独立 runner
+  容器 `lab-updater-<session>`（复用 server 镜像，挂载 docker.sock 与仓库），server 重启不影响执行；
+  runner 入口为镜像内 `lab-update` 二进制（`go-server/cmd/update-runner/`）。
+- `shell`（兜底）：同样派发独立 runner 容器，entrypoint 改为 `bash .hermes/update.sh`
+  （runner 容器内仓库为可写挂载）。update.sh 也可在宿主机上手工执行。
+
+两种引擎都把日志写入 `UPDATE_LOG_FILE`（默认 `/tmp/lab-update-<session>.log`），结束时写
+done marker（`exit_code`/`old_sha`/`new_sha`/`ended_at`），Go 侧 tail 日志文件回传 SSE；
+服务重启后可从磁盘 `.log`/`.done`/`.runner` 文件恢复会话。
 
 ### `GET /api/v1/admin/system/version`
 
@@ -568,7 +578,11 @@ git 不可用或网络不可达时，`current`/`latest` 为空字符串、`can_u
 
 ### `GET /api/v1/admin/system/update/stream/{sessionId}`
 
-SSE 流式返回指定 session 的更新日志。`sessionId` 必须是白名单格式
+SSE 流式返回指定 session 的更新日志。该端点与其余系统管理接口一样挂
+`AuthRequired` + `RequireRole(admin)`：非 admin 用户返回 `403 permission_denied`；
+access token 过期返回 `401`，前端应刷新 token 后重新建立 SSE 连接。
+
+`sessionId` 必须是白名单格式
 `upd_[a-z0-9]{10}`（如 `upd_a1b2c3d4e5`），否则一律 `404 session_not_found`
 （防止把任意 URL 参数拼进文件路径）。session 不在内存时从磁盘 `.log`/`.done` 文件恢复。
 单 session 最多 4 个并发订阅，超出返回 `409 too_many_subscribers`。

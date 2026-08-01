@@ -81,6 +81,8 @@ func TestReplayPreservesSeqAndTS(t *testing.T) {
 }
 
 // done 事件必须在历史回放之后可达，即使回放行数超过 channel 缓冲（修复 #2）。
+// 消费与真实 handler 一致：回放期间持续读取（否则回放补投持锁等接收者、
+// finish 等锁，会形成环形等待）。
 func TestSubscribeDeliversDoneAfterLongReplay(t *testing.T) {
 	svc := NewService(t.TempDir())
 	sess := &UpdateSession{
@@ -104,35 +106,41 @@ func TestSubscribeDeliversDoneAfterLongReplay(t *testing.T) {
 	}
 	defer stop()
 
-	// 回放进行中触发 finish（模拟脚本在回放期间结束）
-	svc.finish(sess, 0, true)
-
-	var sawDone bool
-	var lineCount int
-	seenSeq := map[int]bool{}
-	timeout := time.After(5 * time.Second)
-loop:
-	for {
-		select {
-		case evt, ok := <-ch:
-			if !ok {
-				break loop
-			}
-			if seenSeq[evt.Seq] { // 与前端一致，按 seq 去重
+	// 先启动消费（按 seq 去重，与前端一致），再触发 finish
+	got := make(chan []SSEEvent, 1)
+	go func() {
+		var evts []SSEEvent
+		seenSeq := map[int]bool{}
+		for evt := range ch {
+			if seenSeq[evt.Seq] {
 				continue
 			}
 			seenSeq[evt.Seq] = true
-			switch evt.Type {
-			case "line":
-				lineCount++
-			case "done":
-				if !evt.Success {
-					t.Error("expected success=true")
-				}
-				sawDone = true
+			evts = append(evts, evt)
+		}
+		got <- evts
+	}()
+
+	// 回放进行中触发 finish（模拟脚本在回放期间结束）
+	svc.finish(sess, 0, true)
+
+	var evts []SSEEvent
+	select {
+	case evts = <-got:
+	case <-time.After(5 * time.Second):
+		t.Fatal("timeout: 流未在 finish 后关闭")
+	}
+	var sawDone bool
+	var lineCount int
+	for _, evt := range evts {
+		switch evt.Type {
+		case "line":
+			lineCount++
+		case "done":
+			if !evt.Success {
+				t.Error("expected success=true")
 			}
-		case <-timeout:
-			t.Fatalf("timeout: saw %d lines, done=%v", lineCount, sawDone)
+			sawDone = true
 		}
 	}
 	if !sawDone {
@@ -348,8 +356,7 @@ func TestConcurrentSubscribeRecoversOnce(t *testing.T) {
 	svc := NewService(t.TempDir())
 	svc.logDir = t.TempDir()
 	id := "upd_recover123"
-	logPath := filepath.Join(svc.logDir, "lab-update-"+id+".log")
-	donePath := logPath + ".done"
+	logPath, donePath, _ := sessionPaths(svc.logDir, id)
 	if err := os.WriteFile(logPath, []byte("[UPDATE] line1\n[UPDATE] line2\n"), 0o644); err != nil {
 		t.Fatalf("write log: %v", err)
 	}
@@ -398,16 +405,16 @@ func TestSweepOnceRemovesFiles(t *testing.T) {
 	svc.logDir = t.TempDir()
 	id := "upd_sweep12345"
 	sess := &UpdateSession{
-		ID:        id,
-		Status:    "done",
-		DoneAt:    time.Now().Add(-2 * historyTTL),
-		LogBuffer: NewRingBuffer(ringBufferCap),
-		subs:      make(map[chan SSEEvent]struct{}),
-		done:      make(chan struct{}),
-		logFile:   filepath.Join(svc.logDir, "lab-update-"+id+".log"),
-		doneFile:  filepath.Join(svc.logDir, "lab-update-"+id+".done"),
+		ID:         id,
+		Status:     "done",
+		DoneAt:     time.Now().Add(-2 * historyTTL),
+		LogBuffer:  NewRingBuffer(ringBufferCap),
+		subs:       make(map[chan SSEEvent]struct{}),
+		done:       make(chan struct{}),
+		logFile:    filepath.Join(svc.logDir, "lab-update-"+id+".log"),
+		doneFile:   filepath.Join(svc.logDir, "lab-update-"+id+".done"),
 		runnerFile: filepath.Join(svc.logDir, "lab-update-"+id+".runner"),
-		maxSubs:   4,
+		maxSubs:    4,
 	}
 	files := []string{sess.logFile, sess.doneFile, sess.runnerFile}
 	for _, p := range files {
@@ -444,8 +451,7 @@ func TestRecoverFromDiskDoneMarker(t *testing.T) {
 	svc := NewService(t.TempDir())
 	svc.logDir = t.TempDir()
 	id := "upd_done123456"
-	logPath := filepath.Join(svc.logDir, "lab-update-"+id+".log")
-	donePath := logPath + ".done"
+	logPath, donePath, _ := sessionPaths(svc.logDir, id)
 	if err := os.WriteFile(logPath, []byte("[UPDATE] 步骤一\n[UPDATE] 步骤二\n"), 0o644); err != nil {
 		t.Fatalf("write log: %v", err)
 	}
@@ -478,11 +484,11 @@ func TestRecoverFromDiskCorruptedMarker(t *testing.T) {
 	svc := NewService(t.TempDir())
 	svc.logDir = t.TempDir()
 	id := "upd_corrupt123"
-	logPath := filepath.Join(svc.logDir, "lab-update-"+id+".log")
+	logPath, donePath, _ := sessionPaths(svc.logDir, id)
 	if err := os.WriteFile(logPath, []byte("[UPDATE] 某行\n"), 0o644); err != nil {
 		t.Fatalf("write log: %v", err)
 	}
-	if err := os.WriteFile(logPath+".done", []byte("not-json"), 0o644); err != nil {
+	if err := os.WriteFile(donePath, []byte("not-json"), 0o644); err != nil {
 		t.Fatalf("write marker: %v", err)
 	}
 
@@ -527,11 +533,11 @@ func TestRecoverFromDiskDropsPartialLine(t *testing.T) {
 	svc := NewService(t.TempDir())
 	svc.logDir = t.TempDir()
 	id := "upd_partial123"
-	logPath := filepath.Join(svc.logDir, "lab-update-"+id+".log")
+	logPath, donePath, _ := sessionPaths(svc.logDir, id)
 	if err := os.WriteFile(logPath, []byte("[UPDATE] 第一行\n[UPDATE] 第二行\n[UPDATE] 残缺部分"), 0o644); err != nil {
 		t.Fatalf("write log: %v", err)
 	}
-	if err := os.WriteFile(logPath+".done", []byte(`{"exit_code":0}`), 0o644); err != nil {
+	if err := os.WriteFile(donePath, []byte(`{"exit_code":0}`), 0o644); err != nil {
 		t.Fatalf("write marker: %v", err)
 	}
 
@@ -627,5 +633,41 @@ func TestRunnerFileHelpers(t *testing.T) {
 		if _, err := os.Stat(p); !os.IsNotExist(err) {
 			t.Errorf("file not removed by removeSessionFiles: %s", p)
 		}
+	}
+}
+
+
+// 集成（B1）：按 Trigger 侧命名（lab-update-<id>.log/.done）落盘后，
+// 全新 Service（模拟进程重启）能从磁盘恢复出正确的状态/exit code/SHA。
+func TestRecoverFromDiskUsesTriggerNaming(t *testing.T) {
+	dir := t.TempDir()
+	id := "upd_trigname00"
+	logPath, donePath, _ := sessionPaths(dir, id)
+	if err := os.WriteFile(logPath, []byte("[UPDATE] 备份数据库\n[UPDATE] 完成\n"), 0o644); err != nil {
+		t.Fatalf("write log: %v", err)
+	}
+	marker, _ := json.Marshal(map[string]any{
+		"exit_code": 0, "old_sha": "oldsha", "new_sha": "newsha",
+		"ended_at": time.Now().UTC().Format(time.RFC3339),
+	})
+	if err := os.WriteFile(donePath, marker, 0o644); err != nil {
+		t.Fatalf("write marker: %v", err)
+	}
+
+	svc := NewService(t.TempDir())
+	svc.logDir = dir
+	sess := svc.recoverFromDisk(id)
+	if sess == nil {
+		t.Fatal("recoverFromDisk = nil（命名不一致会导致找不到 done marker）")
+	}
+	if sess.Status != "done" || sess.ExitCode != 0 {
+		t.Errorf("status=%q exit=%d, want done/0", sess.Status, sess.ExitCode)
+	}
+	if sess.OldSHA != "oldsha" || sess.NewSHA != "newsha" {
+		t.Errorf("SHA 恢复错误: old=%q new=%q", sess.OldSHA, sess.NewSHA)
+	}
+	evts := sess.replaySnapshot()
+	if len(evts) != 3 || evts[2].Type != "done" || !evts[2].Success {
+		t.Errorf("回放事件异常: %+v", evts)
 	}
 }
