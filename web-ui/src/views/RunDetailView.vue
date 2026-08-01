@@ -538,7 +538,7 @@ async function createStep() {
 
 async function removeStep(step: RunStep) {
   try {
-    await ElMessageBox.confirm(t('runDetail.confirmDeleteStep', { name: step.name }), t('runDetail.deleteStep'), { type: 'warning' })
+    await ElMessageBox.confirm(t('runDetail.confirmDeleteStep', { name: step.name }), t('runDetail.deleteStepTitle'), { type: 'warning' })
   } catch {
     return
   }
@@ -575,13 +575,13 @@ async function generateAiSteps() {
       aiStage.value = 'result'
     } else if (res.status === 'clarify') {
       aiNoticeType.value = 'warning'
-      aiNotice.value = res.question ? t('runDetail.aiClarify', { question: res.question }) : t('runDetail.aiClarifyMore')
+      aiNotice.value = res.question ? t('runDetail.clarifyNeeded', { question: res.question }) : t('runDetail.clarifyMore')
     } else {
       aiNoticeType.value = 'error'
-      aiNotice.value = res.reason ? t('runDetail.aiFailedReason', { reason: res.reason }) : t('runDetail.aiFailedGeneric')
+      aiNotice.value = res.reason ? t('runDetail.generateFailedReason', { reason: res.reason }) : t('runDetail.generateFailed')
     }
   } catch (err) {
-    showApiError(err, t('runDetail.aiGenerateFailed'))
+    showApiError(err, t('runDetail.aiFailed'))
   } finally {
     aiGenerating.value = false
   }
@@ -589,11 +589,11 @@ async function generateAiSteps() {
 
 function validAiItems() {
   if (aiItems.value.length < 1 || aiItems.value.length > 30) {
-    ElMessage.warning(t('runDetail.candidateCountInvalid'))
+    ElMessage.warning(t('runDetail.itemsCount'))
     return false
   }
   if (aiItems.value.some((s) => !s.name.trim())) {
-    ElMessage.warning(t('runDetail.allStepNamesRequired'))
+    ElMessage.warning(t('runDetail.allNamesRequired'))
     return false
   }
   return true
@@ -650,11 +650,11 @@ async function saveAndApplyTemplate() {
     const tpl = await createTemplateFromAi()
     if (!tpl) return
     await applyRunTemplate(runId, { template_id: tpl.id })
-    ElMessage.success(t('runDetail.savedAndApplied'))
+    ElMessage.success(t('runDetail.templateSavedApplied'))
     aiDialog.value = false
     await loadSteps()
   } catch (err) {
-    showApiError(err, t('runDetail.saveAndApplyFailed'))
+    showApiError(err, t('runDetail.saveApplyFailed'))
   } finally {
     aiSubmitting.value = false
   }
@@ -669,7 +669,7 @@ async function openImport() {
     const res = await listTemplates({ kind: 'experiment', per_page: 100 })
     templateOptions.value = res.items ?? []
   } catch (err) {
-    showApiError(err, t('runDetail.templateListLoadFailed'))
+    showApiError(err, t('runDetail.templatesLoadFailed'))
   } finally {
     templatesLoading.value = false
   }
@@ -680,11 +680,11 @@ async function confirmImport() {
   importing.value = true
   try {
     await applyRunTemplate(runId, { template_id: importTemplateId.value })
-    ElMessage.success(t('runDetail.templateImported'))
+    ElMessage.success(t('runDetail.imported'))
     importDialog.value = false
     await loadSteps()
   } catch (err) {
-    showApiError(err, '导入失败')
+    showApiError(err, t('runDetail.importFailed'))
   } finally {
     importing.value = false
   }
