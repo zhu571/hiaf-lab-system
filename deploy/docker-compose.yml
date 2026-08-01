@@ -121,6 +121,9 @@ services:
       context: ..
       dockerfile: deploy/Dockerfile
     container_name: lab-server
+    user: "${UPDATE_RUN_UID:-1000}:${UPDATE_RUN_GID:-1000}"
+    group_add:
+      - "${UPDATE_DOCKER_GID:-993}"
     environment:
       DB_HOST: postgres
       DB_PORT: 5432
@@ -136,6 +139,13 @@ services:
       PY_AGENT_INTERPRET_URL: http://py-agent-interpret:8001
       PY_AGENT_INTERNAL_TOKEN_FILE: /run/secrets/agent_password
       KEYSIGHT_33210A_ADDR: ${KEYSIGHT_33210A_ADDR:-}
+      REPO_ROOT: /opt/hiaf-lab-system
+      UPDATE_ENGINE: ${UPDATE_ENGINE:-shell}
+      UPDATE_FLAGS: ${UPDATE_FLAGS:-}
+      UPDATE_RUN_UID: ${UPDATE_RUN_UID:-1000}
+      UPDATE_RUN_GID: ${UPDATE_RUN_GID:-1000}
+      UPDATE_DOCKER_GID: ${UPDATE_DOCKER_GID:-993}
+      UPDATE_BACKUP_DIR: /backups
     secrets:
       - db_password
       - jwt_key
@@ -143,6 +153,10 @@ services:
       - agent_password
     ports:
       - "8000:8000"
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - /opt/hiaf-lab-system:/opt/hiaf-lab-system:ro
+      - /opt/hiaf-lab-system/.hermes/backups:/backups
     depends_on:
       postgres:
         condition: service_healthy

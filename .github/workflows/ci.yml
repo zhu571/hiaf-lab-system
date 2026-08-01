@@ -140,6 +140,26 @@ jobs:
           go test ./...
           go vet ./...
 
+  windows-cross-compile:
+    name: Windows cross-compile check
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.22"
+      - name: Cross-compile Go backend for Windows
+        run: |
+          if [ ! -f go-server/go.mod ]; then
+            echo "go-server/go.mod not found; Go backend not implemented yet, skipping."
+            exit 0
+          fi
+          cd go-server
+          CGO_ENABLED=0 GOOS=windows GOARCH=amd64 go build ./...
+          CGO_ENABLED=0 GOOS=windows GOARCH=amd64 go vet ./...
+          # Compile-only test check: -exec=true skips running the Windows test binaries on Linux.
+          CGO_ENABLED=0 GOOS=windows GOARCH=amd64 go test -exec=true ./...
+
   frontend-test:
     runs-on: ubuntu-latest
     steps:
