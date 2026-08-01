@@ -2,6 +2,7 @@
   <div class="page">
     <div class="toolbar">
       <h2>{{ t('instrument.title') }}</h2>
+      <el-button plain @click="whitelistOpen = true">{{ t('instrument.whitelist') }}</el-button>
       <el-button :icon="Refresh" circle :title="t('instrument.refresh')" @click="loadAll" />
     </div>
 
@@ -70,22 +71,6 @@
               </el-form>
               <el-button type="primary" :loading="cmdRunning" :disabled="!cmdName" @click="runCommand(ins)">{{ t('instrument.execute') }}</el-button>
             </template>
-            <div v-if="cmdResult" class="cmd-result">
-              <div v-if="parsedResult?.type === 'sweep_xy' && parsedResult.points?.length" class="parsed-chart">
-                <canvas ref="chartCanvas" :aria-label="t('instrument.chartLabel')"></canvas>
-                <p v-if="parsedResult.x_label || parsedResult.y_label" class="muted chart-caption">
-                  {{ parsedResult.x_label || 'x' }} / {{ parsedResult.y_label || 'y' }}
-                </p>
-              </div>
-              <p v-else-if="parsedResult?.type === 'single_value'" class="parsed-value">{{ parsedResult.value }}</p>
-              <pre v-if="cmdResult.response" class="cmd-response">{{ cmdResult.response }}</pre>
-              <div class="cmd-result-footer">
-                <p class="muted">{{ t('instrument.cmdResultInfo', { cmd: cmdResult.command, duration: (cmdResult.duration / 1e6).toFixed(1) }) }}</p>
-                <el-button v-if="!isViewer" size="small" plain @click="openSave({ instrumentId: ins.id, command: cmdResult.command, response: cmdResult.response, parsed: parsedResult })">
-                  {{ t('instrument.saveToTestData') }}
-                </el-button>
-              </div>
-            </div>
           </template>
           <p v-else class="muted cmd-desc">{{ t('instrument.noPermission') }}</p>
         </div>
@@ -93,35 +78,38 @@
       <el-empty v-if="!loading && !instruments.length && !error" :description="t('instrument.noInstruments')" class="grid-empty" />
     </div>
 
-    <!-- 命令白名单 -->
+    <!-- 执行结果 / 扫频曲线（常驻） -->
     <section class="panel">
       <div class="panel-head">
-        <h3 class="panel-title">{{ t('instrument.whitelist') }}</h3>
-        <span class="muted hint">{{ t('instrument.whitelistHint') }}</span>
+        <h3 class="panel-title">{{ t('instrument.executionResult') }}</h3>
       </div>
-      <el-table v-loading="whitelistLoading" :data="whitelist">
-        <el-table-column prop="name" :label="t('instrument.command')" min-width="150" />
-        <el-table-column prop="description" :label="t('instrument.description')" min-width="180" show-overflow-tooltip />
-        <el-table-column :label="t('instrument.risk')" width="90">
-          <template #default="{ row }">
-            <el-tag :type="riskTag(row.risk)" size="small" effect="light">{{ row.risk }}</el-tag>
-          </template>
-        </el-table-column>
-        <el-table-column :label="t('instrument.scpiTemplate')" min-width="220" show-overflow-tooltip>
-          <template #default="{ row }">
-            <code class="scpi-code">{{ row.scpi || row.build || '—' }}</code>
-          </template>
-        </el-table-column>
-        <el-table-column :label="t('instrument.timeout')" width="90">
-          <template #default="{ row }">{{ row.timeout_ms ? `${row.timeout_ms} ms` : '—' }}</template>
-        </el-table-column>
-        <template #empty>
-          <el-empty :description="t('instrument.whitelistEmpty')" />
-        </template>
-      </el-table>
+      <div v-if="cmdResult" class="cmd-result">
+        <div v-if="parsedResult?.type === 'sweep_xy' && parsedResult.points?.length" class="parsed-chart">
+          <canvas ref="chartCanvas" :aria-label="t('instrument.chartLabel')"></canvas>
+          <p v-if="parsedResult.x_label || parsedResult.y_label" class="muted chart-caption">
+            {{ parsedResult.x_label || 'x' }} / {{ parsedResult.y_label || 'y' }}
+          </p>
+        </div>
+        <p v-else-if="parsedResult?.type === 'single_value'" class="parsed-value">{{ parsedResult.value }}</p>
+        <pre v-if="cmdResult.response" class="cmd-response">{{ cmdResult.response }}</pre>
+        <div class="cmd-result-footer">
+          <p class="muted">{{ t('instrument.cmdResultInfo', { cmd: cmdResult.command, duration: (cmdResult.duration / 1e6).toFixed(1) }) }}</p>
+          <el-button v-if="!isViewer" size="small" plain @click="openSave({ instrumentId: cmdResultInsId, command: cmdResult.command, response: cmdResult.response, parsed: parsedResult })">
+            {{ t('instrument.saveToTestData') }}
+          </el-button>
+        </div>
+      </div>
+      <el-empty v-else :description="t('instrument.noResult')" :image-size="60" />
     </section>
 
-    <el-drawer v-model="aiOpen" :title="`${aiInstrument?.name || ''} · ${t('instrument.aiChat')}`" :size="isMobile ? '100%' : '440px'">
+    <!-- AI 对话（常驻） -->
+    <section ref="aiPanelRef" class="panel">
+      <div class="panel-head">
+        <h3 class="panel-title">{{ t('instrument.aiChat') }}</h3>
+        <el-select v-model="aiInstrumentId" :placeholder="t('instrument.selectAiInstrument')" class="ai-ins-select" @change="resetAIChat">
+          <el-option v-for="ins in instruments" :key="ins.id" :label="ins.name" :value="ins.id" />
+        </el-select>
+      </div>
       <div class="chat-shell">
         <div class="chat-list">
           <el-empty v-if="!aiMessages.length" :description="t('instrument.aiPlaceholder')" :image-size="72" />
@@ -180,10 +168,35 @@
             :placeholder="t('instrument.aiInputPlaceholder')"
             @keydown.ctrl.enter.prevent="sendAI"
           />
-          <el-button type="primary" :loading="aiLoading" :disabled="!aiInput.trim()" @click="sendAI">{{ t('instrument.send') }}</el-button>
+          <el-button type="primary" :loading="aiLoading" :disabled="!aiInstrument || !aiInput.trim()" @click="sendAI">{{ t('instrument.send') }}</el-button>
         </div>
       </div>
-    </el-drawer>
+    </section>
+
+    <!-- 命令白名单（默认收起，点击顶栏按钮弹出） -->
+    <el-dialog v-model="whitelistOpen" :title="t('instrument.whitelist')" :width="isMobile ? '100%' : '900px'">
+      <p class="muted hint whitelist-hint">{{ t('instrument.whitelistHint') }}</p>
+      <el-table v-loading="whitelistLoading" :data="whitelist">
+        <el-table-column prop="name" :label="t('instrument.command')" min-width="150" />
+        <el-table-column prop="description" :label="t('instrument.description')" min-width="180" show-overflow-tooltip />
+        <el-table-column :label="t('instrument.risk')" width="90">
+          <template #default="{ row }">
+            <el-tag :type="riskTag(row.risk)" size="small" effect="light">{{ row.risk }}</el-tag>
+          </template>
+        </el-table-column>
+        <el-table-column :label="t('instrument.scpiTemplate')" min-width="220" show-overflow-tooltip>
+          <template #default="{ row }">
+            <code class="scpi-code">{{ row.scpi || row.build || '—' }}</code>
+          </template>
+        </el-table-column>
+        <el-table-column :label="t('instrument.timeout')" width="90">
+          <template #default="{ row }">{{ row.timeout_ms ? `${row.timeout_ms} ms` : '—' }}</template>
+        </el-table-column>
+        <template #empty>
+          <el-empty :description="t('instrument.whitelistEmpty')" />
+        </template>
+      </el-table>
+    </el-dialog>
 
     <!-- 保存到测试数据 -->
     <el-dialog v-model="saveOpen" :title="t('instrument.saveDialogTitle')" :width="isMobile ? '100%' : '480px'">
@@ -295,17 +308,19 @@ type ChatMessage = {
   exec?: ExecRecord
 }
 
-const aiOpen = ref(false)
-const aiInstrument = ref<InstrumentSummary | null>(null)
+const aiInstrumentId = ref('')
+const aiInstrument = computed(() => instruments.value.find((i) => i.id === aiInstrumentId.value) ?? null)
 const aiInput = ref('')
 const aiLoading = ref(false)
 const aiError = ref('')
 const aiMessages = ref<ChatMessage[]>([])
+const aiPanelRef = ref<HTMLElement>()
 
 const instruments = ref<InstrumentSummary[]>([])
 const whitelist = ref<WhitelistCommand[]>([])
 const loading = ref(false)
 const whitelistLoading = ref(false)
+const whitelistOpen = ref(false)
 const error = ref('')
 
 const expandedId = ref('')
@@ -316,6 +331,8 @@ const cmdName = ref('')
 const cmdParams = reactive<Record<string, any>>({})
 const cmdRunning = ref(false)
 const cmdResult = ref<CommandResult | null>(null)
+// 常驻结果面板需要知道结果来自哪台仪器（保存到测试数据时作为 instrumentId）
+const cmdResultInsId = ref('')
 
 // 执行结果解析与可视化
 const parsedResult = ref<ParsedResult | null>(null)
@@ -394,7 +411,6 @@ async function toggleExpand(ins: InstrumentSummary) {
   }
   expandedId.value = ins.id
   cmdName.value = ''
-  clearCmdResult()
   resetParams()
   detailLoading.value = true
   detailStatus.value = null
@@ -413,7 +429,6 @@ function resetParams() {
 
 function onCommandPick() {
   resetParams()
-  clearCmdResult()
   if (!cmdDef.value) return
   for (const [name, def] of paramEntries(cmdDef.value)) {
     if (def.default === undefined || def.default === null) continue
@@ -434,12 +449,17 @@ function numOrUndef(v: unknown) {
   return Number.isFinite(n) ? n : undefined
 }
 
-function openAI(ins: InstrumentSummary) {
-  aiInstrument.value = ins
+function resetAIChat() {
   aiMessages.value = []
   aiInput.value = ''
   aiError.value = ''
-  aiOpen.value = true
+}
+
+// 卡片上的「AI 对话」按钮：在常驻面板中选中该仪器并滚动到面板
+function openAI(ins: InstrumentSummary) {
+  aiInstrumentId.value = ins.id
+  resetAIChat()
+  aiPanelRef.value?.scrollIntoView({ behavior: 'smooth', block: 'start' })
 }
 
 async function sendAI() {
@@ -516,6 +536,7 @@ async function runCommand(ins: InstrumentSummary) {
   clearCmdResult()
   try {
     cmdResult.value = await executeCommand(ins.id, def.name, { ...cmdParams })
+    cmdResultInsId.value = ins.id
     ElMessage.success(t('instrument.executeSuccess', { name: def.name }))
     parsedResult.value = await parseExecution(ins.id, cmdResult.value.command, cmdResult.value.response)
     if (parsedResult.value?.type === 'sweep_xy') {
@@ -882,12 +903,12 @@ function riskTag(risk: string): 'success' | 'warning' | 'danger' | 'info' {
 }
 
 .parsed-chart {
-  height: 220px;
+  height: 320px;
   margin-bottom: 8px;
 }
 
 .parsed-chart canvas {
-  max-height: 190px;
+  max-height: 290px;
 }
 
 .chart-caption {
@@ -929,11 +950,10 @@ function riskTag(risk: string): 'success' | 'warning' | 'danger' | 'info' {
 .chat-shell {
   display: grid;
   gap: 12px;
-  height: 100%;
-  grid-template-rows: minmax(0, 1fr) auto auto;
 }
 
 .chat-list {
+  max-height: 360px;
   overflow-y: auto;
 }
 
@@ -995,5 +1015,14 @@ function riskTag(risk: string): 'success' | 'warning' | 'danger' | 'info' {
 
 .chat-input .el-textarea {
   flex: 1;
+}
+
+.ai-ins-select {
+  max-width: 240px;
+}
+
+.whitelist-hint {
+  display: block;
+  margin-bottom: 10px;
 }
 </style>
