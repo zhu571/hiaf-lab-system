@@ -11,10 +11,10 @@ import (
 	"os/exec"
 	"path/filepath"
 	"regexp"
+	"runtime"
 	"strconv"
 	"strings"
 	"sync"
-	"syscall"
 	"time"
 )
 
@@ -39,23 +39,90 @@ type Service struct {
 	mu         sync.Mutex
 	active     *UpdateSession
 	sessions   map[string]*UpdateSession // 全部 session（含已完成，TTL 后 sweep）
-	logDir     string                    // 日志目录，默认 /tmp
+	logDir     string                    // 日志目录，默认 /tmp（UPDATE_LOG_DIR 可覆盖）
 	maxSubs    int                       // 单 session 订阅上限，默认 4
 	timeout    time.Duration             // 脚本超时，默认 30min
+
+	// UPDATE_ENGINE 开关：go → 新流水线（Step 表驱动）；shell → 原 update.sh 兜底（默认）。
+	engine string
+	runner SessionRunner
+
+	// Go 引擎 runner 派发参数（从 UPDATE_* env 读取，为空/0 时使用合理默认）。
+	composeFile string
+	projectName string
+	runnerImage string
+	ntfyURL     string
+	backupDir   string
+	gitHome     string
+	runUID      int
+	runGID      int
+	dockerGID   int
+	force       bool
+	dryRun      bool
+	noRollback  bool
 }
 
 func NewService(repoRoot string) *Service {
 	s := &Service{
-		repoRoot:   repoRoot,
-		scriptPath: filepath.Join(repoRoot, ".hermes", "update.sh"),
-		sessions:   make(map[string]*UpdateSession),
-		logDir:     defaultLogDir,
-		maxSubs:    defaultMaxSubs,
-		timeout:    defaultTimeout,
+		repoRoot:    repoRoot,
+		scriptPath:  filepath.Join(repoRoot, ".hermes", "update.sh"),
+		sessions:    make(map[string]*UpdateSession),
+		logDir:      envOrStr("UPDATE_LOG_DIR", defaultLogDir),
+		maxSubs:     defaultMaxSubs,
+		timeout:     defaultTimeout,
+		composeFile: "deploy/docker-compose.yml",
+		projectName: envOrStr("UPDATE_PROJECT", ""),
+		runnerImage: envOrStr("UPDATE_RUNNER_IMAGE", ""),
+		ntfyURL:     envOrStr("UPDATE_NTFY_URL", "http://localhost:8085/lab-system"),
+		backupDir:   envOrStr("UPDATE_BACKUP_DIR", ""),
+		gitHome:     envOrStr("UPDATE_GIT_HOME", ""),
+		runUID:      envOrInt("UPDATE_RUN_UID", 0),
+		runGID:      envOrInt("UPDATE_RUN_GID", 0),
+		dockerGID:   envOrInt("UPDATE_DOCKER_GID", 0),
 	}
+	s.applyUpdateFlags(envOrStr("UPDATE_FLAGS", ""))
+	s.engine = envOrStr("UPDATE_ENGINE", "")
+	if s.engine == "" {
+		if runtime.GOOS == "windows" {
+			s.engine = "go" // Windows 无 bash setsid，默认走进程内流水线
+		} else {
+			s.engine = "shell" // 灰度开关：默认保持原 update.sh，P3 起切 go
+		}
+	}
+	s.runner = newRunner(s, s.engine)
 	// 后台 TTL sweep：只清"已完成且超期"的 session，运行中的 session 永不回收
 	go s.sweepSessions()
 	return s
+}
+
+// applyUpdateFlags 解析 UPDATE_FLAGS（空格分隔的 --force/--dry-run/--no-rollback）。
+func (s *Service) applyUpdateFlags(raw string) {
+	for _, f := range strings.Fields(raw) {
+		switch f {
+		case "--force":
+			s.force = true
+		case "--dry-run":
+			s.dryRun = true
+		case "--no-rollback":
+			s.noRollback = true
+		}
+	}
+}
+
+func envOrStr(key, def string) string {
+	if v := os.Getenv(key); v != "" {
+		return v
+	}
+	return def
+}
+
+func envOrInt(key string, def int) int {
+	if v := os.Getenv(key); v != "" {
+		if n, err := strconv.Atoi(v); err == nil {
+			return n
+		}
+	}
+	return def
 }
 
 // GetVersion 获取当前与远程版本信息。git 不可用/网络不可达时降级返回空值。
@@ -137,9 +204,11 @@ func (s *Service) Trigger() (string, error) {
 			return "", fmt.Errorf("%w（当前 session: %s）", ErrUpdateInProgress, sid)
 		}
 	}
-	if _, err := os.Stat(s.scriptPath); err != nil {
-		s.mu.Unlock()
-		return "", ErrScriptMissing
+	if s.engine == "shell" {
+		if _, err := os.Stat(s.scriptPath); err != nil {
+			s.mu.Unlock()
+			return "", ErrScriptMissing
+		}
 	}
 	rawID, err := nanoid(10)
 	if err != nil {
@@ -155,7 +224,7 @@ func (s *Service) Trigger() (string, error) {
 		done:      make(chan struct{}),
 		logFile:   filepath.Join(s.logDir, "lab-update-"+id+".log"),
 		doneFile:  filepath.Join(s.logDir, "lab-update-"+id+".done"),
-		pidFile:   filepath.Join(s.logDir, "lab-update-"+id+".pid"),
+		runnerFile: filepath.Join(s.logDir, "lab-update-"+id+".runner"),
 		maxSubs:   s.maxSubs,
 	}
 	s.sessions[id] = sess
@@ -270,8 +339,8 @@ func (s *Service) SessionStatus(sessionID string) (*UpdateSession, bool) {
 	return s.session(sessionID)
 }
 
-// runScript 以 setsid 新会话脱离启动更新脚本（脱离 Go 父进程与 server 容器）。
-// 脚本只通过日志文件输出，Go 侧 tail 该文件重建事件序列。
+// runScript 通过 SessionRunner 派发更新执行者（I1：独立于 server 容器的进程/容器），
+// 并挂载超时看门狗 + tail goroutine。runner 只通过日志文件输出，Go 侧 tail 该文件重建事件序列。
 func (s *Service) runScript(session *UpdateSession) {
 	defer func() {
 		if r := recover(); r != nil {
@@ -280,14 +349,14 @@ func (s *Service) runScript(session *UpdateSession) {
 		}
 	}()
 
-	pid, err := s.spawnDetached(session)
+	id, err := s.runner.Spawn(context.Background(), session)
 	if err != nil {
 		session.broadcast(SSEEvent{Type: "error", Message: err.Error()})
 		s.finish(session, -1, false)
 		return
 	}
-	session.setRunnerPID(pid)
-	s.writePIDFile(session, pid)
+	session.setRunnerID(id)
+	s.writeRunnerFile(session, id)
 
 	timer := time.AfterFunc(s.timeout, func() {
 		s.killRunner(session)
@@ -301,50 +370,19 @@ func (s *Service) runScript(session *UpdateSession) {
 	go s.tailSessionLog(session, 0)
 }
 
-// spawnDetached 以 setsid（新会话 + 新进程组）启动脚本，使其脱离 Go 父进程。
-// 返回脚本进程的 PID（进程组 PGID 相同，kill 时用负 PID）。
-func (s *Service) spawnDetached(session *UpdateSession) (int, error) {
-	if _, err := os.Stat(s.scriptPath); err != nil {
-		return 0, ErrScriptMissing
-	}
-	cmd := exec.Command("/bin/bash", s.scriptPath)
-	cmd.Dir = s.repoRoot
-	cmd.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
-	cmd.Env = append(os.Environ(),
-		"UPDATE_SESSION_ID="+session.ID,
-		"UPDATE_LOG_FILE="+session.logFile,
-		"UPDATE_DONE_FILE="+session.doneFile,
-	)
-	devNull, err := os.OpenFile(os.DevNull, os.O_WRONLY, 0)
-	if err != nil {
-		return 0, fmt.Errorf("%w: %v", ErrScriptStartFailed, err)
-	}
-	defer devNull.Close()
-	cmd.Stdout = devNull
-	cmd.Stderr = devNull
-	if err := cmd.Start(); err != nil {
-		return 0, fmt.Errorf("%w: %v", ErrScriptStartFailed, err)
-	}
-	return cmd.Process.Pid, nil
-}
-
-// killRunner 杀掉整个进程组（Setsid 后脚本不是 Go 直系子进程）。
+// killRunner 停止 runner（docker kill / 进程组 kill / context cancel，由平台实现决定）。
 func (s *Service) killRunner(session *UpdateSession) {
-	pid := session.getRunnerPID()
-	if pid > 0 {
-		// 先杀进程组，再兜底杀单进程
-		_ = syscall.Kill(-pid, syscall.SIGKILL)
-		_ = syscall.Kill(pid, syscall.SIGKILL)
+	if id := session.getRunnerID(); id != "" {
+		_ = s.runner.Kill(id)
 	}
 }
 
-// runnerAlive 判断脚本进程是否仍在运行（进程组存在即视为存活）。
+// runnerAlive 判断 runner 是否仍在运行（docker inspect / 进程组 / goroutine 状态）。
 func (s *Service) runnerAlive(sess *UpdateSession) bool {
-	pid := sess.getRunnerPID()
-	if pid <= 0 {
-		return false
+	if id := sess.getRunnerID(); id != "" {
+		return s.runner.Alive(id)
 	}
-	return syscall.Kill(-pid, 0) == nil || syscall.Kill(pid, 0) == nil
+	return false
 }
 
 // tailSessionLog 每 200ms 增量读日志文件，把新行推入 RingBuffer + 广播；
@@ -459,7 +497,7 @@ func (s *Service) finish(session *UpdateSession, exitCode int, success bool) {
 		session.mu.Unlock()
 
 		session.writeMarker(exitCode)
-		s.removePIDFile(session)
+		s.removeRunnerFile(session)
 		session.broadcast(doneEvent)
 		close(session.done)
 	})
@@ -556,34 +594,37 @@ func (s *UpdateSession) writeMarker(exitCode int) {
 	_ = os.WriteFile(s.doneFile, marker, 0o644)
 }
 
-// writePIDFile 持久化 runner 进程组 PID，供进程重启后 recoverFromDisk 判断存活。
-func (s *Service) writePIDFile(session *UpdateSession, pid int) {
-	_ = os.WriteFile(session.pidFile, []byte(strconv.Itoa(pid)+"\n"), 0o644)
+// writeRunnerFile 持久化 runner 标识（容器名/pid/local），供进程重启后 recoverFromDisk 判断存活。
+func (s *Service) writeRunnerFile(session *UpdateSession, id RunnerID) {
+	if session.runnerFile == "" {
+		return
+	}
+	_ = os.WriteFile(session.runnerFile, []byte(string(id)+"\n"), 0o644)
 }
 
-// readPIDFile 读取持久化的 runner PID；不存在或非法时返回 0。
-func (s *Service) readPIDFile(session *UpdateSession) int {
-	data, err := os.ReadFile(session.pidFile)
+// readRunnerFile 读取持久化的 runner 标识；不存在或非法时返回空。
+func (s *Service) readRunnerFile(session *UpdateSession) RunnerID {
+	data, err := os.ReadFile(session.runnerFile)
 	if err != nil {
-		return 0
+		return ""
 	}
-	pid, err := strconv.Atoi(strings.TrimSpace(string(data)))
-	if err != nil || pid <= 0 {
-		return 0
+	id := strings.TrimSpace(string(data))
+	if id == "" {
+		return ""
 	}
-	return pid
+	return RunnerID(id)
 }
 
-// removePIDFile 移除 runner PID 文件（finish 时调用，防陈旧 PID 误杀/误判）。
-func (s *Service) removePIDFile(session *UpdateSession) {
-	if session.pidFile != "" {
-		_ = os.Remove(session.pidFile)
+// removeRunnerFile 移除 runner 标识文件（finish 时调用，防陈旧 ID 误杀/误判）。
+func (s *Service) removeRunnerFile(session *UpdateSession) {
+	if session.runnerFile != "" {
+		_ = os.Remove(session.runnerFile)
 	}
 }
 
 // removeSessionFiles 清理该 session 的全部临时文件（TTL sweep 时调用）。
 func (s *Service) removeSessionFiles(session *UpdateSession) {
-	for _, p := range []string{session.logFile, session.doneFile, session.pidFile} {
+	for _, p := range []string{session.logFile, session.doneFile, session.runnerFile} {
 		if p != "" {
 			_ = os.Remove(p)
 		}
@@ -597,7 +638,7 @@ func (s *Service) recoverFromDisk(sessionID string) *UpdateSession {
 	}
 	logPath := filepath.Join(s.logDir, "lab-update-"+sessionID+".log")
 	donePath := logPath + ".done"
-	pidPath := logPath + ".pid"
+	runnerPath := logPath + ".runner"
 
 	// 并发恢复双重检查：已有内存 session 直接复用，避免重复 tail
 	s.mu.Lock()
@@ -618,7 +659,7 @@ func (s *Service) recoverFromDisk(sessionID string) *UpdateSession {
 		done:      make(chan struct{}),
 		logFile:   logPath,
 		doneFile:  donePath,
-		pidFile:   pidPath,
+		runnerFile: runnerPath,
 		maxSubs:   s.maxSubs,
 	}
 
@@ -648,12 +689,12 @@ func (s *Service) recoverFromDisk(sessionID string) *UpdateSession {
 		sess.history = append(sess.history, evt)
 	}
 
-	// 无锁阶段读取 pid/存活状态：sess 尚未发布到 map，无并发读者，
+	// 无锁阶段读取 runner 标识/存活状态：sess 尚未发布到 map，无并发读者，
 	// 而 runnerAlive 内部会再持 sess.mu，不能在持有锁时调用（防自死锁）。
-	pid := s.readPIDFile(sess)
+	runnerID := s.readRunnerFile(sess)
 	alive := false
-	if pid > 0 {
-		sess.runnerPID = pid
+	if runnerID != "" {
+		sess.runnerID = runnerID
 		alive = s.runnerAlive(sess)
 	}
 
@@ -697,14 +738,14 @@ func (s *Service) recoverFromDisk(sessionID string) *UpdateSession {
 			})
 		}
 	} else {
-		// 无 marker：从 pid 文件恢复 runner PID，判断脚本是否仍在运行
-		sess.runnerPID = pid
+		// 无 marker：从 runner 文件恢复 runner 标识，判断是否仍在运行
+		sess.runnerID = runnerID
 		if alive {
-			// 脚本因 setsid 脱离仍在运行 → 继续 tail
+			// runner 因脱离仍在运行 → 继续 tail
 			sess.Status = "running"
 			sess.seq = len(sess.history)
 		} else {
-			// 进程被 kill、脚本中断
+			// runner 被 kill、更新中断
 			sess.Status = "done"
 			sess.DoneAt = time.Now()
 			sess.history = append(sess.history, SSEEvent{

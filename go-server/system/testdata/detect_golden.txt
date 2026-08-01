@@ -1,0 +1,33 @@
+# 变更路径 → 受影响服务 golden 矩阵（detect_test.go 的唯一事实源）
+# 格式：变更路径（逗号分隔，左侧）<TAB>期望结果（Affected.String()：ALL / none / 空格分隔服务）
+# 覆盖：每条规则代表文件、顺序陷阱（Dockerfile.migrate 不落 deploy/*、epics-gateway 不落 go-server/*、
+# ioc 不落 py-agent/*）、ALL 短路、去重排序、migrations-only、无匹配。
+
+deploy/docker-compose.yml	ALL
+deploy/Dockerfile	ALL
+deploy/.env.example	ALL
+deploy/.env.prod	ALL
+deploy/.envX	ALL
+deploy/Dockerfile.migrate	migrate
+web-ui/src/index.ts	server
+web-ui/dist/index.html	server
+go-server/epics-gateway/main.go	epics-gateway
+go-server/epics-gateway/go.mod	epics-gateway
+go-server/main.go	server
+go-server/system/service.go	server
+py-agent/ioc/Dockerfile	ioc
+py-agent/ioc/ioc.py	ioc
+py-agent/worker.py	py-agent py-agent-interpret
+py-agent/Dockerfile	py-agent py-agent-interpret
+migrations/001_init.sql	migrate
+deploy/nginx.conf	server
+deploy/secrets/db_password.txt	server
+web-ui/src/x.ts,go-server/main.go	server
+go-server/main.go,migrations/001_init.sql	migrate server
+py-agent/ioc/x.py,py-agent/worker.py	ioc py-agent py-agent-interpret
+web-ui/src/x.ts,migrations/001_init.sql	migrate server
+go-server/epics-gateway/main.go,deploy/Dockerfile.migrate	epics-gateway migrate
+README.md	none
+docs/api-contract.md	none
+images/x.png	none
+migrations/001_init.sql,deploy/.env.prod	ALL

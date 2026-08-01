@@ -174,6 +174,7 @@ func TestTriggerRejectsWhenRunning(t *testing.T) {
 
 func TestTriggerScriptMissing(t *testing.T) {
 	svc := NewService(t.TempDir()) // 临时目录下没有 .hermes/update.sh
+	svc.engine = "shell"           // 显式 shell 引擎：脚本缺失必须报错（两平台行为一致）
 	_, err := svc.Trigger()
 	if err != ErrScriptMissing {
 		t.Errorf("expected ErrScriptMissing, got %v", err)
@@ -405,10 +406,10 @@ func TestSweepOnceRemovesFiles(t *testing.T) {
 		done:      make(chan struct{}),
 		logFile:   filepath.Join(svc.logDir, "lab-update-"+id+".log"),
 		doneFile:  filepath.Join(svc.logDir, "lab-update-"+id+".done"),
-		pidFile:   filepath.Join(svc.logDir, "lab-update-"+id+".pid"),
+		runnerFile: filepath.Join(svc.logDir, "lab-update-"+id+".runner"),
 		maxSubs:   4,
 	}
-	files := []string{sess.logFile, sess.doneFile, sess.pidFile}
+	files := []string{sess.logFile, sess.doneFile, sess.runnerFile}
 	for _, p := range files {
 		if err := os.WriteFile(p, []byte("x"), 0o644); err != nil {
 			t.Fatalf("write %s: %v", p, err)
@@ -591,38 +592,38 @@ func TestFinishDoneSeqAfterAllLines(t *testing.T) {
 	}
 }
 
-func TestPIDFileHelpers(t *testing.T) {
+func TestRunnerFileHelpers(t *testing.T) {
 	svc := NewService(t.TempDir())
 	svc.logDir = t.TempDir()
-	id := "upd_pidfile000"
+	id := "upd_rfile0000"
 	sess := &UpdateSession{
-		ID:       id,
-		logFile:  filepath.Join(svc.logDir, "lab-update-"+id+".log"),
-		doneFile: filepath.Join(svc.logDir, "lab-update-"+id+".done"),
-		pidFile:  filepath.Join(svc.logDir, "lab-update-"+id+".pid"),
+		ID:         id,
+		logFile:    filepath.Join(svc.logDir, "lab-update-"+id+".log"),
+		doneFile:   filepath.Join(svc.logDir, "lab-update-"+id+".done"),
+		runnerFile: filepath.Join(svc.logDir, "lab-update-"+id+".runner"),
 	}
-	if got := svc.readPIDFile(sess); got != 0 {
-		t.Fatalf("readPIDFile on missing file = %d, want 0", got)
+	if got := svc.readRunnerFile(sess); got != "" {
+		t.Fatalf("readRunnerFile on missing file = %q, want empty", got)
 	}
-	svc.writePIDFile(sess, 4242)
-	if got := svc.readPIDFile(sess); got != 4242 {
-		t.Fatalf("readPIDFile = %d, want 4242", got)
+	svc.writeRunnerFile(sess, RunnerID("lab-updater-"+id))
+	if got := svc.readRunnerFile(sess); got != RunnerID("lab-updater-"+id) {
+		t.Fatalf("readRunnerFile = %q, want %q", got, "lab-updater-"+id)
 	}
-	svc.removePIDFile(sess)
-	if _, err := os.Stat(sess.pidFile); !os.IsNotExist(err) {
-		t.Error("pid file not removed by removePIDFile")
+	svc.removeRunnerFile(sess)
+	if _, err := os.Stat(sess.runnerFile); !os.IsNotExist(err) {
+		t.Error("runner file not removed by removeRunnerFile")
 	}
-	if got := svc.readPIDFile(sess); got != 0 {
-		t.Errorf("readPIDFile after remove = %d, want 0", got)
+	if got := svc.readRunnerFile(sess); got != "" {
+		t.Errorf("readRunnerFile after remove = %q, want empty", got)
 	}
 
-	for _, p := range []string{sess.logFile, sess.doneFile, sess.pidFile} {
+	for _, p := range []string{sess.logFile, sess.doneFile, sess.runnerFile} {
 		if err := os.WriteFile(p, []byte("x"), 0o644); err != nil {
 			t.Fatalf("write %s: %v", p, err)
 		}
 	}
 	svc.removeSessionFiles(sess)
-	for _, p := range []string{sess.logFile, sess.doneFile, sess.pidFile} {
+	for _, p := range []string{sess.logFile, sess.doneFile, sess.runnerFile} {
 		if _, err := os.Stat(p); !os.IsNotExist(err) {
 			t.Errorf("file not removed by removeSessionFiles: %s", p)
 		}

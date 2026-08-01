@@ -70,9 +70,9 @@ type UpdateSession struct {
 	LogBuffer *RingBuffer // 内存环形日志缓冲
 	history   []SSEEvent  // recoverFromDisk 重建的历史事件序列
 	doneEvent SSEEvent    // finish 时记录的最终 done 事件
-	logFile   string      // /tmp/lab-update-{id}.log（脚本 tee 写入）
-	doneFile  string      // /tmp/lab-update-{id}.done
-	pidFile   string      // /tmp/lab-update-{id}.pid（runner 进程组 PID，重启恢复用）
+	logFile   string      // {logDir}/lab-update-{id}.log（runner 写入）
+	doneFile  string      // {logDir}/lab-update-{id}.done
+	runnerFile string     // {logDir}/lab-update-{id}.runner（持久化 runner ID，重启恢复用）
 	subs      map[chan SSEEvent]struct{}
 	subsCount int
 	maxSubs   int
@@ -82,23 +82,23 @@ type UpdateSession struct {
 	DoneAt    time.Time
 	mu        sync.Mutex
 
-	runnerPID    int         // 宿主命名空间执行时的进程组 PID（setsid 后）
+	runnerID     RunnerID    // runner 标识（lab-updater-<id> / pid:N / local:<id>）
 	timeoutTimer *time.Timer // 超时看门狗，finish 时 Stop
 	tailing      bool        // tail goroutine 是否已在跑
 }
 
-// setRunnerPID 记录 runner 进程组 PID（线程安全，供 killRunner/runnerAlive 读取）。
-func (s *UpdateSession) setRunnerPID(pid int) {
+// setRunnerID 记录 runner 标识（线程安全，供 killRunner/runnerAlive 读取）。
+func (s *UpdateSession) setRunnerID(id RunnerID) {
 	s.mu.Lock()
-	s.runnerPID = pid
+	s.runnerID = id
 	s.mu.Unlock()
 }
 
-// getRunnerPID 读取 runner 进程组 PID（线程安全）。
-func (s *UpdateSession) getRunnerPID() int {
+// getRunnerID 读取 runner 标识（线程安全）。
+func (s *UpdateSession) getRunnerID() RunnerID {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	return s.runnerPID
+	return s.runnerID
 }
 
 // setTimeoutTimer 设置超时看门狗（线程安全，finish 时读取并 Stop）。
