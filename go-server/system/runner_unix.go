@@ -5,9 +5,11 @@ package system
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"path/filepath"
 	"strconv"
 	"strings"
+	"time"
 )
 
 // newRunner 根据 UPDATE_ENGINE 构造平台 runner。
@@ -72,6 +74,43 @@ func (r *dockerRunner) Alive(id RunnerID) bool {
 		return false
 	}
 	return strings.TrimSpace(out) == "true"
+}
+
+// orphanReapAge 孤儿 runner 判定阈值：server 进程重启前 spawn 但未登记 session 的
+// 更新容器，其自身 30min 更新预算内应完成并自行退出（--rm 清理）；
+// 超过该阈值仍未退出且不属于任何存活 session → 判定为孤儿，强制回收。
+const orphanReapAge = 40 * time.Minute
+
+// Reap 列出 lab-updater-* 容器，回收运行超过 orphanReapAge 且不在 protect 集合中的孤儿。
+// server 崩溃前 spawn 成功但未写 .runner 文件的容器由此兜底清理（设计 §10）。
+func (r *dockerRunner) Reap(ctx context.Context, protect map[RunnerID]bool) error {
+	out, _, err := r.cmds.Run(ctx, "docker", "ps", "-q", "--filter", "name=lab-updater-")
+	if err != nil {
+		return err
+	}
+	for _, cid := range strings.Fields(out) {
+		insp, _, ierr := r.cmds.Run(ctx, "docker", "inspect",
+			"-f", "{{.Name}} {{.State.Running}} {{.State.StartedAt}}", cid)
+		if ierr != nil {
+			continue
+		}
+		parts := strings.Fields(insp)
+		if len(parts) < 3 || parts[1] != "true" {
+			continue // inspect 失败或已不在运行，交给 docker 自身清理
+		}
+		name := strings.TrimPrefix(parts[0], "/")
+		started, perr := time.Parse(time.RFC3339, parts[2])
+		if perr != nil || time.Since(started) < orphanReapAge {
+			continue // 启动时间不可解析或未超阈值：保持观望
+		}
+		if protect[RunnerID(name)] {
+			continue // 仍属于存活 session，不能动
+		}
+		slog.Info("reap orphan update runner container", "container", name)
+		r.cmds.Run(ctx, "docker", "kill", name)
+		r.cmds.Run(ctx, "docker", "rm", "-f", name)
+	}
+	return nil
 }
 
 func (c RunnerSpawnConfig) composeFileAbs() string {

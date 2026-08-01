@@ -16,6 +16,10 @@ type SessionRunner interface {
 	Kill(id RunnerID) error
 	// Alive 判断 runner 是否仍在运行（docker inspect / 进程组 / goroutine 状态）。
 	Alive(id RunnerID) bool
+	// Reap 回收孤儿 runner（设计 §10）：server 崩溃前 spawn 成功但未登记 session、
+	// 或 session 已 finish 却仍残留的 runner，运行超过阈值后清理。
+	// protect 为当前仍存活 session 的 runner 标识集合，命中者不回收。
+	Reap(ctx context.Context, protect map[RunnerID]bool) error
 }
 
 // RunnerSpawnConfig 是 dockerRunner 派发 runner 容器的全部参数。

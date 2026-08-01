@@ -95,6 +95,11 @@ func (r *localRunner) Alive(id RunnerID) bool {
 	return ok
 }
 
+// Reap Windows 本地开发实现无孤儿容器概念：进程内 goroutine 由本进程生命周期天然清理。
+func (r *localRunner) Reap(ctx context.Context, protect map[RunnerID]bool) error {
+	return nil
+}
+
 // localDevCmdRunner 是 Windows 本地跑的 fake CmdRunner：
 // git/df/curl 走真实或模拟，docker 一律模拟为不可用（流水线确定性失败、逻辑可跑）。
 func localDevCmdRunner(repoRoot string) CmdRunner {

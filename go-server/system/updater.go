@@ -485,7 +485,7 @@ func (p *Pipeline) rollback(ctx context.Context) {
 			fmt.Sprintf("Rollback to %s blocked: schema may have changed. Manual migrate down required.", oldShort))
 		// 仓库停在 OLD_SHA（与当前运行的旧镜像一致）；若切回 main，
 		// 工作区是新代码而运行的是旧镜像，下次更新的 diff 检测会空转。
-		p.cmds.Run(ctx, "git", "-C", p.cfg.RepoRoot, "reset", "--hard", p.oldSHA)
+		p.returnToBranchAt(ctx, p.oldSHA)
 		return
 	}
 
@@ -508,11 +508,23 @@ func (p *Pipeline) rollback(ctx context.Context) {
 	p.notify(ctx, "系统更新失败-已回滚", "urgent", "warning",
 		fmt.Sprintf("Rollback to %s after update %s failed", oldShort, shortSHA(p.newSHA)))
 
-	// 同上：仓库与运行的旧镜像保持一致（OLD_SHA），不 checkout main 防止后续更新空转。
-	p.cmds.Run(ctx, "git", "-C", p.cfg.RepoRoot, "reset", "--hard", p.oldSHA)
+	// 同上：仓库与运行的旧镜像保持一致（OLD_SHA），但必须回到 main 分支，
+	// 否则脱离 HEAD 状态下下次 `git pull --ff-only origin main` 仍能走但状态非分支态，
+	// 且与 update.sh（checkout 分支后 reset）行为不一致（§9.1）。
+	p.returnToBranchAt(ctx, p.oldSHA)
 
 	p.log.Linef("[WARN] ========== 回滚完成 ==========")
 	p.log.Linef("[WARN] 请检查服务状态并排查失败原因。")
+}
+
+// returnToBranchAt 切回 main 分支并把工作区/分支指针硬重置到指定 commit：
+// 回滚后仓库停在该 commit（与运行中的旧镜像一致），同时保持在分支上，
+// 下次更新 `git pull --ff-only origin main` 直接快进，避免脱离 HEAD 的脆弱状态。
+func (p *Pipeline) returnToBranchAt(ctx context.Context, sha string) {
+	if _, _, err := p.cmds.Run(ctx, "git", "-C", p.cfg.RepoRoot, "checkout", "main"); err != nil {
+		p.log.Linef("[WARN]  git checkout main 失败（可能不在 main 分支）: %v", err)
+	}
+	p.cmds.Run(ctx, "git", "-C", p.cfg.RepoRoot, "reset", "--hard", sha)
 }
 
 // rollbackServices 返回回滚重建的服务列表：ALL 时用全量列表，否则用受影响列表。

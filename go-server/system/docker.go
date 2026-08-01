@@ -15,7 +15,10 @@ type composePSContainer struct {
 }
 
 // parseComposePS 解析 `compose ps --format json` 输出。
-// compose v2 单服务过滤时返回单个对象，无过滤时返回数组，两种形态都要兼容。
+// compose v2 输出形态随容器数量变化，三种都要兼容：
+//   - 单容器：单个 JSON 对象
+//   - 多容器/多副本：NDJSON（每行一个 JSON 对象）
+//   - 部分版本/场景：JSON 数组
 func parseComposePS(data []byte) ([]composePSContainer, error) {
 	trimmed := strings.TrimSpace(string(data))
 	if trimmed == "" {
@@ -28,11 +31,25 @@ func parseComposePS(data []byte) ([]composePSContainer, error) {
 		}
 		return out, nil
 	}
+	// 先试单对象（单容器时 compose 直接输出一个对象，是最常见形态）
 	var one composePSContainer
-	if err := json.Unmarshal(data, &one); err != nil {
-		return nil, fmt.Errorf("解析 compose ps 单对象失败: %w", err)
+	if err := json.Unmarshal(data, &one); err == nil {
+		return []composePSContainer{one}, nil
 	}
-	return []composePSContainer{one}, nil
+	// 单对象失败 → 按 NDJSON 逐行解析（多副本/多容器时每行一个对象）
+	var out []composePSContainer
+	for _, ln := range strings.Split(strings.TrimSpace(string(data)), "\n") {
+		ln = strings.TrimSpace(ln)
+		if ln == "" {
+			continue
+		}
+		var c composePSContainer
+		if err := json.Unmarshal([]byte(ln), &c); err != nil {
+			return nil, fmt.Errorf("解析 compose ps NDJSON 行失败: %w", err)
+		}
+		out = append(out, c)
+	}
+	return out, nil
 }
 
 // containerHealth 提取容器健康态，与 update.sh 的 python 逻辑等价：

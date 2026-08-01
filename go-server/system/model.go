@@ -50,17 +50,18 @@ var (
 )
 
 const (
-	defaultMaxSubs   = 4
-	subBufferSize    = 512
-	defaultTimeout   = 30 * time.Minute
-	historyTTL       = time.Hour       // 内存 session 保留时长
-	sweepInterval    = 5 * time.Minute // TTL sweep 轮询周期
-	ringBufferCap    = 5000            // 内存环形缓冲最大行数
-	logFileMaxLines  = 5000            // 磁盘回放时最多重建行数
-	tailPollInterval = 200 * time.Millisecond
-	sendTimeout      = 5 * time.Second // sendLocked 持锁等待慢客户端的上限，超时判死客户端
-	versionCacheTTL  = time.Minute       // GetVersion 结果缓存时长（避免每次跑 3 个 git 子进程）
-	tailOpenRetries  = 50 // 等待 runner 创建日志文件的最多重试次数（50×200ms = 10s）
+	defaultMaxSubs     = 4
+	subBufferSize      = 512
+	defaultTimeout     = 30 * time.Minute
+	historyTTL         = time.Hour       // 内存 session 保留时长
+	sweepInterval      = 5 * time.Minute // TTL sweep 轮询周期
+	ringBufferCap      = 5000            // 内存环形缓冲最大行数
+	logFileMaxLines    = 5000            // 磁盘回放时最多重建行数
+	tailPollInterval   = 200 * time.Millisecond
+	sendTimeout        = 5 * time.Second  // sendLocked 持锁等待慢客户端的上限，超时判死客户端
+	versionCacheTTL    = time.Minute      // GetVersion 结果缓存时长（避免每次跑 3 个 git 子进程）
+	tailOpenRetries    = 50               // 等待 runner 创建日志文件的最多重试次数（50×200ms = 10s）
+	aliveProbeInterval = 10 * time.Second // 30s 无输出后，对 runner 存活探测的最短间隔（防 200ms 轮询下高频 docker inspect）
 )
 
 // defaultLogDir 返回默认日志目录（跨平台临时目录；UPDATE_LOG_DIR 可覆盖，

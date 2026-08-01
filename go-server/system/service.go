@@ -483,6 +483,7 @@ func (s *Service) tailSessionLog(session *UpdateSession, startOffset int64) {
 	defer f.Close()
 	offset := startOffset
 	var lastLineAt time.Time
+	var lastAliveProbe time.Time
 	var partial []byte // 跨 chunk 的未完成行，避免长行被拆成两条事件
 
 	ticker := time.NewTicker(tailPollInterval)
@@ -519,11 +520,16 @@ func (s *Service) tailSessionLog(session *UpdateSession, startOffset int64) {
 				s.finishFromMarker(session)
 				return
 			}
-			// 无 marker 但 runner 已消亡（被 kill，未走 EXIT trap）→ 判中断
-			if time.Since(lastLineAt) > 30*time.Second && s.runnerGone(session) {
-				session.broadcast(SSEEvent{Type: "error", Message: "更新进程异常终止"})
-				s.finish(session, -1, false)
-				return
+			// 无 marker 但 runner 已消亡（被 kill，未走 EXIT trap）→ 判中断。
+			// 存活探测按 aliveProbeInterval 节流：长静默（如长时间 docker pull）时
+			// 不必每个 200ms tick 都跑 docker inspect。
+			if time.Since(lastLineAt) > 30*time.Second && time.Since(lastAliveProbe) > aliveProbeInterval {
+				lastAliveProbe = time.Now()
+				if s.runnerGone(session) {
+					session.broadcast(SSEEvent{Type: "error", Message: "更新进程异常终止"})
+					s.finish(session, -1, false)
+					return
+				}
 			}
 		}
 		select {
@@ -956,4 +962,33 @@ func (s *Service) sweepOnce() {
 		}
 	}
 	s.mu.Unlock()
+	// 孤儿 runner 回收必须在 s.mu 之外执行（liveRunnerIDs 需重新拿锁，防自死锁）
+	s.reapOrphanRunners()
+}
+
+// reapOrphanRunners 回收孤儿 runner 容器（设计 §10）：进程重启前 spawn 成功但未登记
+// session、或 session 已 finish 而容器仍残留的 lab-updater-*，运行超阈值后 kill+rm。
+func (s *Service) reapOrphanRunners() {
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	if err := s.runner.Reap(ctx, s.liveRunnerIDs()); err != nil {
+		slog.Warn("孤儿 runner 回收失败", "error", err)
+	}
+}
+
+// liveRunnerIDs 返回仍处于 running 状态 session 的 runner 标识集合（孤儿回收的"受保护名单"）。
+func (s *Service) liveRunnerIDs() map[RunnerID]bool {
+	protect := make(map[RunnerID]bool)
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for _, sess := range s.sessions {
+		sess.mu.Lock()
+		running := sess.Status == "running"
+		rid := sess.runnerID
+		sess.mu.Unlock()
+		if running && rid != "" {
+			protect[rid] = true
+		}
+	}
+	return protect
 }

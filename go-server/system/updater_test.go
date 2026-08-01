@@ -288,9 +288,12 @@ func TestPipelineMigrateFailureBlocksRollback(t *testing.T) {
 	if containsCall(calls, "docker", "compose", "up", "-d") {
 		t.Errorf("迁移阻塞分支不应重建服务: %v", callNames(calls))
 	}
-	// 通知迁移阻塞 + 仓库 reset --hard 停在 OLD_SHA（与运行的旧镜像一致）
+	// 通知迁移阻塞 + 仓库回 main 分支并 reset --hard 停在 OLD_SHA（与运行的旧镜像一致）
 	if !hasTitle(h.ntfyTitles, "系统更新失败-迁移变更阻塞") {
 		t.Errorf("缺少迁移阻塞通知: %v", h.ntfyTitles)
+	}
+	if !containsCall(calls, "git", "checkout", "main") {
+		t.Errorf("阻塞分支应 git checkout main: %v", callNames(calls))
 	}
 	if !containsCall(calls, "git", "reset", "--hard", "oldsha") {
 		t.Errorf("阻塞分支应 git reset --hard oldsha: %v", callNames(calls))
@@ -329,6 +332,9 @@ func TestPipelineHealthFailureRollsBack(t *testing.T) {
 	}
 	if !containsCall(calls, "git", "reset", "--hard", "oldsha") {
 		t.Errorf("回滚完成应 git reset --hard oldsha: %v", callNames(calls))
+	}
+	if !containsCall(calls, "git", "checkout", "main") {
+		t.Errorf("回滚完成应 git checkout main（回到分支）: %v", callNames(calls))
 	}
 	if !hasTitle(h.ntfyTitles, "系统更新失败-已回滚") {
 		t.Errorf("缺少已回滚通知: %v", h.ntfyTitles)

@@ -6,6 +6,7 @@ import (
 	"context"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestBuildRunnerCmdGoEngine(t *testing.T) {
@@ -129,5 +130,72 @@ func TestBuildRunnerCmdContainerNameFromSession(t *testing.T) {
 	}
 	if !found {
 		t.Error("docker run 缺少容器名")
+	}
+}
+
+// TestDockerRunnerReap 孤儿回收：超阈值的 lab-updater-* 容器（不在受保护名单）被 kill+rm；
+// 受保护（仍存活 session）与未超阈值的容器不受影响。
+func TestDockerRunnerReap(t *testing.T) {
+	fake := &fakeCmdRunner{fn: func(c Call) (string, string, error) {
+		switch {
+		case hasArg(c.Args, "ps"):
+			return "cid-orphan\ncid-young\ncid-protected\n", "", nil
+		case hasArg(c.Args, "inspect"):
+			name := "lab-updater-upd_xxxx"
+			if hasArg(c.Args, "cid-young") {
+				name = "lab-updater-upd_young0"
+			}
+			if hasArg(c.Args, "cid-protected") {
+				name = "lab-updater-upd_protect"
+			}
+			// orphan/protected 启动于 1 小时前（超阈值），young 为 1 分钟前（不超阈值）
+			started := time.Now().Add(-time.Hour).UTC().Format(time.RFC3339)
+			if hasArg(c.Args, "cid-young") {
+				started = time.Now().Add(-time.Minute).UTC().Format(time.RFC3339)
+			}
+			return name + " true " + started, "", nil
+		default:
+			return "", "", nil
+		}
+	}}
+	r := &dockerRunner{cmds: fake}
+	protect := map[RunnerID]bool{"lab-updater-upd_protect": true}
+	if err := r.Reap(context.Background(), protect); err != nil {
+		t.Fatalf("Reap: %v", err)
+	}
+	calls := fake.callsSnapshot()
+	killNames := map[string]bool{}
+	for _, c := range calls {
+		if hasArg(c.Args, "kill") && len(c.Args) > 0 {
+			killNames[c.Args[len(c.Args)-1]] = true
+		}
+	}
+	if !killNames["lab-updater-upd_xxxx"] {
+		t.Errorf("超阈值孤儿应被 kill: %v", callNames(calls))
+	}
+	if killNames["lab-updater-upd_protect"] {
+		t.Errorf("受保护容器不应被 kill: %v", callNames(calls))
+	}
+	if killNames["lab-updater-upd_young0"] {
+		t.Errorf("未超阈值容器不应被 kill: %v", callNames(calls))
+	}
+}
+
+// TestDockerRunnerReapNoContainers ps 无输出时不报错也不误杀。
+func TestDockerRunnerReapNoContainers(t *testing.T) {
+	fake := &fakeCmdRunner{fn: func(c Call) (string, string, error) {
+		if hasArg(c.Args, "ps") {
+			return "", "", nil
+		}
+		return "", "", nil
+	}}
+	r := &dockerRunner{cmds: fake}
+	if err := r.Reap(context.Background(), nil); err != nil {
+		t.Fatalf("Reap: %v", err)
+	}
+	for _, c := range fake.callsSnapshot() {
+		if hasArg(c.Args, "kill") {
+			t.Errorf("不应有任何 kill: %v", callNames(fake.callsSnapshot()))
+		}
 	}
 }

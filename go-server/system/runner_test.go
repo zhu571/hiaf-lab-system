@@ -18,6 +18,7 @@ type fakeSessionRunner struct {
 	killed       int
 	aliveQueries int
 	alive        bool
+	reaped       []RunnerID // Reap 记录的受保护外容器名
 }
 
 func (f *fakeSessionRunner) Spawn(ctx context.Context, sess *UpdateSession) (RunnerID, error) {
@@ -44,6 +45,17 @@ func (f *fakeSessionRunner) Alive(id RunnerID) bool {
 	return f.alive
 }
 
+func (f *fakeSessionRunner) Reap(_ context.Context, protect map[RunnerID]bool) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	for id := range protect {
+		if id != "" {
+			f.reaped = append(f.reaped, id)
+		}
+	}
+	return nil
+}
+
 func (f *fakeSessionRunner) stats() (spawned, killed, aliveQueries int) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
@@ -60,6 +72,8 @@ func (r *noFileRunner) Spawn(ctx context.Context, sess *UpdateSession) (RunnerID
 func (r *noFileRunner) Kill(id RunnerID) error { return nil }
 
 func (r *noFileRunner) Alive(id RunnerID) bool { return true }
+
+func (r *noFileRunner) Reap(_ context.Context, _ map[RunnerID]bool) error { return nil }
 
 // waitTailExited 等待 tail goroutine 退出（finish 关闭 done 后至多 ~200ms）。
 // Windows 上打开中的日志文件无法删除，测试结束前必须等句柄释放。
@@ -320,7 +334,6 @@ func TestTailSessionLogWaitsForLogFile(t *testing.T) {
 	finishAndWaitTail(t, svc, sess)
 }
 
-
 // 重启恢复（#5）：NewService 启动时扫描 logDir，把"有 .log+.runner、无 .done"的
 // 中断 session 重建进内存（runner 已死 → 判中断 done，可从 SessionStatus 查到）。
 func TestNewServiceScansInterruptedSessions(t *testing.T) {
@@ -414,4 +427,58 @@ func TestReplaySnapshotAppendsTailedLinesAfterHistory(t *testing.T) {
 	}
 	svc.finish(sess, 0, true)
 	waitTailExited(t, sess)
+}
+
+// 孤儿回收（设计 §10）：sweepOnce 必须把"仍存活 session 的 runner"传入受保护名单，
+// 孤儿（无对应 session 的容器）交由 runner.Reap 处理；done 的 session 不在保护名单。
+func TestSweepOncePassesLiveRunnerIDsToReap(t *testing.T) {
+	svc := NewService(t.TempDir())
+	svc.engine = "go"
+	svc.logDir = t.TempDir()
+	fake := &fakeSessionRunner{}
+	svc.runner = fake
+
+	// 运行中的 session → 受保护
+	runningID := "upd_running00"
+	running := &UpdateSession{
+		ID: runningID, Status: "running", LogBuffer: NewRingBuffer(ringBufferCap),
+		subs: make(map[chan SSEEvent]struct{}), done: make(chan struct{}),
+		logFile: filepath.Join(svc.logDir, "x.log"), doneFile: filepath.Join(svc.logDir, "x.done"),
+		maxSubs: 4,
+	}
+	running.setRunnerID(RunnerID("lab-updater-" + runningID))
+	// 已完成的 session → 不保护
+	doneID := "upd_done000000"
+	doneSess := &UpdateSession{
+		ID: doneID, Status: "done", DoneAt: time.Now(), LogBuffer: NewRingBuffer(ringBufferCap),
+		subs: make(map[chan SSEEvent]struct{}), done: make(chan struct{}),
+		logFile: filepath.Join(svc.logDir, "y.log"), doneFile: filepath.Join(svc.logDir, "y.done"),
+		maxSubs: 4,
+	}
+	doneSess.setRunnerID(RunnerID("lab-updater-" + doneID))
+	svc.mu.Lock()
+	svc.sessions[runningID] = running
+	svc.sessions[doneID] = doneSess
+	svc.active = running
+	svc.mu.Unlock()
+
+	svc.sweepOnce()
+	fake.mu.Lock()
+	reaped := append([]RunnerID{}, fake.reaped...)
+	fake.mu.Unlock()
+	if !containsRunner(reaped, RunnerID("lab-updater-"+runningID)) {
+		t.Errorf("运行中 session 的 runner 应传入保护名单: %v", reaped)
+	}
+	if containsRunner(reaped, RunnerID("lab-updater-"+doneID)) {
+		t.Errorf("已 done session 的 runner 不应保护: %v", reaped)
+	}
+}
+
+func containsRunner(ids []RunnerID, want RunnerID) bool {
+	for _, id := range ids {
+		if id == want {
+			return true
+		}
+	}
+	return false
 }

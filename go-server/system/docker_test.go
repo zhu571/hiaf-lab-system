@@ -46,6 +46,26 @@ func TestParseComposePSBadJSON(t *testing.T) {
 	}
 }
 
+// TestParseComposePSNDJSON 多副本/多容器时 compose ps 输出 NDJSON（每行一个对象），
+// 单对象解析失败后必须回落到逐行解析，否则健康检查会误判健康服务为 missing。
+func TestParseComposePSNDJSON(t *testing.T) {
+	data := []byte("{\"Name\":\"lab-server-1\",\"Service\":\"server\",\"State\":\"running\",\"Health\":\"healthy\"}\n{\"Name\":\"lab-server-2\",\"Service\":\"server\",\"State\":\"running\",\"Health\":\"healthy\"}\n")
+	cs, err := parseComposePS(data)
+	if err != nil {
+		t.Fatalf("parseComposePS NDJSON: %v", err)
+	}
+	if len(cs) != 2 || cs[0].Name != "lab-server-1" || cs[1].Name != "lab-server-2" {
+		t.Errorf("unexpected NDJSON parse: %+v", cs)
+	}
+	if got := containerHealth(cs[1]); got != "healthy" {
+		t.Errorf("containerHealth = %q, want healthy", got)
+	}
+	// 任一行为坏 JSON 必须报错，不能静默丢副本
+	if _, err := parseComposePS([]byte("{\"Name\":\"a\"}\nnot-json\n")); err == nil {
+		t.Error("NDJSON 含坏行应报错")
+	}
+}
+
 func TestContainerHealth(t *testing.T) {
 	cases := []struct {
 		in   composePSContainer
