@@ -21,12 +21,30 @@ RUN go mod download
 COPY go-server/ ./
 COPY --from=frontend-builder /web-ui/dist ./static/
 RUN CGO_ENABLED=0 go build -o /lab-server .
+RUN CGO_ENABLED=0 go build -o /lab-update ./cmd/update-runner
 
 FROM alpine:3.20
 
-RUN apk add --no-cache ca-certificates tzdata
+# docker-cli-compose: runner 容器内执行 docker compose；coreutils: update.sh 使用 stdbuf。
+RUN apk add --no-cache ca-certificates tzdata docker-cli docker-cli-compose git curl bash coreutils
+
+# 容器内以 UID 1000 运行、无 HOME，写不了 global git config；
+# 仓库属主与容器 UID 不一致会触发 git dubious ownership，构建期写入 system 级配置。
+RUN git config --system --add safe.directory '*'
 
 COPY --from=builder /lab-server /lab-server
+COPY --from=builder /lab-update /usr/local/bin/lab-update
+# 打包自检：两个二进制必须已就位且可执行。
+RUN test -x /lab-server && test -x /usr/local/bin/lab-update
+
+# 非 root 运行时 cwd 不能是 /（UID 1000 无法在 / 下建目录，
+# 例如 attachments 默认 ATTACHMENT_DIR=./uploads 会落到 /uploads 并失败）。
+WORKDIR /app
+RUN mkdir -p /app/uploads && chown 1000:1000 /app/uploads
+
+# 非 root 运行；UID/GID 由 compose 的 UPDATE_RUN_UID/UPDATE_RUN_GID 覆盖，
+# docker.sock 访问依赖 compose 的 group_add（UPDATE_DOCKER_GID）。
+USER 1000:1000
 
 EXPOSE 8000
 

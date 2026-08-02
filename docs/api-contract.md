@@ -522,6 +522,91 @@ middleware 与 instruments service 双重校验；租约与独立 ACL 后续接�
 
 仅 admin 或安全审计员可查。支持 `actor_id`、`acting_user_id`、`object_type`、`object_id`、`from`、`to`。
 
+## 3.12 系统管理模块（系统更新）
+
+仅 admin 角色可访问（路由挂 `RequireRole(admin)`）。更新由 Go 进程触发，执行引擎由
+`UPDATE_ENGINE` 环境变量决定：
+
+- `go`（推荐，容器部署默认）：Step 表驱动流水线（`go-server/system/`），派发独立 runner
+  容器 `lab-updater-<session>`（复用 server 镜像，挂载 docker.sock 与仓库），server 重启不影响执行；
+  runner 入口为镜像内 `lab-update` 二进制（`go-server/cmd/update-runner/`）。
+- `shell`（兜底）：同样派发独立 runner 容器，entrypoint 改为 `bash .hermes/update.sh`
+  （runner 容器内仓库为可写挂载）。update.sh 也可在宿主机上手工执行。
+
+两种引擎都把日志写入 `UPDATE_LOG_FILE`（默认 `/tmp/lab-update-<session>.log`），结束时写
+done marker（`exit_code`/`old_sha`/`new_sha`/`ended_at`），Go 侧 tail 日志文件回传 SSE；
+服务重启后可从磁盘 `.log`/`.done`/`.runner` 文件恢复会话。
+
+### `GET /api/v1/admin/system/version`
+
+只读，无审计、无 Idempotency-Key。返回当前与远程版本信息。
+
+响应：
+
+```json
+{
+  "data": {
+    "current": "9af36b7...",
+    "current_short": "9af36b7",
+    "latest": "abc1234...",
+    "latest_short": "abc1234",
+    "behind": 3,
+    "can_update": true
+  },
+  "request_id": "req_..."
+}
+```
+
+git 不可用或网络不可达时，`current`/`latest` 为空字符串、`can_update=false`（降级而非报错）。
+
+### `POST /api/v1/admin/system/update`
+
+写操作：必须带 `Idempotency-Key` 请求头并写审计日志。单例互斥：已有运行中更新时返回
+`409 update_in_progress`；更新脚本缺失返回 `500 script_missing`。
+
+响应：
+
+```json
+{
+  "data": {
+    "session_id": "upd_a1b2c3d4e5",
+    "current": "9af36b7..."
+  },
+  "request_id": "req_..."
+}
+```
+
+### `GET /api/v1/admin/system/update/stream/{sessionId}`
+
+SSE 流式返回指定 session 的更新日志。该端点与其余系统管理接口一样挂
+`AuthRequired` + `RequireRole(admin)`：非 admin 用户返回 `403 permission_denied`；
+access token 过期返回 `401`，前端应刷新 token 后重新建立 SSE 连接。
+
+`sessionId` 必须是白名单格式
+`upd_[a-z0-9]{10}`（如 `upd_a1b2c3d4e5`），否则一律 `404 session_not_found`
+（防止把任意 URL 参数拼进文件路径）。session 不在内存时从磁盘 `.log`/`.done` 文件恢复。
+单 session 最多 4 个并发订阅，超出返回 `409 too_many_subscribers`。
+
+每帧 `data:` 为 JSON，事件结构：
+
+```json
+{
+  "seq": 42,
+  "ts": "2026-07-31T18:00:00.123456789+08:00",
+  "type": "line"
+}
+```
+
+`type` 取值：
+
+- `line`：普通日志行，附加 `text`。
+- `step`：步骤行，附加 `step`、`step_total`、`title`。
+- `done`：更新结束，附加 `exit_code`、`success`、`old_sha`、`new_sha`。
+- `error`：更新失败/中断/超时，附加 `message`。
+
+`seq` 单调递增，是重连去重的唯一依据：前端按 `seq` 丢弃重复帧，历史回放保证
+`done` 事件在长回放后仍可达。
+
 ## 4. 模块间通信
 
 | 调用方 | 被调用方 | 协议 | 用途 |

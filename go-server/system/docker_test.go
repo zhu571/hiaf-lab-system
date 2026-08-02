@@ -1,0 +1,120 @@
+package system
+
+import (
+	"testing"
+)
+
+func TestParseComposePSSingleObject(t *testing.T) {
+	data := []byte(`{"Name":"lab-server","Service":"server","State":"running","Health":"healthy"}`)
+	cs, err := parseComposePS(data)
+	if err != nil {
+		t.Fatalf("parseComposePS: %v", err)
+	}
+	if len(cs) != 1 || cs[0].Service != "server" || cs[0].Health != "healthy" {
+		t.Errorf("unexpected parse: %+v", cs)
+	}
+}
+
+func TestParseComposePSArray(t *testing.T) {
+	data := []byte(`[{"Name":"lab-server","Service":"server","State":"running","Health":"healthy"},{"Name":"lab-py-agent","Service":"py-agent","State":"exited","Health":""}]`)
+	cs, err := parseComposePS(data)
+	if err != nil {
+		t.Fatalf("parseComposePS: %v", err)
+	}
+	if len(cs) != 2 || cs[1].State != "exited" {
+		t.Errorf("unexpected parse: %+v", cs)
+	}
+}
+
+func TestParseComposePSMissingFields(t *testing.T) {
+	data := []byte(`{"Service":"ioc","State":"running"}`)
+	cs, err := parseComposePS(data)
+	if err != nil {
+		t.Fatalf("parseComposePS: %v", err)
+	}
+	if got := containerHealth(cs[0]); got != "running" {
+		t.Errorf("containerHealth = %q, want running (Health 缺失回落 State)", got)
+	}
+}
+
+func TestParseComposePSBadJSON(t *testing.T) {
+	if _, err := parseComposePS([]byte("not-json")); err == nil {
+		t.Fatal("expected error for bad json")
+	}
+	if _, err := parseComposePS([]byte("")); err != nil {
+		t.Fatalf("empty input should parse to nil, got %v", err)
+	}
+}
+
+// TestParseComposePSNDJSON 多副本/多容器时 compose ps 输出 NDJSON（每行一个对象），
+// 单对象解析失败后必须回落到逐行解析，否则健康检查会误判健康服务为 missing。
+func TestParseComposePSNDJSON(t *testing.T) {
+	data := []byte("{\"Name\":\"lab-server-1\",\"Service\":\"server\",\"State\":\"running\",\"Health\":\"healthy\"}\n{\"Name\":\"lab-server-2\",\"Service\":\"server\",\"State\":\"running\",\"Health\":\"healthy\"}\n")
+	cs, err := parseComposePS(data)
+	if err != nil {
+		t.Fatalf("parseComposePS NDJSON: %v", err)
+	}
+	if len(cs) != 2 || cs[0].Name != "lab-server-1" || cs[1].Name != "lab-server-2" {
+		t.Errorf("unexpected NDJSON parse: %+v", cs)
+	}
+	if got := containerHealth(cs[1]); got != "healthy" {
+		t.Errorf("containerHealth = %q, want healthy", got)
+	}
+	// 任一行为坏 JSON 必须报错，不能静默丢副本
+	if _, err := parseComposePS([]byte("{\"Name\":\"a\"}\nnot-json\n")); err == nil {
+		t.Error("NDJSON 含坏行应报错")
+	}
+}
+
+func TestContainerHealth(t *testing.T) {
+	cases := []struct {
+		in   composePSContainer
+		want string
+	}{
+		{composePSContainer{State: "running", Health: "healthy"}, "healthy"},
+		{composePSContainer{State: "running", Health: ""}, "running"},
+		{composePSContainer{State: "exited", Health: "unhealthy"}, "unhealthy"},
+		{composePSContainer{State: "created", Health: ""}, "created"},
+	}
+	for _, c := range cases {
+		if got := containerHealth(c.in); got != c.want {
+			t.Errorf("containerHealth(%+v) = %q, want %q", c.in, got, c.want)
+		}
+	}
+}
+
+func TestParseComposeImages(t *testing.T) {
+	// 真实 `compose config --images` 输出是纯文本逐行，不是 JSON 数组
+	data := []byte("deploy-server\n")
+	imgs, err := parseComposeImages(data)
+	if err != nil {
+		t.Fatalf("parseComposeImages: %v", err)
+	}
+	if len(imgs) != 1 || imgs[0] != "deploy-server" {
+		t.Errorf("unexpected images: %v", imgs)
+	}
+	// 多行输出每行一个镜像，空行跳过
+	imgs, err = parseComposeImages([]byte("repo-server\n\nrepo-py-agent\n"))
+	if err != nil || len(imgs) != 2 || imgs[1] != "repo-py-agent" {
+		t.Errorf("多行解析异常: %v %v", imgs, err)
+	}
+	// 空输出解析为空（不报错），由调用方按空结果处理
+	imgs, err = parseComposeImages([]byte("\n"))
+	if err != nil {
+		t.Fatalf("空输出不应报错: %v", err)
+	}
+	if len(imgs) != 0 {
+		t.Errorf("空输出应解析为空, got %v", imgs)
+	}
+}
+
+func TestParseComposeProjects(t *testing.T) {
+	data := []byte(`[{"Name":"deploy","Status":"running","ConfigFiles":"/opt/hiaf-lab-system/deploy/docker-compose.yml"}]`)
+	projects, err := parseComposeProjects(data)
+	if err != nil {
+		t.Fatalf("parseComposeProjects: %v", err)
+	}
+	if len(projects) != 1 || projects[0].Name != "deploy" {
+		t.Errorf("unexpected projects: %+v", projects)
+	}
+}
