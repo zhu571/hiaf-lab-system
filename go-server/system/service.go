@@ -94,6 +94,18 @@ func NewService(repoRoot string) *Service {
 	s.runner = newRunner(s, s.engine)
 	// 启动恢复：重建进程重启前中断的 session（运行中的挂到 s.active，防双更新并发）
 	s.recoverInterruptedSessions()
+	// 启动时异步回收孤儿 runner（设计 §10）：sweep 每 5min 也会兜底，这里加快
+	// 崩溃残留容器的回收；无 docker CLI 的环境（Windows 本地/无 docker 的 CI）静默跳过。
+	if _, err := exec.LookPath("docker"); err == nil {
+		runner := s.runner // 捕获引用：防止后续替换 s.runner（测试注入）造成竞态
+		go func() {
+			ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+			defer cancel()
+			if err := runner.Reap(ctx, s.liveRunnerIDs()); err != nil {
+				slog.Warn("孤儿 runner 回收失败", "error", err)
+			}
+		}()
+	}
 	// 后台 TTL sweep：只清"已完成且超期"的 session，运行中的 session 永不回收
 	go s.sweepSessions()
 	return s
@@ -398,7 +410,7 @@ func (s *Service) runScript(session *UpdateSession) {
 
 	id, err := s.runner.Spawn(context.Background(), session)
 	if err != nil {
-		session.broadcast(SSEEvent{Type: "error", Message: err.Error()})
+		session.ingestError(err.Error())
 		s.finish(session, -1, false)
 		return
 	}
@@ -407,7 +419,7 @@ func (s *Service) runScript(session *UpdateSession) {
 
 	timer := time.AfterFunc(s.timeout, func() {
 		s.killRunner(session)
-		session.broadcast(SSEEvent{Type: "error", Message: "更新超时已终止"})
+		session.ingestError("更新超时已终止")
 		s.finish(session, -2, false)
 	})
 	// 与 finish 竞态：Spawn 返回时 runner 可能已瞬间结束并 finish（finish 只 Stop 当时
@@ -526,7 +538,7 @@ func (s *Service) tailSessionLog(session *UpdateSession, startOffset int64) {
 			if time.Since(lastLineAt) > 30*time.Second && time.Since(lastAliveProbe) > aliveProbeInterval {
 				lastAliveProbe = time.Now()
 				if s.runnerGone(session) {
-					session.broadcast(SSEEvent{Type: "error", Message: "更新进程异常终止"})
+					session.ingestError("更新进程异常终止")
 					s.finish(session, -1, false)
 					return
 				}
@@ -655,6 +667,21 @@ func (s *UpdateSession) unsubscribe(ch chan SSEEvent) {
 		s.subsCount--
 		close(ch) // 通知 handler 退出
 	}
+}
+
+// ingestError 以与日志行共享的 seq 计数器投递错误事件（不写日志文件/环形缓冲）。
+// live 广播的 error 若不带 seq（seq=0），会被前端按 `seq <= lastSeq` 去重丢弃，
+// spawn 失败/超时/中断的具体原因用户将看不到；done 后丢弃，避免反超 done 序号。
+func (s *UpdateSession) ingestError(message string) {
+	s.mu.Lock()
+	if s.Status == "done" {
+		s.mu.Unlock()
+		return
+	}
+	s.seq++
+	evt := SSEEvent{Seq: s.seq, Timestamp: time.Now().Format(time.RFC3339Nano), Type: "error", Message: message}
+	s.mu.Unlock()
+	s.broadcast(evt)
 }
 
 // ingestLine 把一行日志写入内存 RingBuffer、分配 seq 并广播。
@@ -885,7 +912,7 @@ func (s *Service) recoverFromDisk(sessionID string) *UpdateSession {
 		// 重启后原超时看门狗已丢，重新挂载；期间若已 finish 则停止
 		timer := time.AfterFunc(s.timeout, func() {
 			s.killRunner(sess)
-			sess.broadcast(SSEEvent{Type: "error", Message: "更新超时已终止"})
+			sess.ingestError("更新超时已终止")
 			s.finish(sess, -2, false)
 		})
 		sess.mu.Lock()

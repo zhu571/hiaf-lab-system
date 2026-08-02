@@ -21,10 +21,20 @@ func newRunner(s *Service, engine string) SessionRunner {
 	return &dockerRunner{cmds: NewExecRunner("", nil), cfg: s.spawnConfig()}
 }
 
+// 看门狗终止 runner 的优雅退出预算与轮询间隔（设计 §6.2）：
+// 先发 SIGTERM 让 runner 内 pipeline 完成已开始的回滚（回滚在 WithoutCancel 的
+// 独立预算下继续），预算耗尽仍存活才 SIGKILL，避免"看门狗在回滚中途杀 runner → 半回滚状态"。
+const (
+	killGraceDefault = 30 * time.Minute // 与回滚预算（UPDATE_ROLLBACK_TIMEOUT 默认 30min）对齐
+	killPollDefault  = 2 * time.Second  // 存活轮询间隔
+)
+
 // dockerRunner 通过 docker CLI 以 `docker run -d` 派发独立 runner 容器。
 type dockerRunner struct {
-	cmds CmdRunner
-	cfg  RunnerSpawnConfig
+	cmds      CmdRunner
+	cfg       RunnerSpawnConfig
+	killGrace time.Duration // 0 → killGraceDefault（测试可注入短值）
+	killPoll  time.Duration // 0 → killPollDefault
 }
 
 func (r *dockerRunner) Spawn(ctx context.Context, sess *UpdateSession) (RunnerID, error) {
@@ -61,8 +71,28 @@ func (r *dockerRunner) resolveImage(ctx context.Context) (string, error) {
 	return images[0], nil
 }
 
+// Kill 优雅终止 runner：先 SIGTERM，等待其退出（回滚预算内）；超时仍未退出再 SIGKILL + rm。
+// 阻塞直到容器确已停止，保证调用方（看门狗）随后 finish 时 runner 不会再写仓库/容器，
+// 避免新 Trigger 与残留 runner 并发操作同一仓库。
 func (r *dockerRunner) Kill(id RunnerID) error {
+	grace, poll := r.killGrace, r.killPoll
+	if grace <= 0 {
+		grace = killGraceDefault
+	}
+	if poll <= 0 {
+		poll = killPollDefault
+	}
 	ctx := context.Background()
+	_, _, _ = r.cmds.Run(ctx, "docker", "kill", "--signal", "SIGTERM", string(id))
+	deadline := time.Now().Add(grace)
+	for time.Now().Before(deadline) {
+		if !r.Alive(id) {
+			_, _, _ = r.cmds.Run(ctx, "docker", "rm", "-f", string(id))
+			return nil
+		}
+		time.Sleep(poll)
+	}
+	// 优雅退出预算耗尽 → 硬杀兜底
 	_, _, _ = r.cmds.Run(ctx, "docker", "kill", string(id))
 	_, _, _ = r.cmds.Run(ctx, "docker", "rm", "-f", string(id))
 	return nil

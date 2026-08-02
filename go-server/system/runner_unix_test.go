@@ -181,6 +181,69 @@ func TestDockerRunnerReap(t *testing.T) {
 	}
 }
 
+// TestDockerRunnerKillGracefulThenHardKill Kill 先 SIGTERM 等待优雅退出，预算耗尽仍存活才 SIGKILL + rm。
+func TestDockerRunnerKillGracefulThenHardKill(t *testing.T) {
+	fake := &fakeCmdRunner{fn: func(c Call) (string, string, error) {
+		if hasArg(c.Args, "inspect") {
+			return "true", "", nil // 一直存活直到优雅预算耗尽
+		}
+		return "", "", nil
+	}}
+	r := &dockerRunner{cmds: fake, killGrace: 150 * time.Millisecond, killPoll: 20 * time.Millisecond}
+	if err := r.Kill("lab-updater-upd_abc1234567"); err != nil {
+		t.Fatalf("Kill: %v", err)
+	}
+
+	calls := fake.callsSnapshot()
+	// 第一次 kill 必须带 --signal SIGTERM（先优雅、后硬杀）
+	if len(calls) == 0 || !hasArg(calls[0].Args, "kill") || !hasArg(calls[0].Args, "--signal") || !hasArg(calls[0].Args, "SIGTERM") {
+		t.Errorf("应先发送 SIGTERM: %v", callNames(calls))
+	}
+	var hardKill, rm bool
+	for _, c := range calls {
+		if hasArg(c.Args, "kill") && !hasArg(c.Args, "--signal") {
+			hardKill = true
+		}
+		if hasArg(c.Args, "rm") {
+			rm = true
+		}
+	}
+	if !hardKill || !rm {
+		t.Errorf("优雅预算耗尽后应 SIGKILL + rm: %v", callNames(calls))
+	}
+}
+
+// TestDockerRunnerKillGracefulExit 容器收到 SIGTERM 后自行退出 → 不再硬杀。
+func TestDockerRunnerKillGracefulExit(t *testing.T) {
+	fake := &fakeCmdRunner{fn: func(c Call) (string, string, error) {
+		if hasArg(c.Args, "inspect") {
+			return "false", "", nil // SIGTERM 后已退出
+		}
+		return "", "", nil
+	}}
+	r := &dockerRunner{cmds: fake, killGrace: time.Minute, killPoll: 20 * time.Millisecond}
+	if err := r.Kill("lab-updater-upd_abc1234567"); err != nil {
+		t.Fatalf("Kill: %v", err)
+	}
+
+	calls := fake.callsSnapshot()
+	var sigterm, plainKill bool
+	for _, c := range calls {
+		if hasArg(c.Args, "kill") && hasArg(c.Args, "--signal") {
+			sigterm = true
+		}
+		if hasArg(c.Args, "kill") && !hasArg(c.Args, "--signal") {
+			plainKill = true
+		}
+	}
+	if !sigterm {
+		t.Errorf("应先发送 SIGTERM: %v", callNames(calls))
+	}
+	if plainKill {
+		t.Errorf("优雅退出后不应硬杀: %v", callNames(calls))
+	}
+}
+
 // TestDockerRunnerReapNoContainers ps 无输出时不报错也不误杀。
 func TestDockerRunnerReapNoContainers(t *testing.T) {
 	fake := &fakeCmdRunner{fn: func(c Call) (string, string, error) {

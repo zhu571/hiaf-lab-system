@@ -101,6 +101,56 @@ func finishAndWaitTail(t *testing.T, svc *Service, sess *UpdateSession) {
 	waitTailExited(t, sess)
 }
 
+// TestIngestErrorGetsSeqBeforeDone live 错误事件必须带真实 seq（前端按 seq 去重），
+// 且先于 done；done 后到达的错误事件被丢弃。
+func TestIngestErrorGetsSeqBeforeDone(t *testing.T) {
+	svc := NewService(t.TempDir())
+	svc.logDir = t.TempDir()
+	svc.runner = &fakeSessionRunner{}
+	id := "upd_errseq0000"
+	logPath, _, _ := sessionPaths(svc.logDir, id)
+	if err := os.WriteFile(logPath, []byte("line1\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	sess := &UpdateSession{
+		ID: id, Status: "running", LogBuffer: NewRingBuffer(ringBufferCap),
+		subs: make(map[chan SSEEvent]struct{}), done: make(chan struct{}),
+		logFile: logPath, maxSubs: 4,
+	}
+	ch, err := sess.subscribe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer sess.unsubscribe(ch)
+	go func() {
+		sess.ingestError("boom")
+		svc.finish(sess, 1, false)
+	}()
+	var evts []SSEEvent
+	timeout := time.After(3 * time.Second)
+	for len(evts) < 2 {
+		select {
+		case e := <-ch:
+			evts = append(evts, e)
+		case <-timeout:
+			t.Fatalf("timed out, got %+v", evts)
+		}
+	}
+	if evts[0].Type != "error" || evts[0].Seq <= 0 {
+		t.Errorf("error 事件 seq 必须 > 0: %+v", evts[0])
+	}
+	if evts[1].Type != "done" || evts[1].Seq <= evts[0].Seq {
+		t.Errorf("done seq 必须大于 error seq: %+v", evts)
+	}
+	// done 后再 ingestError 应被丢弃（不产生新事件）
+	sess.ingestError("late")
+	select {
+	case e := <-ch:
+		t.Errorf("done 后不应再有事件: %+v", e)
+	case <-time.After(100 * time.Millisecond):
+	}
+}
+
 // TestServiceGoEngineSpawnsRunner UPDATE_ENGINE=go：Trigger 走 runner 派发而非脚本。
 func TestServiceGoEngineSpawnsRunner(t *testing.T) {
 	svc := NewService(t.TempDir())
