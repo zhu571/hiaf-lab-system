@@ -3,26 +3,72 @@ package instruments
 import (
 	"context"
 	"encoding/json"
+	"math"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 )
 
 func TestParseResultSweepXY(t *testing.T) {
 	svc := NewServiceWithGateway("http://unused")
-	def, err := GetCommand("e5063a", "trigger_single")
-	if err != nil || def.ResultParser == nil {
-		t.Fatalf("trigger_single missing result_parser: def=%+v err=%v", def, err)
-	}
-	parsed, err := svc.ParseResult(def, "noise 1000000,-10.5;2000000,-20.25;3000000,-15.0; tail")
+	// 旧版 "x,y;x,y" 单行格式仍需兼容；regex 须支持科学计数法
+	def := &CommandDef{ResultParser: &ResultParserConfig{
+		Type: "sweep_xy", XLabel: "频率 (Hz)", YLabel: "S11 (dB)",
+		Regex: `(?P<points>(?:[+-]?[\d.]+(?:[eE][+-]?\d+)?,[+-]?[\d.]+(?:[eE][+-]?\d+)?(?:;|$))+)`,
+	}}
+	parsed, err := svc.ParseResult(def, "noise 1.0E+06,-1.05E+01;+2.0E+06,-2.025E+01;3.0E+06,-1.5E+01; tail")
 	if err != nil {
 		t.Fatalf("ParseResult returned error: %v", err)
 	}
 	if parsed.Type != "sweep_xy" || len(parsed.Points) != 3 || parsed.XLabel == "" || parsed.YLabel == "" {
 		t.Fatalf("unexpected parsed result: %+v", parsed)
 	}
-	if parsed.Points[0] != (Point{X: 1000000, Y: -10.5}) || parsed.Points[2] != (Point{X: 3000000, Y: -15.0}) {
+	if parsed.Points[0] != (Point{X: 1e6, Y: -10.5}) || parsed.Points[2] != (Point{X: 3e6, Y: -15.0}) {
 		t.Fatalf("unexpected points: %+v", parsed.Points)
+	}
+}
+
+func TestParseResultSweepXYComplex(t *testing.T) {
+	svc := NewServiceWithGateway("http://unused")
+	def, err := GetCommand("e5063a", "trigger_single")
+	if err != nil || def.ResultParser == nil {
+		t.Fatalf("trigger_single missing result_parser: def=%+v err=%v", def, err)
+	}
+	// E5063A 实际响应：第一行 SDATA 复数数组（re,im 对），第二行 FREQ 频率轴，均为科学计数法
+	response := "+1.00000000E-01,+0.00000000E+00,+7.07106781E-01,-7.07106781E-01\n" +
+		"+1.00000000E+06,+2.00000000E+06"
+	parsed, err := svc.ParseResult(def, response)
+	if err != nil {
+		t.Fatalf("ParseResult returned error: %v", err)
+	}
+	if parsed.Type != "sweep_xy" || len(parsed.Points) != 2 || parsed.XLabel == "" || parsed.YLabel == "" {
+		t.Fatalf("unexpected parsed result: %+v", parsed)
+	}
+	// 点 1: |0.1| = 0.1 → -20 dB；点 2: |0.7071+j0.7071| ≈ 1 → ≈0 dB
+	// 两个 dB 断言统一使用同一容差常量
+	const epsilon = 1e-6
+	if parsed.Points[0].X != 1e6 || math.Abs(parsed.Points[0].Y-(-20)) > epsilon {
+		t.Fatalf("unexpected point 0: %+v", parsed.Points[0])
+	}
+	if parsed.Points[1].X != 2e6 || math.Abs(parsed.Points[1].Y) > epsilon {
+		t.Fatalf("unexpected point 1: %+v", parsed.Points[1])
+	}
+}
+
+func TestParseResultSweepXYComplexMismatch(t *testing.T) {
+	svc := NewServiceWithGateway("http://unused")
+	def, err := GetCommand("e5063a", "trigger_single")
+	if err != nil {
+		t.Fatalf("GetCommand: %v", err)
+	}
+	// 复数数据 2 点，频率轴 3 点 → 必须报错
+	if _, err := svc.ParseResult(def, "1.0E-01,0,2.0E-01,0\n1.0E+06,2.0E+06,3.0E+06"); err == nil {
+		t.Fatal("expected error for mismatched complex/frequency lengths")
+	}
+	// 单行响应（缺频率轴）→ 必须报错
+	if _, err := svc.ParseResult(def, "1.0E-01,0,2.0E-01,0"); err == nil {
+		t.Fatal("expected error for single-section response")
 	}
 }
 
@@ -61,6 +107,11 @@ func TestParseResultRejectsMalformedSweep(t *testing.T) {
 	}
 	if _, err := svc.ParseResult(def, "no numeric data here"); err == nil {
 		t.Fatal("expected error for unparseable sweep response")
+	}
+	// 两行响应但内容非数字 → splitFloatList 失败，应报"无法解析复数数据段"
+	if _, err := svc.ParseResult(def, "abc,def\nghi,jkl"); err == nil ||
+		!strings.Contains(err.Error(), "无法解析复数数据段") {
+		t.Fatalf("expected splitFloatList parse error, got %v", err)
 	}
 }
 

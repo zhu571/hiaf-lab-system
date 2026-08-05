@@ -556,12 +556,18 @@ function clearCmdResult() {
   destroyChart()
 }
 
-// 解析失败（命令未配置 result_parser 返回 null，响应无法解析返回 400）不影响原始结果展示，静默忽略
+// 命令未配置 result_parser 时后端返回 null，属正常情况；配置了 parser 但解析失败时必须让用户知道
 async function parseExecution(instrumentId: string, command: string, response?: string): Promise<ParsedResult | null> {
   if (!response) return null
   try {
     return await parseResult(instrumentId, command, response)
-  } catch {
+  } catch (err) {
+    const reason = err instanceof Error ? err.message : String(err)
+    console.warn(`[instruments] parse-result failed: command=${command} reason=${reason}`)
+    const hasParser = Boolean(whitelist.value.find((c) => c.name === command)?.result_parser)
+    if (hasParser) {
+      ElMessage.warning(t('instrument.parseFailed', { reason }))
+    }
     return null
   }
 }

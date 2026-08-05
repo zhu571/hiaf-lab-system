@@ -78,7 +78,7 @@ def create_app(interpreter, planner, token):
                 raise ValueError("request too large")
             kind = data.get("kind")
             prompt = data.get("prompt")
-            context = data.get("context", {})
+            context = data.get("context") or {}
             if kind not in {"assembly", "experiment"}:
                 raise ValueError("kind is invalid")
             if not isinstance(prompt, str) or not prompt.strip() or len(prompt) > 4000:

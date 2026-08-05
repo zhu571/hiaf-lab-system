@@ -25,6 +25,7 @@ var (
 	ErrInvalidInput     = errors.New("请求参数无效")
 	ErrForbidden        = errors.New("当前用户无权执行此操作")
 	ErrAgentRejected    = errors.New("agent 角色不允许执行此操作")
+	ErrUpstream         = errors.New("py-agent 上游服务错误")
 	ErrDuplicateItems   = errors.New("步骤序号重复")
 	ErrDependencyInvalid = errors.New("依赖步骤序号无效")
 )
@@ -101,10 +102,14 @@ func (s *Service) Generate(ctx context.Context, userID, userRole string, req Gen
 		return nil, ErrInvalidInput
 	}
 
+	reqContext := req.Context
+	if reqContext == nil {
+		reqContext = map[string]any{}
+	}
 	payload, err := json.Marshal(map[string]any{
 		"kind":    kind,
 		"prompt":  prompt,
-		"context": req.Context,
+		"context": reqContext,
 	})
 	if err != nil {
 		return nil, err
@@ -119,24 +124,24 @@ func (s *Service) Generate(ctx context.Context, userID, userRole string, req Gen
 
 	resp, err := s.client.Do(httpReq)
 	if err != nil {
-		return nil, fmt.Errorf("py-agent 请求失败: %w", err)
+		return nil, fmt.Errorf("%w: py-agent 请求失败: %w", ErrUpstream, err)
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
 		body, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
-		return nil, fmt.Errorf("py-agent 返回 %d: %s", resp.StatusCode, string(body))
+		return nil, fmt.Errorf("%w: py-agent 返回 %d: %s", ErrUpstream, resp.StatusCode, string(body))
 	}
 
 	var result GenerateResponseData
 	decoder := json.NewDecoder(io.LimitReader(resp.Body, 128<<10))
 	decoder.DisallowUnknownFields()
 	if err := decoder.Decode(&result); err != nil {
-		return nil, fmt.Errorf("解码 AI 响应失败: %w", err)
+		return nil, fmt.Errorf("%w: 解码 AI 响应失败: %w", ErrUpstream, err)
 	}
 
 	if result.Status != "ok" && result.Status != "clarify" && result.Status != "rejected" {
-		return nil, fmt.Errorf("AI 返回无效状态: %s", result.Status)
+		return nil, fmt.Errorf("%w: AI 返回无效状态: %s", ErrUpstream, result.Status)
 	}
 
 	if result.Status == "ok" {

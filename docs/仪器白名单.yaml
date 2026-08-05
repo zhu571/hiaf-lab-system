@@ -1,5 +1,5 @@
 # 仪器控制白名单
-version: "2026-07-21-v3"
+version: "2026-08-05-v4"
 policy:
   module_boundary: "instrument service only accepts command names from this whitelist; raw SCPI is forbidden"
   yellow_requires:
@@ -160,6 +160,10 @@ e5063a:
           continuous: "INIT1:CONT?"
         failure_action: "mark_instrument_needs_check_and_alert"
       returns: "complex_s11"
+      result_parser:
+        type: sweep_xy_complex
+        x_label: "频率 (Hz)"
+        y_label: "S11 (dB)"
 
     - name: take_screenshot
       description: "保存仪器屏幕截图"
@@ -217,6 +221,8 @@ hioki_im3536:
       risk: green
       scpi: "MEASure?"
       returns: [Z_ohm, theta_deg, param3, param4]
+      result_parser:
+        type: single_value
 
     - name: self_test
       description: "自检"

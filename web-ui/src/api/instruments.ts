@@ -34,6 +34,7 @@ export type WhitelistCommand = {
   timeout_ms?: number
   params?: Record<string, CommandParamDef>
   returns?: unknown
+  result_parser?: { type: string; x_label?: string; y_label?: string; regex?: string }
 }
 
 export type CommandResult = {
@@ -120,7 +121,7 @@ export function executeCommandWithMeta(id: string, command: string, params: Reco
   return requestWithMeta<CommandResult>({ url: `/instruments/${id}/commands`, method: 'POST', data: { command, params } })
 }
 
-// 只读解析接口，不需要 Idempotency-Key；解析失败（parse_failed）由调用方静默处理
+// 只读解析接口，不需要 Idempotency-Key；解析失败（parse_failed）由调用方决定如何提示
 export function parseResult(id: string, command: string, response: string) {
   return request<ParsedResult | null>({ url: `/instruments/${id}/parse-result`, method: 'POST', data: { command, response } })
 }
