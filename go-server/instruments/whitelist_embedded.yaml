@@ -1,5 +1,5 @@
 # 仪器控制白名单
-version: "2026-07-21-v3"
+version: "2026-08-05-v4"
 policy:
   module_boundary: "instrument service only accepts command names from this whitelist; raw SCPI is forbidden"
   yellow_requires:
@@ -161,10 +161,9 @@ e5063a:
         failure_action: "mark_instrument_needs_check_and_alert"
       returns: "complex_s11"
       result_parser:
-        type: sweep_xy
+        type: sweep_xy_complex
         x_label: "频率 (Hz)"
         y_label: "S11 (dB)"
-        regex: "(?P<points>(?:[\\d.]+,[\\d.-]+(?:;|$))+)"
 
     - name: take_screenshot
       description: "保存仪器屏幕截图"

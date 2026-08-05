@@ -199,10 +199,20 @@ func (s *Service) ParseResult(def *CommandDef, response string) (*ParsedResult, 
 			Type: "sweep_xy", Points: points,
 			XLabel: def.ResultParser.XLabel, YLabel: def.ResultParser.YLabel,
 		}, nil
+	case "sweep_xy_complex":
+		// VNA（如 E5063A）扫频响应：第一行 SDATA 复数数组（re,im 对），
+		// 第二行 FREQ 频率轴数组；配对后取幅度换算 dB。
+		return parseSweepXYComplex(def, response)
 	case "single_value":
-		match := firstFloatRegex.FindString(response)
-		if match == "" {
+		loc := firstFloatRegex.FindStringIndex(response)
+		if loc == nil {
 			return nil, fmt.Errorf("响应中未找到数值")
+		}
+		match := response[loc[0]:loc[1]]
+		// 防御性检查：匹配串后紧跟 '.'（如输入 "1.2.3"）说明不是合法的单个数值，
+		// 直接拒绝，避免 ParseFloat 静默截断为 1.2。
+		if loc[1] < len(response) && response[loc[1]] == '.' {
+			return nil, fmt.Errorf("无法解析数值 %q", response)
 		}
 		val, err := strconv.ParseFloat(match, 64)
 		if err != nil {
@@ -211,6 +221,58 @@ func (s *Service) ParseResult(def *CommandDef, response string) (*ParsedResult, 
 		return &ParsedResult{Type: "single_value", Value: &val}, nil
 	}
 	return nil, nil
+}
+
+// minMagnitude 防止 log10(0) 产生 -Inf（JSON 无法表示）。magnitude 低于此值时钳位，对应 -240 dB。
+const minMagnitude = 1e-12
+
+// parseSweepXYComplex parses a two-line VNA sweep response: the first line is the
+// SDATA complex array (re,im pairs) and the second line is the FREQ axis array.
+// Points are emitted as (frequency, 20*log10|s|) in dB.
+func parseSweepXYComplex(def *CommandDef, response string) (*ParsedResult, error) {
+	sections := make([]string, 0, 2)
+	for _, line := range strings.Split(response, "\n") {
+		if line = strings.TrimSpace(line); line != "" {
+			sections = append(sections, line)
+		}
+	}
+	if len(sections) != 2 {
+		return nil, fmt.Errorf("扫频响应应为两行（复数数据 + 频率轴），实际 %d 行", len(sections))
+	}
+	complexData, err := splitFloatList(sections[0])
+	if err != nil || len(complexData) == 0 || len(complexData)%2 != 0 {
+		return nil, fmt.Errorf("无法解析复数数据段 %q", sections[0])
+	}
+	freqs, err := splitFloatList(sections[1])
+	if err != nil || len(freqs) == 0 {
+		return nil, fmt.Errorf("无法解析频率轴数据段 %q", sections[1])
+	}
+	if len(complexData) != 2*len(freqs) {
+		return nil, fmt.Errorf("复数数据点数 (%d) 与频率轴点数 (%d) 不匹配", len(complexData)/2, len(freqs))
+	}
+	points := make([]Point, 0, len(freqs))
+	for i, freq := range freqs {
+		magnitude := math.Hypot(complexData[2*i], complexData[2*i+1])
+		points = append(points, Point{X: freq, Y: 20 * math.Log10(math.Max(magnitude, minMagnitude))})
+	}
+	return &ParsedResult{
+		Type: "sweep_xy", Points: points,
+		XLabel: def.ResultParser.XLabel, YLabel: def.ResultParser.YLabel,
+	}, nil
+}
+
+// splitFloatList parses a comma-separated list of floats; scientific notation is supported.
+func splitFloatList(line string) ([]float64, error) {
+	parts := strings.Split(line, ",")
+	values := make([]float64, 0, len(parts))
+	for _, part := range parts {
+		value, err := strconv.ParseFloat(strings.TrimSpace(part), 64)
+		if err != nil {
+			return nil, err
+		}
+		values = append(values, value)
+	}
+	return values, nil
 }
 
 // NewSCPIConnection opens a TCP connection to a SCPI instrument.

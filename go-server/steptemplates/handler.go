@@ -179,6 +179,9 @@ func (h *Handler) writeError(w http.ResponseWriter, r *http.Request, err error) 
 		common.WriteError(w, r, http.StatusForbidden, "permission_denied", err.Error(), nil)
 	case errors.Is(err, ErrAgentRejected):
 		common.WriteError(w, r, http.StatusForbidden, "agent_forbidden", err.Error(), nil)
+	case errors.Is(err, ErrUpstream):
+		slog.Error("steptemplates upstream error", "error", err, "request_id", common.GetRequestID(r.Context()))
+		common.WriteError(w, r, http.StatusBadGateway, "upstream_error", "AI 生成服务暂时不可用，请稍后再试", nil)
 	default:
 		slog.Error("steptemplates request failed", "error", err, "request_id", common.GetRequestID(r.Context()))
 		common.WriteError(w, r, http.StatusInternalServerError, "internal_error", "服务器内部错误", nil)

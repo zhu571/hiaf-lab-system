@@ -106,7 +106,7 @@ type SCPIConnection struct {
 
 // ResultParserConfig describes how to parse a command's raw response.
 type ResultParserConfig struct {
-	Type   string `yaml:"type" json:"type"` // "sweep_xy" | "single_value"
+	Type   string `yaml:"type" json:"type"` // "sweep_xy" | "sweep_xy_complex" | "single_value"
 	XLabel string `yaml:"x_label,omitempty" json:"x_label,omitempty"`
 	YLabel string `yaml:"y_label,omitempty" json:"y_label,omitempty"`
 	Regex  string `yaml:"regex,omitempty" json:"regex,omitempty"`

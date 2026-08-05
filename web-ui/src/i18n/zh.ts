@@ -110,6 +110,7 @@ export default {
     confirmWrite: '确认执行吗？',
     writeConfirm: '写入确认',
     executeSuccess: '命令 {name} 执行成功',
+    parseFailed: '结果解析失败：{reason}，仅显示原始响应',
     projectsLoadFailed: '项目列表加载失败',
     runsLoadFailed: '批次列表加载失败',
     pleaseSelectProject: '请选择项目',

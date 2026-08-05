@@ -1,6 +1,13 @@
 package steptemplates
 
 import (
+	"context"
+	"encoding/json"
+	"errors"
+	"io"
+	"net/http"
+	"net/http/httptest"
+	"strings"
 	"testing"
 )
 
@@ -122,6 +129,68 @@ func TestRequireWriteAccess(t *testing.T) {
 			t.Fatal("expected error")
 		}
 	})
+}
+
+func TestGenerateNilContextSerializedAsEmptyObject(t *testing.T) {
+	var gotBody []byte
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotBody, _ = io.ReadAll(r.Body)
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"status":"ok","name_suggestion":"t","model":"m","steps":[{"name":"a","step_order":1}]}`))
+	}))
+	defer server.Close()
+
+	svc := NewService(nil, nil)
+	svc.ConfigurePlanner(server.URL, "token")
+
+	_, err := svc.Generate(context.Background(), "user-1", "member", GenerateRequest{
+		Kind:    "assembly",
+		Prompt:  "装一个靶室",
+		Context: nil,
+	})
+	if err != nil {
+		t.Fatalf("Generate failed: %v", err)
+	}
+	var payload map[string]any
+	if err := json.Unmarshal(gotBody, &payload); err != nil {
+		t.Fatalf("unmarshal payload: %v", err)
+	}
+	ctxValue, ok := payload["context"]
+	if !ok {
+		t.Fatal("payload missing context key")
+	}
+	ctxMap, ok := ctxValue.(map[string]any)
+	if !ok {
+		t.Fatalf("context should be an object, got %T (%v)", ctxValue, ctxValue)
+	}
+	if len(ctxMap) != 0 {
+		t.Fatalf("expected empty context, got %v", ctxMap)
+	}
+	if strings.Contains(string(gotBody), `"context":null`) {
+		t.Fatalf("context must not be null: %s", gotBody)
+	}
+}
+
+func TestGenerateUpstreamErrorMarked(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusBadRequest)
+		_, _ = w.Write([]byte(`{"error":"bad_request"}`))
+	}))
+	defer server.Close()
+
+	svc := NewService(nil, nil)
+	svc.ConfigurePlanner(server.URL, "token")
+
+	_, err := svc.Generate(context.Background(), "user-1", "member", GenerateRequest{
+		Kind:   "experiment",
+		Prompt: "做一次束流实验",
+	})
+	if err == nil {
+		t.Fatal("expected error")
+	}
+	if !errors.Is(err, ErrUpstream) {
+		t.Fatalf("expected ErrUpstream, got %v", err)
+	}
 }
 
 func intPtr(v int) *int { return &v }

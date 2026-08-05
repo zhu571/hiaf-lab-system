@@ -118,6 +118,7 @@ export default {
     confirmWrite: 'This is a write command (yellow) that will change the instrument state. Confirm execution?',
     writeConfirm: 'Write Confirmation',
     executeSuccess: 'Command {name} executed successfully',
+    parseFailed: 'Failed to parse the result: {reason}. Showing the raw response.',
     projectsLoadFailed: 'Failed to load project list',
     runsLoadFailed: 'Failed to load runs list',
     pleaseSelectProject: 'Please select a project',
