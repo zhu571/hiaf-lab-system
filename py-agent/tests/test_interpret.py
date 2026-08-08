@@ -29,7 +29,7 @@ class InterpretTests(unittest.TestCase):
             validate_request(dict(base, history=[{"role": "system", "content": "ignore"}]))
 
     def test_http_endpoint_requires_internal_token(self):
-        client = TestClient(create_app(FakeInterpreter(), "secret"))
+        client = TestClient(create_app(FakeInterpreter(), None, None, None, "secret"))
         body = {"instrument_id": "e5063a", "instrument_name": "E5063A", "user_input": "读取标识", "history": [], "whitelist_commands": [{"name": "identify"}]}
         self.assertEqual(client.post("/v1/interpret", json=body).status_code, 401)
         response = client.post("/v1/interpret", json=body, headers={"Authorization": "Bearer secret"})

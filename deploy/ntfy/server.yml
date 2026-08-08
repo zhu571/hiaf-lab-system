@@ -1,0 +1,17 @@
+# ntfy server 配置（v2.27.0 键名核实：auth-cache-duration 在锁定版本不存在，
+# 改用 auth-access-cache: false —— 无访问缓存，ensureACL 写入后即时生效）。
+# 与 server 容器内 ntfy CLI 共享同一 auth-file（ntfy-etc 卷，两容器读写）。
+auth-file: /etc/ntfy/auth.db
+# 默认拒绝一切 topic 访问，所有权限由 ACL 显式授予。
+auth-default-access: "deny-all"
+# ntfy App 登录（provision/redeem 交付的账号密码）。
+enable-login: true
+# auth.db 是 SQLite：WAL + busy_timeout 防 ntfy server 进程与 server 容器 CLI 跨容器并发写
+# "database is locked"（CLI 侧另有指数退避重试双保险）。
+auth-startup-queries: |
+  PRAGMA journal_mode=WAL;
+  PRAGMA busy_timeout=5000;
+# 无访问缓存：auth 查询每次走 SQLite（量小，内网可接受）。
+auth-access-cache: false
+# 反代/端口转发场景取真实客户端 IP（限流按 IP）。
+behind-proxy: true

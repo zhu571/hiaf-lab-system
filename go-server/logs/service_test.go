@@ -201,6 +201,7 @@ func testLog(id, projectID, status, content, occurredAt string) Log {
 
 type fakeAccess struct {
 	canAccess bool
+	projects  []middleware.ProjectSummary
 }
 
 func (f fakeAccess) ProjectExists(projectID string) (bool, error) {
@@ -213,6 +214,10 @@ func (f fakeAccess) ProjectStatus(projectID string) (string, error) {
 
 func (f fakeAccess) HasProjectPermission(projectID, userID string, perm middleware.Permission) (bool, error) {
 	return f.canAccess, nil
+}
+
+func (f fakeAccess) ListProjectsWithPermission(userID string, perm middleware.Permission) ([]middleware.ProjectSummary, error) {
+	return f.projects, nil
 }
 
 type fakeRepo struct {
@@ -258,6 +263,25 @@ func (f *fakeRepo) GetReportByDate(authorID, reportDate string) (*DailyReport, e
 		}
 	}
 	return nil, nil
+}
+
+func (f *fakeRepo) GetLatestReportBefore(authorID, beforeDate string) (*DailyReport, error) {
+	var latest *DailyReport
+	for _, report := range f.reports {
+		if report.AuthorID != authorID || report.ReportDate > beforeDate {
+			continue
+		}
+		if strings.TrimSpace(report.RawText) == "" && strings.TrimSpace(report.Summary) == "" {
+			continue
+		}
+		if latest == nil || report.ReportDate > latest.ReportDate {
+			latest = report
+		}
+	}
+	if latest == nil {
+		return nil, nil
+	}
+	return cloneReport(*latest), nil
 }
 
 func (f *fakeRepo) ListReports(params ReportListParams) ([]DailyReport, int, error) {

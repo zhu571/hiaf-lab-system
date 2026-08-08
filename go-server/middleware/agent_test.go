@@ -29,3 +29,31 @@ func TestAgentBusinessPathAllowlist(t *testing.T) {
 		t.Fatalf("allowlist mismatch: allowed=%v blocked=%v", allowed, blocked)
 	}
 }
+
+func TestAgentCannotAiParseDailyReport(t *testing.T) {
+	if agentBusinessPathAllowed(http.MethodPost, "/api/v1/daily-reports/report_1/ai-parse") {
+		t.Fatal("agent must not be allowed to POST /api/v1/daily-reports/{id}/ai-parse")
+	}
+}
+
+func TestAgentContextSkipsServiceCall(t *testing.T) {
+	// service token 调用（by-date 白名单）无 JWT claims，AgentContext 必须放行，
+	// 否则生产链路 AuthRequired→AgentContext 会把 scheduler 的日报拉取挡成 401。
+	old := serviceToken
+	defer func() { serviceToken = old }()
+	SetServiceToken("svc-secret")
+
+	stack := ServiceToken()(AgentContext(nil)(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if !IsServiceCall(r.Context()) {
+			t.Fatal("expected service call marker to survive AgentContext")
+		}
+		w.WriteHeader(http.StatusOK)
+	})))
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest(http.MethodGet, "/api/v1/daily-reports/by-date?user_id=u1", nil)
+	r.Header.Set("Authorization", "Bearer svc-secret")
+	stack.ServeHTTP(w, r)
+	if w.Code != http.StatusOK {
+		t.Fatalf("service call must pass AgentContext, got %d", w.Code)
+	}
+}

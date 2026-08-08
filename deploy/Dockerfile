@@ -1,3 +1,6 @@
+# Stage 0: ntfy CLI（版本必须与 compose 中 ntfy 服务镜像一致——auth-file schema 兼容性）
+FROM binwiederhier/ntfy:v2.27.0 AS ntfy-cli
+
 # Stage 1: build frontend
 FROM node:20-alpine AS frontend-builder
 
@@ -34,8 +37,10 @@ RUN git config --system --add safe.directory '*'
 
 COPY --from=builder /lab-server /lab-server
 COPY --from=builder /lab-update /usr/local/bin/lab-update
-# 打包自检：两个二进制必须已就位且可执行。
-RUN test -x /lab-server && test -x /usr/local/bin/lab-update
+# ntfy CLI：跨容器直写共享 auth-file（账号/ACL 管理），镜像锁定与 ntfy 服务同版本。
+COPY --from=ntfy-cli /usr/bin/ntfy /usr/local/bin/ntfy
+# 打包自检：两个二进制 + ntfy CLI 必须已就位且可执行。
+RUN test -x /lab-server && test -x /usr/local/bin/lab-update && test -x /usr/local/bin/ntfy && ntfy --version
 
 # 非 root 运行时 cwd 不能是 /（UID 1000 无法在 / 下建目录，
 # 例如 attachments 默认 ATTACHMENT_DIR=./uploads 会落到 /uploads 并失败）。

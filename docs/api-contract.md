@@ -25,7 +25,7 @@
 
 | Header | 必填 | 说明 |
 |--------|------|------|
-| `Authorization: Bearer <access_token>` | 是 | 用户或服务 JWT |
+| `Authorization: Bearer <access_token>` | 是 | 用户或服务 JWT（内部 service token 仅白名单路径有效，见 §3.9） |
 | `X-Request-ID` | 否 | 客户端请求 ID；缺省由网关生成 |
 | `Idempotency-Key` | 写接口必填 | 同一用户同一操作 24 小时内去重 |
 | `X-Acting-User-ID` | Agent 必填 | Agent 代表的真实用户 |
@@ -56,6 +56,16 @@
   "request_id": "req_20260714_000001"
 }
 ```
+
+### 2.3.1 冲突类错误码（409）
+
+写接口在状态机/乐观锁/幂等重放下返回 `409 Conflict`，`error.code` 区分原因：
+
+| code | 语义 | 典型场景 |
+|------|------|----------|
+| `state_conflict` | 状态已变更，操作不再适用 | 对已 done 待办重复 done；对 deferred 待办重复 defer |
+| `version_conflict` | 乐观锁版本过期 | `PATCH /todos/{id}` 携带的 `updated_at` 不是最新值 |
+| `duplicate_idempotency_key` | 同一 Idempotency-Key 已被使用 | 同 key 重放写请求（响应含 `existing_request_id`） |
 
 ### 2.4 分页、过滤与时间
 
@@ -212,6 +222,56 @@ Agent 解析入口，返回候选字段，不直接入库。
   "request_id": "req_001"
 }
 ```
+
+### `POST /api/v1/daily-reports/{id}/ai-parse`
+
+把日报 raw_text 交给 py-agent 整理为结构化日志草稿。**结果不落库**，仅返回给前端由用户逐条编辑确认后走 `POST /api/v1/projects/{id}/logs` 入库。
+
+要求：`Idempotency-Key` 头（组级中间件强制）；仅日报作者本人（admin 除外）且日报为 `draft` 状态；agent 角色被 middleware 白名单拦截（403 `agent_action_forbidden`）。每用户限流 10 次/分钟。
+
+请求体：无（`projects` 由服务端按当前用户 `create_log` 权限注入，不透传前端）。
+
+响应（三态，对齐 py-agent `/v1/daily-parse`）：
+
+```json
+{
+  "data": {
+    "status": "ok",
+    "logs": [
+      {
+        "category": "assembly",
+        "project_id": "prj_rf_001",
+        "content": "装配匹配电路",
+        "occurred_at": "2026-08-06T09:00:00+08:00"
+      }
+    ],
+    "question": null,
+    "reason": null,
+    "model": "deepseek-v4-pro",
+    "prompt_version": "1.0"
+  },
+  "request_id": "req_001"
+}
+```
+
+`status=clarify` 时 `question` 非空、`logs` 为空；`status=rejected` 时 `reason` 非空、`logs` 为空。
+
+错误码：
+
+| HTTP | code | 场景 |
+|------|------|------|
+| 400 | missing_idempotency_key | 缺少 Idempotency-Key |
+| 409 | duplicate_idempotency_key | Idempotency-Key 重复 |
+| 404 | report_not_found | 日报不存在 |
+| 403 | permission_denied | 非日报作者 |
+| 400 | already_submitted | 日报已提交，不可再整理 |
+| 400 | empty_raw_text | 日报原文为空 |
+| 400 | bad_request | raw_text 超 4000 字符或 py-agent 判定请求参数错误 |
+| 400 | ai_parse_failed | 模型输出非法或响应未通过二次校验，请修改描述后重试 |
+| 429 | too_many_requests | 超过 10 次/分钟限流 |
+| 502 | upstream_error | py-agent 未配置/不可达/超时/其他非 2xx |
+
+审计：动作 `daily_report.ai_parsed`，明细只记 report_id、status 与 log_count，不记 raw_text 全文。
 
 ## 3.3 附件与 OCR 模块
 
@@ -403,6 +463,81 @@ IOC 心跳上报。
 释放租约。
 
 ### `POST /api/v1/instruments/{instrument_id}/commands`
+
+## 3.9 Todolist 模块
+
+个人/共享待办 + issue 自动聚合 + LLM 生成 + ntfy 订阅。所有写接口需 `Idempotency-Key`，
+权限矩阵：添加者(owner) 全权；共享项项目 active 成员可完成（viewer 只读）；非成员不可见（列表不报 403、直查返回 404）。
+
+### `POST /api/v1/todos`
+
+手动添加待办。Body：`{title, priority?, project_id?}`。
+`project_id` 非空 = 共享到该项目（校验添加者是项目 active 成员，非成员 403）。
+`created_for` = 今天（Asia/Shanghai）。Resp 201：`{id, title, priority, status, source, created_by, created_for, project_id?, issue_id?, completed_at?, completed_by?, created_at, updated_at}`。
+
+### `POST /api/v1/todos/llm-parse`
+
+LLM 自然语言解析为草稿（不落库）。Body：`{raw_text}`（≤2000 字符）。
+Resp：`{status: "ok"|"rejected", title, priority, reason?}`；上游失败降级为按清洗后标题保存。
+限流 10 次/分钟/用户（与 provision/redeem 共用）。
+
+### `POST /api/v1/todos/llm-add`
+
+确认草稿后落库。Body：`{draft_id?, title, priority?}`（草稿内容前端原样回传，不二次解析）。
+Resp 201：同 `POST /todos`，`source=llm`。
+
+### `GET /api/v1/todos`
+
+Params：`date=YYYY-MM-DD`（默认今天）、`scope=all|mine|shared`（默认 `all`）、
+`status=open|done|cancelled|all`（默认 `open`，`open` 含 pending+deferred）、`limit=100`（不分页）。
+scope 口径：`mine` = `created_by = me`；`shared` = `project_id IN 我的 active 项目`（含我添加的共享项，不含个人项）；
+`all` = mine ∪ shared。非成员 `scope=shared` 返回 200 空列表（不断言 403）。
+非法 `date`/`scope`/`status` → 400 `bad_request`。
+Resp 200：待办数组（含 `owner_display_name` 与 `updated_at`）。
+
+### `PATCH /api/v1/todos/{id}`
+
+编辑（仅 owner）。Body 带 `updated_at` 乐观锁版本 + `title?/priority?/project_id?`（`project_id` 传空串取消共享）。
+乐观锁过期 → 409 `version_conflict`；`updated_at` 缺失 → 400。
+
+### `PATCH /api/v1/todos/{id}/done`
+
+勾选完成。owner 或共享项 active 成员（viewer 403）；状态守卫：仅 pending/deferred 可完成，
+已 done 再 done → 409 `state_conflict`。Resp 200：完成后的待办（含 `completed_at`/`completed_by`）。
+
+### `PATCH /api/v1/todos/{id}/defer`
+
+推迟到明天（仅 owner；viewer/成员 403）。仅 pending 可推迟，deferred 再次 defer → 409 `state_conflict`。
+`created_for` 直接改写为明日（顺延链不可追溯，已接受）。
+
+### `DELETE /api/v1/todos/{id}`
+
+删除（仅 owner）。Resp 200：`{id}`。不存在/无权限 → 404 `todo_not_found`。
+
+### `GET /api/v1/todos/notification-topic`
+
+只返回当前 JWT 用户的 ntfy topic 与订阅地址（幂等无副作用，不做参数化查询，防枚举）。
+Resp：`{topic: "lab-todos-{sha256(user_id)[:16]}", subscribe_url}`。
+
+### `POST /api/v1/todos/notification-topic/provision`
+
+生成一次性 `provision_token`（24h TTL，再次 provision 作废旧 token；同时重置 ntfy 密码）。
+Resp：`{provision_token, expires_at}`。限流 10 次/分钟/用户。
+
+### `POST /api/v1/todos/notification-topic/redeem`
+
+兑换 provision_token（一次性，兑换即作废）→ 返回 ntfy 账号与一次性密码。
+Body：`{provision_token}`。Resp：`{username: "todo-{username}", password, topic}`。
+token 归属绑定（仅签发对象可兑换，冒用尝试即焚毁）；无效/过期/已兑换/跨用户 token → 401 `invalid_provision_token`。
+
+### 内部 service token 调用（白名单收敛）
+
+Scheduler 经 service token 调用 `GET /api/v1/daily-reports/by-date` 拉取全量用户日报：
+`Authorization: Bearer <SERVICE_TOKEN>` + `user_id=<uuid>`（可加 `date=` 与 `latest=true` 回溯最近一份非空日报）。
+白名单仅此路径；其他路径携带 service token 不生效（交给 JWT 鉴权，→401）。
+普通 JWT 调用 by-date 时 `user_id` 参数被忽略、强制取自己（防越权）。
+service token 调用产生的审计行 `actor_type='system'`。
+
 
 执行白名单命令。
 
@@ -617,6 +752,8 @@ access token 过期返回 `401`，前端应刷新 token 后重新建立 SSE 连�
 | EPICS/PLC 接入 | Go API 网关 | HTTP 内网 REST | 传感器数据和 IOC 心跳 |
 | 仪器控制服务 | Go API 网关 | HTTP 内网 REST | 命令结果和审计回写 |
 | Go API 网关 | 通知服务 | HTTP 内网 REST | 告警事件路由 |
+| Go todos scheduler | Go API 网关 | 内部 HTTP（SERVICE_TOKEN） | by-date 拉取全量用户日报（白名单收敛） |
+| Go todos | py-agent | HTTP 内网 REST | `/v1/todo-add`（15s）/`/v1/todo-daily`（60s）LLM 生成 |
 
 禁止项：
 
@@ -640,6 +777,7 @@ access token 过期返回 `401`，前端应刷新 token 后重新建立 SSE 连�
 | 仪器控制 | 租约、命令、结果摘要 | 用户、仪器 ACL、白名单 | HTTP API + YAML |
 | Agent | 任务、候选动作 | 日志、Issue、经验、权限 | HTTP API |
 | 通知 | 通知事件、投递记录 | 用户通知偏好、告警规则 | HTTP API |
+| Todolist | 待办、共享可见性 | 用户、项目、Issue（只读聚合） | HTTP API + 只读快照（跨模块只读例外已批准，见 `todos/snapshot.go`） |
 | 审计 | 审计事件 | 所有模块上下文 | 网关注入 + HTTP 写入 |
 
 ## 6. API 兼容与演进

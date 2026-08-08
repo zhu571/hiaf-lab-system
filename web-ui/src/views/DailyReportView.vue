@@ -15,23 +15,59 @@
         </div>
       </div>
       <el-input v-model="rawText" type="textarea" :rows="8" :placeholder="t('dailyReport.editorPlaceholder')" />
+      <div class="ai-row">
+        <el-button type="primary" plain :disabled="!canAiOrganize" :loading="aiLoading" @click="organizeWithAI">
+          {{ aiLoading ? t('dailyReport.aiOrganizing') : t('dailyReport.aiOrganize') }}
+        </el-button>
+      </div>
     </section>
     <section class="panel">
       <div class="toolbar">
         <h3>{{ t('dailyReport.structuredLogs') }}</h3>
         <el-button @click="openAddLog">{{ t('dailyReport.addLog') }}</el-button>
       </div>
-      <el-table :data="report?.logs || []">
-        <el-table-column prop="category" :label="t('dailyReport.category')" width="140" />
-        <el-table-column prop="content" :label="t('dailyReport.content')" />
-        <el-table-column :label="t('dailyReport.status')" width="120">
+      <el-table :data="tableRows">
+        <el-table-column :label="t('dailyReport.category')" width="150">
           <template #default="{ row }">
-            <StatusBadge :value="row.content_status" />
+            <el-select v-if="row._draft" v-model="row.category" size="small">
+              <el-option v-for="c in categories" :key="c" :label="c" :value="c" />
+            </el-select>
+            <template v-else>{{ row.category }}</template>
           </template>
         </el-table-column>
-        <el-table-column :label="t('dailyReport.actions')" width="150">
+        <el-table-column :label="t('dailyReport.project')" width="160">
           <template #default="{ row }">
-            <template v-if="row.content_status === 'draft'">
+            <el-select v-if="row._draft" v-model="row.project_id" size="small">
+              <el-option v-for="p in projects.projects" :key="p.id" :label="p.name" :value="p.id" />
+            </el-select>
+            <template v-else>{{ projectName(row.project_id) }}</template>
+          </template>
+        </el-table-column>
+        <el-table-column :label="t('dailyReport.occurredAt')" width="220">
+          <template #default="{ row }">
+            <el-date-picker v-if="row._draft" v-model="row.occurred_at" type="datetime" size="small" value-format="YYYY-MM-DDTHH:mm:ssZ" style="width: 200px" />
+            <template v-else>{{ row.occurred_at }}</template>
+          </template>
+        </el-table-column>
+        <el-table-column :label="t('dailyReport.content')">
+          <template #default="{ row }">
+            <el-input v-if="row._draft" v-model="row.content" type="textarea" :rows="2" size="small" />
+            <template v-else>{{ row.content }}</template>
+          </template>
+        </el-table-column>
+        <el-table-column :label="t('dailyReport.status')" width="90">
+          <template #default="{ row }">
+            <el-tag v-if="row._draft" size="small" type="warning">{{ t('dailyReport.aiTag') }}</el-tag>
+            <StatusBadge v-else :value="row.content_status" />
+          </template>
+        </el-table-column>
+        <el-table-column :label="t('dailyReport.actions')" width="160">
+          <template #default="{ row }">
+            <template v-if="row._draft">
+              <el-button link type="success" :loading="row.confirming" @click="confirmDraft(row)">{{ t('dailyReport.confirm') }}</el-button>
+              <el-button link type="danger" @click="removeDraft(row)">{{ t('dailyReport.remove') }}</el-button>
+            </template>
+            <template v-else-if="row.content_status === 'draft'">
               <el-button link type="primary" @click="openEditLog(row)">{{ t('dailyReport.edit') }}</el-button>
               <el-button link type="success" @click="confirmLog(row.id)">{{ t('dailyReport.confirm') }}</el-button>
             </template>
@@ -81,11 +117,11 @@
 <script setup lang="ts">
 import { computed, onMounted, reactive, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { ElMessage } from 'element-plus'
+import { ElMessage, ElMessageBox } from 'element-plus'
 import { showApiError } from '../composables/useNotify'
 import { Paperclip } from '@element-plus/icons-vue'
 import StatusBadge from '../components/StatusBadge.vue'
-import { createLog, submitReport, todayReport, updateLog, updateReportRawText, type DailyReport, type LogItem } from '../api/logs'
+import { aiParseReport, createLog, submitReport, todayReport, updateLog, updateReportRawText, type DailyReport, type LogItem } from '../api/logs'
 import { useProjectStore } from '../stores/project'
 import { useAuthStore } from '../stores/auth'
 import { uploadAttachment } from '../api/attachments'
@@ -142,6 +178,87 @@ const editingLogId = ref('')
 const warningDialog = ref(false)
 const warnings = ref<Array<{ code: string; message: string; log_id?: string }>>([])
 const logDraft = reactive({ project_id: '', category: 'general', content: '' })
+
+// AI 整理草稿：仅前端内存态，刷新丢失（方案明示的取舍）。
+type AiDraftRow = {
+  _draft: true
+  key: number
+  category: string
+  project_id: string
+  content: string
+  occurred_at: string
+  confirming: boolean
+}
+const aiDrafts = ref<AiDraftRow[]>([])
+const aiLoading = ref(false)
+let aiDraftSeq = 0
+const categories = ['general', 'assembly', 'test', 'cryo', 'rf', 'vacuum', 'beam', 'data_analysis']
+const tableRows = computed(() => [...(report.value?.logs || []), ...aiDrafts.value])
+const canAiOrganize = computed(
+  () => !!report.value && report.value.content_status === 'draft' && rawText.value.trim() !== '' && !aiLoading.value
+)
+
+function projectName(id: string) {
+  return projects.projects.find((p) => p.id === id)?.name || id
+}
+
+async function organizeWithAI() {
+  if (!report.value) return
+  aiLoading.value = true
+  try {
+    // 后端从已保存的 raw_text 取数：先落盘当前编辑内容，避免整理到旧文本或空文本
+    if (rawText.value !== report.value.raw_text) {
+      report.value = await updateReportRawText(report.value.id, rawText.value)
+    }
+    const { data } = await aiParseReport(report.value.id)
+    if (data.status === 'ok') {
+      for (const log of data.logs) {
+        aiDrafts.value.push({ _draft: true, key: ++aiDraftSeq, confirming: false, ...log })
+      }
+    } else if (data.status === 'clarify') {
+      await ElMessageBox.alert(data.question || '', t('dailyReport.aiClarifyTitle'))
+    } else {
+      await ElMessageBox.alert(data.reason || '', t('dailyReport.aiRejectedTitle'))
+    }
+  } catch (err) {
+    const e = err as (Error & { requestId?: string; status?: number }) | undefined
+    const key =
+      e?.status === 502 ? 'aiUpstreamDown'
+      : e?.status === 429 ? 'aiRateLimited'
+      : e?.status === 409 ? 'aiDuplicate'
+      : 'aiFailed'
+    const message = t(`dailyReport.${key}`)
+    ElMessage.error(e?.requestId ? `${message}（request_id: ${e.requestId}）` : message)
+  } finally {
+    aiLoading.value = false
+  }
+}
+
+async function confirmDraft(row: AiDraftRow) {
+  if (!report.value) return
+  row.confirming = true
+  try {
+    await createLog(row.project_id, {
+      daily_report_id: report.value.id,
+      category: row.category,
+      content: row.content,
+      occurred_at: row.occurred_at,
+      source: 'agent'
+    })
+    // 部分成功语义：单条失败只提示该条，其余草稿保留；成功才刷新并移除该行。
+    report.value = await todayReport()
+    aiDrafts.value = aiDrafts.value.filter((item) => item.key !== row.key)
+    ElMessage.success(t('dailyReport.logConfirmed'))
+  } catch (err) {
+    showApiError(err, t('dailyReport.aiConfirmFailed'))
+  } finally {
+    row.confirming = false
+  }
+}
+
+function removeDraft(row: AiDraftRow) {
+  aiDrafts.value = aiDrafts.value.filter((item) => item.key !== row.key)
+}
 
 onMounted(async () => {
   await projects.load()
@@ -224,6 +341,11 @@ async function submit(force: boolean) {
 .toolbar-actions {
   display: flex;
   gap: 10px;
+}
+
+.ai-row {
+  display: flex;
+  justify-content: flex-end;
 }
 
 .file-list {

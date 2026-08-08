@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"net/http"
 	"strconv"
+	"strings"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/zhu571/hiaf-lab-system/go-server/common"
@@ -64,17 +65,34 @@ func (h *Handler) UpdateReportRawText(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handler) GetReportByDate(w http.ResponseWriter, r *http.Request) {
+	// 显式审计动作：by-date 是 GET 默认不审计，但 service token 拉全量用户日报属敏感
+	// 读取，需要 actor_type='system' 审计行（方案 §10 验收）；普通 JWT 调用同样落审计。
+	middleware.SetAuditAction(r.Context(), "daily_report.by_date")
 	claims := middleware.GetUserClaims(r.Context())
+	latest := r.URL.Query().Get("latest") == "true"
+
+	// service token 调用（scheduler 批量拉取）：必须显式传 user_id，落到 daily_reports.author_id。
+	if middleware.IsServiceCall(r.Context()) {
+		userID := strings.TrimSpace(r.URL.Query().Get("user_id"))
+		if userID == "" {
+			common.WriteError(w, r, http.StatusBadRequest, "bad_request", "缺少 user_id 参数", nil)
+			return
+		}
+		report, err := h.svc.GetReportByDateLatest(userID, r.URL.Query().Get("date"), latest)
+		if err != nil {
+			h.writeError(w, r, err, nil)
+			return
+		}
+		common.WriteSuccess(w, r, report)
+		return
+	}
+
 	if claims == nil {
 		common.WriteError(w, r, http.StatusUnauthorized, "unauthorized", "未登录", nil)
 		return
 	}
-	reportDate := r.URL.Query().Get("date")
-	if reportDate == "" {
-		common.WriteError(w, r, http.StatusBadRequest, "bad_request", "缺少 date 参数", nil)
-		return
-	}
-	report, err := h.svc.GetReportByDate(middleware.EffectiveUserID(r.Context()), reportDate)
+	// 普通 JWT：user_id 参数被忽略，强制取自己（防越权）。
+	report, err := h.svc.GetReportByDateLatest(middleware.EffectiveUserID(r.Context()), r.URL.Query().Get("date"), latest)
 	if err != nil {
 		h.writeError(w, r, err, nil)
 		return
@@ -137,6 +155,31 @@ func (h *Handler) SubmitReport(w http.ResponseWriter, r *http.Request) {
 		h.writeError(w, r, err, nil)
 		return
 	}
+	common.WriteSuccess(w, r, result)
+}
+
+// AiParseReport 把日报 raw_text 交给 py-agent 整理为结构化日志草稿（不落库）。
+// 审计明细由组内 Audit middleware 记录（action + path 含 report_id），不记 raw_text 全文。
+func (h *Handler) AiParseReport(w http.ResponseWriter, r *http.Request) {
+	middleware.SetAuditAction(r.Context(), "daily_report.ai_parsed")
+	if !requireIdempotencyKey(w, r) {
+		return
+	}
+	claims := middleware.GetUserClaims(r.Context())
+	if claims == nil {
+		common.WriteError(w, r, http.StatusUnauthorized, "unauthorized", "未登录", nil)
+		return
+	}
+	result, err := h.svc.AiParse(r.Context(), chi.URLParam(r, "id"), middleware.EffectiveUserID(r.Context()), claims.Role)
+	if err != nil {
+		h.writeError(w, r, err, nil)
+		return
+	}
+	middleware.SetAuditDetail(r.Context(), map[string]any{
+		"report_id": chi.URLParam(r, "id"),
+		"status":    result.Status,
+		"log_count": len(result.Logs),
+	})
 	common.WriteSuccess(w, r, result)
 }
 
@@ -266,6 +309,13 @@ func (h *Handler) writeError(w http.ResponseWriter, r *http.Request, err error, 
 		common.WriteError(w, r, http.StatusForbidden, "log_not_draft", err.Error(), details)
 	case errors.Is(err, ErrPerPageTooLarge):
 		common.WriteError(w, r, http.StatusBadRequest, "per_page_too_large", err.Error(), details)
+	case errors.Is(err, ErrRateLimited):
+		common.WriteError(w, r, http.StatusTooManyRequests, "too_many_requests", err.Error(), details)
+	case errors.Is(err, ErrAiParseFailed):
+		common.WriteError(w, r, http.StatusBadRequest, "ai_parse_failed", err.Error(), details)
+	case errors.Is(err, ErrUpstream):
+		slog.Error("logs upstream error", "error", err, "request_id", common.GetRequestID(r.Context()))
+		common.WriteError(w, r, http.StatusBadGateway, "upstream_error", "AI 整理服务暂时不可用，请稍后再试", nil)
 	case errors.Is(err, ErrInvalidInput), errors.Is(err, ErrInvalidTimeZone):
 		common.WriteError(w, r, http.StatusBadRequest, "bad_request", err.Error(), details)
 	default:

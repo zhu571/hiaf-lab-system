@@ -57,7 +57,7 @@ type Log struct {
 	ContentStatus string    `json:"content_status"`
 	CreatedAt     time.Time `json:"created_at"`
 	UpdatedAt     time.Time `json:"updated_at"`
-	RunID       *string    `json:"run_id,omitempty"`
+	RunID         *string   `json:"run_id,omitempty"`
 }
 
 type CreateDailyReportRequest struct {
@@ -118,4 +118,22 @@ type ReportListParams struct {
 	Date     string `json:"date,omitempty"`
 	Page     int    `json:"page"`
 	PerPage  int    `json:"per_page"`
+}
+
+// AiParseLogEntry 是 AI 整理产出的一条候选日志（草稿，未入库）。
+type AiParseLogEntry struct {
+	Category   string `json:"category"`
+	ProjectID  string `json:"project_id"`
+	Content    string `json:"content"`
+	OccurredAt string `json:"occurred_at"`
+}
+
+// AiParseResult 对齐 py-agent /v1/daily-parse 的三态契约。
+type AiParseResult struct {
+	Status        string            `json:"status"`
+	Logs          []AiParseLogEntry `json:"logs"`
+	Question      *string           `json:"question"`
+	Reason        *string           `json:"reason"`
+	Model         string            `json:"model,omitempty"`
+	PromptVersion string            `json:"prompt_version,omitempty"`
 }

@@ -63,6 +63,26 @@ func (r *Repository) GetReportByDate(authorID, reportDate string) (*DailyReport,
 	return &out, nil
 }
 
+// GetLatestReportBefore 返回 report_date <= beforeDate 的最近一份非空日报（raw_text 或 summary 非空）。
+func (r *Repository) GetLatestReportBefore(authorID, beforeDate string) (*DailyReport, error) {
+	var out DailyReport
+	err := scanDailyReport(r.db.QueryRow(
+		`SELECT id, report_date, author_id, raw_text, summary, content_status, quality_status, created_at, updated_at
+		 FROM daily_reports
+		 WHERE author_id = $1 AND report_date <= $2::date AND (raw_text <> '' OR summary <> '')
+		 ORDER BY report_date DESC
+		 LIMIT 1`,
+		authorID, beforeDate,
+	), &out)
+	if err != nil {
+		if err == sql.ErrNoRows {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("get latest daily report before date: %w", err)
+	}
+	return &out, nil
+}
+
 func (r *Repository) ListReports(params ReportListParams) ([]DailyReport, int, error) {
 	params.Page, params.PerPage = normalizePage(params.Page, params.PerPage)
 	where, args := buildReportWhere(params)

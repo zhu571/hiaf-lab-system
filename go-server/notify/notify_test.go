@@ -21,16 +21,32 @@ func TestSend(t *testing.T) {
 		if r.Header.Get("Title") != "alert" || r.Header.Get("Click") != "http://example.test" || r.Header.Get("Priority") != "urgent" || r.Header.Get("Tags") != "warning,skull" {
 			t.Fatalf("unexpected headers: %v", r.Header)
 		}
-		if user, pass, ok := r.BasicAuth(); !ok || user != "alice" || pass != "secret" {
-			t.Fatalf("unexpected basic auth: %q %q %v", user, pass, ok)
+		// v13：统一切换为 todo-publisher Bearer token（Basic auth 已废弃）。
+		if got := r.Header.Get("Authorization"); got != "Bearer secret" {
+			t.Fatalf("unexpected authorization header: %q", got)
 		}
 	}))
 	defer server.Close()
 	t.Setenv("NTFY_ADDR", server.URL)
-	t.Setenv("NTFY_USER", "alice")
-	t.Setenv("NTFY_PASS", "secret")
+	t.Setenv("NTFY_PUBLISH_TOKEN", "secret")
 
 	if err := Send("lab-alerts", "alert", "details", "http://example.test", "urgent", []string{"warning", "skull"}); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestSendNoToken(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if got := r.Header.Get("Authorization"); got != "" {
+			t.Fatalf("expected no authorization header when token unset, got %q", got)
+		}
+	}))
+	defer server.Close()
+	t.Setenv("NTFY_ADDR", server.URL)
+	t.Setenv("NTFY_PUBLISH_TOKEN", "")
+	t.Setenv("NTFY_PUBLISH_TOKEN_FILE", "")
+
+	if err := Send("lab-alerts", "alert", "details", "", "high", nil); err != nil {
 		t.Fatal(err)
 	}
 }

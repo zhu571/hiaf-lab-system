@@ -151,6 +151,66 @@ func IsProjectAdmin(ctx context.Context) bool {
 	return ok
 }
 
+// ProjectSummary 是权限过滤后的项目最小视图，用于服务端注入 AI 解析上下文。
+type ProjectSummary struct {
+	ID   string `json:"id"`
+	Name string `json:"name"`
+}
+
+// ListProjectsWithPermission 返回用户拥有指定权限的 active 项目。
+// admin 返回全部 active 项目；其他用户取其 active 成员项目，再按 rolePermissions 过滤。
+func ListProjectsWithPermission(db *sql.DB, userID string, perm Permission) ([]ProjectSummary, error) {
+	var userRole string
+	err := db.QueryRow(`SELECT role FROM users WHERE id = $1`, userID).Scan(&userRole)
+	if err != nil {
+		if err == sql.ErrNoRows {
+			return []ProjectSummary{}, nil
+		}
+		return nil, err
+	}
+	if userRole == "admin" {
+		rows, err := db.Query(`SELECT id, name FROM projects WHERE status = 'active' ORDER BY name`)
+		if err != nil {
+			return nil, err
+		}
+		defer rows.Close()
+		out := []ProjectSummary{}
+		for rows.Next() {
+			var p ProjectSummary
+			if err := rows.Scan(&p.ID, &p.Name); err != nil {
+				return nil, err
+			}
+			out = append(out, p)
+		}
+		return out, rows.Err()
+	}
+
+	rows, err := db.Query(
+		`SELECT p.id, p.name, pm.role
+		 FROM project_members pm
+		 JOIN projects p ON p.id = pm.project_id
+		 WHERE pm.user_id = $1 AND pm.status = 'active' AND p.status = 'active'
+		 ORDER BY p.name`,
+		userID,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := []ProjectSummary{}
+	for rows.Next() {
+		var p ProjectSummary
+		var role string
+		if err := rows.Scan(&p.ID, &p.Name, &role); err != nil {
+			return nil, err
+		}
+		if roleHasPermission(role, perm) {
+			out = append(out, p)
+		}
+	}
+	return out, rows.Err()
+}
+
 func roleHasPermission(role string, perm Permission) bool {
 	for _, p := range rolePermissions[role] {
 		if p == perm {

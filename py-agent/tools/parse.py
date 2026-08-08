@@ -1,14 +1,20 @@
 import json
 import re
+from datetime import datetime
 from pathlib import Path
 
 
 MODEL = "deepseek-v4-pro"
 BASE_URL = "https://api.deepseek.com"
+DAILY_LOG_CATEGORIES = {"general", "assembly", "test", "cryo", "rf", "vacuum", "beam", "data_analysis"}
 INJECTION = re.compile(
     r"忽略(?:之前|以上).*指令|ignore (?:all )?(?:previous|prior).*instructions?"
     r"|execute_python_code|upload_file_to_oss|动态.*tool|tool.*generation",
     re.IGNORECASE,
+)
+# 与 Go 侧 time.RFC3339 对齐：T 分隔、秒、可选小数、Z 或 ±hh:mm 时区。
+RFC3339 = re.compile(
+    r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:\d{2})$"
 )
 
 
@@ -63,6 +69,25 @@ class Parser:
             metadata={"extra_body": {"thinking": {"type": "disabled"}}},
         )
         return validate_candidates(_json_array(str(result)), existing_issues, project_ids)
+
+    def parse_daily_logs(self, raw_text, projects, report_date):
+        ensure_safe(raw_text)
+        query = json.dumps({
+            "trusted_context": {
+                "report_date": report_date,
+                "projects": [
+                    {"id": project["id"], "name": project["name"]}
+                    for project in projects
+                ],
+            },
+            "untrusted_inputs": [{"type": "daily_report", "content": raw_text}],
+        }, ensure_ascii=False)
+        result = self.agent.run(
+            query, tools=[], use_skills=False, max_retry=3, result_format="str",
+            metadata={"extra_body": {"thinking": {"type": "disabled"}}},
+        )
+        allowed = {project["id"] for project in projects}
+        return validate_daily_logs(_json_object(str(result)), allowed)
 
 
 def _json_array(text):
@@ -160,6 +185,54 @@ def validate_interpretation(item, allowed_commands):
         "question": str(item.get("question", "")).strip() or None,
         "reason": str(item.get("reason", "")).strip() or None,
         "prompt_version": "1.0", "model": MODEL,
+    }
+
+
+def validate_daily_logs(item, allowed_projects):
+    status = item.get("status")
+    if status not in {"ok", "clarify", "rejected"}:
+        raise ParseError("daily parse status is invalid")
+    if status == "clarify" and not str(item.get("question", "")).strip():
+        raise ParseError("clarification question is required")
+    if status == "rejected" and not str(item.get("reason", "")).strip():
+        raise ParseError("rejection reason is required")
+    logs = item.get("logs")
+    out = []
+    if status == "ok":
+        if not isinstance(logs, list) or not 1 <= len(logs) <= 20:
+            raise ParseError("daily parse logs count must be 1-20")
+        for entry in logs:
+            if not isinstance(entry, dict):
+                raise ParseError("daily parse log must be an object")
+            category = entry.get("category")
+            project_id = entry.get("project_id")
+            content = entry.get("content")
+            occurred_at = entry.get("occurred_at")
+            if not isinstance(content, str) or not isinstance(occurred_at, str):
+                raise ParseError("daily parse log content or occurred_at must be strings")
+            content = content.strip()
+            occurred_at = occurred_at.strip()
+            if category not in DAILY_LOG_CATEGORIES or project_id not in allowed_projects:
+                raise ParseError("daily parse log category or project is invalid")
+            if not 1 <= len(content) <= 2000:
+                raise ParseError("daily parse log content length is invalid")
+            if not RFC3339.match(occurred_at):
+                raise ParseError("daily parse log occurred_at is invalid")
+            try:
+                parsed = datetime.fromisoformat(occurred_at.replace("Z", "+00:00"))
+            except ValueError as exc:
+                raise ParseError("daily parse log occurred_at is invalid") from exc
+            if parsed.tzinfo is None:
+                raise ParseError("daily parse log occurred_at is invalid")
+            out.append({
+                "category": category, "project_id": project_id,
+                "content": content, "occurred_at": occurred_at,
+            })
+    return {
+        "status": status, "logs": out,
+        "question": str(item.get("question", "")).strip() or None,
+        "reason": str(item.get("reason", "")).strip() or None,
+        "model": MODEL, "prompt_version": "1.0",
     }
 
 
