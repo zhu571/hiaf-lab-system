@@ -49,6 +49,7 @@ declare module 'vue' {
     ElTimelineItem: typeof import('element-plus/es')['ElTimelineItem']
     ElTooltip: typeof import('element-plus/es')['ElTooltip']
     ElUpload: typeof import('element-plus/es')['ElUpload']
+    MobileTopBar: typeof import('./src/components/MobileTopBar.vue')['default']
     ProjectDashboard: typeof import('./src/components/ProjectDashboard.vue')['default']
     ProjectLayout: typeof import('./src/components/ProjectLayout.vue')['default']
     ProjectSidebar: typeof import('./src/components/ProjectSidebar.vue')['default']

@@ -32,43 +32,45 @@ const ManualView = () => import('../views/ManualView.vue')
 const router = createRouter({
   history: createWebHistory(),
   routes: [
-    { path: '/', component: () => import('../views/DashboardView.vue'), meta: { requiresAuth: true } },
+    { path: '/', component: () => import('../views/DashboardView.vue'), meta: { requiresAuth: true, titleKey: 'nav.home' } },
     { path: '/login', component: LoginView, meta: { public: true } },
-    { path: '/projects', component: ProjectsView },
+    { path: '/projects', component: ProjectsView, meta: { titleKey: 'nav.projects' } },
     {
       path: '/daily-report',
       component: DailyReportShell,
+      meta: { titleKey: 'nav.dailyReport' },
       children: [
-        { path: '', component: DailyReportView },
-        { path: 'history', component: DailyHistoryView }
+        { path: '', component: DailyReportView, meta: { titleKey: 'nav.dailyReport' } },
+        { path: 'history', component: DailyHistoryView, meta: { titleKey: 'nav.dailyReport' } }
       ]
     },
     {
       path: '/projects/:id',
       component: ProjectLayout,
+      meta: { titleKey: 'nav.projects' },
       children: [
-        { path: '', component: ProjectDashboard },
-        { path: 'issues', component: IssuesView },
-        { path: 'experiment-runs', component: RunListView },
-        { path: 'test-data', component: TestDataView },
-        { path: 'rf-matching', component: RFMatchingView },
-        { path: 'assembly', component: AssemblyView }
+        { path: '', component: ProjectDashboard, meta: { titleKey: 'nav.projects' } },
+        { path: 'issues', component: IssuesView, meta: { titleKey: 'nav.projects' } },
+        { path: 'experiment-runs', component: RunListView, meta: { titleKey: 'nav.projects' } },
+        { path: 'test-data', component: TestDataView, meta: { titleKey: 'nav.projects' } },
+        { path: 'rf-matching', component: RFMatchingView, meta: { titleKey: 'nav.projects' } },
+        { path: 'assembly', component: AssemblyView, meta: { titleKey: 'nav.projects' } }
       ]
     },
-    { path: '/experiment-runs/:id', component: RunDetailView },
-    { path: '/step-templates', component: StepTemplatesView, meta: { requiresAuth: true } },
-    { path: '/attachments', component: AttachmentView },
-    { path: '/instrument-measure', component: InstrumentMeasureView },
-    { path: '/gas-control', component: GasControlView },
-    { path: '/sensors', component: SensorsView },
-    { path: '/todos', component: TodoView, meta: { requiresAuth: true } },
-    { path: '/experiences', component: ExperiencesView },
-    { path: '/audit', component: AuditView },
-    { path: '/settings', component: SettingsView },
-    { path: '/manual', component: ManualView, meta: { requiresAuth: true } },
-    { path: '/daily-reports/:id', component: DailyReportDetailView },
-    { path: '/admin/users', component: AdminUsersView, meta: { admin: true } },
-    { path: '/agent-candidates', component: AgentCandidatesView, meta: { reviewer: true } },
+    { path: '/experiment-runs/:id', component: RunDetailView, meta: { titleKey: 'mobile.title.runDetail' } },
+    { path: '/step-templates', component: StepTemplatesView, meta: { requiresAuth: true, titleKey: 'mobile.title.stepTemplates' } },
+    { path: '/attachments', component: AttachmentView, meta: { titleKey: 'nav.attachments' } },
+    { path: '/instrument-measure', component: InstrumentMeasureView, meta: { titleKey: 'nav.instruments' } },
+    { path: '/gas-control', component: GasControlView, meta: { titleKey: 'nav.gasControl' } },
+    { path: '/sensors', component: SensorsView, meta: { titleKey: 'nav.sensors' } },
+    { path: '/todos', component: TodoView, meta: { requiresAuth: true, titleKey: 'nav.todos' } },
+    { path: '/experiences', component: ExperiencesView, meta: { titleKey: 'nav.experiences' } },
+    { path: '/audit', component: AuditView, meta: { titleKey: 'nav.audit' } },
+    { path: '/settings', component: SettingsView, meta: { titleKey: 'nav.settings' } },
+    { path: '/manual', component: ManualView, meta: { requiresAuth: true, titleKey: 'nav.manual' } },
+    { path: '/daily-reports/:id', component: DailyReportDetailView, meta: { titleKey: 'mobile.title.dailyReportDetail' } },
+    { path: '/admin/users', component: AdminUsersView, meta: { admin: true, titleKey: 'nav.adminUsers' } },
+    { path: '/agent-candidates', component: AgentCandidatesView, meta: { reviewer: true, titleKey: 'nav.aiReview' } },
     // 兼容重定向：保留旧链接不 404
     { path: '/issues', redirect: '/projects' },
     { path: '/daily-reports', redirect: '/daily-report/history' },

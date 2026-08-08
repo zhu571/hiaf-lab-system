@@ -1,5 +1,18 @@
 <template>
   <div class="page settings">
+    <section v-if="isMobile" class="panel mobile-quick-links">
+      <h3 class="section-title">{{ t('settings.quickLinks') }}</h3>
+      <div class="quick-card-row">
+        <div class="quick-card" role="button" tabindex="0" @click="router.push('/experiences')" @keydown.enter="router.push('/experiences')">
+          <el-icon><Memo /></el-icon>
+          <span>{{ t('nav.experiences') }}</span>
+        </div>
+        <div class="quick-card" role="button" tabindex="0" @click="router.push('/attachments')" @keydown.enter="router.push('/attachments')">
+          <el-icon><Paperclip /></el-icon>
+          <span>{{ t('nav.attachments') }}</span>
+        </div>
+      </div>
+    </section>
     <section class="panel settings-card">
       <div class="user-head">
         <span class="avatar">{{ (auth.user?.username || '?').slice(0, 1).toUpperCase() }}</span>
@@ -114,17 +127,19 @@ import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref } from 'v
 import { useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import { ElMessage } from 'element-plus'
-import { ArrowRight, CircleCheckFilled, CircleCloseFilled, DataBoard, Tickets, User } from '@element-plus/icons-vue'
+import { ArrowRight, CircleCheckFilled, CircleCloseFilled, DataBoard, Memo, Paperclip, Tickets, User } from '@element-plus/icons-vue'
 import { changePassword } from '../api/auth'
 import { refreshAuthSession } from '../api/client'
 import * as systemApi from '../api/system'
 import type { SSEEvent, VersionInfo } from '../api/system'
 import { useAuthStore } from '../stores/auth'
+import { useMobile } from '../composables/useMobile'
 import { setLocale, type AppLocale } from '../i18n'
 
 const router = useRouter()
 const auth = useAuthStore()
 const { t, locale } = useI18n()
+const isMobile = useMobile()
 const form = reactive({ oldPassword: '', newPassword: '', confirm: '' })
 
 // ---- 版本状态 ----
@@ -444,6 +459,43 @@ async function doLogout() {
   flex-wrap: wrap;
   gap: 16px;
   margin-top: 20px;
+}
+
+.mobile-quick-links {
+  display: grid;
+  gap: 12px;
+}
+
+.quick-card-row {
+  display: grid;
+  gap: 10px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.quick-card {
+  align-items: center;
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  color: var(--text-2);
+  cursor: pointer;
+  display: flex;
+  flex-direction: column;
+  font-size: 14px;
+  gap: 8px;
+  min-height: 76px;
+  justify-content: center;
+  transition: border-color 0.15s ease;
+}
+
+.quick-card:active {
+  background: var(--brand-050);
+  border-color: var(--brand-500);
+}
+
+.quick-card .el-icon {
+  color: var(--brand-600);
+  font-size: 22px;
 }
 
 .section-title {

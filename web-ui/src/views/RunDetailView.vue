@@ -969,5 +969,9 @@ function fmtTime(x?: string) {
   .actions {
     margin-left: 0;
   }
+
+  .form-row, .form-row.three {
+    grid-template-columns: 1fr;
+  }
 }
 </style>
