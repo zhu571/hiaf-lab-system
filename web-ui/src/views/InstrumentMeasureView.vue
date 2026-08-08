@@ -1074,5 +1074,9 @@ function riskTag(risk: string): 'success' | 'warning' | 'danger' | 'info' {
     flex-basis: 100%;
     margin-left: 0;
   }
+
+  .parsed-chart {
+    height: 260px;
+  }
 }
 </style>

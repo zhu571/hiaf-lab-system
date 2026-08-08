@@ -202,6 +202,7 @@ export default {
     // Project workspace header (ProjectLayout).
     backToList: 'Projects',
     switchProject: 'Switch project',
+    searchPlaceholder: 'Search projects',
     goToProjects: 'Go to projects',
     fallbackNoAccess: 'Project not found or access denied. Please select another one.',
     fallbackNoProjects: 'No projects yet. Create or select a project first.',
@@ -243,6 +244,8 @@ export default {
     create: 'New Step',
     retry: 'Retry',
     dragSort: 'Drag to reorder',
+    moveUp: 'Move up',
+    moveDown: 'Move down',
     // Step meta line prefixes, each followed by a value.
     metaAssignee: 'Assignee: ',
     metaDependency: 'Depends on: ',

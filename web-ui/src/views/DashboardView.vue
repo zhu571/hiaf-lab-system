@@ -895,6 +895,14 @@ function stagger(i: number) {
   .brief-card {
     flex-basis: 186px;
   }
+
+  .gas-stats {
+    grid-template-columns: 1fr;
+  }
+
+  .dash-date {
+    white-space: normal;
+  }
 }
 
 @media (max-width: 480px) {

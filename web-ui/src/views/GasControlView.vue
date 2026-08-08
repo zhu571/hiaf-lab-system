@@ -287,6 +287,18 @@ async function clearA5() {
 .control-grid :deep(.el-input-number) { width: 100%; }
 .control-actions :deep(.el-form-item__content) { align-items: flex-end; }
 .button-row { align-items: center; border-top: 1px solid var(--border); display: flex; flex-wrap: wrap; gap: 10px; padding-top: 16px; }
-@media (max-width: 700px) { .chart-card { height: 400px; padding: 14px; } .chart-card canvas { height: 325px !important; } }
-@media (max-width: 900px) { .control-grid { grid-template-columns: 1fr 1fr; } }
+@media (max-width: 768px) {
+  .chart-card {
+    height: 400px;
+    padding: 14px;
+  }
+
+  .chart-card canvas {
+    height: 320px !important;
+  }
+
+  .control-grid {
+    grid-template-columns: 1fr 1fr;
+  }
+}
 </style>

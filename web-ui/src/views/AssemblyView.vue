@@ -54,6 +54,10 @@
             </el-button>
             <el-button size="small" type="danger" plain @click="remove(step)">{{ t('assembly.delete') }}</el-button>
           </div>
+          <div v-if="isMobile && canReorder && !statusFilter" class="move-buttons">
+            <el-button size="small" :disabled="index === 0" @click="moveStep(index, -1)">{{ t('assembly.moveUp') }}</el-button>
+            <el-button size="small" :disabled="index === filteredSteps.length - 1" @click="moveStep(index, 1)">{{ t('assembly.moveDown') }}</el-button>
+          </div>
         </div>
         <el-empty v-if="!loading && !loadError && filteredSteps.length === 0" :description="t('assembly.empty')" />
       </div>
@@ -139,6 +143,7 @@ import { ElMessage, ElMessageBox } from 'element-plus'
 import { Rank } from '@element-plus/icons-vue'
 import StatusBadge from '../components/StatusBadge.vue'
 import StepItemsEditor from '../components/StepItemsEditor.vue'
+import { useMobile } from '../composables/useMobile'
 import {
   applyAssemblyTemplate,
   createAssemblyStep,
@@ -154,6 +159,7 @@ import { useAuthStore } from '../stores/auth'
 import { showApiError } from '../composables/useNotify'
 
 const { t } = useI18n()
+const isMobile = useMobile()
 
 type TransitionAction = { transition: string; label: string; confirm: boolean; danger?: boolean }
 
@@ -299,9 +305,19 @@ async function onDrop(index: number) {
   const from = dragIndex.value
   dragIndex.value = -1
   if (from < 0 || from === index) return
+  await applyReorder(from, index)
+}
+
+async function moveStep(index: number, delta: number) {
+  const to = index + delta
+  if (to < 0 || to >= filteredSteps.value.length) return
+  await applyReorder(index, to)
+}
+
+async function applyReorder(from: number, to: number) {
   const reordered = [...steps.value]
   const [moved] = reordered.splice(from, 1)
-  reordered.splice(index, 0, moved)
+  reordered.splice(to, 0, moved)
   try {
     await reorderAssemblySteps({ project_id: projectId.value, steps: reordered.map((s, i) => ({ id: s.id, step_order: i + 1 })) })
     ElMessage.success(t('assembly.orderUpdated'))
@@ -568,6 +584,16 @@ async function saveAndApply() {
   margin-left: 0;
 }
 
+.move-buttons {
+  display: flex;
+  flex-shrink: 0;
+  gap: 8px;
+}
+
+.move-buttons .el-button + .el-button {
+  margin-left: 0;
+}
+
 .override-tip {
   align-items: center;
   color: var(--text-2);
@@ -585,6 +611,10 @@ async function saveAndApply() {
   .step-actions {
     justify-content: flex-start;
     margin-left: 0;
+  }
+
+  .drag-handle {
+    display: none;
   }
 }
 </style>

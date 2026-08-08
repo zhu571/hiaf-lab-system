@@ -126,6 +126,7 @@
         <section class="panel chart-panel">
           <h3 class="panel-title">{{ $t('testData.chart') }} <span class="muted hint">{{ $t('testData.chartHint') }}</span></h3>
           <template v-if="chartGroups.length">
+            <div class="chart-scroll">
             <svg class="trend-chart" :viewBox="`0 0 ${CHART_W} ${CHART_H}`" preserveAspectRatio="xMidYMid meet">
               <line class="axis" :x1="PAD_X" :y1="CHART_H - PAD_Y" :x2="CHART_W - PAD_X" :y2="CHART_H - PAD_Y" />
               <line class="axis" :x1="PAD_X" :y1="PAD_Y" :x2="PAD_X" :y2="CHART_H - PAD_Y" />
@@ -142,6 +143,7 @@
                 <circle v-for="(c, i) in chartCoords(group)" :key="i" :cx="c.x" :cy="c.y" :fill="group.color" r="3" />
               </g>
             </svg>
+            </div>
             <div class="legend">
               <span v-for="group in chartGroups" :key="group.name" class="legend-item">
                 <i class="legend-dot" :style="{ background: group.color }" />{{ group.name }}
@@ -467,6 +469,14 @@ function formatTime(v?: string) {
 @media (max-width: 768px) {
   .filters .el-select {
     width: 100%;
+  }
+
+  .chart-scroll {
+    overflow-x: auto;
+  }
+
+  .trend-chart {
+    width: 640px;
   }
 }
 </style>
