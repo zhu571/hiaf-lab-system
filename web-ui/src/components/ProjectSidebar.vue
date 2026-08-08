@@ -1,6 +1,6 @@
 <template>
   <aside class="project-sidebar">
-    <el-input v-model="keyword" placeholder="搜索项目" clearable />
+    <el-input v-model="keyword" :placeholder="t('project.searchPlaceholder')" clearable />
     <el-scrollbar>
       <button
         v-for="project in filtered"
@@ -17,11 +17,13 @@
 
 <script setup lang="ts">
 import { computed, ref } from 'vue'
+import { useI18n } from 'vue-i18n'
 import { useRouter } from 'vue-router'
 import { useProjectStore } from '../stores/project'
 
 const router = useRouter()
 const store = useProjectStore()
+const { t } = useI18n()
 const keyword = ref('')
 const filtered = computed(() => store.projects.filter((item) => `${item.name} ${item.code}`.toLowerCase().includes(keyword.value.toLowerCase())))
 

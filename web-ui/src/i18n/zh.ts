@@ -189,6 +189,7 @@ export default {
   project: {
     backToList: '项目列表',
     switchProject: '切换项目',
+    searchPlaceholder: '搜索项目',
     goToProjects: '前往项目列表',
     fallbackNoAccess: '项目不存在或无权访问，请重新选择',
     fallbackNoProjects: '暂无项目，请先创建或选择一个项目',
@@ -227,6 +228,8 @@ export default {
     create: '新建步骤',
     retry: '重试',
     dragSort: '拖拽排序',
+    moveUp: '上移',
+    moveDown: '下移',
     metaAssignee: '执行人：',
     metaDependency: '依赖：',
     metaStarted: '开始：',

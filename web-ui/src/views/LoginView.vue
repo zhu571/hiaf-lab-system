@@ -109,8 +109,8 @@ async function submitRegister() {
     radial-gradient(900px 520px at -10% 110%, rgba(26, 134, 162, 0.35), transparent 55%),
     linear-gradient(150deg, #0a1c2e 0%, #123652 55%, #155a72 100%);
   display: grid;
-  min-height: 100vh;
-  overflow: hidden;
+  min-height: 100dvh;
+  overflow: auto;
   padding: 24px;
   place-items: center;
   position: relative;

@@ -158,5 +158,10 @@ function switchProject(id: string) {
     max-width: none;
     width: 100%;
   }
+
+  .workspace-tabs :deep(.el-tabs__item) {
+    font-size: 13px;
+    padding: 0 12px;
+  }
 }
 </style>
