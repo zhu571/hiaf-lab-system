@@ -41,6 +41,11 @@ func SetJWTSecret(secret []byte) {
 // AuthRequired validates the Bearer token and injects UserClaims into the request context.
 func AuthRequired(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// service token 调用已由 ServiceToken 中间件鉴权，直接放行（无 JWT claims）。
+		if IsServiceCall(r.Context()) {
+			next.ServeHTTP(w, r)
+			return
+		}
 		tokenStr := ""
 		header := r.Header.Get("Authorization")
 		if strings.HasPrefix(header, "Bearer ") {

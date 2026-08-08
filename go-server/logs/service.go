@@ -1,10 +1,20 @@
 package logs
 
 import (
+	"bytes"
+	"context"
 	"database/sql"
+	"encoding/json"
 	"errors"
+	"fmt"
+	"io"
+	"net/http"
+	"os"
+	"path/filepath"
 	"strings"
+	"sync"
 	"time"
+	"unicode/utf8"
 
 	"github.com/zhu571/hiaf-lab-system/go-server/middleware"
 	"github.com/zhu571/hiaf-lab-system/go-server/projects"
@@ -29,18 +39,27 @@ var (
 	ErrInvalidTimeZone         = errors.New("时区配置无效")
 	ErrLogOwnerMismatch        = errors.New("只能修改自己的工作记录")
 	ErrProjectLifecycleBlocked = errors.New("项目当前状态不允许修改工作记录")
+
+	// ErrUpstream 复制自 steptemplates 包同名错误的用法模式（见 steptemplates/service.go）。
+	// 有意不提取公共包：logs 与 steptemplates 是平行业务模块，互相 import 私有运行时
+	// 实现会造成耦合；若第三个模块出现同需求，再提取到 common。
+	ErrUpstream      = errors.New("py-agent 上游服务错误")
+	ErrRateLimited   = errors.New("操作过于频繁，请稍后再试")
+	ErrAiParseFailed = errors.New("解析失败，请修改描述后重试")
 )
 
 type ProjectAccessChecker interface {
 	ProjectExists(projectID string) (bool, error)
 	ProjectStatus(projectID string) (string, error)
 	HasProjectPermission(projectID, userID string, perm middleware.Permission) (bool, error)
+	ListProjectsWithPermission(userID string, perm middleware.Permission) ([]middleware.ProjectSummary, error)
 }
 
 type logRepository interface {
 	GetOrCreateTodayReport(authorID, reportDate string) (*DailyReport, error)
 	GetReportByID(id string) (*DailyReport, error)
 	GetReportByDate(authorID, reportDate string) (*DailyReport, error)
+	GetLatestReportBefore(authorID, beforeDate string) (*DailyReport, error)
 	ListReports(params ReportListParams) ([]DailyReport, int, error)
 	UpdateReport(id, rawText string) error
 	SubmitReport(id, qualityStatus string) (*DailyReport, error)
@@ -56,10 +75,47 @@ type Service struct {
 	repo     logRepository
 	timezone string
 	access   ProjectAccessChecker
+
+	client      *http.Client
+	parserURL   string
+	parserToken string
+	rlMu        sync.Mutex
+	rlCalls     map[string][]time.Time
 }
 
 func NewService(repo logRepository, timezone string, access ProjectAccessChecker) *Service {
-	return &Service{repo: repo, timezone: timezone, access: access}
+	return &Service{
+		repo:     repo,
+		timezone: timezone,
+		access:   access,
+		client:   &http.Client{Timeout: 60 * time.Second},
+		rlCalls:  map[string][]time.Time{},
+	}
+}
+
+func (s *Service) ConfigureParser(url, token string) {
+	s.parserURL = strings.TrimRight(url, "/")
+	s.parserToken = token
+}
+
+// AutoConfigure 复用 steptemplates 的同名模式：从 PY_AGENT_INTERPRET_URL 与
+// PY_AGENT_INTERNAL_TOKEN_FILE 读取 py-agent 上游配置。
+func (s *Service) AutoConfigure() error {
+	url := strings.TrimRight(os.Getenv("PY_AGENT_INTERPRET_URL"), "/")
+	tokenPath := os.Getenv("PY_AGENT_INTERNAL_TOKEN_FILE")
+	var token string
+	if tokenPath != "" {
+		data, err := os.ReadFile(filepath.Clean(tokenPath))
+		if err != nil {
+			return fmt.Errorf("read py-agent token: %w", err)
+		}
+		token = strings.TrimSpace(string(data))
+	}
+	if url != "" && token != "" {
+		s.parserURL = url
+		s.parserToken = token
+	}
+	return nil
 }
 
 func (s *Service) GetOrCreateTodayReport(userID string) (*DailyReport, error) {
@@ -74,11 +130,25 @@ func (s *Service) GetOrCreateTodayReport(userID string) (*DailyReport, error) {
 	return s.withReportLogs(report)
 }
 
-func (s *Service) GetReportByDate(userID, reportDate string) (*DailyReport, error) {
+// GetReportByDateLatest 取指定日期（空则默认今天）的日报；latest=true 时向前回溯取最近一份
+// 非空日报（跨周末，周一取周五），零日报用户返回 ErrReportNotFound。
+func (s *Service) GetReportByDateLatest(userID, reportDate string, latest bool) (*DailyReport, error) {
+	loc, err := time.LoadLocation(defaultString(s.timezone, "Asia/Shanghai"))
+	if err != nil {
+		return nil, ErrInvalidTimeZone
+	}
+	if strings.TrimSpace(reportDate) == "" {
+		reportDate = time.Now().In(loc).Format(time.DateOnly)
+	}
 	if _, err := time.Parse(time.DateOnly, reportDate); err != nil {
 		return nil, ErrInvalidInput
 	}
-	report, err := s.repo.GetReportByDate(userID, reportDate)
+	var report *DailyReport
+	if latest {
+		report, err = s.repo.GetLatestReportBefore(userID, reportDate)
+	} else {
+		report, err = s.repo.GetReportByDate(userID, reportDate)
+	}
 	if err != nil {
 		return nil, err
 	}
@@ -380,6 +450,131 @@ func (s *Service) withReportLogs(report *DailyReport) (*DailyReport, error) {
 	return report, nil
 }
 
+// AiParse 把日报 raw_text 转发给 py-agent 整理为结构化日志草稿（不落库）。
+// projects 由服务端按当前用户 PermCreateLog 权限注入，不透传前端。
+func (s *Service) AiParse(ctx context.Context, id, userID, userRole string) (*AiParseResult, error) {
+	report, err := s.GetReportByID(id, userID, userRole)
+	if err != nil {
+		return nil, err
+	}
+	if report.ContentStatus != ReportStatusDraft {
+		return nil, fmt.Errorf("%w，不可再整理", ErrAlreadySubmitted)
+	}
+	rawText := strings.TrimSpace(report.RawText)
+	if rawText == "" {
+		return nil, ErrEmptyRawText
+	}
+	if utf8.RuneCountInString(report.RawText) > 4000 {
+		return nil, fmt.Errorf("%w: 日报内容过长（上限 4000 字符）", ErrInvalidInput)
+	}
+
+	allowed, err := s.access.ListProjectsWithPermission(userID, middleware.PermCreateLog)
+	if err != nil {
+		return nil, err
+	}
+	if !s.allowOne(userID) {
+		return nil, ErrRateLimited
+	}
+	if s.parserURL == "" || s.parserToken == "" {
+		return nil, fmt.Errorf("%w: AI 整理服务未配置", ErrUpstream)
+	}
+
+	payload, err := json.Marshal(map[string]any{
+		"raw_text":    report.RawText,
+		"projects":    allowed,
+		"report_date": report.ReportDate,
+	})
+	if err != nil {
+		return nil, err
+	}
+	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, s.parserURL+"/v1/daily-parse", bytes.NewReader(payload))
+	if err != nil {
+		return nil, err
+	}
+	httpReq.Header.Set("Content-Type", "application/json")
+	httpReq.Header.Set("Authorization", "Bearer "+s.parserToken)
+
+	resp, err := s.client.Do(httpReq)
+	if err != nil {
+		return nil, fmt.Errorf("%w: py-agent 请求失败: %w", ErrUpstream, err)
+	}
+	defer resp.Body.Close()
+
+	switch resp.StatusCode {
+	case http.StatusOK:
+	case http.StatusUnprocessableEntity:
+		// py-agent 422 = 模型输出未通过校验，归为用户可重试的解析失败。
+		return nil, ErrAiParseFailed
+	case http.StatusBadRequest:
+		return nil, fmt.Errorf("%w: 请求参数错误", ErrInvalidInput)
+	default:
+		body, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
+		return nil, fmt.Errorf("%w: py-agent 返回 %d: %s", ErrUpstream, resp.StatusCode, string(body))
+	}
+
+	var result AiParseResult
+	if err := json.NewDecoder(io.LimitReader(resp.Body, 128<<10)).Decode(&result); err != nil {
+		return nil, fmt.Errorf("%w: 解码 AI 响应失败: %w", ErrUpstream, err)
+	}
+	if result.Status != "ok" && result.Status != "clarify" && result.Status != "rejected" {
+		return nil, fmt.Errorf("%w: AI 返回无效状态: %s", ErrUpstream, result.Status)
+	}
+	if result.Status == "ok" {
+		if err := validateAiParseLogs(result.Logs, allowed); err != nil {
+			return nil, err
+		}
+	} else if result.Status == "clarify" && (result.Question == nil || strings.TrimSpace(*result.Question) == "") {
+		return nil, ErrAiParseFailed
+	} else if result.Status == "rejected" && (result.Reason == nil || strings.TrimSpace(*result.Reason) == "") {
+		return nil, ErrAiParseFailed
+	}
+	return &result, nil
+}
+
+// validateAiParseLogs 对 py-agent 响应做二次校验（防御上游被绕过/配置错误，fail closed）。
+func validateAiParseLogs(items []AiParseLogEntry, allowed []middleware.ProjectSummary) error {
+	if len(items) < 1 || len(items) > 20 {
+		return ErrAiParseFailed
+	}
+	allowedIDs := make(map[string]bool, len(allowed))
+	for _, p := range allowed {
+		allowedIDs[p.ID] = true
+	}
+	for _, item := range items {
+		if !validCategory(item.Category) || !allowedIDs[item.ProjectID] {
+			return ErrAiParseFailed
+		}
+		if n := utf8.RuneCountInString(strings.TrimSpace(item.Content)); n < 1 || n > 2000 {
+			return ErrAiParseFailed
+		}
+		if _, err := time.Parse(time.RFC3339, strings.TrimSpace(item.OccurredAt)); err != nil {
+			return ErrAiParseFailed
+		}
+	}
+	return nil
+}
+
+// allowOne 复制自 steptemplates.Service.allowOne（每用户 10 次/分钟，内存计数）。
+// 有意不提取公共包：logs 与 steptemplates 是平行业务模块，互相 import 私有运行时
+// 实现会造成耦合；若第三个模块出现同需求，再提取到 common。
+func (s *Service) allowOne(userID string) bool {
+	now, cutoff := time.Now(), time.Now().Add(-time.Minute)
+	s.rlMu.Lock()
+	defer s.rlMu.Unlock()
+	calls := s.rlCalls[userID][:0]
+	for _, call := range s.rlCalls[userID] {
+		if call.After(cutoff) {
+			calls = append(calls, call)
+		}
+	}
+	if len(calls) >= 10 {
+		s.rlCalls[userID] = calls
+		return false
+	}
+	s.rlCalls[userID] = append(calls, now)
+	return true
+}
+
 func submitWarnings(report DailyReport, items []Log) []SubmitWarning {
 	var warnings []SubmitWarning
 	for _, item := range items {
@@ -503,4 +698,8 @@ func (a ProjectAccessAdapter) ProjectStatus(projectID string) (string, error) {
 
 func (a ProjectAccessAdapter) HasProjectPermission(projectID, userID string, perm middleware.Permission) (bool, error) {
 	return middleware.HasPermission(a.DB, projectID, userID, perm)
+}
+
+func (a ProjectAccessAdapter) ListProjectsWithPermission(userID string, perm middleware.Permission) ([]middleware.ProjectSummary, error) {
+	return middleware.ListProjectsWithPermission(a.DB, userID, perm)
 }

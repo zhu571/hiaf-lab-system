@@ -23,6 +23,12 @@ const (
 func AgentContext(db *sql.DB) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			// service token 调用（by-date 白名单）无 JWT claims，且不会携带 agent 代理头，
+			// 由 ServiceToken 中间件完成鉴权，此处直接放行。
+			if IsServiceCall(r.Context()) {
+				next.ServeHTTP(w, r)
+				return
+			}
 			claims := GetUserClaims(r.Context())
 			actingUserID := strings.TrimSpace(r.Header.Get("X-Acting-User-ID"))
 			taskID := strings.TrimSpace(r.Header.Get("X-Agent-Task-ID"))

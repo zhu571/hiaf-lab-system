@@ -94,8 +94,9 @@ api.interceptors.response.use(
       redirectToLogin()
     }
     const message = error.response?.data?.error?.message || error.message || '请求失败'
-    const err = new Error(message) as Error & { requestId?: string }
+    const err = new Error(message) as Error & { requestId?: string; status?: number }
     err.requestId = error.response?.data?.request_id
+    err.status = error.response?.status
     return Promise.reject(err)
   }
 )

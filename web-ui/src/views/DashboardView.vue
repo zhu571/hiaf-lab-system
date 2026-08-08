@@ -11,6 +11,37 @@
       </div>
     </div>
 
+    <section class="panel todo-panel">
+      <div class="panel-head">
+        <span class="panel-icon"><el-icon><Tickets /></el-icon></span>
+        <h3>{{ t('dashboard.todayTodos') }}</h3>
+        <span class="panel-meta">{{ t('dashboard.todosCount', { n: todos.length }) }}</span>
+        <el-button class="todo-more" size="small" text type="primary" @click="router.push('/todos')">
+          {{ t('dashboard.todosMore') }}
+        </el-button>
+      </div>
+      <div v-loading="loadingTodos" class="todo-list">
+        <el-empty v-if="!loadingTodos && !todos.length" :description="t('dashboard.noTodos')" :image-size="60" />
+        <div v-for="item in todos" :key="item.id" class="todo-row" :class="{ done: item.status === 'done' }">
+          <el-checkbox :model-value="item.status === 'done'" @change="toggleTodo(item)" />
+          <span class="todo-priority" :class="item.priority">{{ todoPriorityLabel(item.priority) }}</span>
+          <span class="todo-title">{{ item.title }}</span>
+          <span class="todo-source">{{ todoSourceLabel(item) }}</span>
+          <el-button v-if="item.status === 'pending'" size="small" text type="warning" @click="deferTodoItem(item)">
+            {{ t('dashboard.defer') }}
+          </el-button>
+        </div>
+      </div>
+      <div class="todo-add-row">
+        <el-input v-model="manualTitle" :placeholder="t('dashboard.todoAddPlaceholder')" maxlength="256" clearable @keyup.enter="addManualTodo" />
+        <el-button type="primary" :loading="addingTodo" @click="addManualTodo">{{ t('dashboard.todoAdd') }}</el-button>
+      </div>
+      <div class="todo-add-row">
+        <el-input v-model="llmText" :placeholder="t('dashboard.todoLLMPlaceholder')" maxlength="2000" clearable @keyup.enter="parseLLMTodo" />
+        <el-button type="success" plain :loading="parsingLLM" @click="parseLLMTodo">{{ t('dashboard.todoLLM') }}</el-button>
+      </div>
+    </section>
+
     <div class="dashboard-grid">
       <!-- 左列：设备状态 -->
       <section class="panel column">
@@ -125,9 +156,11 @@
 import { ref, reactive, computed, watch, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
-import { ArrowLeft, ArrowRight, Avatar, Calendar, DataAnalysis, Odometer } from '@element-plus/icons-vue'
+import { ArrowLeft, ArrowRight, Avatar, Calendar, DataAnalysis, Odometer, Tickets } from '@element-plus/icons-vue'
+import { ElMessage, ElMessageBox } from 'element-plus'
 import { listInstruments, gasCellStatus, type InstrumentSummary, type GasCellPoint } from '../api/instruments'
 import { listReports, type DailyReport } from '../api/logs'
+import { listTodos, createTodo, doneTodo, deferTodo, llmParse, llmAdd, type Todo } from '../api/todos'
 import { showApiError } from '../composables/useNotify'
 
 const router = useRouter()
@@ -141,6 +174,13 @@ const gasData = reactive<Record<string, GasCellPoint>>({})
 const reports = ref<DailyReport[]>([])
 const loadingInstruments = ref(false)
 const loadingReports = ref(false)
+const todos = ref<Todo[]>([])
+const loadingTodos = ref(false)
+const manualTitle = ref('')
+const llmText = ref('')
+const addingTodo = ref(false)
+const parsingLLM = ref(false)
+const llmDraft = ref<{ title: string; priority: Todo['priority']; reason?: string | null } | null>(null)
 // 默认显示昨天
 const selectedDate = ref(localDate(new Date(Date.now() - 86400000)))
 
@@ -156,6 +196,7 @@ onMounted(() => {
   loadInstruments()
   loadGasCell()
   loadReports()
+  loadTodos()
 })
 
 async function loadInstruments() {
@@ -186,6 +227,95 @@ async function loadReports() {
   } finally {
     loadingReports.value = false
   }
+}
+
+async function loadTodos() {
+  loadingTodos.value = true
+  try {
+    todos.value = await listTodos({ status: 'open' })
+  } catch (err) {
+    showApiError(err, t('dashboard.todosLoadFailed'))
+  } finally {
+    loadingTodos.value = false
+  }
+}
+
+async function toggleTodo(item: Todo) {
+  try {
+    await doneTodo(item.id)
+    ElMessage.success(t('dashboard.todoDone'))
+    loadTodos()
+  } catch (err) {
+    showApiError(err, t('dashboard.todoDoneFailed'))
+  }
+}
+
+async function deferTodoItem(item: Todo) {
+  try {
+    await deferTodo(item.id)
+    ElMessage.success(t('dashboard.todoDeferred'))
+    loadTodos()
+  } catch (err) {
+    showApiError(err, t('dashboard.todoDeferFailed'))
+  }
+}
+
+async function addManualTodo() {
+  const title = manualTitle.value.trim()
+  if (!title) return
+  addingTodo.value = true
+  try {
+    await createTodo({ title })
+    ElMessage.success(t('dashboard.todoAdded'))
+    manualTitle.value = ''
+    loadTodos()
+  } catch (err) {
+    showApiError(err, t('dashboard.todoAddFailed'))
+  } finally {
+    addingTodo.value = false
+  }
+}
+
+async function parseLLMTodo() {
+  const text = llmText.value.trim()
+  if (!text) return
+  parsingLLM.value = true
+  try {
+    const draft = await llmParse(text)
+    if (draft.status === 'rejected') {
+      ElMessage.info(draft.reason || t('dashboard.todoLLMRejected', { reason: '' }))
+      return
+    }
+    llmDraft.value = { title: draft.title, priority: draft.priority, reason: draft.reason }
+    if (draft.reason) ElMessage.info(t('dashboard.todoLLMRejected', { reason: draft.reason }))
+    const confirmed = await ElMessageBox.confirm(
+      `${t('dashboard.todoDraftTitle')}：${draft.title}`,
+      t('dashboard.todoDraftConfirm'),
+      { confirmButtonText: t('dashboard.todoDraftSave'), cancelButtonText: t('common.cancel'), type: 'info' }
+    )
+    if (confirmed !== 'confirm') return
+    await llmAdd({ title: draft.title, priority: draft.priority })
+    ElMessage.success(t('dashboard.todoAdded'))
+    llmText.value = ''
+    llmDraft.value = null
+    loadTodos()
+  } catch (err) {
+    if (err === 'cancel' || err === 'close') return
+    showApiError(err, t('dashboard.todoLLMFailed'))
+  } finally {
+    parsingLLM.value = false
+  }
+}
+
+function todoPriorityLabel(p: string) {
+  return t(`todos.priority${p.charAt(0).toUpperCase()}${p.slice(1)}`)
+}
+
+function todoSourceLabel(item: Todo) {
+  if (item.source === 'issue') return t('todos.sourceIssue')
+  if (item.source === 'daily_llm') return t('todos.sourceDaily')
+  if (item.source === 'llm') return t('todos.sourceLLM')
+  return t('todos.sourceManual')
 }
 
 function isOnline(state: string) {
@@ -380,6 +510,82 @@ function stagger(i: number) {
   display: grid;
   gap: 12px;
   min-height: 80px;
+}
+
+/* ---------- 今日待办 ---------- */
+
+.todo-panel {
+  margin-bottom: 12px;
+}
+
+.todo-more {
+  margin-left: auto;
+}
+
+.todo-list {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-height: 48px;
+}
+
+.todo-row {
+  align-items: center;
+  border-bottom: 1px solid var(--border);
+  display: flex;
+  gap: 10px;
+  padding: 6px 8px;
+}
+
+.todo-row.done .todo-title {
+  color: var(--text-3);
+  text-decoration: line-through;
+}
+
+.todo-priority {
+  border-radius: 4px;
+  font-size: 12px;
+  padding: 1px 6px;
+  white-space: nowrap;
+}
+
+.todo-priority.high {
+  background: #fde2e2;
+  color: #c45656;
+}
+
+.todo-priority.medium {
+  background: #fff3cd;
+  color: #b58a1d;
+}
+
+.todo-priority.low {
+  background: #e3f2fd;
+  color: #3a7dc2;
+}
+
+.todo-title {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.todo-source {
+  color: var(--text-3);
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+.todo-add-row {
+  display: flex;
+  gap: 8px;
+  margin-top: 10px;
+}
+
+.todo-add-row .el-input {
+  flex: 1;
 }
 
 /* ---------- 卡片基座 ---------- */

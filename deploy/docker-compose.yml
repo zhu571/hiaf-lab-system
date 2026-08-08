@@ -153,11 +153,18 @@ services:
       # ntfy 地址：runner 容器以 --network host 运行（宿主机网络栈），
       # 必须用宿主可达地址（ntfy 发布 127.0.0.1:8085），不能用 compose 网络内的 ntfy:80。
       UPDATE_NTFY_URL: ${UPDATE_NTFY_URL:-http://localhost:8085/lab-system}
+      # Todolist：service token 拉取日报、ntfy 发布 token、scheduler 开关、ntfy 对外地址
+      SERVICE_TOKEN_FILE: /run/secrets/service_token
+      NTFY_PUBLISH_TOKEN_FILE: /run/secrets/ntfy_publish_token
+      TODOS_SCHEDULER_ENABLED: ${TODOS_SCHEDULER_ENABLED:-true}
+      NTFY_PUBLIC_URL: ${NTFY_PUBLIC_URL:-http://10.144.144.12:8087}
     secrets:
       - db_password
       - jwt_key
       - influxdb_token
       - agent_password
+      - service_token
+      - ntfy_publish_token
     ports:
       - "8000:8000"
     volumes:
@@ -167,6 +174,11 @@ services:
       # 更新日志/备份目录以相同路径 rw 挂载（子路径覆盖在 ro 仓库挂载之上），与 runner 容器共享
       - /opt/hiaf-lab-system/.hermes/updates:/opt/hiaf-lab-system/.hermes/updates
       - /opt/hiaf-lab-system/.hermes/backups:/opt/hiaf-lab-system/.hermes/backups
+      # ntfy 共享 auth-file（ntfy CLI 与 lab-ntfy 服务读写同一 SQLite，见 init_ntfy.sh 属主说明）
+      - ntfy-etc:/etc/ntfy
+      # server 容器内 ntfy CLI 默认读 /etc/ntfy/server.yml 定位 auth-file，
+      # 必须与 lab-ntfy 挂同一份配置（只读），否则 CLI 可能写到错误路径
+      - ./ntfy/server.yml:/etc/ntfy/server.yml:ro
     depends_on:
       postgres:
         condition: service_healthy
@@ -227,14 +239,15 @@ services:
     restart: unless-stopped
 
   ntfy:
-    image: binwiederhier/ntfy:latest
+    # 镜像锁定版本（与 deploy/Dockerfile 的 ntfy-cli 阶段一致：auth-file schema 兼容）
+    image: binwiederhier/ntfy:v2.27.0
     container_name: lab-ntfy
     command: serve
-    environment:
-      - NTFY_BEHIND_PROXY=true
     volumes:
       - ntfy-cache:/var/cache/ntfy
       - ntfy-etc:/etc/ntfy
+      # server.yml 只读挂载：auth-file/auth-default-access/WAL 等（见 deploy/ntfy/server.yml）
+      - ./ntfy/server.yml:/etc/ntfy/server.yml:ro
     ports:
       - "127.0.0.1:8085:80"
       - "10.144.144.12:8087:80"
@@ -255,3 +268,8 @@ secrets:
     file: ./secrets/influxdb_token.txt
   agent_password:
     file: ./secrets/agent_password.txt
+  # 以下两个由 deploy/scripts/init_ntfy.sh 生成（todo 发布 token + 内部 service token）
+  ntfy_publish_token:
+    file: ./secrets/ntfy_publish_token.txt
+  service_token:
+    file: ./secrets/service_token.txt

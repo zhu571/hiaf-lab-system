@@ -3,9 +3,13 @@ package middleware
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
+	"fmt"
 	"log/slog"
 	"net/http"
+	"strconv"
 	"strings"
+	"time"
 
 	"github.com/zhu571/hiaf-lab-system/go-server/common"
 )
@@ -13,6 +17,10 @@ import (
 type auditActionKeyType string
 
 const auditActionKey auditActionKeyType = "audit_action"
+
+type auditDetailKeyType string
+
+const auditDetailKey auditDetailKeyType = "audit_detail"
 
 // responseWriter wraps http.ResponseWriter to capture the written status code.
 type responseWriter struct {
@@ -31,6 +39,8 @@ func Audit(db *sql.DB) func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			actionOverride := ""
 			r = r.WithContext(context.WithValue(r.Context(), auditActionKey, &actionOverride))
+			detail := map[string]any(nil)
+			r = r.WithContext(context.WithValue(r.Context(), auditDetailKey, &detail))
 			rw := &responseWriter{ResponseWriter: w, statusCode: http.StatusOK}
 			next.ServeHTTP(rw, r)
 			if (r.Method == http.MethodGet || r.Method == http.MethodHead || r.Method == http.MethodOptions) && actionOverride == "" {
@@ -46,6 +56,10 @@ func Audit(db *sql.DB) func(next http.Handler) http.Handler {
 				if claims.Role == "agent" {
 					actorType = "agent"
 				}
+			} else if IsServiceCall(r.Context()) {
+				// service token 调用（白名单端点，见 service_token.go）：无 JWT claims，
+				// 落 actor_type='system' 便于审计区分系统内部调用。
+				actorType = "system"
 			}
 
 			action := strings.TrimPrefix(r.URL.Path, "/api/v1/")
@@ -59,33 +73,108 @@ func Audit(db *sql.DB) func(next http.Handler) http.Handler {
 				clientIP = fwd
 			}
 
-			if _, err := db.Exec(
-				`INSERT INTO audit_log
-				 (request_id, user_id, username, method, path, action, status_code, client_ip,
-				  actor_type, acting_user_id, agent_task_id, idempotency_key)
-				 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)`,
-				common.GetRequestID(r.Context()),
-				nullString(userID),
-				username,
-				r.Method,
-				r.URL.Path,
-				action,
-				rw.statusCode,
-				clientIP,
-				actorType,
-				nullString(ActingUserID(r.Context())),
-				nullString(AgentTaskID(r.Context())),
-				nullString(r.Header.Get("Idempotency-Key")),
-			); err != nil {
+			if err := insertAuditLog(r.Context(), db, auditRow{
+				requestID:      common.GetRequestID(r.Context()),
+				userID:         nullString(userID),
+				username:       username,
+				method:         r.Method,
+				path:           r.URL.Path,
+				action:         action,
+				statusCode:     rw.statusCode,
+				clientIP:       clientIP,
+				actorType:      actorType,
+				actingUserID:   nullString(ActingUserID(r.Context())),
+				agentTaskID:    nullString(AgentTaskID(r.Context())),
+				idempotencyKey: nullString(r.Header.Get("Idempotency-Key")),
+				detail:         detail,
+			}); err != nil {
 				slog.Error("audit log insert failed", "error", err, "request_id", common.GetRequestID(r.Context()))
 			}
 		})
 	}
 }
 
+// auditRow 是 audit_log 一行记录的字段集合，供 HTTP 中间件与系统内部写入共用。
+type auditRow struct {
+	requestID      string
+	userID         sql.NullString
+	username       string
+	method         string
+	path           string
+	action         string
+	statusCode     int
+	clientIP       string
+	actorType      string
+	actingUserID   sql.NullString
+	agentTaskID    sql.NullString
+	idempotencyKey sql.NullString
+	detail         map[string]any
+}
+
+// insertAuditLog 是 audit_log 的共享 INSERT 写入器。
+func insertAuditLog(ctx context.Context, db *sql.DB, row auditRow) error {
+	// detail 是 JSONB：lib/pq 不接受 map 直接传参，必须先 Marshal（[]byte 按 JSONB 写入）。
+	var detail any
+	if row.detail != nil {
+		data, err := json.Marshal(row.detail)
+		if err != nil {
+			return fmt.Errorf("marshal audit detail: %w", err)
+		}
+		detail = data
+	}
+	_, err := db.ExecContext(ctx,
+		`INSERT INTO audit_log
+		 (request_id, user_id, username, method, path, action, status_code, client_ip,
+		  actor_type, acting_user_id, agent_task_id, idempotency_key, detail)
+		 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)`,
+		row.requestID,
+		row.userID,
+		row.username,
+		row.method,
+		row.path,
+		row.action,
+		row.statusCode,
+		row.clientIP,
+		row.actorType,
+		row.actingUserID,
+		row.agentTaskID,
+		row.idempotencyKey,
+		detail,
+	)
+	return err
+}
+
+// WriteSystemAudit 追加一条 actor_type='system' 的审计行。
+// 例外声明：scheduler 无 HTTP 上下文，无法走 Audit 中间件；audit_log 为审计专用
+// append-only 表（应用层约定），此写入仅 INSERT 不修改/删除，为最小跨模块写例外。
+func WriteSystemAudit(ctx context.Context, db *sql.DB, action string, detail map[string]any) error {
+	requestID := common.GetRequestID(ctx)
+	if requestID == "" {
+		requestID = "sys_" + strconv.FormatInt(time.Now().UnixNano(), 36)
+	}
+	return insertAuditLog(ctx, db, auditRow{
+		requestID:  requestID,
+		username:   "system",
+		method:     "SYSTEM",
+		path:       "",
+		action:     action,
+		statusCode: 200,
+		clientIP:   "",
+		actorType:  "system",
+		detail:     detail,
+	})
+}
+
 func SetAuditAction(ctx context.Context, action string) {
 	if target, _ := ctx.Value(auditActionKey).(*string); target != nil {
 		*target = action
+	}
+}
+
+// SetAuditDetail 让 handler 补充审计明细（如 AI 解析的返回状态与条数），仍由 Audit 中间件统一落库。
+func SetAuditDetail(ctx context.Context, detail map[string]any) {
+	if target, _ := ctx.Value(auditDetailKey).(*map[string]any); target != nil {
+		*target = detail
 	}
 }
 

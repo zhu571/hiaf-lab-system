@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"embed"
 	"encoding/json"
 	"fmt"
@@ -8,8 +9,11 @@ import (
 	"log/slog"
 	"net/http"
 	"os"
+	"os/signal"
 	"path"
 	"strings"
+	"syscall"
+	"time"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
@@ -31,6 +35,7 @@ import (
 	"github.com/zhu571/hiaf-lab-system/go-server/steptemplates"
 	"github.com/zhu571/hiaf-lab-system/go-server/system"
 	"github.com/zhu571/hiaf-lab-system/go-server/testdata"
+	"github.com/zhu571/hiaf-lab-system/go-server/todos"
 )
 
 //go:embed static
@@ -45,6 +50,12 @@ func main() {
 		os.Exit(1)
 	}
 	mw.SetJWTSecret([]byte(jwtSecret))
+
+	serviceToken, err := common.ReadSecret("/run/secrets/service_token", "SERVICE_TOKEN")
+	if err != nil {
+		slog.Warn("service token 未配置（todos scheduler 将无法拉取日报）", "error", err)
+	}
+	mw.SetServiceToken(serviceToken)
 
 	db, err := common.OpenDB()
 	if err != nil {
@@ -71,6 +82,9 @@ func main() {
 	projectsSvc := projects.NewService(projectsRepo, issuesRepo, logsRepo)
 	projectsHandler := projects.NewHandler(projectsSvc)
 	logsSvc := logs.NewService(logsRepo, "Asia/Shanghai", logs.ProjectAccessAdapter{DB: db, Repo: projectsRepo})
+	if err := logsSvc.AutoConfigure(); err != nil {
+		slog.Warn("logs ai-parse autoconfigure failed", "error", err)
+	}
 	logsHandler := logs.NewHandler(logsSvc)
 	auditHandler := audit.NewHandler(db)
 	agentRepo := agent.NewRepository(db)
@@ -150,9 +164,29 @@ func main() {
 	systemSvc := system.NewService(repoRoot)
 	systemHandler := system.NewHandler(systemSvc)
 
+	loc, err := time.LoadLocation("Asia/Shanghai")
+	if err != nil {
+		slog.Error("failed to load Asia/Shanghai timezone", "error", err)
+		os.Exit(1)
+	}
+	todosRepo := todos.NewRepository(db)
+	todosSvc := todos.NewService(
+		todosRepo,
+		todos.NewSnapshot(db),
+		todos.NewDBPermChecker(db),
+		todos.NewAuditWriter(db),
+		todos.NewHTTPLLMPlanner(),
+		todos.NewHTTPReportFetcher(selfBase),
+		todos.NewNtfyCLIClient(todos.NewExecNtfyRunner()),
+		todos.NewNtfyPublisher(),
+		loc, time.Now,
+	)
+	todosHandler := todos.NewHandler(todosSvc)
+
 	r := chi.NewRouter()
 	r.Use(middleware.RealIP)
 	r.Use(mw.RequestID)
+	r.Use(mw.ServiceToken())
 	r.Use(mw.CORS)
 	r.Use(mw.CSRF)
 	r.Use(middleware.Logger)
@@ -224,6 +258,7 @@ func main() {
 			r.Get("/", logsHandler.GetReportByID)
 			r.Patch("/", logsHandler.UpdateReportRawText)
 			r.Post("/submit", logsHandler.SubmitReport)
+			r.Post("/ai-parse", logsHandler.AiParseReport)
 		})
 	})
 	r.Route("/api/v1/projects", func(r chi.Router) {
@@ -456,6 +491,25 @@ func main() {
 		r.Get("/latest", sensorsHandler.Latest)
 		r.Get("/history", sensorsHandler.History)
 	})
+	r.Route("/api/v1/todos", func(r chi.Router) {
+		r.Use(mw.AuthRequired)
+		r.Use(mw.AgentContext(db))
+		r.Use(mw.Audit(db))
+		r.Use(mw.RequireIdempotencyKey(db))
+		r.Get("/", todosHandler.List)
+		r.Post("/", todosHandler.Create)
+		r.Post("/llm-parse", todosHandler.ParseLLM)
+		r.Post("/llm-add", todosHandler.LLMAdd)
+		r.Get("/notification-topic", todosHandler.NotificationTopic)
+		r.Post("/notification-topic/provision", todosHandler.Provision)
+		r.Post("/notification-topic/redeem", todosHandler.Redeem)
+		r.Route("/{id}", func(r chi.Router) {
+			r.Patch("/", todosHandler.Edit)
+			r.Patch("/done", todosHandler.Done)
+			r.Patch("/defer", todosHandler.Defer)
+			r.Delete("/", todosHandler.Delete)
+		})
+	})
 
 	// Serve embedded frontend with SPA fallback
 	staticFS, fsErr := fs.Sub(frontendFiles, "static")
@@ -480,8 +534,26 @@ func main() {
 		spa.ServeHTTP(w, r)
 	}))
 
+	// 优雅关闭：SIGINT/SIGTERM → scheduler 不再起新批、在途批完成（≤30s），HTTP 10s 内排空。
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+	if os.Getenv("TODOS_SCHEDULER_ENABLED") != "false" {
+		sched := todos.NewScheduler(todosSvc, loc, time.Now)
+		go sched.Run(ctx)
+		slog.Info("todos scheduler enabled")
+	}
+
+	srv := &http.Server{Addr: ":" + port, Handler: r}
+	go func() {
+		<-ctx.Done()
+		shutdownCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+		if err := srv.Shutdown(shutdownCtx); err != nil {
+			slog.Warn("http server shutdown", "error", err)
+		}
+	}()
 	slog.Info("server starting", "port", port)
-	if err := http.ListenAndServe(":"+port, r); err != nil {
+	if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 		slog.Error("server exited", "error", err)
 		os.Exit(1)
 	}

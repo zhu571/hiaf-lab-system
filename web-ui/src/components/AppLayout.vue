@@ -68,7 +68,7 @@
 import { computed, onMounted, type Component } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
-import { ArrowUp, Connection, DataBoard, Document, FolderOpened, HomeFilled, MagicStick, Memo, Monitor, Odometer, Paperclip, Setting, User } from '@element-plus/icons-vue'
+import { ArrowUp, Connection, DataBoard, Document, FolderOpened, HomeFilled, MagicStick, Memo, Monitor, Odometer, Paperclip, Setting, Tickets, User } from '@element-plus/icons-vue'
 import { useMobile } from '../composables/useMobile'
 import { useAuthStore } from '../stores/auth'
 import { useProjectStore } from '../stores/project'
@@ -90,6 +90,7 @@ const navItems = computed<NavItem[]>(() => {
   const items: NavItem[] = [
     { label: t('nav.home'), path: '/', icon: HomeFilled },
     { label: t('nav.projects'), path: '/projects', icon: FolderOpened },
+    { label: t('nav.todos'), path: '/todos', icon: Tickets },
     { label: t('nav.dailyReport'), path: '/daily-report', icon: Document },
     { label: t('nav.experiences'), path: '/experiences', icon: Memo },
     { label: t('nav.attachments'), path: '/attachments', icon: Paperclip }
@@ -112,6 +113,7 @@ const systemItems = computed<NavItem[]>(() => {
 const mobileItems = computed<NavItem[]>(() => {
   const items: NavItem[] = [
     { label: t('nav.projects'), path: '/projects', icon: FolderOpened },
+    { label: t('nav.short.todos'), path: '/todos', icon: Tickets },
     { label: t('nav.short.dailyReport'), path: '/daily-report', icon: Document },
     { label: t('nav.short.experiences'), path: '/experiences', icon: Memo },
     { label: t('nav.short.attachments'), path: '/attachments', icon: Paperclip },

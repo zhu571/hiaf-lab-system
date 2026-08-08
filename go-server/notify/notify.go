@@ -13,13 +13,23 @@ import (
 
 const (
 	defaultAddr = "http://ntfy:80"
-	alertTopic  = "lab-alerts"
-	WebURL      = "http://10.144.144.12:8000"
+	// AlertTopic 是 ntfy 告警主题（todos scheduler 失败告警复用）。
+	AlertTopic = "lab-alerts"
+	WebURL     = "http://10.144.144.12:8000"
 )
 
 var client = &http.Client{Timeout: 5 * time.Second}
 
 // Send pushes a notification to ntfy.
+func readPublishToken() string {
+	if file := os.Getenv("NTFY_PUBLISH_TOKEN_FILE"); file != "" {
+		if data, err := os.ReadFile(file); err == nil {
+			return strings.TrimSpace(string(data))
+		}
+	}
+	return strings.TrimSpace(os.Getenv("NTFY_PUBLISH_TOKEN"))
+}
+
 func Send(topic, title, message, clickURL, priority string, tags []string) error {
 	addr := os.Getenv("NTFY_ADDR")
 	if addr == "" {
@@ -34,8 +44,9 @@ func Send(topic, title, message, clickURL, priority string, tags []string) error
 	req.Header.Set("Click", clickURL)
 	req.Header.Set("Priority", priority)
 	req.Header.Set("Tags", strings.Join(tags, ","))
-	if user, pass := os.Getenv("NTFY_USER"), os.Getenv("NTFY_PASS"); user != "" || pass != "" {
-		req.SetBasicAuth(user, pass)
+	// v13：统一切换为 todo-publisher Bearer token（NTFY_USER/NTFY_PASS 已废弃）。
+	if token := readPublishToken(); token != "" {
+		req.Header.Set("Authorization", "Bearer "+token)
 	}
 
 	resp, err := client.Do(req)
@@ -77,20 +88,20 @@ func sendBoth(topic, title, message, clickURL, priority string, tags []string) e
 
 // InstrumentEmergency reports an instrument emergency stop.
 func InstrumentEmergency(instrument, user string) error {
-	return sendBoth(alertTopic, "仪器急停", fmt.Sprintf("%s 被 %s 紧急停止", instrument, user), WebURL+"/", "urgent", []string{"rotating_light"})
+	return sendBoth(AlertTopic, "仪器急停", fmt.Sprintf("%s 被 %s 紧急停止", instrument, user), WebURL+"/", "urgent", []string{"rotating_light"})
 }
 
 // InstrumentRestoreFailed reports that an instrument could not be restored.
 func InstrumentRestoreFailed(instrument, err string) error {
-	return sendBoth(alertTopic, "仪器恢复失败", fmt.Sprintf("%s: %s", instrument, err), WebURL+"/", "high", []string{"warning"})
+	return sendBoth(AlertTopic, "仪器恢复失败", fmt.Sprintf("%s: %s", instrument, err), WebURL+"/", "high", []string{"warning"})
 }
 
 // SecurityAlert reports a security event.
 func SecurityAlert(title, detail string) error {
-	return sendBoth(alertTopic, title, detail, WebURL+"/audit", "urgent", []string{"shield"})
+	return sendBoth(AlertTopic, title, detail, WebURL+"/audit", "urgent", []string{"shield"})
 }
 
 // AgentDeadLetter reports an Agent task that entered the dead-letter queue.
 func AgentDeadLetter(taskID, reason string) error {
-	return sendBoth(alertTopic, "Agent 死信告警", fmt.Sprintf("任务 %s: %s", taskID, reason), WebURL+"/agent-candidates", "high", []string{"robot_face", "warning"})
+	return sendBoth(AlertTopic, "Agent 死信告警", fmt.Sprintf("任务 %s: %s", taskID, reason), WebURL+"/agent-candidates", "high", []string{"robot_face", "warning"})
 }
