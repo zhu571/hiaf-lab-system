@@ -72,7 +72,7 @@
         <el-tab-pane :label="t('runDetail.stepsTab')" name="steps">
           <section class="panel">
             <h3 class="panel-title">{{ t('runDetail.experimentSteps') }}</h3>
-            <el-table v-loading="stepsLoading" :data="steps" size="small">
+            <ResponsiveTable :rows="steps" :loading="stepsLoading" size="small">
               <el-table-column label="#" width="50" align="center">
                 <template #default="{ row }">{{ row.step_order }}</template>
               </el-table-column>
@@ -86,7 +86,7 @@
               <el-table-column :label="t('runDetail.dependsOn')" width="140">
                 <template #default="{ row }">{{ depName(row.depends_on) }}</template>
               </el-table-column>
-              <el-table-column v-if="canEdit" :label="t('runDetail.actions')" width="280" fixed="right">
+              <el-table-column v-if="canEdit" :label="t('runDetail.actions')" width="280">
                 <template #default="{ row }">
                   <el-button
                     v-for="a in stepTransitions[row.status] || []"
@@ -104,7 +104,29 @@
               <template #empty>
                 <el-empty :description="t('runDetail.noSteps')" :image-size="60" />
               </template>
-            </el-table>
+              <template #card="{ row }">
+                <div class="step-card">
+                  <span class="card-title">{{ row.step_order }}. {{ row.name }}</span>
+                  <div class="card-fields">
+                    <StatusBadge :value="row.status" />
+                    <span>{{ t('runDetail.duration') }}: {{ durationText(row) }}</span>
+                  </div>
+                  <div v-if="canEdit" class="card-actions">
+                    <el-button
+                      v-for="a in stepTransitions[row.status] || []"
+                      :key="a.value"
+                      size="small"
+                      :type="a.danger ? 'danger' : 'primary'"
+                      plain
+                      @click="onStepTransition(row, a)"
+                    >
+                      {{ a.label }}
+                    </el-button>
+                    <el-button size="small" type="danger" plain @click="removeStep(row)">{{ t('runDetail.delete') }}</el-button>
+                  </div>
+                </div>
+              </template>
+            </ResponsiveTable>
           </section>
         </el-tab-pane>
         <el-tab-pane :label="t('runDetail.linkedReports')" name="reports">
@@ -130,11 +152,11 @@
           <section class="panel">
             <h3 class="panel-title">{{ t('runDetail.linkedTestData') }}</h3>
             <el-table v-loading="testDataLoading" :data="testData" size="small">
-              <el-table-column prop="measurement" :label="t('runDetail.measurement')" />
-              <el-table-column prop="value" :label="t('runDetail.value')" width="120" />
-              <el-table-column prop="unit" :label="t('runDetail.unit')" width="100" />
-              <el-table-column prop="quality" :label="t('runDetail.quality')" width="100" />
-              <el-table-column :label="t('runDetail.measuredAt')" width="180">
+              <el-table-column prop="measurement" :label="t('runDetail.measurement')" show-overflow-tooltip />
+              <el-table-column prop="value" :label="t('runDetail.value')" width="120" show-overflow-tooltip />
+              <el-table-column prop="unit" :label="t('runDetail.unit')" width="100" show-overflow-tooltip />
+              <el-table-column prop="quality" :label="t('runDetail.quality')" width="100" show-overflow-tooltip />
+              <el-table-column :label="t('runDetail.measuredAt')" width="180" show-overflow-tooltip>
                 <template #default="{ row }">{{ row.measured_at ? fmtTime(row.measured_at) : '—' }}</template>
               </el-table-column>
               <template #empty>
@@ -252,6 +274,7 @@ import { useI18n } from 'vue-i18n'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import StatusBadge from '../components/StatusBadge.vue'
 import StepItemsEditor from '../components/StepItemsEditor.vue'
+import ResponsiveTable from '../components/ResponsiveTable.vue'
 import {
   addReportLink,
   applyRunTemplate,
@@ -489,6 +512,21 @@ function depName(id?: string) {
   if (!id) return '—'
   const dep = steps.value.find((s) => s.id === id)
   return dep ? `${dep.step_order}. ${dep.name}` : '—'
+}
+
+// 步骤耗时：started_at → completed_at（无时间戳返回 —）
+function durationText(step: RunStep) {
+  if (!step.started_at || !step.completed_at) return '—'
+  const start = new Date(step.started_at).getTime()
+  const end = new Date(step.completed_at).getTime()
+  if (!(end >= start) || Number.isNaN(start) || Number.isNaN(end)) return '—'
+  const totalSec = Math.floor((end - start) / 1000)
+  const h = Math.floor(totalSec / 3600)
+  const m = Math.floor((totalSec % 3600) / 60)
+  const s = totalSec % 60
+  if (h > 0) return `${h}h ${m}m`
+  if (m > 0) return `${m}m ${s}s`
+  return `${s}s`
 }
 
 async function onStepTransition(step: RunStep, action: StepAction) {

@@ -1040,6 +1040,7 @@ export default {
     status: '状态',
     dependsOn: '依赖步骤',
     actions: '操作',
+    duration: '耗时',
     noSteps: '暂无步骤',
     linkedReports: '关联日报',
     selectReport: '选择日报',
