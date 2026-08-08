@@ -87,3 +87,22 @@ func TestCSRF_AuthEndpointsSkipCheck(t *testing.T) {
 		}
 	}
 }
+
+// 回归：agent 豁免曾用 `len(path) >= 15 && path[:15] == "/api/v1/agent/"` 判断，
+// 而 "/api/v1/agent/" 实际长度为 14，条件永假 → py-agent worker claim 持续 403 csrf_failed。
+func TestCSRF_AgentPathsSkipCheck(t *testing.T) {
+	handler := CSRF(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {}))
+
+	for _, path := range []string{
+		"/api/v1/agent/tasks/claim",
+		"/api/v1/agent/tasks",
+	} {
+		w := httptest.NewRecorder()
+		// 无 csrf_token cookie、无 X-CSRF-Token header，仍应放行。
+		r := httptest.NewRequest(http.MethodPost, path, nil)
+		handler.ServeHTTP(w, r)
+		if w.Code != http.StatusOK {
+			t.Errorf("%s: expected 200, got %d", path, w.Code)
+		}
+	}
+}
