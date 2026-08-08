@@ -2,6 +2,7 @@ package middleware
 
 import (
 	"net/http"
+	"strings"
 
 	"github.com/zhu571/hiaf-lab-system/go-server/common"
 )
@@ -17,7 +18,7 @@ func CSRF(next http.Handler) http.Handler {
 			return
 		}
 		// Agent 服务账号 API 无需 CSRF（有 JWT + acting-user 认证链）
-		if len(r.URL.Path) >= 15 && r.URL.Path[:15] == "/api/v1/agent/" {
+		if strings.HasPrefix(r.URL.Path, "/api/v1/agent/") {
 			next.ServeHTTP(w, r)
 			return
 		}
