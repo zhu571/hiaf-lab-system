@@ -566,5 +566,9 @@ async function saveAndApplyTemplate() {
     max-width: none;
     width: 100%;
   }
+
+  .form-row, .form-row.three {
+    grid-template-columns: 1fr;
+  }
 }
 </style>

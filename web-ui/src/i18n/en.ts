@@ -47,11 +47,21 @@ export default {
     logout: 'Log out',
     // Short labels for the mobile bottom navigation bar.
     short: {
+      home: 'Home',
       todos: 'Todos',
       dailyReport: 'Reports',
       experiences: 'Library',
       attachments: 'Files',
       mine: 'Me'
+    }
+  },
+  mobile: {
+    // Mobile top bar (MobileTopBar).
+    back: 'Back',
+    title: {
+      runDetail: 'Run Detail',
+      dailyReportDetail: 'Daily Report Detail',
+      stepTemplates: 'Step Templates'
     }
   },
   instrument: {

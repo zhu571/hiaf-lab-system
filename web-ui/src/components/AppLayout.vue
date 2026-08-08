@@ -1,5 +1,6 @@
 <template>
   <div class="layout">
+    <MobileTopBar v-if="isMobile" />
     <aside v-if="!isMobile" class="nav">
       <div class="brand">
         <span class="brand-mark">H</span>
@@ -72,6 +73,7 @@ import { ArrowUp, Connection, DataBoard, Document, FolderOpened, HomeFilled, Mag
 import { useMobile } from '../composables/useMobile'
 import { useAuthStore } from '../stores/auth'
 import { useProjectStore } from '../stores/project'
+import MobileTopBar from './MobileTopBar.vue'
 
 type NavItem = { label: string; path: string; icon: Component }
 
@@ -113,11 +115,10 @@ const systemItems = computed<NavItem[]>(() => {
 
 const mobileItems = computed<NavItem[]>(() => {
   const items: NavItem[] = [
+    { label: t('nav.short.home'), path: '/', icon: HomeFilled },
     { label: t('nav.projects'), path: '/projects', icon: FolderOpened },
     { label: t('nav.short.todos'), path: '/todos', icon: Tickets },
     { label: t('nav.short.dailyReport'), path: '/daily-report', icon: Document },
-    { label: t('nav.short.experiences'), path: '/experiences', icon: Memo },
-    { label: t('nav.short.attachments'), path: '/attachments', icon: Paperclip },
     { label: t('nav.short.mine'), path: '/settings', icon: Setting }
   ]
   return items
@@ -312,6 +313,7 @@ async function onUserCommand(command: string | number | object) {
   display: grid;
   grid-template-columns: repeat(5, 1fr);
   left: 0;
+  padding-bottom: var(--safe-area-bottom);
   position: fixed;
   right: 0;
   z-index: 10;
@@ -335,7 +337,7 @@ async function onUserCommand(command: string | number | object) {
 @media (max-width: 768px) {
   .content {
     margin-left: 0;
-    padding: 12px 12px 76px;
+    padding: calc(var(--mobile-topbar-height) + var(--safe-area-top) + 8px) 12px calc(var(--bottom-nav-height) + var(--safe-area-bottom) + 12px);
   }
 }
 </style>

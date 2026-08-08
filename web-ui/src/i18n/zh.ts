@@ -40,11 +40,20 @@ export default {
     logout: '退出登录',
     // 移动端底栏短标签
     short: {
+      home: '首页',
       todos: '待办',
       dailyReport: '日报',
       experiences: '经验',
       attachments: '附件',
       mine: '我的'
+    }
+  },
+  mobile: {
+    back: '返回',
+    title: {
+      runDetail: '运行详情',
+      dailyReportDetail: '日报详情',
+      stepTemplates: '步骤模板'
     }
   },
   instrument: {

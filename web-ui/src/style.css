@@ -25,6 +25,13 @@
   --navy-800: #10283e;
 
   --ok: #4d9e6b;
+
+  /* 移动端布局变量（桌面端规则不引用，零影响；媒体查询内不可用 var()，断点写死字面量） */
+  --bottom-nav-height: 58px;
+  --mobile-topbar-height: 48px;
+  --safe-area-bottom: env(safe-area-inset-bottom, 0px);
+  --safe-area-top: env(safe-area-inset-top, 0px);
+  --touch-target: 40px;
   --warn: #d9932c;
   --danger: #cd4a45;
 
@@ -279,5 +286,21 @@ h4 {
 
   .toolbar h2 {
     font-size: 18px;
+  }
+
+  /* 移动端弹层收敛：dialog/drawer 的 width 是内联样式，必须 !important */
+  .el-dialog {
+    width: calc(100vw - 24px) !important;
+    max-height: calc(100dvh - 48px);
+    display: flex;
+    flex-direction: column;
+  }
+  .el-dialog__body { overflow-y: auto; }
+  .el-dialog__footer { flex-shrink: 0; }   /* 超高表单滚动时 footer 不被压缩 */
+  .el-drawer.rtl, .el-drawer.ltr { width: 100vw !important; max-width: 480px; }
+  .el-message-box { width: calc(100vw - 32px); }          /* 非内联，无需 !important */
+  .el-picker__popper.el-popper {                           /* daterange 面板 ~620px，收敛 + 面板内横滑 */
+    max-width: calc(100vw - 24px);
+    overflow-x: auto;
   }
 }

@@ -26,7 +26,7 @@
         <h3>{{ t('dailyReport.structuredLogs') }}</h3>
         <el-button @click="openAddLog">{{ t('dailyReport.addLog') }}</el-button>
       </div>
-      <el-table :data="tableRows">
+      <el-table v-if="!isMobile" :data="tableRows">
         <el-table-column :label="t('dailyReport.category')" width="150">
           <template #default="{ row }">
             <el-select v-if="row._draft" v-model="row.category" size="small">
@@ -77,6 +77,28 @@
           <el-empty :description="t('dailyReport.emptyLogs')" />
         </template>
       </el-table>
+      <div v-else class="log-card-list">
+        <div v-for="row in (tableRows as any[])" :key="row._draft ? `draft-${row.key}` : row.id" class="log-card">
+          <div class="log-card-head">
+            <span class="log-card-time">{{ row.occurred_at }}</span>
+            <el-tag v-if="row._draft" size="small" type="warning">{{ t('dailyReport.aiTag') }}</el-tag>
+            <StatusBadge v-else :value="row.content_status" />
+          </div>
+          <div class="log-card-meta">{{ row.category }}<template v-if="row.project_id"> · {{ projectName(row.project_id) }}</template></div>
+          <p class="log-card-content">{{ row.content }}</p>
+          <div class="log-card-actions">
+            <template v-if="row._draft">
+              <el-button size="small" type="success" :loading="row.confirming" @click="confirmDraft(row)">{{ t('dailyReport.confirm') }}</el-button>
+              <el-button size="small" @click="removeDraft(row)">{{ t('dailyReport.remove') }}</el-button>
+            </template>
+            <template v-else-if="row.content_status === 'draft'">
+              <el-button size="small" type="primary" @click="openEditLog(row)">{{ t('dailyReport.edit') }}</el-button>
+              <el-button size="small" type="success" @click="confirmLog(row.id)">{{ t('dailyReport.confirm') }}</el-button>
+            </template>
+          </div>
+        </div>
+        <el-empty v-if="!tableRows.length" :description="t('dailyReport.emptyLogs')" />
+      </div>
     </section>
     <el-dialog v-model="logDialog" :title="editingLogId ? t('dailyReport.editLog') : t('dailyReport.addNewLog')" width="560">
       <el-form label-position="top">
@@ -124,11 +146,13 @@ import StatusBadge from '../components/StatusBadge.vue'
 import { aiParseReport, createLog, submitReport, todayReport, updateLog, updateReportRawText, type DailyReport, type LogItem } from '../api/logs'
 import { useProjectStore } from '../stores/project'
 import { useAuthStore } from '../stores/auth'
+import { useMobile } from '../composables/useMobile'
 import { uploadAttachment } from '../api/attachments'
 
 const { t } = useI18n()
 const projectStore = useProjectStore()
 const auth = useAuthStore()
+const isMobile = useMobile()
 const canSubmit = computed(() => auth.user?.role !== 'viewer')
 const projects = projectStore
 
@@ -360,6 +384,52 @@ async function submit(force: boolean) {
   display: flex;
   gap: 8px;
   padding: 8px 12px;
+}
+
+.log-card-list {
+  display: grid;
+  gap: 12px;
+}
+
+.log-card {
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  display: grid;
+  gap: 8px;
+  padding: 12px 14px;
+}
+
+.log-card-head {
+  align-items: center;
+  display: flex;
+  gap: 8px;
+}
+
+.log-card-time {
+  color: var(--text-3);
+  font-size: 12px;
+  margin-right: auto;
+}
+
+.log-card-meta {
+  color: var(--brand-600);
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.log-card-content {
+  color: var(--text-2);
+  font-size: 14px;
+  line-height: 1.6;
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+}
+
+.log-card-actions {
+  display: flex;
+  gap: 10px;
+  margin-top: 2px;
 }
 
 .muted {
