@@ -79,3 +79,6 @@ deploy/secrets/*.txt
 tmp/
 temp/
 go-server/go-server
+
+# Hermes agent workspace (plans, audit logs, local notes)
+.hermes/

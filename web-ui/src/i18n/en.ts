@@ -42,6 +42,7 @@ export default {
     sensors: 'Sensors',
     adminUsers: 'User Management',
     audit: 'Audit',
+    manual: 'Manual',
     settings: 'Settings',
     logout: 'Log out',
     // Short labels for the mobile bottom navigation bar.
