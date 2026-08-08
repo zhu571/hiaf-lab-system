@@ -27,6 +27,7 @@ const DailyReportDetailView = () => import('../views/DailyReportDetailView.vue')
 const DailyReportShell = () => import('../components/DailyReportShell.vue')
 const ProjectLayout = () => import('../components/ProjectLayout.vue')
 const ProjectDashboard = () => import('../components/ProjectDashboard.vue')
+const ManualView = () => import('../views/ManualView.vue')
 
 const router = createRouter({
   history: createWebHistory(),
@@ -64,6 +65,7 @@ const router = createRouter({
     { path: '/experiences', component: ExperiencesView },
     { path: '/audit', component: AuditView },
     { path: '/settings', component: SettingsView },
+    { path: '/manual', component: ManualView, meta: { requiresAuth: true } },
     { path: '/daily-reports/:id', component: DailyReportDetailView },
     { path: '/admin/users', component: AdminUsersView, meta: { admin: true } },
     { path: '/agent-candidates', component: AgentCandidatesView, meta: { reviewer: true } },

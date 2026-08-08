@@ -68,7 +68,7 @@
 import { computed, onMounted, type Component } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
-import { ArrowUp, Connection, DataBoard, Document, FolderOpened, HomeFilled, MagicStick, Memo, Monitor, Odometer, Paperclip, Setting, Tickets, User } from '@element-plus/icons-vue'
+import { ArrowUp, Connection, DataBoard, Document, FolderOpened, HomeFilled, MagicStick, Memo, Monitor, Odometer, Paperclip, Reading, Setting, Tickets, User } from '@element-plus/icons-vue'
 import { useMobile } from '../composables/useMobile'
 import { useAuthStore } from '../stores/auth'
 import { useProjectStore } from '../stores/project'
@@ -107,6 +107,7 @@ const systemItems = computed<NavItem[]>(() => {
   ]
   if (auth.isAdmin) items.push({ label: t('nav.adminUsers'), path: '/admin/users', icon: User })
   items.push({ label: t('nav.audit'), path: '/audit', icon: DataBoard })
+  items.push({ label: t('nav.manual'), path: '/manual', icon: Reading })
   return items
 })
 

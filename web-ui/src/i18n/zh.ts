@@ -35,6 +35,7 @@ export default {
     sensors: '传感器',
     adminUsers: '用户管理',
     audit: '审计',
+    manual: '系统手册',
     settings: '个人设置',
     logout: '退出登录',
     // 移动端底栏短标签
