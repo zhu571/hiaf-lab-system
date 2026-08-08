@@ -16,9 +16,9 @@
         <pre class="raw-text">{{ report.raw_text || t('dailyReportDetail.none') }}</pre>
         <h3>{{ t('dailyReportDetail.projectLogs') }}</h3>
         <el-table :data="report.logs || []">
-          <el-table-column prop="category" :label="t('dailyReportDetail.category')" width="140" />
-          <el-table-column prop="content" :label="t('dailyReportDetail.content')" />
-          <el-table-column :label="t('dailyReportDetail.status')" width="120">
+          <el-table-column prop="category" :label="t('dailyReportDetail.category')" width="140" show-overflow-tooltip />
+          <el-table-column prop="content" :label="t('dailyReportDetail.content')" show-overflow-tooltip />
+          <el-table-column :label="t('dailyReportDetail.status')" width="120" show-overflow-tooltip>
             <template #default="{ row }">
               <StatusBadge :value="row.content_status" />
             </template>

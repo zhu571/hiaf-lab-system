@@ -17,7 +17,7 @@
       <el-empty v-else :description="t('audit.inputRequestId')" />
     </section>
     <section class="panel">
-      <el-table :data="records">
+      <ResponsiveTable :rows="records">
         <el-table-column prop="created_at" :label="t('audit.time')" width="190" />
         <el-table-column prop="method" :label="t('audit.method')" width="90" />
         <el-table-column prop="path" :label="t('audit.path')" />
@@ -26,7 +26,17 @@
         <template #empty>
           <el-empty :description="t('audit.noRecords')" />
         </template>
-      </el-table>
+        <template #card="{ row }">
+          <div class="audit-card">
+            <span class="card-title"><code class="audit-method">{{ row.method }}</code> {{ row.path }}</span>
+            <div class="card-fields">
+              <span>{{ row.created_at }}</span>
+              <span>HTTP {{ row.status_code }}</span>
+              <span>{{ row.username || '-' }}</span>
+            </div>
+          </div>
+        </template>
+      </ResponsiveTable>
     </section>
   </div>
 </template>
@@ -37,6 +47,7 @@ import { useI18n } from 'vue-i18n'
 import { ElMessage } from 'element-plus'
 import { showApiError } from '../composables/useNotify'
 import { useMobile } from '../composables/useMobile'
+import ResponsiveTable from '../components/ResponsiveTable.vue'
 import { getAudit, type AuditRecord } from '../api/audit'
 
 const { t } = useI18n()
@@ -69,6 +80,13 @@ async function load() {
 
 .request-input {
   max-width: 420px;
+}
+
+.audit-method {
+  background: var(--bg);
+  border-radius: 4px;
+  font-size: 12px;
+  padding: 1px 6px;
 }
 
 @media (max-width: 768px) {

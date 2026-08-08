@@ -181,7 +181,7 @@
     <!-- 命令白名单（默认收起，点击顶栏按钮弹出） -->
     <el-dialog v-model="whitelistOpen" :title="t('instrument.whitelist')" :width="isMobile ? '100%' : '900px'">
       <p class="muted hint whitelist-hint">{{ t('instrument.whitelistHint') }}</p>
-      <el-table v-loading="whitelistLoading" :data="whitelist">
+      <ResponsiveTable :rows="whitelist" :loading="whitelistLoading">
         <el-table-column prop="name" :label="t('instrument.command')" min-width="150" />
         <el-table-column prop="description" :label="t('instrument.description')" min-width="180" show-overflow-tooltip />
         <el-table-column :label="t('instrument.risk')" width="90">
@@ -200,7 +200,19 @@
         <template #empty>
           <el-empty :description="t('instrument.whitelistEmpty')" />
         </template>
-      </el-table>
+        <template #card="{ row }">
+          <div class="wl-card">
+            <span class="card-title">{{ row.name }}</span>
+            <div class="card-fields">
+              <span>{{ row.description || '—' }}</span>
+              <el-tag :type="riskTag(row.risk)" size="small" effect="light">{{ row.risk }}</el-tag>
+            </div>
+            <div v-if="canOperate && row.risk !== 'red'" class="card-actions">
+              <el-button size="small" type="primary" plain @click="executeFromWhitelist(row)">{{ t('instrument.execute') }}</el-button>
+            </div>
+          </div>
+        </template>
+      </ResponsiveTable>
     </el-dialog>
 
     <!-- 保存到测试数据 -->
@@ -284,6 +296,7 @@ import { listRuns, type ExperimentRun } from '../api/runs'
 import { useAuthStore } from '../stores/auth'
 import { showApiError } from '../composables/useNotify'
 import { useMobile } from '../composables/useMobile'
+import ResponsiveTable from '../components/ResponsiveTable.vue'
 
 Chart.register(LineController, ScatterController, LineElement, PointElement, LinearScale, Legend, Tooltip)
 
@@ -439,6 +452,21 @@ function onCommandPick() {
     if (def.default === undefined || def.default === null) continue
     cmdParams[name] = (def.enum || def.type === 'string') ? String(def.default) : Number(def.default)
   }
+}
+
+// 白名单卡片「执行」：把命令带入仪器卡执行表单（展开首台仪器并预填参数），
+// 真正的执行仍走 runCommand 的既有二次确认流程，一步不少。
+async function executeFromWhitelist(cmd: WhitelistCommand) {
+  const target = instruments.value.find((i) => i.id === expandedId.value) ?? instruments.value[0]
+  if (!target) return
+  whitelistOpen.value = false
+  if (expandedId.value !== target.id) {
+    await toggleExpand(target)
+  }
+  cmdName.value = cmd.name
+  onCommandPick()
+  await nextTick()
+  document.querySelector('.ins-card')?.scrollIntoView({ behavior: 'smooth', block: 'start' })
 }
 
 function paramEntries(def: WhitelistCommand): [string, CommandParamDef][] {

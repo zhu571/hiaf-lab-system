@@ -1085,6 +1085,7 @@ export default {
     status: 'Status',
     dependsOn: 'Depends On',
     actions: 'Actions',
+    duration: 'Duration',
     noSteps: 'No steps',
     linkedReports: 'Linked Reports',
     selectReport: 'Select report',

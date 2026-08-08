@@ -14,12 +14,12 @@
     </section>
     <section class="panel">
       <el-table v-loading="loading" :data="reports" class="clickable-table" @row-click="openDetail">
-        <el-table-column prop="report_date" :label="t('dailyHistory.date')" width="120" />
-        <el-table-column :label="t('dailyHistory.author')" width="140">
+        <el-table-column prop="report_date" :label="t('dailyHistory.date')" width="120" show-overflow-tooltip />
+        <el-table-column :label="t('dailyHistory.author')" width="140" show-overflow-tooltip>
           <template #default="{ row }">{{ row.author_name || row.author_id }}</template>
         </el-table-column>
-        <el-table-column prop="summary" :label="t('dailyHistory.summary')" />
-        <el-table-column :label="t('dailyHistory.status')" width="120">
+        <el-table-column prop="summary" :label="t('dailyHistory.summary')" show-overflow-tooltip />
+        <el-table-column :label="t('dailyHistory.status')" width="120" show-overflow-tooltip>
           <template #default="{ row }">
             <StatusBadge :value="row.content_status" />
           </template>
