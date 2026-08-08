@@ -8,7 +8,7 @@
       </div>
     </div>
     <section class="panel">
-      <el-descriptions v-if="records[0]" border :column="2">
+      <el-descriptions v-if="records[0]" border :column="isMobile ? 1 : 2">
         <el-descriptions-item label="Request ID">{{ records[0].request_id }}</el-descriptions-item>
         <el-descriptions-item :label="t('audit.recordCount')">{{ records.length }}</el-descriptions-item>
         <el-descriptions-item :label="t('audit.user')">{{ records[0].username || '-' }}</el-descriptions-item>
@@ -36,9 +36,11 @@ import { ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { ElMessage } from 'element-plus'
 import { showApiError } from '../composables/useNotify'
+import { useMobile } from '../composables/useMobile'
 import { getAudit, type AuditRecord } from '../api/audit'
 
 const { t } = useI18n()
+const isMobile = useMobile()
 
 const requestId = ref('')
 const records = ref<AuditRecord[]>([])

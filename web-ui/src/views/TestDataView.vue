@@ -68,7 +68,7 @@
               <el-button size="small" @click="load">{{ $t('testData.retry') }}</el-button>
             </el-alert>
             <template v-else>
-              <el-table v-loading="loading" :data="items">
+              <ResponsiveTable :rows="items" :loading="loading">
                 <el-table-column :label="$t('testData.measuredAt')" width="170">
                   <template #default="{ row }">{{ formatTime(row.measured_at) }}</template>
                 </el-table-column>
@@ -94,7 +94,21 @@
                 <template #empty>
                   <el-empty :description="$t('testData.empty')" />
                 </template>
-              </el-table>
+                <template #card="{ row }">
+                  <div class="td-card">
+                    <span class="card-title">{{ row.measurement }}</span>
+                    <div class="card-fields">
+                      <span>{{ row.data_type }}</span>
+                      <span>{{ formatTime(row.measured_at) }}</span>
+                      <span>{{ row.value }}{{ row.unit ? ` ${row.unit}` : '' }}</span>
+                      <el-tag :type="qualityTag(row.quality)" size="small" effect="light">{{ row.quality }}</el-tag>
+                    </div>
+                    <div class="card-actions">
+                      <el-button v-if="!isViewer" size="small" type="danger" plain :disabled="row.quality === 'invalid'" @click="invalidate(row)">{{ $t('testData.markInvalid') }}</el-button>
+                    </div>
+                  </div>
+                </template>
+              </ResponsiveTable>
               <el-pagination
                 v-model:current-page="page"
                 class="pager"
@@ -150,6 +164,7 @@ import { createTestData, deleteTestData, listTestData, type TestData, type TestD
 import { listRuns, type ExperimentRun } from '../api/runs'
 import { useAuthStore } from '../stores/auth'
 import { showApiError } from '../composables/useNotify'
+import ResponsiveTable from '../components/ResponsiveTable.vue'
 
 const { t } = useI18n()
 const route = useRoute()

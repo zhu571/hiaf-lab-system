@@ -53,6 +53,7 @@ declare module 'vue' {
     ProjectDashboard: typeof import('./src/components/ProjectDashboard.vue')['default']
     ProjectLayout: typeof import('./src/components/ProjectLayout.vue')['default']
     ProjectSidebar: typeof import('./src/components/ProjectSidebar.vue')['default']
+    ResponsiveTable: typeof import('./src/components/ResponsiveTable.vue')['default']
     RouterLink: typeof import('vue-router')['RouterLink']
     RouterView: typeof import('vue-router')['RouterView']
     StatusBadge: typeof import('./src/components/StatusBadge.vue')['default']

@@ -11,7 +11,7 @@
       </div>
     </section>
     <section class="panel">
-      <el-table v-loading="loading" :data="candidates">
+      <ResponsiveTable :rows="candidates" :loading="loading">
         <el-table-column :label="t('agentCandidates.date')" width="170">
           <template #default="{ row }">{{ formatTime(row.created_at) }}</template>
         </el-table-column>
@@ -44,7 +44,26 @@
         <template #empty>
           <el-empty :description="t('agentCandidates.empty')" />
         </template>
-      </el-table>
+        <template #card="{ row }">
+          <div class="candidate-card">
+            <span class="card-title">{{ summary(row) }}</span>
+            <div class="card-fields">
+              <span>
+                <el-tag :type="actionTag(row.action_type)" size="small" effect="light">{{ actionLabel(row.action_type) }}</el-tag>
+              </span>
+              <span>{{ t('agentCandidates.confidence') }}：{{ formatConfidence(row.agent_confidence) }}</span>
+              <span>{{ formatTime(row.created_at) }}</span>
+            </div>
+            <div class="card-actions">
+              <el-button size="small" @click="openDetail(row)">{{ t('agentCandidates.viewDetail') }}</el-button>
+              <template v-if="row.status === 'pending_review'">
+                <el-button size="small" type="primary" @click="approve(row)">{{ t('agentCandidates.approve') }}</el-button>
+                <el-button size="small" type="danger" @click="openReject(row)">{{ t('agentCandidates.reject') }}</el-button>
+              </template>
+            </div>
+          </div>
+        </template>
+      </ResponsiveTable>
       <el-pagination
         v-model:current-page="page"
         class="pager"
@@ -104,6 +123,7 @@ import { useI18n } from 'vue-i18n'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { showApiError } from '../composables/useNotify'
 import StatusBadge from '../components/StatusBadge.vue'
+import ResponsiveTable from '../components/ResponsiveTable.vue'
 import { approveCandidate, listAgentCandidates, rejectCandidate, type AgentCandidate } from '../api/agent'
 
 const { t } = useI18n()

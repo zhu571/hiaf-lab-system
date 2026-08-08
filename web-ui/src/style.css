@@ -303,4 +303,17 @@ h4 {
     max-width: calc(100vw - 24px);
     overflow-x: auto;
   }
+
+  /* 触摸目标：最小可点高度（值取自 --touch-target），ElMessageBox 按钮 teleport 到 body 同样命中 */
+  .el-button {
+    min-height: var(--touch-target);
+  }
+  .el-button--small {
+    min-height: 36px;
+  }
+
+  /* 分页器不挤压：隐藏 total，layout 属性不变 */
+  .el-pagination__total {
+    display: none;
+  }
 }

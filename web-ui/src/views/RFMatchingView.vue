@@ -18,7 +18,7 @@
         <el-button size="small" @click="load">{{ t('rfMatching.retry') }}</el-button>
       </el-alert>
       <template v-else>
-        <el-table v-loading="loading" :data="items" :row-class-name="rowClass">
+        <ResponsiveTable :rows="items" :loading="loading" :row-class-name="rowClass">
           <el-table-column prop="device" :label="t('rfMatching.device')" width="120" />
           <el-table-column prop="frequency_mhz" :label="t('rfMatching.frequency')" width="110" />
           <el-table-column :label="t('rfMatching.s11')" width="90">
@@ -50,7 +50,22 @@
           <template #empty>
             <el-empty :description="t('rfMatching.empty')" />
           </template>
-        </el-table>
+          <template #card="{ row }">
+            <div class="rf-card" :class="{ void: row.is_void }">
+              <span class="card-title">{{ row.device }} · {{ row.frequency_mhz }} MHz</span>
+              <div class="card-fields">
+                <span>{{ formatTime(row.measured_at) }}</span>
+                <span>s11: {{ row.s11 == null ? '—' : row.s11 }}</span>
+                <span>{{ row.capacitance_text || '—' }}</span>
+                <el-tag v-if="row.status" :type="statusTag(row.status)" size="small" effect="light">{{ row.status }}</el-tag>
+                <el-tag v-if="row.is_void" type="info" size="small" effect="plain">{{ t('rfMatching.voided') }}</el-tag>
+              </div>
+              <div class="card-actions">
+                <el-button v-if="!isViewer" size="small" type="danger" plain :disabled="row.is_void" @click="voidRecord(row)">{{ t('rfMatching.void') }}</el-button>
+              </div>
+            </div>
+          </template>
+        </ResponsiveTable>
         <el-pagination
           v-model:current-page="page"
           class="pager"
@@ -150,6 +165,7 @@ import { ElMessage, ElMessageBox } from 'element-plus'
 import { createRFMatching, deleteRFMatching, listRFMatching, type RFMatchingPayload, type RFMatchingRecord } from '../api/rfmatch'
 import { useAuthStore } from '../stores/auth'
 import { showApiError } from '../composables/useNotify'
+import ResponsiveTable from '../components/ResponsiveTable.vue'
 
 const route = useRoute()
 const auth = useAuthStore()
@@ -338,6 +354,11 @@ function formatTime(v?: string) {
 }
 
 :deep(.void-row) {
+  color: var(--text-3);
+  opacity: 0.55;
+}
+
+.rf-card.void {
   color: var(--text-3);
   opacity: 0.55;
 }
