@@ -6,7 +6,7 @@
     </div>
     <section v-loading="loading" class="panel">
       <template v-if="report">
-        <el-descriptions border :column="2" size="small">
+        <el-descriptions border :column="isMobile ? 1 : 2" size="small">
           <el-descriptions-item :label="t('dailyReportDetail.date')">{{ report.report_date }}</el-descriptions-item>
           <el-descriptions-item :label="t('dailyReportDetail.author')">{{ report.author_name || report.author_id }}</el-descriptions-item>
           <el-descriptions-item :label="t('dailyReportDetail.status')"><StatusBadge :value="report.content_status" /></el-descriptions-item>
@@ -39,10 +39,12 @@ import { useRoute } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import { ElMessage } from 'element-plus'
 import { showApiError } from '../composables/useNotify'
+import { useMobile } from '../composables/useMobile'
 import StatusBadge from '../components/StatusBadge.vue'
 import { getReport, type DailyReport } from '../api/logs'
 
 const { t } = useI18n()
+const isMobile = useMobile()
 const route = useRoute()
 const report = ref<DailyReport | null>(null)
 const loading = ref(false)

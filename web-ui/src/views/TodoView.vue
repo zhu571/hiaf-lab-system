@@ -459,4 +459,30 @@ async function copyText(text: string) {
 .load-error {
   margin-bottom: 8px;
 }
+
+@media (max-width: 768px) {
+  .todo-row {
+    flex-wrap: wrap;
+  }
+
+  .todo-row .el-checkbox {
+    order: 1;
+  }
+
+  .todo-title {
+    flex: 1 1 auto;
+    order: 2;
+  }
+
+  .todo-priority,
+  .todo-row .el-tag,
+  .todo-source {
+    order: 3;
+  }
+
+  .todo-actions {
+    margin-left: auto;
+    order: 4;
+  }
+}
 </style>

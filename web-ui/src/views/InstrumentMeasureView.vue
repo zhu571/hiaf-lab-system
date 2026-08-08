@@ -25,7 +25,12 @@
             {{ expandedId === ins.id ? t('instrument.collapse') : t('instrument.details') }}
           </el-button>
           <el-button size="small" type="primary" plain @click="openAI(ins)">{{ t('instrument.aiChat') }}</el-button>
-          <el-button size="small" type="danger" class="estop-btn" @click="onEmergencyStop(ins)">{{ t('instrument.emergencyStop') }}</el-button>
+          <el-button
+            :size="isMobile ? 'default' : 'small'"
+            type="danger"
+            class="estop-btn"
+            @click="onEmergencyStop(ins)"
+          >{{ t('instrument.emergencyStop') }}</el-button>
         </div>
 
         <div v-if="expandedId === ins.id" v-loading="detailLoading" class="ins-detail">
@@ -1030,5 +1035,16 @@ function riskTag(risk: string): 'success' | 'warning' | 'danger' | 'info' {
 .whitelist-hint {
   display: block;
   margin-bottom: 10px;
+}
+
+@media (max-width: 768px) {
+  .ins-actions {
+    flex-wrap: wrap;
+  }
+
+  .estop-btn {
+    flex-basis: 100%;
+    margin-left: 0;
+  }
 }
 </style>

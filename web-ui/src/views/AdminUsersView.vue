@@ -25,7 +25,7 @@
       >
         <el-button size="small" @click="load">{{ t('adminUsers.retry') }}</el-button>
       </el-alert>
-      <el-table v-loading="loading" :data="filteredUsers">
+      <ResponsiveTable :rows="filteredUsers" :loading="loading">
         <el-table-column :label="t('adminUsers.tableUser')" min-width="220">
           <template #default="{ row }">
             <div class="user-cell">
@@ -72,7 +72,37 @@
         <template #empty>
           <el-empty :description="keyword ? t('adminUsers.noMatch') : t('adminUsers.empty')" />
         </template>
-      </el-table>
+        <template #card="{ row }">
+          <div class="user-card">
+            <div class="user-card-title">
+              <el-avatar :size="32">{{ avatarText(row) }}</el-avatar>
+              <span class="card-title">{{ row.username }}</span>
+            </div>
+            <div class="card-fields">
+              <span>{{ row.display_name || t('adminUsers.noDisplayName') }}</span>
+              <el-tag :type="roleTagType(row.role)" size="small" effect="light">{{ roleLabel(row.role) }}</el-tag>
+              <el-tag :type="row.disabled ? 'danger' : 'success'" size="small" effect="light">
+                {{ row.disabled ? t('adminUsers.disabled') : t('adminUsers.active') }}
+              </el-tag>
+            </div>
+            <div class="card-actions">
+              <template v-if="row.id !== auth.user?.id">
+                <el-button size="small" @click="openRoleDialog(row)">{{ t('adminUsers.changeRole') }}</el-button>
+                <el-button size="small" @click="reset(row)">{{ t('adminUsers.resetPassword') }}</el-button>
+                <el-button
+                  size="small"
+                  :type="row.disabled ? 'success' : 'danger'"
+                  plain
+                  @click="toggleDisabled(row)"
+                >
+                  {{ row.disabled ? t('adminUsers.enable') : t('adminUsers.disable') }}
+                </el-button>
+              </template>
+              <span v-else class="muted">{{ t('adminUsers.currentAccount') }}</span>
+            </div>
+          </div>
+        </template>
+      </ResponsiveTable>
     </section>
 
     <el-dialog v-model="roleDialog" :title="t('adminUsers.changeRoleTitle')" width="440">
@@ -132,6 +162,7 @@ import { showApiError } from '../composables/useNotify'
 import { Search } from '@element-plus/icons-vue'
 import { createUser, listUsers, resetPassword, updateUser, type UserInfo } from '../api/auth'
 import { useAuthStore } from '../stores/auth'
+import ResponsiveTable from '../components/ResponsiveTable.vue'
 
 const { t } = useI18n()
 const auth = useAuthStore()
@@ -335,6 +366,13 @@ async function copyPassword() {
 
 .username {
   font-weight: 600;
+}
+
+.user-card-title {
+  align-items: center;
+  display: flex;
+  gap: 10px;
+  min-width: 0;
 }
 
 .role-dialog-text {

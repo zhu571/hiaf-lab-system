@@ -13,7 +13,7 @@
       <el-alert v-if="loadError" class="load-error" type="error" :title="loadError" show-icon :closable="false">
         <el-button size="small" @click="load">{{ t('stepTemplates.retry') }}</el-button>
       </el-alert>
-      <el-table v-loading="loading" :data="items">
+      <ResponsiveTable :rows="items" :loading="loading">
         <el-table-column :label="t('stepTemplates.name')" min-width="180">
           <template #default="{ row }">{{ row.name }}</template>
         </el-table-column>
@@ -37,7 +37,7 @@
         <el-table-column :label="t('stepTemplates.createdAt')" width="170">
           <template #default="{ row }">{{ fmtTime(row.created_at) }}</template>
         </el-table-column>
-        <el-table-column :label="t('stepTemplates.actions')" width="300" fixed="right">
+        <el-table-column :label="t('stepTemplates.actions')" width="300">
           <template #default="{ row }">
             <el-button size="small" @click="openDetail(row)">{{ t('stepTemplates.detail') }}</el-button>
             <el-button v-if="canManage(row)" size="small" @click="openEdit(row)">{{ t('stepTemplates.edit') }}</el-button>
@@ -48,7 +48,25 @@
         <template #empty>
           <el-empty :description="t('stepTemplates.empty')" />
         </template>
-      </el-table>
+        <template #card="{ row }">
+          <div class="tmpl-card">
+            <div class="tmpl-card-title">
+              <span class="card-title">{{ row.name }}</span>
+              <el-tag size="small" :type="row.kind === 'assembly' ? 'primary' : 'success'" effect="light">{{ kindLabel(row.kind) }}</el-tag>
+            </div>
+            <div class="card-fields">
+              <span>{{ t('stepTemplates.stepCount') }}：{{ row._item_count ?? '—' }}</span>
+              <span>{{ fmtTime(row.created_at) }}</span>
+            </div>
+            <div class="card-actions">
+              <el-button size="small" @click="openDetail(row)">{{ t('stepTemplates.detail') }}</el-button>
+              <el-button v-if="canManage(row)" size="small" @click="openEdit(row)">{{ t('stepTemplates.edit') }}</el-button>
+              <el-button size="small" type="primary" plain @click="openApply(row)">{{ t('stepTemplates.applyToProject') }}</el-button>
+              <el-button v-if="canManage(row)" size="small" type="danger" plain @click="remove(row)">{{ t('stepTemplates.delete') }}</el-button>
+            </div>
+          </div>
+        </template>
+      </ResponsiveTable>
       <el-pagination
         v-model:current-page="page"
         class="pager"
@@ -165,6 +183,7 @@ import { computed, onMounted, reactive, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import StepItemsEditor from '../components/StepItemsEditor.vue'
+import ResponsiveTable from '../components/ResponsiveTable.vue'
 import {
   createTemplate,
   deleteTemplate,
@@ -497,5 +516,12 @@ async function remove(row: StepTemplate) {
 
 .apply-select {
   width: 100%;
+}
+
+.tmpl-card-title {
+  align-items: center;
+  display: flex;
+  gap: 8px;
+  min-width: 0;
 }
 </style>

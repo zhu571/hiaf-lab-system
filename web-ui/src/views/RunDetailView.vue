@@ -30,7 +30,7 @@
           <div class="tab-stack">
             <section class="panel">
               <h3 class="panel-title">{{ t('runDetail.metaInfo') }}</h3>
-              <el-descriptions :column="2" border>
+              <el-descriptions :column="isMobile ? 1 : 2" border>
                 <el-descriptions-item label="Campaign">{{ run.campaign || '—' }}</el-descriptions-item>
                 <el-descriptions-item :label="t('runDetail.type')">{{ runTypeLabel(run.run_type) }}</el-descriptions-item>
                 <el-descriptions-item :label="t('runDetail.gas')">{{ run.gas_type || '—' }}</el-descriptions-item>
@@ -273,11 +273,13 @@ import { listReports, type DailyReport } from '../api/logs'
 import { listTestData, type TestData } from '../api/testdata'
 import { useAuthStore } from '../stores/auth'
 import { showApiError } from '../composables/useNotify'
+import { useMobile } from '../composables/useMobile'
 
 const route = useRoute()
 const router = useRouter()
 const { t } = useI18n()
 const auth = useAuthStore()
+const isMobile = useMobile()
 
 const runId = String(route.params.id || '')
 const run = ref<ExperimentRun | null>(null)
