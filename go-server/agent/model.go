@@ -35,6 +35,10 @@ type PendingAgentTask struct {
 	Model           *string         `json:"model,omitempty"`
 	PromptVersion   *string         `json:"prompt_version,omitempty"`
 	AgentConfidence *float64        `json:"agent_confidence,omitempty"`
+	// 快照仅经 trace 端点输出（030），不进 Claim/Complete/Fail 的任务响应体。
+	RawTextSnapshot *string         `json:"-"`
+	RawTextSHA256   *string         `json:"-"`
+	ReportDate      *string         `json:"report_date,omitempty"`
 	CreatedAt       time.Time       `json:"created_at"`
 	UpdatedAt       time.Time       `json:"updated_at"`
 }
@@ -71,6 +75,10 @@ type CompleteTaskRequest struct {
 	AgentConfidence *float64         `json:"agent_confidence,omitempty"`
 	Candidates      []CandidateInput `json:"candidates"`
 	ClaimToken      string           `json:"claim_token"`
+	// AI 看到的原始输入快照与报告日期（030），由 worker 随结果回传；
+	// 缺省（旧 worker/旧任务）时保持 NULL，trace 端点降级显示。
+	RawTextSnapshot string           `json:"raw_text_snapshot"`
+	ReportDate      string           `json:"report_date"`
 }
 
 type ClaimTaskRequest struct {

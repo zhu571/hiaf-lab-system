@@ -51,7 +51,10 @@ class Worker:
             parsed = self._parse_with_timeout(report.get("raw_text", ""), issues, project_ids)
             candidates = [to_candidate(item) for item in parsed]
             confidence = sum(item["confidence"] for item in parsed) / len(parsed) if parsed else None
-            self.api.complete(task_id, candidates, confidence, claim_token=claim_token)
+            self.api.complete(
+                task_id, candidates, confidence, claim_token=claim_token,
+                raw_text_snapshot=report.get("raw_text", ""), report_date=report.get("report_date"),
+            )
             LOG.info("task completed", extra={"task_id": task_id, "candidate_count": len(candidates)})
         except Exception as exc:
             if _is_invalid_lease(exc):

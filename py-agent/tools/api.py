@@ -79,7 +79,8 @@ class GoAPI:
         )
         return (data or {}).get("items") or []
 
-    def complete(self, task_id, candidates, confidence=None, claim_token=None):
+    def complete(self, task_id, candidates, confidence=None, claim_token=None,
+                 raw_text_snapshot=None, report_date=None):
         body = {
             "result": {"candidate_count": len(candidates)},
             "model": MODEL,
@@ -90,6 +91,11 @@ class GoAPI:
             body["agent_confidence"] = confidence
         if claim_token:
             body["claim_token"] = claim_token
+        # 030 审计链：AI 看到的原始输入与报告日期随结果回传，Go 侧落库。
+        if raw_text_snapshot is not None:
+            body["raw_text_snapshot"] = raw_text_snapshot
+        if report_date:
+            body["report_date"] = report_date
         return self._request(
             "POST", f"/api/v1/agent/tasks/{task_id}/complete", json=body,
             headers={"Idempotency-Key": f"agent-complete-{task_id}"},

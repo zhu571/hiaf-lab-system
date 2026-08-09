@@ -14,7 +14,7 @@ from worker import Worker, to_candidate  # noqa: E402
 
 TASK = {"id": "task-1", "report_id": "report-1", "acting_user_id": "user-1", "claim_token": "token-1"}
 REPORT = {
-    "id": "report-1", "raw_text": "RF 匹配在 3.65MHz 反射异常",
+    "id": "report-1", "raw_text": "RF 匹配在 3.65MHz 反射异常", "report_date": "2026-08-08",
     "logs": [{"project_id": "project-1", "content": "RF 匹配异常，S11 仅 -6dB"}],
 }
 CREATE = {
@@ -43,8 +43,9 @@ class FakeAPI:
         self.searches.append((project_id, status, keyword))
         return self.issues
 
-    def complete(self, task_id, candidates, confidence, claim_token=None):
-        self.completed.append((task_id, candidates, confidence, claim_token))
+    def complete(self, task_id, candidates, confidence, claim_token=None,
+                 raw_text_snapshot=None, report_date=None):
+        self.completed.append((task_id, candidates, confidence, claim_token, raw_text_snapshot, report_date))
 
     def fail(self, task_id, error, claim_token=None):
         self.failed.append((task_id, error, claim_token))
@@ -116,6 +117,12 @@ class WorkerTests(unittest.TestCase):
         api2 = FakeAPI()
         Worker(api2, FakeParser(error=RuntimeError("boom"))).run_once()
         self.assertEqual(api2.failed[0][2], "token-1")
+
+    def test_complete_returns_raw_text_snapshot_and_report_date(self):
+        api = FakeAPI()
+        Worker(api, FakeParser()).run_once()
+        self.assertEqual(api.completed[0][4], REPORT["raw_text"])
+        self.assertEqual(api.completed[0][5], "2026-08-08")
 
     def test_llm_hard_timeout_marks_task_failed(self):
         class SlowParser:

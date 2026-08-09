@@ -1,7 +1,9 @@
 package agent
 
 import (
+	"crypto/sha256"
 	"database/sql"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"os"
@@ -76,6 +78,7 @@ func TestQueueAndCandidateLifecyclePostgres(t *testing.T) {
 	}
 	task, err = svc.Complete(task.ID, CompleteTaskRequest{
 		Result: json.RawMessage(`{"ok":true}`), Model: "test", PromptVersion: "v1", ClaimToken: *task.ClaimToken,
+		RawTextSnapshot: "RF 匹配原始文本", ReportDate: "2099-01-15",
 		Candidates: []CandidateInput{
 			{ActionType: "create_issue", Payload: json.RawMessage(`{"title":"test"}`)},
 			{ActionType: "create_experience", Payload: json.RawMessage(`{"title":"test","content":"test"}`)},
@@ -83,6 +86,20 @@ func TestQueueAndCandidateLifecyclePostgres(t *testing.T) {
 	})
 	if err != nil || task.Status != TaskDone {
 		t.Fatalf("complete = %#v, %v", task, err)
+	}
+	// 030 快照落库：raw_text_sha256 由 Go 侧计算，report_date 原样写入。
+	wantSHA := sha256.Sum256([]byte("RF 匹配原始文本"))
+	if task.RawTextSHA256 == nil || *task.RawTextSHA256 != hex.EncodeToString(wantSHA[:]) {
+		t.Fatalf("raw_text_sha256 = %#v", task.RawTextSHA256)
+	}
+	if task.ReportDate == nil || *task.ReportDate != "2099-01-15" {
+		t.Fatalf("report_date = %#v", task.ReportDate)
+	}
+	var storedSHA, storedDate string
+	if err := db.QueryRow(
+		`SELECT raw_text_sha256, report_date::text FROM pending_agent_tasks WHERE id = $1`, task.ID,
+	).Scan(&storedSHA, &storedDate); err != nil || storedSHA != *task.RawTextSHA256 || storedDate != "2099-01-15" {
+		t.Fatalf("stored snapshot = %q %q, %v", storedSHA, storedDate, err)
 	}
 	listed, err := svc.ListCandidates(CandidatePending, 1, 20)
 	if err != nil || len(listed.Items) == 0 {

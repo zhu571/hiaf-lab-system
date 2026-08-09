@@ -2,6 +2,7 @@ package agent
 
 import (
 	"crypto/rand"
+	"crypto/sha256"
 	"database/sql"
 	"encoding/hex"
 	"encoding/json"
@@ -55,7 +56,8 @@ func (r *Repository) Claim(leaseSeconds int) (*PendingAgentTask, error) {
 		 )
 		 RETURNING id, report_id, acting_user_id, status, attempts, claim_token, claimed_at,
 		           lease_expires_at, next_attempt_at, completed_at, last_error,
-		           result, model, prompt_version, agent_confidence, created_at, updated_at`,
+		           result, model, prompt_version, agent_confidence,
+		           raw_text_snapshot, raw_text_sha256, report_date, created_at, updated_at`,
 		leaseSeconds, claimToken,
 	), &task)
 	if err != nil {
@@ -86,7 +88,8 @@ func (r *Repository) Complete(taskID string, req CompleteTaskRequest) (*PendingA
 	if err := scanTask(tx.QueryRow(
 		`SELECT id, report_id, acting_user_id, status, attempts, claim_token, claimed_at,
 		        lease_expires_at, next_attempt_at, completed_at, last_error,
-		        result, model, prompt_version, agent_confidence, created_at, updated_at
+		        result, model, prompt_version, agent_confidence,
+		        raw_text_snapshot, raw_text_sha256, report_date, created_at, updated_at
 		 FROM pending_agent_tasks WHERE id = $1 FOR UPDATE`, taskID,
 	), &task); err != nil {
 		if err == sql.ErrNoRows {
@@ -119,16 +122,30 @@ func (r *Repository) Complete(taskID string, req CompleteTaskRequest) (*PendingA
 		}
 	}
 
+	// 原始输入快照（030）：worker 回传 raw_text，Go 侧计算 sha256 一并落库；
+	// agent 模块不读取 daily_reports，快照是"AI 当时看到的内容"的唯一可信留痕。
+	var rawTextSnapshot, rawTextSHA256, reportDate any
+	if req.RawTextSnapshot != "" {
+		rawTextSnapshot = req.RawTextSnapshot
+		sum := sha256.Sum256([]byte(req.RawTextSnapshot))
+		rawTextSHA256 = hex.EncodeToString(sum[:])
+	}
+	if req.ReportDate != "" {
+		reportDate = req.ReportDate
+	}
 	if err := scanTask(tx.QueryRow(
 		`UPDATE pending_agent_tasks
 		 SET status = 'done', completed_at = now(), lease_expires_at = NULL,
 		     result = $2::jsonb, model = $3, prompt_version = $4,
-		     agent_confidence = $5, updated_at = now()
+		     agent_confidence = $5, raw_text_snapshot = $6, raw_text_sha256 = $7,
+		     report_date = $8::date, updated_at = now()
 		 WHERE id = $1
 		 RETURNING id, report_id, acting_user_id, status, attempts, claim_token, claimed_at,
 		           lease_expires_at, next_attempt_at, completed_at, last_error,
-		           result, model, prompt_version, agent_confidence, created_at, updated_at`,
+		           result, model, prompt_version, agent_confidence,
+		           raw_text_snapshot, raw_text_sha256, report_date, created_at, updated_at`,
 		task.ID, string(req.Result), req.Model, req.PromptVersion, req.AgentConfidence,
+		rawTextSnapshot, rawTextSHA256, reportDate,
 	), &task); err != nil {
 		return nil, fmt.Errorf("complete agent task: %w", err)
 	}
@@ -150,7 +167,8 @@ func (r *Repository) Fail(taskID, lastError string, maxAttempts int, claimToken 
 		 WHERE id = $1 AND claim_token = $4 AND status = 'processing' AND lease_expires_at > now()
 		 RETURNING id, report_id, acting_user_id, status, attempts, claim_token, claimed_at,
 		           lease_expires_at, next_attempt_at, completed_at, last_error,
-		           result, model, prompt_version, agent_confidence, created_at, updated_at`,
+		           result, model, prompt_version, agent_confidence,
+		           raw_text_snapshot, raw_text_sha256, report_date, created_at, updated_at`,
 		taskID, lastError, maxAttempts, claimToken,
 	), &task)
 	if err != nil {
@@ -337,13 +355,16 @@ type rowScanner interface{ Scan(...any) error }
 
 func scanTask(row rowScanner, task *PendingAgentTask) error {
 	var actingUserID, claimToken, lastError, model, promptVersion sql.NullString
+	var rawTextSnapshot, rawTextSHA256 sql.NullString
+	var reportDate sql.NullTime
 	var claimedAt, leaseExpiresAt, nextAttemptAt, completedAt sql.NullTime
 	var result []byte
 	var confidence sql.NullFloat64
 	if err := row.Scan(
 		&task.ID, &task.ReportID, &actingUserID, &task.Status, &task.Attempts, &claimToken,
 		&claimedAt, &leaseExpiresAt, &nextAttemptAt, &completedAt, &lastError,
-		&result, &model, &promptVersion, &confidence, &task.CreatedAt, &task.UpdatedAt,
+		&result, &model, &promptVersion, &confidence,
+		&rawTextSnapshot, &rawTextSHA256, &reportDate, &task.CreatedAt, &task.UpdatedAt,
 	); err != nil {
 		return err
 	}
@@ -361,6 +382,12 @@ func scanTask(row rowScanner, task *PendingAgentTask) error {
 	task.PromptVersion = nullStringPtr(promptVersion)
 	if confidence.Valid {
 		task.AgentConfidence = &confidence.Float64
+	}
+	task.RawTextSnapshot = nullStringPtr(rawTextSnapshot)
+	task.RawTextSHA256 = nullStringPtr(rawTextSHA256)
+	if reportDate.Valid {
+		formatted := reportDate.Time.Format(time.DateOnly)
+		task.ReportDate = &formatted
 	}
 	return nil
 }

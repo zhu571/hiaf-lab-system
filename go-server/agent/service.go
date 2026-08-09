@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"strings"
+	"time"
 	"unicode/utf8"
 )
 
@@ -49,6 +50,11 @@ func (s *Service) Complete(taskID string, req CompleteTaskRequest) (*PendingAgen
 	}
 	for _, candidate := range req.Candidates {
 		if !validActionType(candidate.ActionType) || !json.Valid(candidate.Payload) {
+			return nil, ErrInvalidInput
+		}
+	}
+	if req.ReportDate != "" {
+		if _, err := time.Parse(time.DateOnly, strings.TrimSpace(req.ReportDate)); err != nil {
 			return nil, ErrInvalidInput
 		}
 	}
