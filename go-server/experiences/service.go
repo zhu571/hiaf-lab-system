@@ -53,7 +53,7 @@ func NewService(repo experienceRepository, access ProjectAccessChecker, validato
 }
 
 func (s *Service) Create(userID, userRole string, req CreateExperienceRequest) (*Experience, error) {
-	if err := s.validateAgentFields(userID, userRole, req.AiGenerated, req.AgentTaskID); err != nil {
+	if err := s.validateAgentFields(userID, userRole, req.AiGenerated, req.AgentTaskID, req.CandidateID); err != nil {
 		return nil, ErrInvalidInput
 	}
 	req.Title = strings.TrimSpace(req.Title)
@@ -96,9 +96,9 @@ func (s *Service) Create(userID, userRole string, req CreateExperienceRequest) (
 	return s.repo.Create(userID, req)
 }
 
-func (s *Service) validateAgentFields(userID, userRole string, aiGenerated bool, taskID *string) error {
+func (s *Service) validateAgentFields(userID, userRole string, aiGenerated bool, taskID, candidateID *string) error {
 	if userRole != auth.RoleAgent {
-		if aiGenerated || taskID != nil {
+		if aiGenerated || taskID != nil || candidateID != nil {
 			return ErrInvalidInput
 		}
 		return nil

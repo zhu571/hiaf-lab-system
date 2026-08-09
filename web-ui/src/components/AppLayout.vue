@@ -13,7 +13,17 @@
         :class="['nav-link', { 'router-link-active': navActive(item.path) }]"
       >
         <el-icon><component :is="item.icon" /></el-icon>
-        <span>{{ item.label }}</span>
+        <el-badge
+          v-if="item.path === '/agent-candidates'"
+          :value="agentPending"
+          :max="99"
+          :hidden="agentPending === 0"
+          :title="t('nav.pendingReview')"
+          class="nav-badge"
+        >
+          <span>{{ item.label }}</span>
+        </el-badge>
+        <span v-else>{{ item.label }}</span>
       </RouterLink>
       <p class="nav-group">{{ t('nav.systemGroup') }}</p>
       <RouterLink
@@ -66,13 +76,14 @@
 </template>
 
 <script setup lang="ts">
-import { computed, onMounted, type Component } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref, watch, type Component } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import { ArrowUp, Connection, DataBoard, Document, FolderOpened, HomeFilled, MagicStick, Memo, Monitor, Odometer, Paperclip, Reading, Setting, Tickets, User } from '@element-plus/icons-vue'
 import { useMobile } from '../composables/useMobile'
 import { useAuthStore } from '../stores/auth'
 import { useProjectStore } from '../stores/project'
+import { listAgentCandidates } from '../api/agent'
 import MobileTopBar from './MobileTopBar.vue'
 
 type NavItem = { label: string; path: string; icon: Component }
@@ -86,7 +97,48 @@ const { t } = useI18n()
 
 onMounted(() => {
   projects.load().catch(() => undefined)
+  agentTimer = window.setInterval(refreshAgentPending, 30000)
+  document.addEventListener('visibilitychange', onVisibilityChange)
 })
+
+onBeforeUnmount(() => {
+  window.clearInterval(agentTimer)
+  document.removeEventListener('visibilitychange', onVisibilityChange)
+})
+
+// C11 未读徽章：30s 轮询待审核候选数（复用现有分页接口的 total，零新 API）。
+// 仅 admin/maintainer（与 ListCandidates 后端权限一致）拉取；页面隐藏时暂停，
+// 恢复可见、角色资料到位、进入候选页（审核后计数变化）时立即刷新。
+const agentPending = ref(0)
+let agentTimer: number | undefined
+
+async function refreshAgentPending() {
+  if (!auth.canReviewAgent || document.hidden) return
+  try {
+    const data = await listAgentCandidates({ status: 'pending_review', page: 1, per_page: 1 })
+    agentPending.value = data.total
+  } catch {
+    // 徽章拉取失败静默降级，下一轮轮询再试，不打断导航
+  }
+}
+
+function onVisibilityChange() {
+  if (!document.hidden) refreshAgentPending()
+}
+
+watch(
+  () => auth.canReviewAgent,
+  (ok) => {
+    if (ok) refreshAgentPending()
+  },
+  { immediate: true }
+)
+watch(
+  () => route.path,
+  (p) => {
+    if (p.startsWith('/agent-candidates')) refreshAgentPending()
+  }
+)
 
 const navItems = computed<NavItem[]>(() => {
   const items: NavItem[] = [
@@ -222,6 +274,16 @@ async function onUserCommand(command: string | number | object) {
 
 .nav-link .el-icon {
   font-size: 17px;
+}
+
+.nav-badge {
+  display: inline-flex;
+}
+
+.nav-badge :deep(.el-badge__content) {
+  margin-left: 6px;
+  position: static;
+  transform: none;
 }
 
 .nav-link:hover {

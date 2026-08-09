@@ -1,25 +1,74 @@
+import concurrent.futures
 import logging
+import os
 import re
 import time
 
-from tools.api import sanitize_error
+from tools.api import APIError, sanitize_error
+from tools.parse import LLM_TIMEOUT_SECONDS
 
 
 LOG = logging.getLogger("py-agent")
 
 
+def _ntfy_publish_token():
+    # 与 Go 侧 notify.readPublishToken 同源凭据：secret 文件优先，env 兜底。
+    # 凭据是 todo-publisher 的 Bearer token（deploy/secrets/ntfy_publish_token.txt，
+    # 已授 lab-alerts write）；严禁用 service_token——那是 Go 内部服务 token，ntfy 侧无该用户。
+    path = os.environ.get("NTFY_PUBLISH_TOKEN_FILE", "/run/secrets/ntfy_publish_token")
+    try:
+        with open(path, encoding="utf-8") as fh:
+            token = fh.read().strip()
+            if token:
+                return token
+    except OSError:
+        pass
+    return os.environ.get("NTFY_PUBLISH_TOKEN", "").strip()
+
+
+def dead_letter_alert(task_id, detail):
+    # 死信降级告警：fail 也失败时的最后手段，直接发 ntfy（带 Bearer token，C6 修复——
+    # 此前无 token 发布，ntfy auth-default-access: deny-all 下被 403 静默丢弃）。
+    # 任何异常都在此处吞掉，不能再向上抛。
+    try:
+        from urllib.parse import quote
+        from urllib.request import Request, urlopen
+        req = Request("http://ntfy:80/lab-alerts", data=f"任务 {task_id}: {detail}".encode("utf-8"), method="POST")
+        req.add_header("Title", quote("Agent 死信告警", safe=""))
+        req.add_header("Priority", "high")
+        req.add_header("Tags", "robot_face,warning")
+        req.add_header("Click", "http://10.144.144.12:8000/agent-candidates")
+        token = _ntfy_publish_token()
+        if token:
+            req.add_header("Authorization", f"Bearer {token}")
+        urlopen(req, timeout=5)
+    except Exception:
+        LOG.exception("dead letter ntfy alert failed")
+
+
+class LLMTimeoutError(RuntimeError):
+    pass
+
+
+def _is_invalid_lease(exc):
+    # 任务已被他人重领（claim_token/租约校验失败）：属设计内行为，静默即可。
+    return isinstance(exc, APIError) and "invalid_agent_lease" in str(exc)
+
+
 class Worker:
-    def __init__(self, api, parser, poll_interval=5, lease_seconds=300):
+    def __init__(self, api, parser, poll_interval=5, lease_seconds=300, llm_timeout=LLM_TIMEOUT_SECONDS):
         self.api = api
         self.parser = parser
         self.poll_interval = poll_interval
         self.lease_seconds = lease_seconds
+        self.llm_timeout = llm_timeout
 
     def run_once(self):
         task = self.api.claim(self.lease_seconds)
         if task is None:
             return False
         task_id = task["id"]
+        claim_token = task.get("claim_token")
         try:
             report = self.api.get_report(task["report_id"], task["acting_user_id"], task_id)
             project_ids = list(dict.fromkeys(
@@ -35,34 +84,45 @@ class Worker:
                         project_id, status, keyword, task["acting_user_id"], task_id,
                     ))
             issues = list({item["id"]: item for item in issues}.values())[:10]
-            parsed = self.parser.parse(report.get("raw_text", ""), issues, project_ids)
+            parsed = self._parse_with_timeout(report.get("raw_text", ""), issues, project_ids)
             candidates = [to_candidate(item) for item in parsed]
             confidence = sum(item["confidence"] for item in parsed) / len(parsed) if parsed else None
-            self.api.complete(task_id, candidates, confidence)
+            self.api.complete(
+                task_id, candidates, confidence, claim_token=claim_token,
+                raw_text_snapshot=report.get("raw_text", ""), report_date=report.get("report_date"),
+            )
             LOG.info("task completed", extra={"task_id": task_id, "candidate_count": len(candidates)})
         except Exception as exc:
+            if _is_invalid_lease(exc):
+                LOG.info("task ownership lost, skip fail", extra={"task_id": task_id})
+                return True
             import traceback
             LOG.exception("task failed", extra={"task_id": task_id, "trace": traceback.format_exc()[:500]})
-            detail = sanitize_error(exc)
+            detail = "llm timeout" if isinstance(exc, LLMTimeoutError) else sanitize_error(exc)
             LOG.warning("task failed", extra={"task_id": task_id, "error": detail})
             try:
-                self.api.fail(task_id, detail)
-            except Exception:
+                self.api.fail(task_id, detail, claim_token=claim_token)
+            except Exception as fail_exc:
+                if _is_invalid_lease(fail_exc):
+                    LOG.info("fail arrived after reclaim, ignore", extra={"task_id": task_id})
+                    return True
                 LOG.exception("could not mark task failed", extra={"task_id": task_id})
-                try:
-                    from urllib.parse import quote
-                    from urllib.request import Request, urlopen
-                    title = quote("Agent 死信告警", safe="")
-                    body = f"任务 {task_id}: {detail}".encode("utf-8")
-                    req = Request("http://ntfy:80/lab-alerts", data=body, method="POST")
-                    req.add_header("Title", title)
-                    req.add_header("Priority", "high")
-                    req.add_header("Tags", "robot_face,warning")
-                    req.add_header("Click", "http://10.144.144.12:8000/agent-candidates")
-                    urlopen(req, timeout=5)
-                except Exception:
-                    LOG.exception("dead letter ntfy alert failed")
+                dead_letter_alert(task_id, detail)
         return True
+
+    def _parse_with_timeout(self, raw_text, issues, project_ids):
+        # 硬超时只包 LLM parse（前置 HTTP 调用已有自身超时）。每次调用新建
+        # executor 且 shutdown(wait=False)，绝不复用共享池：ThreadPoolExecutor
+        # 无法取消已启动的调用，共享池会被挂死线程堵死（C1 缺口 A）。
+        pool = concurrent.futures.ThreadPoolExecutor(max_workers=1)
+        future = pool.submit(self.parser.parse, raw_text, issues, project_ids)
+        try:
+            return future.result(timeout=self.llm_timeout)
+        except concurrent.futures.TimeoutError as exc:
+            future.cancel()
+            raise LLMTimeoutError("llm timeout") from exc
+        finally:
+            pool.shutdown(wait=False)
 
     def run_forever(self):
         while True:

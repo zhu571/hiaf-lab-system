@@ -47,6 +47,16 @@ func TestCreateRejectsAiGeneratedFromNonAgent(t *testing.T) {
 	}
 }
 
+func TestCreateRejectsCandidateIDFromNonAgent(t *testing.T) {
+	svc := NewService(newFakeExperienceRepo(), fakeProjectAccess{})
+
+	candidateID := "cand_1"
+	_, err := svc.Create("usr_1", auth.RoleMember, CreateExperienceRequest{CandidateID: &candidateID})
+	if !errors.Is(err, ErrInvalidInput) {
+		t.Fatalf("Create error = %v, want %v", err, ErrInvalidInput)
+	}
+}
+
 func TestCandidateListFiltersOrdinaryUserToOwnItems(t *testing.T) {
 	repo := newFakeExperienceRepo()
 	prj := "prj_1"

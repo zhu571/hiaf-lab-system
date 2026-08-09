@@ -78,6 +78,16 @@ func TestCreateRejectsAiGeneratedFromNonAgent(t *testing.T) {
 	}
 }
 
+func TestCreateRejectsCandidateIDFromNonAgent(t *testing.T) {
+	svc := NewService(newFakeIssueRepo(), fakeProjectAccess{})
+
+	candidateID := "cand_1"
+	_, err := svc.Create("prj_1", "usr_1", auth.RoleMember, CreateIssueRequest{CandidateID: &candidateID})
+	if !errors.Is(err, ErrInvalidInput) {
+		t.Fatalf("Create error = %v, want %v", err, ErrInvalidInput)
+	}
+}
+
 func TestUpdateRejectsClosedIssue(t *testing.T) {
 	repo := newFakeIssueRepo()
 	closed := testIssue("iss_1", StatusClosed, "usr_1", nil)

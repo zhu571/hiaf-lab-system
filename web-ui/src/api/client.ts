@@ -78,8 +78,38 @@ function redirectToLogin() {
   }
 }
 
+// C15 运行时校验（轻量结构断言，不上 zod）：成功响应必须是 { data, request_id }
+// envelope；data 为 null/undefined（Go nil slice 序列化为 null）时按请求形态兜底——
+// GET 集合端点给 []（列表防崩，替代 store 层散落补丁），其余给 {}（详情字段渲染为空）。
+// 非 JSON 端点直接放行：附件 blob 下载（responseType/Content-Type 判断）；
+// SSE 流（system.ts fetch、GasControlView EventSource）与静态资源本就不经此 axios 实例。
+const COLLECTION_SEGMENT = /^[a-z]+$/
+
+function isCollectionRequest(config?: AxiosRequestConfig): boolean {
+  if ((config?.method || 'get').toUpperCase() !== 'GET') return false
+  const segments = (config?.url || '').split('?')[0].split('/').filter(Boolean)
+  const last = segments[segments.length - 1] || ''
+  // 纯小写字母末段视为集合（projects/todos/whitelist/members…）；
+  // UUID/含数字/含连字符的末段（by-date、{id} 等）按详情处理。
+  return COLLECTION_SEGMENT.test(last)
+}
+
 api.interceptors.response.use(
-  (response) => response,
+  (response) => {
+    const contentType = String(response.headers?.['content-type'] ?? '')
+    if (response.config.responseType === 'blob' || !contentType.includes('application/json')) {
+      return response
+    }
+    const body = response.data
+    if (!body || typeof body !== 'object' || !('data' in body) || typeof body.request_id !== 'string') {
+      return Promise.reject(new Error(`API 响应结构异常（缺 data/request_id）：${response.config.url}`))
+    }
+    if (body.data === null || body.data === undefined) {
+      body.data = isCollectionRequest(response.config) ? [] : {}
+      console.warn(`[api] ${response.config.url} 返回空 data，已兜底`, body.data)
+    }
+    return response
+  },
   async (error) => {
     const config = error.config as (AxiosRequestConfig & { _retriedAfterRefresh?: boolean }) | undefined
     const url = config?.url ?? ''

@@ -102,6 +102,12 @@ func QueueTaskContext(db *sql.DB) func(http.Handler) http.Handler {
 }
 
 func agentBusinessPathAllowed(method, path string) bool {
+	// C10 递归防护（不变量强制）：显式拒绝 agent PATCH 日报。
+	// 当前 PATCH 本就被下方白名单拒绝，此分支是防未来误放开的断言——
+	// agent 写 daily_reports 会经触发器再次入队 agent 任务，形成自触发回路。
+	if method == http.MethodPatch && strings.HasPrefix(path, "/api/v1/daily-reports/") {
+		return false
+	}
 	if method == http.MethodGet {
 		for _, prefix := range []string{
 			"/api/v1/daily-reports", "/api/v1/projects", "/api/v1/logs",

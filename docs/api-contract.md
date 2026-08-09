@@ -607,6 +607,38 @@ middleware 与 instruments service 双重校验；租约与独立 ACL 后续接�
 
 ## 3.9 Agent 模块
 
+### `POST /api/v1/agent/tasks/claim`
+
+领取待处理任务（agent 角色 + Idempotency-Key）。响应含 `claim_token`（028）：
+每次领取轮换，后续 complete/fail 必须携带同一 token，否则 409 `invalid_agent_lease`。
+
+### `POST /api/v1/agent/tasks/{task_id}/complete` / `POST /api/v1/agent/tasks/{task_id}/fail`
+
+agent 角色 + Idempotency-Key。请求体含 `claim_token`（028 所有权校验）；
+complete 另可携带 `raw_text_snapshot`、`report_date`（030 审计链快照，
+Go 侧计算 `raw_text_sha256` 落库；旧 worker 缺省时保持 NULL）。
+
+### `GET /api/v1/agent/candidates/{id}/trace`
+
+admin/maintainer。候选全链路溯源（030）：
+
+```json
+{
+  "candidate": {},
+  "task": {
+    "model": "deepseek-v4-pro", "prompt_version": "1.0", "agent_confidence": 0.9,
+    "raw_text_snapshot": "AI 当时看到的日报原文", "raw_text_sha256": "...", "report_date": "2026-08-08"
+  },
+  "report": {"id": "...", "report_date": "2026-08-08", "raw_text": "当前值"},
+  "result": {"issue_id": "...", "title": "...", "url": "/projects/.../issues/..."},
+  "audit": []
+}
+```
+
+`report` 经 logs 模块注入读取（无权限时降级为 null）；`result` 经 issues/experiences
+按 `candidate_id` 反链注入反查；`audit` 经 audit 模块注入读取。030 迁移前完成的
+存量任务无快照，`raw_text_snapshot`/`raw_text_sha256`/`report_date` 为 null。
+
 ### `POST /api/v1/agent/tasks`
 
 创建 Agent 任务。
@@ -634,6 +666,9 @@ middleware 与 instruments service 双重校验；租约与独立 ACL 后续接�
 
 ### `POST /api/v1/notifications/events`
 
+> ⚠️ 预告，尚未实现（文档超前于实现）。当前告警由 Go 侧 `notify.Send` 直发 ntfy，
+> 无统一事件入口。
+
 内部服务提交告警事件，由通知模块按规则路由到 ntfy 或 MeoW。
 
 请求：
@@ -653,11 +688,112 @@ middleware 与 instruments service 双重校验；租约与独立 ACL 后续接�
 
 ## 3.11 审计模块
 
+仅 admin/maintainer 可查（handler 内角色校验）。`audit_log` 自 029 迁移起带
+SHA-256 hash 链（`prev_hash`/`hash`）：每条记录的 `hash = sha256(prev_hash|规范化内容)`，
+创世块 `prev_hash` 为 64 个 `0`。写入被应用层 advisory lock 串行化，篡改/删行可被
+verify 端点检出。审计路由不挂 Audit 中间件（verify/events 查询不自审计）。
+
+### `GET /api/v1/audit/{request_id}`
+
+按 request_id 查审计行（029 起响应含 `actor_type`/`acting_user_id`/`agent_task_id`/
+`idempotency_key`/`prev_hash`/`hash`）。
+
+响应：
+
+```json
+{
+  "data": {
+    "items": [
+      {
+        "id": 101, "request_id": "req_20260808_000001", "user_id": "...", "username": "admin",
+        "method": "POST", "path": "/api/v1/issues", "action": "issues.create", "status_code": 201,
+        "client_ip": "10.0.0.1", "detail": {}, "created_at": "2026-08-08T10:00:00+08:00",
+        "actor_type": "user", "acting_user_id": null, "agent_task_id": null,
+        "idempotency_key": "...", "prev_hash": "...", "hash": "..."
+      }
+    ],
+    "total": 1
+  },
+  "request_id": "req_20260808_000002"
+}
+```
+
+### `GET /api/v1/audit/verify`
+
+全链重算校验，O(n) 单趟。支持 `?from_id=&to_id=` 增量区间（定期抽查用；`from_id`
+以该行之前最近一行的 hash 为锚点，缺省 0=不设界）。
+
+响应：
+
+```json
+{
+  "data": {"valid": true, "total": 1234, "checked": 1234, "first_broken_id": null, "message": "链校验通过"},
+  "request_id": "req_20260808_000003"
+}
+```
+
+`valid=false` 时 `first_broken_id` 指向首个断链/篡改行，`message` 说明原因。
+
 ### `GET /api/v1/audit/events`
 
-仅 admin 或安全审计员可查。支持 `actor_id`、`acting_user_id`、`object_type`、`object_id`、`from`、`to`。
+审计列表端点。查询参数：`action`（精确匹配）、`user_id`（UUID）、`actor_type`
+（user/agent/system）、`from`/`to`（RFC3339，`created_at` 区间）、`page`（默认 1）、
+`per_page`（默认 20，上限 100）。按写入顺序倒序（最新在前）。
 
-## 3.12 系统管理模块（系统更新）
+响应：
+
+```json
+{
+  "data": {"items": [/* 同 GET /api/v1/audit/{request_id} 的 Record 结构 */], "total": 1234, "page": 1, "per_page": 20},
+  "request_id": "req_20260808_000004"
+}
+```
+
+## 3.12 自动化规则模块（C9 规则引擎一期）
+
+仅 admin 角色可访问（路由挂 `RequireRole(admin)`，写操作挂 Audit + Idempotency-Key）。
+规则表驱动 `daily_report.submitted` 事件的 agent 任务入队（迁移 032 起触发器规则派发，
+替代 014 硬编码）。一期边界由 DB CHECK + service 双重白名单锁死：事件仅
+`daily_report.submitted`，动作仅 `enqueue_agent_task`；PATCH 仅允许切换 `enabled`。
+
+### `GET /api/v1/admin/automation/rules`
+
+规则列表（含 disabled）。响应：
+
+```json
+{
+  "data": {
+    "items": [
+      {
+        "id": "...", "name": "日报提交→issue 候选",
+        "trigger_event": "daily_report.submitted",
+        "action": {"type": "enqueue_agent_task", "mode": "parse_issues"},
+        "enabled": true, "created_by": null,
+        "created_at": "2026-08-09T10:00:00+08:00", "updated_at": "2026-08-09T10:00:00+08:00"
+      }
+    ],
+    "total": 1
+  },
+  "request_id": "req_..."
+}
+```
+
+### `POST /api/v1/admin/automation/rules`
+
+新建规则（Idempotency-Key + 审计）。请求体 `{name, trigger_event, action}`；
+`trigger_event`/`action.type` 非白名单值返回 400 `invalid_rule`（DB CHECK 为兜底）。
+
+### `PATCH /api/v1/admin/automation/rules/{id}`
+
+仅允许切换 `enabled`（Idempotency-Key + 审计）。请求体 `{"enabled": false}`；
+一期不改 `trigger_event`/`action`（避免无 schema 校验的写穿）。规则不存在返回
+404 `rule_not_found`。
+
+### `DELETE /api/v1/admin/automation/rules/{id}`
+
+硬删除（Idempotency-Key + 审计留痕）。规则不存在返回 404 `rule_not_found`。
+
+## 3.13 系统管理模块（系统更新）
 
 仅 admin 角色可访问（路由挂 `RequireRole(admin)`）。更新由 Go 进程触发，执行引擎由
 `UPDATE_ENGINE` 环境变量决定：

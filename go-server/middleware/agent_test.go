@@ -36,6 +36,29 @@ func TestAgentCannotAiParseDailyReport(t *testing.T) {
 	}
 }
 
+// C10 递归防护：agent 写日报（PATCH /api/v1/daily-reports/{id}）必须被显式拒绝，
+// 防止未来白名单放开形成 agent → daily_reports → 触发器 → agent 的自触发回路。
+func TestAgentCannotPatchDailyReport(t *testing.T) {
+	const reportURL = "/api/v1/daily-reports/00000000-0000-0000-0000-000000000001"
+	if agentBusinessPathAllowed(http.MethodPatch, reportURL) {
+		t.Fatal("agent must not be allowed to PATCH /api/v1/daily-reports/{id}")
+	}
+	// 中间件级验证：路径拒绝发生在任务校验（需 DB）之前，AgentContext(nil) 即可。
+	ctx := context.WithValue(context.Background(), userClaimsKey, &UserClaims{UserID: "agent-1", Role: "agent"})
+	req := httptest.NewRequest(http.MethodPatch, reportURL, nil).WithContext(ctx)
+	req.Header.Set("X-Acting-User-ID", "user-1")
+	req.Header.Set("X-Agent-Task-ID", "task-1")
+	rr := httptest.NewRecorder()
+
+	AgentContext(nil)(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {
+		t.Fatal("agent PATCH daily-reports should have been rejected")
+	})).ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusForbidden {
+		t.Fatalf("expected 403, got %d", rr.Code)
+	}
+}
+
 func TestAgentContextSkipsServiceCall(t *testing.T) {
 	// service token 调用（by-date 白名单）无 JWT claims，AgentContext 必须放行，
 	// 否则生产链路 AuthRequired→AgentContext 会把 scheduler 的日报拉取挡成 401。

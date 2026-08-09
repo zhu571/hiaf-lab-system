@@ -61,6 +61,16 @@
         </div>
         <el-empty v-if="!loading && !loadError && filteredSteps.length === 0" :description="t('assembly.empty')" />
       </div>
+      <el-pagination
+        v-model:current-page="page"
+        v-model:page-size="perPage"
+        class="pager"
+        layout="total, sizes, prev, pager, next"
+        :page-sizes="[20, 50, 100]"
+        :total="total"
+        @current-change="load"
+        @size-change="onSizeChange"
+      />
     </section>
     <el-dialog v-model="createDialog" :title="t('assembly.create')" width="560">
       <el-form label-position="top">
@@ -170,6 +180,9 @@ const members = ref<ProjectMember[]>([])
 const loading = ref(false)
 const loadError = ref('')
 const statusFilter = ref('')
+const page = ref(1)
+const perPage = ref(20)
+const total = ref(0)
 const createDialog = ref(false)
 const overrideDialog = ref(false)
 const overrideReason = ref('')
@@ -224,15 +237,24 @@ const filteredSteps = computed(() => (statusFilter.value ? steps.value.filter((s
 const memberMap = computed(() => Object.fromEntries(members.value.map((m) => [m.user_id, m.username || m.user_id])) as Record<string, string>)
 
 onMounted(load)
-watch(projectId, load)
+watch(projectId, () => {
+  page.value = 1
+  load()
+})
+
+function onSizeChange() {
+  page.value = 1
+  load()
+}
 
 async function load() {
   loading.value = true
   loadError.value = ''
   try {
     if (!projectId.value) return
-    const [data, memberList] = await Promise.all([listAssemblySteps(projectId.value, { per_page: 100 }), listMembers(projectId.value)])
+    const [data, memberList] = await Promise.all([listAssemblySteps(projectId.value, { page: page.value, per_page: perPage.value }), listMembers(projectId.value)])
     steps.value = (data.items ?? []).slice().sort((a, b) => a.step_order - b.step_order)
+    total.value = data.total ?? 0
     members.value = memberList ?? []
   } catch (err) {
     loadError.value = err instanceof Error ? err.message : t('assembly.loadFailed')
@@ -318,8 +340,11 @@ async function applyReorder(from: number, to: number) {
   const reordered = [...steps.value]
   const [moved] = reordered.splice(from, 1)
   reordered.splice(to, 0, moved)
+  // 分页下拖拽/移动仅覆盖当前页条目；step_order 按全局序号（页偏移 + 页内位置）提交，
+  // 后端 Reorder 只更新提交的条目（不要求全量），其他页条目的相对顺序不受影响
+  const base = (page.value - 1) * perPage.value
   try {
-    await reorderAssemblySteps({ project_id: projectId.value, steps: reordered.map((s, i) => ({ id: s.id, step_order: i + 1 })) })
+    await reorderAssemblySteps({ project_id: projectId.value, steps: reordered.map((s, i) => ({ id: s.id, step_order: base + i + 1 })) })
     ElMessage.success(t('assembly.orderUpdated'))
     await load()
   } catch (err) {
@@ -495,6 +520,11 @@ async function saveAndApply() {
   display: grid;
   gap: 10px;
   min-height: 80px;
+}
+
+.pager {
+  justify-content: flex-end;
+  margin-top: 14px;
 }
 
 .step-row {

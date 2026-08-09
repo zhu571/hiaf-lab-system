@@ -1,3 +1,4 @@
+import asyncio
 import json
 import os
 import re
@@ -26,191 +27,149 @@ def read_token():
     return os.getenv("PY_AGENT_INTERNAL_TOKEN", "")
 
 
+def check(cond, msg):
+    """请求校验辅助：条件不满足抛 ValueError（端点工厂统一映射 400）。"""
+    if not cond:
+        raise ValueError(msg)
+
+
+def _size_ok(data):
+    return isinstance(data, dict) and len(json.dumps(data, ensure_ascii=False)) <= 64_000
+
+
 def validate_request(data):
-    if not isinstance(data, dict) or len(json.dumps(data, ensure_ascii=False)) > 64_000:
-        raise ValueError("request too large")
+    check(_size_ok(data), "request too large")
     user_input = data.get("user_input")
     history = data.get("history", [])
     commands = data.get("whitelist_commands")
-    if not isinstance(user_input, str) or not user_input.strip() or len(user_input) > 1000:
-        raise ValueError("user_input is invalid")
-    if not isinstance(history, list) or len(history) > 10:
-        raise ValueError("history is invalid")
+    check(isinstance(user_input, str) and user_input.strip() and len(user_input) <= 1000, "user_input is invalid")
+    check(isinstance(history, list) and len(history) <= 10, "history is invalid")
     for item in history:
-        if not isinstance(item, dict) or item.get("role") not in {"user", "assistant"} or not isinstance(item.get("content"), str) or len(item["content"]) > 1000:
-            raise ValueError("history item is invalid")
-    if not isinstance(commands, list) or not commands or len(commands) > 100:
-        raise ValueError("whitelist_commands is invalid")
+        check(isinstance(item, dict) and item.get("role") in {"user", "assistant"}
+              and isinstance(item.get("content"), str) and len(item["content"]) <= 1000, "history item is invalid")
+    check(isinstance(commands, list) and commands and len(commands) <= 100, "whitelist_commands is invalid")
     for command in commands:
-        if not isinstance(command, dict) or not isinstance(command.get("name"), str):
-            raise ValueError("whitelist command is invalid")
+        check(isinstance(command, dict) and isinstance(command.get("name"), str), "whitelist command is invalid")
     return user_input.strip(), history, commands
+
+
+def validate_step_plan(data):
+    check(_size_ok(data), "request too large")
+    kind = data.get("kind")
+    prompt = data.get("prompt")
+    context = data.get("context") or {}
+    check(kind in {"assembly", "experiment"}, "kind is invalid")
+    check(isinstance(prompt, str) and prompt.strip() and len(prompt) <= 4000, "prompt is invalid")
+    check(isinstance(context, dict), "context is invalid")
+    return kind, prompt.strip(), context
 
 
 REPORT_DATE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
 
 
 def validate_daily_parse(data):
-    if not isinstance(data, dict) or len(json.dumps(data, ensure_ascii=False)) > 64_000:
-        raise ValueError("request too large")
+    check(_size_ok(data), "request too large")
     raw_text = data.get("raw_text")
     projects = data.get("projects")
     report_date = data.get("report_date")
-    if not isinstance(raw_text, str) or not 1 <= len(raw_text.strip()) <= 4000:
-        raise ValueError("raw_text is invalid")
-    if not isinstance(projects, list) or not 1 <= len(projects) <= 50:
-        raise ValueError("projects is invalid")
+    check(isinstance(raw_text, str) and 1 <= len(raw_text.strip()) <= 4000, "raw_text is invalid")
+    check(isinstance(projects, list) and 1 <= len(projects) <= 50, "projects is invalid")
     for project in projects:
-        if not isinstance(project, dict) or not isinstance(project.get("id"), str) or not isinstance(project.get("name"), str):
-            raise ValueError("project is invalid")
-    if not isinstance(report_date, str) or not REPORT_DATE.match(report_date):
-        raise ValueError("report_date is invalid")
+        check(isinstance(project, dict) and isinstance(project.get("id"), str) and isinstance(project.get("name"), str),
+              "project is invalid")
+    check(isinstance(report_date, str) and REPORT_DATE.match(report_date), "report_date is invalid")
     return raw_text.strip(), projects, report_date
 
 
 def validate_todo_add(data):
-    if not isinstance(data, dict) or len(json.dumps(data, ensure_ascii=False)) > 64_000:
-        raise ValueError("request too large")
+    check(_size_ok(data), "request too large")
     raw_text = data.get("raw_text")
     user_id = data.get("user_id")
-    if not isinstance(raw_text, str) or not raw_text.strip() or len(raw_text.strip()) > 2000:
-        raise ValueError("raw_text is invalid")
-    if not isinstance(user_id, str) or not user_id.strip() or len(user_id.strip()) > 128:
-        raise ValueError("user_id is invalid")
+    check(isinstance(raw_text, str) and raw_text.strip() and len(raw_text.strip()) <= 2000, "raw_text is invalid")
+    check(isinstance(user_id, str) and user_id.strip() and len(user_id.strip()) <= 128, "user_id is invalid")
     return raw_text.strip(), user_id.strip()
 
 
 def validate_todo_daily(data):
-    if not isinstance(data, dict) or len(json.dumps(data, ensure_ascii=False)) > 64_000:
-        raise ValueError("request too large")
+    check(_size_ok(data), "request too large")
     user_id = data.get("user_id")
     yesterday_report = data.get("yesterday_report", "")
     open_issues = data.get("open_issues", [])
     existing_titles = data.get("existing_titles", [])
-    if not isinstance(user_id, str) or not user_id.strip() or len(user_id.strip()) > 128:
-        raise ValueError("user_id is invalid")
-    if not isinstance(yesterday_report, str) or len(yesterday_report) > 20_000:
-        raise ValueError("yesterday_report is invalid")
-    if not isinstance(open_issues, list) or len(open_issues) > 50:
-        raise ValueError("open_issues is invalid")
+    check(isinstance(user_id, str) and user_id.strip() and len(user_id.strip()) <= 128, "user_id is invalid")
+    check(isinstance(yesterday_report, str) and len(yesterday_report) <= 20_000, "yesterday_report is invalid")
+    check(isinstance(open_issues, list) and len(open_issues) <= 50, "open_issues is invalid")
     for issue in open_issues:
-        if not isinstance(issue, dict):
-            raise ValueError("open_issue is invalid")
-        if not isinstance(issue.get("id"), str) or not issue.get("id") or \
-           not isinstance(issue.get("title"), str) or not issue.get("title"):
-            raise ValueError("open_issue fields are invalid")
-    if not isinstance(existing_titles, list) or len(existing_titles) > 50:
-        raise ValueError("existing_titles is invalid")
+        check(isinstance(issue, dict), "open_issue is invalid")
+        check(isinstance(issue.get("id"), str) and issue.get("id")
+              and isinstance(issue.get("title"), str) and issue.get("title"), "open_issue fields are invalid")
+    check(isinstance(existing_titles, list) and len(existing_titles) <= 50, "existing_titles is invalid")
     for title in existing_titles:
-        if not isinstance(title, str) or len(title) > 300:
-            raise ValueError("existing_title is invalid")
+        check(isinstance(title, str) and len(title) <= 300, "existing_title is invalid")
     return user_id.strip(), yesterday_report, open_issues, existing_titles
 
 
 def create_app(interpreter, planner, parser, todo_planner, token):
+    def make_endpoint(validate, handler, parse_error_code):
+        """端点工厂：统一 Bearer 鉴权、JSON 解析（64KB 上限）、三态异常映射（400/422/502）。
+
+        handler 接收 (validated, 原始 dict)：interpret 需读原始 data 的
+        instrument_id/instrument_name（validate_request 不校验这两字段）。
+        """
+        async def endpoint(request: Request):
+            supplied = request.headers.get("authorization", "").removeprefix("Bearer ")
+            if not token or not secrets.compare_digest(supplied, token):
+                return JSONResponse({"error": "unauthorized"}, status_code=401)
+            try:
+                data = await request.json()
+                result = await handler(validate(data), data)
+                return JSONResponse(result)
+            except (ValueError, json.JSONDecodeError):
+                return JSONResponse({"error": "bad_request"}, status_code=400)
+            except ParseError:
+                return JSONResponse({"error": parse_error_code}, status_code=422)
+            except Exception:
+                return JSONResponse({"error": "provider_unavailable"}, status_code=502)
+        return endpoint
+
     async def health(_request):
         return JSONResponse({"status": "ok"})
 
-    async def interpret(request: Request):
-        supplied = request.headers.get("authorization", "").removeprefix("Bearer ")
-        if not token or not secrets.compare_digest(supplied, token):
-            return JSONResponse({"error": "unauthorized"}, status_code=401)
-        try:
-            data = await request.json()
-            user_input, history, commands = validate_request(data)
-            result = interpreter.interpret(
-                str(data.get("instrument_id", ""))[:128], str(data.get("instrument_name", ""))[:256],
-                commands, user_input, history,
-            )
-            return JSONResponse(result)
-        except (ValueError, json.JSONDecodeError):
-            return JSONResponse({"error": "bad_request"}, status_code=400)
-        except ParseError:
-            return JSONResponse({"error": "interpretation_failed"}, status_code=422)
-        except Exception:
-            return JSONResponse({"error": "provider_unavailable"}, status_code=502)
+    # 同步 LLM 调用一律 asyncio.to_thread 放线程池，避免慢请求阻塞整个事件循环（C1 缺口 C）。
 
-    async def step_plan(request: Request):
-        supplied = request.headers.get("authorization", "").removeprefix("Bearer ")
-        if not token or not secrets.compare_digest(supplied, token):
-            return JSONResponse({"error": "unauthorized"}, status_code=401)
-        try:
-            data = await request.json()
-            if not isinstance(data, dict) or len(json.dumps(data, ensure_ascii=False)) > 64_000:
-                raise ValueError("request too large")
-            kind = data.get("kind")
-            prompt = data.get("prompt")
-            context = data.get("context") or {}
-            if kind not in {"assembly", "experiment"}:
-                raise ValueError("kind is invalid")
-            if not isinstance(prompt, str) or not prompt.strip() or len(prompt) > 4000:
-                raise ValueError("prompt is invalid")
-            if not isinstance(context, dict):
-                raise ValueError("context is invalid")
-            result = planner.plan(kind, prompt.strip(), context)
-            return JSONResponse(result)
-        except (ValueError, json.JSONDecodeError):
-            return JSONResponse({"error": "bad_request"}, status_code=400)
-        except ParseError:
-            return JSONResponse({"error": "planning_failed"}, status_code=422)
-        except Exception:
-            return JSONResponse({"error": "provider_unavailable"}, status_code=502)
+    async def do_interpret(validated, data):
+        user_input, history, commands = validated
+        return await asyncio.to_thread(
+            interpreter.interpret,
+            str(data.get("instrument_id", ""))[:128], str(data.get("instrument_name", ""))[:256],
+            commands, user_input, history,
+        )
 
-    async def daily_parse(request: Request):
-        supplied = request.headers.get("authorization", "").removeprefix("Bearer ")
-        if not token or not secrets.compare_digest(supplied, token):
-            return JSONResponse({"error": "unauthorized"}, status_code=401)
-        try:
-            data = await request.json()
-            raw_text, projects, report_date = validate_daily_parse(data)
-            result = parser.parse_daily_logs(raw_text, projects, report_date)
-            return JSONResponse(result)
-        except (ValueError, json.JSONDecodeError):
-            return JSONResponse({"error": "bad_request"}, status_code=400)
-        except ParseError:
-            return JSONResponse({"error": "daily_parse_failed"}, status_code=422)
-        except Exception:
-            return JSONResponse({"error": "provider_unavailable"}, status_code=502)
+    async def do_step_plan(validated, _data):
+        kind, prompt, context = validated
+        return await asyncio.to_thread(planner.plan, kind, prompt, context)
 
-    async def todo_add(request: Request):
-        supplied = request.headers.get("authorization", "").removeprefix("Bearer ")
-        if not token or not secrets.compare_digest(supplied, token):
-            return JSONResponse({"error": "unauthorized"}, status_code=401)
-        try:
-            data = await request.json()
-            raw_text, user_id = validate_todo_add(data)
-            result = todo_planner.parse_add(raw_text, user_id)
-            return JSONResponse(result)
-        except (ValueError, json.JSONDecodeError):
-            return JSONResponse({"error": "bad_request"}, status_code=400)
-        except ParseError:
-            return JSONResponse({"error": "todo_add_failed"}, status_code=422)
-        except Exception:
-            return JSONResponse({"error": "provider_unavailable"}, status_code=502)
+    async def do_daily_parse(validated, _data):
+        raw_text, projects, report_date = validated
+        return await asyncio.to_thread(parser.parse_daily_logs, raw_text, projects, report_date)
 
-    async def todo_daily(request: Request):
-        supplied = request.headers.get("authorization", "").removeprefix("Bearer ")
-        if not token or not secrets.compare_digest(supplied, token):
-            return JSONResponse({"error": "unauthorized"}, status_code=401)
-        try:
-            data = await request.json()
-            user_id, yesterday_report, open_issues, existing_titles = validate_todo_daily(data)
-            result = todo_planner.generate_daily(user_id, yesterday_report, open_issues, existing_titles)
-            return JSONResponse(result)
-        except (ValueError, json.JSONDecodeError):
-            return JSONResponse({"error": "bad_request"}, status_code=400)
-        except ParseError:
-            return JSONResponse({"error": "todo_daily_failed"}, status_code=422)
-        except Exception:
-            return JSONResponse({"error": "provider_unavailable"}, status_code=502)
+    async def do_todo_add(validated, _data):
+        raw_text, user_id = validated
+        return await asyncio.to_thread(todo_planner.parse_add, raw_text, user_id)
+
+    async def do_todo_daily(validated, _data):
+        user_id, yesterday_report, open_issues, existing_titles = validated
+        return await asyncio.to_thread(
+            todo_planner.generate_daily, user_id, yesterday_report, open_issues, existing_titles,
+        )
 
     return Starlette(routes=[
         Route("/health", health),
-        Route("/v1/interpret", interpret, methods=["POST"]),
-        Route("/v1/step-plan", step_plan, methods=["POST"]),
-        Route("/v1/daily-parse", daily_parse, methods=["POST"]),
-        Route("/v1/todo-add", todo_add, methods=["POST"]),
-        Route("/v1/todo-daily", todo_daily, methods=["POST"]),
+        Route("/v1/interpret", make_endpoint(validate_request, do_interpret, "interpretation_failed"), methods=["POST"]),
+        Route("/v1/step-plan", make_endpoint(validate_step_plan, do_step_plan, "planning_failed"), methods=["POST"]),
+        Route("/v1/daily-parse", make_endpoint(validate_daily_parse, do_daily_parse, "daily_parse_failed"), methods=["POST"]),
+        Route("/v1/todo-add", make_endpoint(validate_todo_add, do_todo_add, "todo_add_failed"), methods=["POST"]),
+        Route("/v1/todo-daily", make_endpoint(validate_todo_daily, do_todo_daily, "todo_daily_failed"), methods=["POST"]),
     ])
 
 
