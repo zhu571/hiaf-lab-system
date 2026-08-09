@@ -11,6 +11,7 @@ from starlette.requests import Request
 from starlette.responses import JSONResponse
 from starlette.routing import Route
 
+from tools.ask import AskEngine
 from tools.parse import InstrumentInterpreter, ParseError, Parser
 from tools.stepplan import StepPlanner
 from tools.todoplan import TodoPlanner
@@ -109,7 +110,22 @@ def validate_todo_daily(data):
     return user_id.strip(), yesterday_report, open_issues, existing_titles
 
 
-def create_app(interpreter, planner, parser, todo_planner, token):
+def validate_ask(data):
+    """AI 智能查询：question ≤ 1000 字符（strip 非空）、schema ≤ 64KB、history 可选（≤10 条）。"""
+    check(_size_ok(data), "request too large")
+    question = data.get("question")
+    schema = data.get("schema")
+    history = data.get("history", [])
+    check(isinstance(question, str) and question.strip() and len(question) <= 1000, "question is invalid")
+    check(isinstance(schema, str) and len(schema) <= 64_000, "schema is invalid")
+    check(isinstance(history, list) and len(history) <= 10, "history is invalid")
+    for item in history:
+        check(isinstance(item, dict) and item.get("role") in {"user", "assistant"}
+              and isinstance(item.get("content"), str) and len(item["content"]) <= 1000, "history item is invalid")
+    return question.strip(), schema, history
+
+
+def create_app(interpreter, planner, parser, todo_planner, token, ask_engine=None):
     def make_endpoint(validate, handler, parse_error_code):
         """端点工厂：统一 Bearer 鉴权、JSON 解析（64KB 上限）、三态异常映射（400/422/502）。
 
@@ -163,6 +179,17 @@ def create_app(interpreter, planner, parser, todo_planner, token):
             todo_planner.generate_daily, user_id, yesterday_report, open_issues, existing_titles,
         )
 
+    async def do_ask(validated, _data):
+        if ask_engine is None:
+            raise RuntimeError("ask engine is not configured")
+        question, schema, history = validated
+        # 总超时 60s 预算（规划 25s + 执行 5s + 整合 25s + 余量；重试共享同一预算）：
+        # 两步 LLM 规划 + 一次执行 + 一次整合整体 wait_for，超时 → 502 provider_unavailable。
+        return await asyncio.wait_for(
+            asyncio.to_thread(ask_engine.ask, question, schema, history),
+            timeout=AskEngine.TOTAL_TIMEOUT,
+        )
+
     return Starlette(routes=[
         Route("/health", health),
         Route("/v1/interpret", make_endpoint(validate_request, do_interpret, "interpretation_failed"), methods=["POST"]),
@@ -170,6 +197,7 @@ def create_app(interpreter, planner, parser, todo_planner, token):
         Route("/v1/daily-parse", make_endpoint(validate_daily_parse, do_daily_parse, "daily_parse_failed"), methods=["POST"]),
         Route("/v1/todo-add", make_endpoint(validate_todo_add, do_todo_add, "todo_add_failed"), methods=["POST"]),
         Route("/v1/todo-daily", make_endpoint(validate_todo_daily, do_todo_daily, "todo_daily_failed"), methods=["POST"]),
+        Route("/v1/ask", make_endpoint(validate_ask, do_ask, "ask_failed"), methods=["POST"]),
     ])
 
 
@@ -181,5 +209,6 @@ if __name__ == "__main__":
     app = create_app(
         InstrumentInterpreter(api_key), StepPlanner(api_key),
         Parser(api_key, prompt_path=daily_prompt), TodoPlanner(api_key), read_token(),
+        ask_engine=AskEngine(api_key),
     )
     uvicorn.run(app, host="0.0.0.0", port=8001)
