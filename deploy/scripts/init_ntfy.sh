@@ -7,6 +7,8 @@
 #   3. 批量建 per-user 账号 todo-{username} + 各自 lab-todos-{sha256(user_id)[:16]} read-only ACL
 #   4. 生成 service_token（todos scheduler 拉日报用）
 #   5. 修正 /etc/ntfy 属主为 server 容器 UID（默认 1000，与 compose UPDATE_RUN_UID 对齐）
+#   6. 生成 agent_password（py-agent 以 agent@system 登录 Go 侧）
+#   7. 生成 grafana admin 密码（Grafana 登录凭据，P1-3：默认 admin/admin 不再适用）
 #
 # 用法：cd deploy && ./scripts/init_ntfy.sh
 # 前置：docker compose up -d 已启动（lab-ntfy、lab-postgres 在跑）。
@@ -98,5 +100,23 @@ fi
 # 需对 /etc/ntfy 有写权限（WAL/SHM 文件也在该目录）；ntfy 服务以 root 运行不受影响。
 docker exec "$NTFY_CONTAINER" chown -R "$RUN_UID:$RUN_GID" /etc/ntfy
 echo "auth-file 属主已对齐 server 容器 UID $RUN_UID:$RUN_GID"
+
+# ---------- 6. agent 登录密码（py-agent 以 agent@system 登录 Go 侧） ----------
+# 只补缺省、不覆盖已有文件（已部署系统重跑脚本不会破坏 agent 登录）。
+# agent@system 的 DB 侧密码哈希由 seed-agent 首启时写入，若手工重置该密码需同步重跑 seed。
+if [ ! -s "$SECRETS_DIR/agent_password.txt" ]; then
+  openssl rand -base64 24 | tr -d '\n' > "$SECRETS_DIR/agent_password.txt"
+  chmod 600 "$SECRETS_DIR/agent_password.txt"
+  echo "已生成 agent password → $SECRETS_DIR/agent_password.txt"
+fi
+
+# ---------- 7. Grafana admin 登录密码（P1-3：默认凭据 secret 化） ----------
+# 只补缺省、不覆盖已有文件（已部署系统重跑不会破坏现有密码）。
+# 密码变更需重建 grafana 容器生效（docker compose up -d grafana），或 grafana-cli admin reset-admin-password。
+if [ ! -s "$SECRETS_DIR/grafana_admin_password.txt" ]; then
+  openssl rand -base64 24 | tr -d '\n' > "$SECRETS_DIR/grafana_admin_password.txt"
+  chmod 600 "$SECRETS_DIR/grafana_admin_password.txt"
+  echo "已生成 grafana admin 密码 → $SECRETS_DIR/grafana_admin_password.txt"
+fi
 
 echo "ntfy 初始化完成。"

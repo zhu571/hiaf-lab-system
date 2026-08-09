@@ -46,6 +46,8 @@ const (
 	snapshotBudget   = 256 << 10 // rows 快照总字节 ≤256KB
 	schemaTTL        = 10 * time.Minute
 	statementTimeout = 5000 // ms
+	retentionDays    = 90   // 快照保留天数默认值（ASK_HISTORY_RETENTION_DAYS 可调）
+	retentionTick    = 24 * time.Hour
 )
 
 // 防线 2+3 正则（见方案 §5）。
@@ -96,6 +98,7 @@ type Service struct {
 	schemaMu   sync.Mutex
 	schemaText string
 	schemaAt   time.Time
+	retention  sync.Mutex // 防保留任务重入（与 todos scheduler 互斥模式一致）
 }
 
 func NewService(repo *Repository, db *sql.DB) *Service {
@@ -450,8 +453,10 @@ func prepareSQL(raw string) (sqlText, table string, truncated bool, err error) {
 		}
 		seen[name] = true
 	}
-	if len(seen) > 1 {
-		return "", "", false, fmt.Errorf("%w: v1 仅允许查询单张表", ErrSQLRejected)
+	// 按 FROM 子句表引用 token 数判定（非去重后表数）：堵住同表逗号自连接
+	// （FROM projects p1, projects p2 去重后只剩 1 张表，但笛卡尔积放大照常发生）。
+	if len(fromTables) > 1 {
+		return "", "", false, fmt.Errorf("%w: v1 仅允许查询单张表（禁止逗号自连接）", ErrSQLRejected)
 	}
 	for t := range seen {
 		table = t
@@ -773,4 +778,54 @@ func (s *Service) List(userID string, page, perPage int) ([]AskHistory, int, err
 
 func (s *Service) GetByUser(id, userID string) (*AskHistory, error) {
 	return s.repo.GetHistoryByUser(id, userID)
+}
+
+// RunRetentionOnce 执行一轮快照保留：cutoff 之前且非空的行置 NULL（P2-3，定死方案：
+// 不做 DELETE、不做 admin 清理端点——保留历史列表可用性）。返回置空行数。
+func (s *Service) RunRetentionOnce(ctx context.Context, cutoff time.Time) (int64, error) {
+	n, err := s.repo.NullifyOldSnapshots(cutoff)
+	if err != nil {
+		return 0, err
+	}
+	if n > 0 {
+		slog.Info("ask history snapshots nullified", "count", n, "cutoff", cutoff.Format(time.RFC3339))
+	}
+	return n, nil
+}
+
+// StartRetentionTask 启动每日快照保留任务：立即执行一次 + 每 24h tick；
+// 互斥锁防重入；保留天数取 ASK_HISTORY_RETENTION_DAYS（默认 90），
+// cutoff 用 Asia/Shanghai 本地日界对齐。ctx 取消即退出。
+func (s *Service) StartRetentionTask(ctx context.Context) {
+	days := retentionDays
+	if v := os.Getenv("ASK_HISTORY_RETENTION_DAYS"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil && n > 0 {
+			days = n
+		}
+	}
+	loc, err := time.LoadLocation("Asia/Shanghai")
+	if err != nil {
+		slog.Warn("ask retention: Asia/Shanghai unavailable, fallback to UTC", "error", err)
+		loc = time.UTC
+	}
+	run := func() {
+		s.retention.Lock()
+		defer s.retention.Unlock()
+		now := time.Now().In(loc)
+		cutoff := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, loc).AddDate(0, 0, -days)
+		if _, err := s.RunRetentionOnce(ctx, cutoff); err != nil && ctx.Err() == nil {
+			slog.Warn("ask retention run failed", "error", err)
+		}
+	}
+	run()
+	ticker := time.NewTicker(retentionTick)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			run()
+		}
+	}
 }

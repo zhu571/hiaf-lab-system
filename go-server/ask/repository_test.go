@@ -1,6 +1,7 @@
 package ask
 
 import (
+	"context"
 	"database/sql"
 	"os"
 	"testing"
@@ -103,5 +104,94 @@ func TestAskRepository(t *testing.T) {
 	}
 	if _, err := repo.GetHistory("00000000-0000-0000-0000-00000000dead"); err != ErrNotFound {
 		t.Fatalf("expected ErrNotFound for missing id, got %v", err)
+	}
+}
+
+// TestAskRetention 快照保留策略（P2-3，迁移 034）：100 天前行置 NULL、行仍在、
+// 明细接口不 500（Rows==nil）、90 天内行不受影响、列表接口不受影响。
+func TestAskRetention(t *testing.T) {
+	db := openAskTestDB(t)
+	defer db.Close()
+	repo := NewRepository(db)
+	svc := NewService(repo, db)
+
+	cleanup := func() {
+		db.Exec(`DELETE FROM ask_history WHERE user_id IN ($1,$2)`, askUserID, askUserID2)
+	}
+	cleanup()
+	defer cleanup()
+
+	save := func(userID string) *AskHistory {
+		h := &AskHistory{
+			UserID:    userID,
+			RequestID: "req_ask_retention",
+			Question:  "retention test",
+			Answer:    "ok",
+			Columns:   []string{"id"},
+			Rows:      []map[string]any{{"id": "r1"}},
+			RowCount:  1,
+			Model:     "test",
+		}
+		if err := repo.SaveAsk(h); err != nil {
+			t.Fatalf("SaveAsk: %v", err)
+		}
+		return h
+	}
+
+	old := save(askUserID)
+	new := save(askUserID2)
+	// 手工改 created_at：old 置 100 天前，new 保持 90 天内。
+	if _, err := db.Exec(
+		`UPDATE ask_history SET created_at = now() - interval '100 days' WHERE id = $1`, old.ID,
+	); err != nil {
+		t.Fatalf("backdate old row: %v", err)
+	}
+
+	cutoff := time.Now().AddDate(0, 0, -90)
+	n, err := svc.RunRetentionOnce(context.Background(), cutoff)
+	if err != nil {
+		t.Fatalf("RunRetentionOnce: %v", err)
+	}
+	if n != 1 {
+		t.Fatalf("expected 1 row nullified, got %d", n)
+	}
+
+	// 行仍在、快照已置 NULL，明细接口不 500（防 NULL 列 json.Unmarshal 回归）。
+	got, err := svc.GetByUser(old.ID, askUserID)
+	if err != nil {
+		t.Fatalf("GetHistoryByUser after retention: %v", err)
+	}
+	if got.Rows != nil {
+		t.Fatalf("old snapshot must be nil, got %v", got.Rows)
+	}
+	if got.Answer != "ok" {
+		t.Fatalf("row content must survive retention: %+v", got)
+	}
+
+	// 90 天内行快照不受影响。
+	gotNew, err := svc.GetByUser(new.ID, askUserID2)
+	if err != nil {
+		t.Fatalf("GetHistoryByUser recent row: %v", err)
+	}
+	if gotNew.Rows == nil || gotNew.Rows[0]["id"] != "r1" {
+		t.Fatalf("recent snapshot must be preserved: %+v", gotNew.Rows)
+	}
+
+	// 列表接口不含 rows，且行都还在。
+	items, total, err := repo.ListHistory(askUserID, 20, 0)
+	if err != nil {
+		t.Fatalf("ListHistory: %v", err)
+	}
+	if total != 1 || len(items) != 1 {
+		t.Fatalf("expected old row still listed, total=%d len=%d", total, len(items))
+	}
+
+	// 幂等：再次执行无新置空行。
+	n, err = svc.RunRetentionOnce(context.Background(), cutoff)
+	if err != nil {
+		t.Fatalf("RunRetentionOnce again: %v", err)
+	}
+	if n != 0 {
+		t.Fatalf("expected 0 rows on second run, got %d", n)
 	}
 }

@@ -1,0 +1,11 @@
+# Prometheus 抓取配置（P2-2）：只抓 server 的 /metrics。
+# 离线部署镜像：docker.m.daocloud.io/prom/prometheus:v2.53.0（见 deploy/scripts/README.md 离线清单）。
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+
+scrape_configs:
+  - job_name: lab-server
+    static_configs:
+      - targets: ["lab-server:8000"]
+    metrics_path: /metrics

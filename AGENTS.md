@@ -130,7 +130,17 @@ go-server/<module>/
 
 铁律：不允许跨模块直接访问、写入或 join 对方数据库表。跨模块协作只走两条路：对外的 HTTP API，或在 `main.go` 构造期注入的窄接口/适配器（如各模块的 `ProjectAccessAdapter`，agent 模块的 `SetExecutor` / `SetReportReader` / `SetAuditReader` / `SetResultResolver`）。agent 模块的候选执行和 trace 端点全靠注入桥接 logs/audit/issues/experiences，自身不 SELECT `daily_reports`、`audit_log` 等他模块表。
 
-**全库只读例外（ask 模块）**：AI 智能查询系统（`go-server/ask/`）的 `POST /api/v1/ask/execute` 由 SERVICE_TOKEN 调用，在只读事务内 `SET LOCAL ROLE ask_reader` 直读业务表，是上述铁律的唯一只读例外——DB 权限层由迁移 033 的 `ask_reader` 角色 GRANT SELECT 白名单（18 张主表）强制，Go 解析器仅作纵深；仅允许 SELECT 单表，禁写/禁跨表 join/禁多语句。与 agent 模块 `SetExecutor` 桥接先例并列；后续收紧（project_id 过滤）见 `docs/permission-audit.md` D4 风险登记。
+**全库只读例外（ask 模块）**：AI 智能查询系统（`go-server/ask/`）的 `POST /api/v1/ask/execute` 由 SERVICE_TOKEN 调用，在只读事务内 `SET LOCAL ROLE ask_reader` 直读业务表，是上述铁律的全库级只读例外——DB 权限层由迁移 033 的 `ask_reader` 角色 GRANT SELECT 白名单（18 张主表）强制，Go 解析器仅作纵深；仅允许 SELECT 单表，禁写/禁跨表 join/禁多语句。与 agent 模块 `SetExecutor` 桥接先例并列；后续收紧（project_id 过滤）见 `docs/permission-audit.md` D4 风险登记。
+
+**轻量只读例外登记（3 处，代码不动）**：除 ask 全库只读例外外，以下跨模块轻量只读为既有登记豁免：
+
+- `issues/repository.go` `CountRelatedLogs`/`CountLogsByIDs` —— 直读 `logs` 表 COUNT（删除校验用）；
+- `todos/repository.go` `List`/`OpenVisibleForUser` —— `LEFT JOIN users` 取展示字段 display_name；
+- `projects/repository.go:242-249` `UserExists` —— 直读 `users` 表 EXISTS（成员校验用）。
+
+豁免约束（写死在文档里）：**只允许 COUNT / EXISTS / 展示字段 JOIN；禁止跨模块写、禁止写语句内嵌跨模块子查询、禁止业务数据 join 穿透。新增此类访问必须先在登记小节补充条目（PR 评审把关），能注入化的优先注入化。** 写入类跨模块访问无豁免——`todos.IssueSync` 原为写语句内嵌跨模块子查询，已按注入化处置：todos 侧定义窄接口 `issueStatusResolver{ TerminalIssueIDs(ctx) }`，经 `main.go` 构造期注入 issues 仓储，todos 自身不读 issues 表。
+
+**横切点说明（不登记不豁免）**：middleware 直读 `users`/`projects`/`pending_agent_tasks` 及写 `audit_log`（permission.go / agent.go / audit.go）属横切关注点，不属业务模块禁令范围。
 
 ## 6. 编码约定
 
@@ -208,6 +218,12 @@ cp deploy/.env.example deploy/.env
 docker compose -f deploy/docker-compose.yml up -d
 ```
 
+> **AI 辅助服务降级说明（P0-3）**：server 对 `py-agent-interpret` 的依赖仅为
+> `service_started`（不要求健康）。interpret 未就绪/崩溃重启期间，`ask/chat`、
+> 日志 AI 解析、仪器 NL 命令返回 502 `upstream_error`（前端已有对应错误提示）；
+> `/health` 始终 200；日志录入、权限、审计、仪器控制等其余业务完全不受影响。
+> interpret 自身恢复健康后 AI 功能自动恢复。
+
 ### 单独开发 Go 后端
 
 ```bash
@@ -271,4 +287,5 @@ python worker.py
 - 先确认当前仓库实际状态再动手。
 - 代码改动尽量小，优先复用已有设计和本仓库已有代码。
 - 涉及仪器控制、权限、审计、Agent 自动操作时，宁可多读文档，不要靠猜。
+- 新增跨模块轻量只读前先查 AGENTS.md §5「轻量只读例外登记」：能注入化的优先注入化；仅 COUNT / EXISTS / 展示字段 JOIN 可登记豁免，且须同步登记条目（PR 评审把关）。
 - 发现文档与代码不一致时，在改动中同步修正文档或在提交说明里明确指出。

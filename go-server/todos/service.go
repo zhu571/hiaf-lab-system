@@ -43,11 +43,17 @@ type todoRepository interface {
 	UpdateEdit(id string, oldUpdatedAt time.Time, req UpdateRequest, now time.Time) (bool, error)
 	Delete(id string) (bool, error)
 	Rollover(today string, now time.Time) (int64, error)
-	IssueSync() (int64, error)
+	IssueSync(terminalIDs []string) (int64, error)
 	Cleanup(createdForCutoff string, createdAtCutoff time.Time) (int64, int64, error)
 	OpenVisibleForUser(userID string, projectIDs []string, date string) ([]Todo, error)
 	InflightIssueIDs(userID string) (map[string]bool, error)
 	CleanupHintCandidates(userID, cutoffDate string) ([]Todo, error)
+}
+
+// issueStatusResolver 提供终态 issue id 集合：跨模块只读经 main.go 注入的窄接口，
+// todos 不直读 issues 表（AGENTS.md §5 注入化条目）。
+type issueStatusResolver interface {
+	TerminalIssueIDs(ctx context.Context) ([]string, error)
 }
 
 type snapshotReader interface {
@@ -117,14 +123,15 @@ func NewAuditWriter(db *sql.DB) auditWriter {
 }
 
 type Service struct {
-	repo       todoRepository
-	snap       snapshotReader
-	perm       permChecker
-	audit      auditWriter
-	llm        llmPlanner
-	reports    reportFetcher
-	ntfy       ntfyClient
-	publisher  publishClient
+	repo     todoRepository
+	resolver issueStatusResolver
+	snap     snapshotReader
+	perm     permChecker
+	audit    auditWriter
+	llm      llmPlanner
+	reports  reportFetcher
+	ntfy     ntfyClient
+	publisher publishClient
 	loc        *time.Location
 	now        func() time.Time
 	provisions *provisionStore
@@ -139,11 +146,11 @@ type Service struct {
 }
 
 // NewService 组装 todos 服务。loc/now 显式注入（Asia/Shanghai 与时钟可测）。
-func NewService(repo todoRepository, snap snapshotReader, perm permChecker, audit auditWriter,
+func NewService(repo todoRepository, resolver issueStatusResolver, snap snapshotReader, perm permChecker, audit auditWriter,
 	llm llmPlanner, reports reportFetcher, ntfy ntfyClient, publisher publishClient,
 	loc *time.Location, now func() time.Time) *Service {
 	return &Service{
-		repo: repo, snap: snap, perm: perm, audit: audit, llm: llm, reports: reports,
+		repo: repo, resolver: resolver, snap: snap, perm: perm, audit: audit, llm: llm, reports: reports,
 		ntfy: ntfy, publisher: publisher, loc: loc, now: now,
 		provisions:        newProvisionStore(),
 		publishRetryDelay: 2 * time.Second,

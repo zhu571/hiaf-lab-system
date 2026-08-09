@@ -93,7 +93,7 @@ docker compose -f deploy/docker-compose.yml up -d
 | 服务 | 地址 | 说明 |
 |------|------|------|
 | Go 后端 API | http://localhost:8000 | REST API + 前端 SPA |
-| Grafana 监控 | http://localhost:3000 | 仪表盘 (默认 admin/admin) |
+| Grafana 监控 | http://localhost:3000 | 仪表盘（凭据见 deploy/secrets/grafana_admin_password.txt） |
 | ntfy 消息 | http://localhost:8085 | 通知服务 |
 
 部署涉及的全部服务：

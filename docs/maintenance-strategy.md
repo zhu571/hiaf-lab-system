@@ -311,6 +311,8 @@ migrations/
 - 每次发布前手动或自动创建发布前备份。
 - 备份文件必须加密存储，访问权限最小化。
 - 每季度至少演练一次从备份恢复。
+- 离线镜像包（deploy/scripts/README.md「离线部署与镜像打包」导出的 lab-images.tar）随升级
+  一并更新至备份存储。
 
 备份命名建议：
 
@@ -594,8 +596,9 @@ bash /usr/local/bin/lab-watchdog.sh --dry-run  # 冒烟：只报告不告警、�
 journalctl -u lab-watchdog.service             # 查看历史探测输出
 ```
 
-二期 TODO（未实现）：`docker inspect` 探测 postgres/influxdb/grafana/ntfy 其余容器健康态；
-IOC 心跳 PV（EPICS）探测，覆盖"进程活着但数据流断"场景。
+二期 TODO（未实现）：`docker inspect` 探测 postgres/influxdb/grafana/ntfy/prometheus 其余容器
+健康态（lab-prometheus 自 P2-2 起随系统指标一并纳入）；IOC 心跳 PV（EPICS）探测，覆盖
+"进程活着但数据流断"场景。
 
 ## 9. 定期维护任务
 
@@ -615,6 +618,8 @@ IOC 心跳 PV（EPICS）探测，覆盖"进程活着但数据流断"场景。
 - 轮流查看 13 个模块错误日志和慢接口。
 - 处理安全依赖告警。
 - 清理失败任务、过期临时文件、无引用附件。
+- ask_history 快照：90 天前置空（ask 服务内置每日维护任务，`ASK_HISTORY_RETENTION_DAYS` 可调；
+  置 NULL 后由 autovacuum 自然回收空间，无需手动 VACUUM）。
 - 检查 Agent 审核积压和错误样本。
 - 抽查仪器控制审计日志和拒绝日志。
 - 更新本周发布计划和风险项。

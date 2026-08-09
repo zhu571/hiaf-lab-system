@@ -242,7 +242,7 @@ func TestGenerateForDateConcurrencyLimit(t *testing.T) {
 func TestRunIssueSync(t *testing.T) {
 	d := newTestDeps()
 	// 在途待办关联已 resolved issue → cancelled，且 completed_at 为空
-	d.repo.resolvedIssueIDs["iss1"] = true
+	d.resolver.terminalIDs["iss1"] = true
 	svc := d.service()
 	svc.Create("u1", "member", CreateRequest{Title: "x"}) // 无 issue
 	item, err := svc.Create("u1", "member", CreateRequest{Title: "y"})
@@ -261,6 +261,47 @@ func TestRunIssueSync(t *testing.T) {
 	}
 	if got := auditInt(d.audit.lastDetail()["count"]); got != 1 {
 		t.Fatalf("expected count 1, got %v", got)
+	}
+	// 幂等：重复执行不再计入
+	if err := svc.RunIssueSync(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if got := auditInt(d.audit.lastDetail()["count"]); got != 0 {
+		t.Fatalf("issue sync must be idempotent, count = %v", got)
+	}
+}
+
+func TestRunIssueSyncNonTerminalUntouched(t *testing.T) {
+	d := newTestDeps()
+	// resolver 不返回该 issue → 在途待办保持 pending
+	svc := d.service()
+	item, err := svc.Create("u1", "member", CreateRequest{Title: "y"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	iid := "iss-not-terminal"
+	d.repo.todos[item.ID].IssueID = &iid
+
+	if err := svc.RunIssueSync(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	got, _ := d.repo.GetByID(item.ID)
+	if got.Status != StatusPending {
+		t.Fatalf("non-terminal issue todo must stay pending, got %+v", got)
+	}
+	if got := auditInt(d.audit.lastDetail()["count"]); got != 0 {
+		t.Fatalf("expected count 0, got %v", got)
+	}
+}
+
+func TestRunIssueSyncResolverError(t *testing.T) {
+	d := newTestDeps()
+	d.resolver.err = errors.New("resolver down")
+	if err := d.service().RunIssueSync(context.Background()); err == nil {
+		t.Fatal("expected resolver error to propagate")
+	}
+	if d.repo.issueSyncCalls != 0 {
+		t.Fatal("repo.IssueSync must not be called when resolver fails")
 	}
 }
 

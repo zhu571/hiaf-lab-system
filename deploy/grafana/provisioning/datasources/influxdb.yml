@@ -1,0 +1,16 @@
+apiVersion: 1
+datasources:
+  - name: InfluxDB
+    # uid 固定：dashboard（lab-system.json）按此引用
+    uid: influxdb-flux
+    type: influxdb
+    access: proxy
+    url: http://influxdb:8086
+    isDefault: true
+    jsonData:
+      version: Flux
+      organization: ${INFLUXDB_ORG}
+      defaultBucket: ${INFLUXDB_BUCKET}
+    # token 走 secureJsonData：加密存储，不回写磁盘明文（由 grafana 容器环境变量供给）
+    secureJsonData:
+      token: ${INFLUX_TOKEN}

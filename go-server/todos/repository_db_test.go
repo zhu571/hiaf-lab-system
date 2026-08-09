@@ -120,6 +120,24 @@ func TestRepositoryStateGuards(t *testing.T) {
 	}
 }
 
+// terminalIssueIDs 模拟注入的 issueStatusResolver：返回终态 issue id 集合（两段式语义）。
+func terminalIssueIDs(db *sql.DB) ([]string, error) {
+	rows, err := db.Query(`SELECT id FROM issues WHERE status IN ('resolved','closed')`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var ids []string
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		ids = append(ids, id)
+	}
+	return ids, rows.Err()
+}
+
 func TestRepositoryRolloverAndIssueSync(t *testing.T) {
 	db := openTestDB(t)
 	r := NewRepository(db)
@@ -163,7 +181,12 @@ func TestRepositoryRolloverAndIssueSync(t *testing.T) {
 	if got.Status != StatusPending {
 		t.Fatalf("issue todo should be pending before sync: %+v", got)
 	}
-	n, err = r.IssueSync()
+	// 两段式：先经 resolver 取终态 id 集合，再更新（todos 不直读 issues 表）
+	ids, err := terminalIssueIDs(db)
+	if err != nil {
+		t.Fatal(err)
+	}
+	n, err = r.IssueSync(ids)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -173,6 +196,16 @@ func TestRepositoryRolloverAndIssueSync(t *testing.T) {
 	got, _ = r.GetByID(issueTodo.ID)
 	if got.Status != StatusCancelled || got.CompletedAt != nil || got.CompletedBy != nil {
 		t.Fatalf("issue sync must cancel without completion fields: %+v", got)
+	}
+	// 幂等：重复执行结果一致（已 cancelled 不再计入）
+	n, err = r.IssueSync(ids)
+	if err != nil || n != 0 {
+		t.Fatalf("issue sync must be idempotent: n=%d err=%v", n, err)
+	}
+	// 空集合 → 直接返回 0
+	n, err = r.IssueSync(nil)
+	if err != nil || n != 0 {
+		t.Fatalf("empty terminal ids must be a no-op: n=%d err=%v", n, err)
 	}
 	// 释放后可重新生成
 	ok, err = r.InsertGenerated(&Todo{Title: "重新生成", Priority: PriorityHigh, Status: StatusPending, Source: SourceIssue, CreatedBy: dbUserID, CreatedFor: "2026-08-08", IssueID: &issueID})

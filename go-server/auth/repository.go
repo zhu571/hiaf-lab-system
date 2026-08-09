@@ -351,6 +351,26 @@ func (r *Repository) RevokeRefreshToken(id string) error {
 	return nil
 }
 
+// FindRevokedRefreshToken 只匹配已撤销且未过期的 token：用于检测真复用重放
+// （已撤销 token 被再次使用；FindRefreshToken 只查未撤销行，检测不到）。
+func (r *Repository) FindRevokedRefreshToken(rawToken string) (*RefreshTokenRecord, error) {
+	var rec RefreshTokenRecord
+	err := r.db.QueryRow(
+		`SELECT id, user_id, family, expires_at, revoked
+		 FROM refresh_tokens
+		 WHERE revoked = TRUE AND expires_at > now()
+		   AND crypt($1, token_hash) = token_hash`,
+		rawToken,
+	).Scan(&rec.ID, &rec.UserID, &rec.Family, &rec.ExpiresAt, &rec.Revoked)
+	if err != nil {
+		if err == sql.ErrNoRows {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("find revoked refresh token: %w", err)
+	}
+	return &rec, nil
+}
+
 func nullStringPtr(s *string) sql.NullString {
 	if s == nil {
 		return sql.NullString{Valid: false}

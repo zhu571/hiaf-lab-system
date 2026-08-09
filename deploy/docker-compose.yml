@@ -30,10 +30,11 @@ services:
       - ../migrations:/migrations
     secrets:
       - db_password
+      - ntfy_publish_token
     entrypoint:
       - "/bin/sh"
       - "-c"
-      - "PASSWORD=$$(cat /run/secrets/db_password); ENCODED=$$(PASSWORD=\"$$PASSWORD\" python3 -c \"import os, urllib.parse; print(urllib.parse.quote_plus(os.environ['PASSWORD']))\"); migrate -path /migrations -database postgres://lab:$$ENCODED@postgres:5432/lab?sslmode=disable up || { curl -s -X POST http://ntfy:80/lab-system -H 'Title: 数据库迁移失败' -H 'Priority: urgent' -H 'Tags: warning' -d 'migration failed' >/dev/null 2>&1; exit 1; }"
+      - "PASSWORD=$$(cat /run/secrets/db_password); ENCODED=$$(PASSWORD=\"$$PASSWORD\" python3 -c \"import os, urllib.parse; print(urllib.parse.quote_plus(os.environ['PASSWORD']))\"); migrate -path /migrations -database postgres://lab:$$ENCODED@postgres:5432/lab?sslmode=disable up || { TOKEN=$$(cat /run/secrets/ntfy_publish_token 2>/dev/null || true); curl -s -X POST http://ntfy:80/lab-system -H 'Title: 数据库迁移失败' -H 'Priority: urgent' -H 'Tags: warning' -H \"Authorization: Bearer $$TOKEN\" -d 'migration failed' >/dev/null 2>&1; exit 1; }"
 
   epics-gateway:
     build:
@@ -68,13 +69,26 @@ services:
       retries: 5
 
   grafana:
-    image: docker.m.daocloud.io/grafana/grafana:latest
+    # 锁版本（P1-3）：升级遵循 docs/maintenance-strategy.md 双 MINOR/3 个月窗口策略
+    image: docker.m.daocloud.io/grafana/grafana:11.1.0
     container_name: lab-grafana
     restart: unless-stopped
+    # admin 密码走 secret：Grafana 官方镜像不支持 *_FILE 环境变量，entrypoint 内 cat 注入
+    entrypoint: ["/bin/sh", "-c", "export GF_SECURITY_ADMIN_PASSWORD=$$(cat /run/secrets/grafana_admin_password); exec /run.sh"]
     ports:
-      - "3000:3000"
+      # 默认仅绑定 127.0.0.1；外网访问走 frp/VPS 反代（参照 ntfy 的 10.144.144.12:8087 模式）
+      - "${GRAFANA_BIND_ADDR:-127.0.0.1}:3000:3000"
+    environment:
+      # provisioning 文件 ${VAR} 插值来源（P1-3，缺一不可）
+      INFLUX_TOKEN: ${INFLUX_TOKEN}
+      INFLUXDB_ORG: ${INFLUXDB_ORG:-lab-org}
+      INFLUXDB_BUCKET: ${INFLUXDB_BUCKET:-lab-bucket}
     volumes:
       - /opt/lab-monitor/grafana:/var/lib/grafana
+      - ./grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./grafana/dashboards:/etc/grafana/dashboards:ro
+    secrets:
+      - grafana_admin_password
     depends_on:
       influxdb:
         condition: service_healthy
@@ -97,8 +111,12 @@ services:
       INFLUX_ORG: ${INFLUXDB_ORG:-lab-org}
       INFLUX_BUCKET: ${INFLUXDB_BUCKET:-lab-bucket}
       SENSOR_DB_PATH: /data/sensor_history.db
+      # ntfy 发布凭据（lab-system 主题 todo-publisher 的 Bearer token；deny-all 下无凭据发
+      # 送会被 403 静默丢弃，P0-1 修复：IOC 仪器域告警恢复）
+      NTFY_PUBLISH_TOKEN_FILE: /run/secrets/ntfy_publish_token
     secrets:
       - influxdb_token
+      - ntfy_publish_token
     volumes:
       - /opt/lab-monitor/sqlite:/data
     deploy:
@@ -158,6 +176,8 @@ services:
       NTFY_PUBLISH_TOKEN_FILE: /run/secrets/ntfy_publish_token
       TODOS_SCHEDULER_ENABLED: ${TODOS_SCHEDULER_ENABLED:-true}
       NTFY_PUBLIC_URL: ${NTFY_PUBLIC_URL:-http://10.144.144.12:8087}
+      # CORS 白名单（P1-4）：生产同源无需配置；独立域名/端口前端在 .env 追加
+      CORS_ALLOWED_ORIGINS: ${CORS_ALLOWED_ORIGINS:-http://127.0.0.1:5173,http://localhost:5173}
     secrets:
       - db_password
       - jwt_key
@@ -187,7 +207,7 @@ services:
       epics-gateway:
         condition: service_started
       py-agent-interpret:
-        condition: service_healthy
+        condition: service_started
     healthcheck:
       test: ["CMD-SHELL", "wget -qO- http://localhost:8000/health || exit 1"]
       interval: 10s
@@ -272,6 +292,27 @@ services:
       - "10.144.144.12:8087:80"
     restart: unless-stopped
 
+  prometheus:
+    # 锁版本（P2-2）：升级遵循 docs/maintenance-strategy.md 双 MINOR/3 个月窗口策略
+    image: docker.m.daocloud.io/prom/prometheus:v2.53.0
+    container_name: lab-prometheus
+    command:
+      - --config.file=/etc/prometheus/prometheus.yml
+      - --storage.tsdb.retention.time=90d
+      - --storage.tsdb.path=/prometheus
+    volumes:
+      - ./prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - /opt/lab-monitor/prometheus:/prometheus
+    ports:
+      # 默认仅绑定 127.0.0.1（同 Grafana 模式）
+      - "${PROMETHEUS_BIND_ADDR:-127.0.0.1}:9090:9090"
+    deploy:
+      resources:
+        limits:
+          cpus: "0.5"
+          memory: "512M"
+    restart: unless-stopped
+
 volumes:
   pgdata:
   influxdb_config:
@@ -292,3 +333,6 @@ secrets:
     file: ./secrets/ntfy_publish_token.txt
   service_token:
     file: ./secrets/service_token.txt
+  # 由 deploy/scripts/init_ntfy.sh 生成（Grafana admin 登录密码，P1-3）
+  grafana_admin_password:
+    file: ./secrets/grafana_admin_password.txt

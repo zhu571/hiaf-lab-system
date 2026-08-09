@@ -1,6 +1,7 @@
 package agent
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"strings"
@@ -59,6 +60,12 @@ func (s *Service) SetResultResolver(resolver CandidateResultResolver) { s.result
 
 func (s *Service) ValidateAgentTask(taskID, actingUserID string) (bool, error) {
 	return s.repo.ValidateTask(taskID, actingUserID)
+}
+
+// QueueDepth 返回 agent 队列深度（pending + processing 任务数，P2-2 指标用）。
+// 由 main.go 经 middleware.SetAgentQueueProvider 注入 /metrics，agent 不对外暴露表访问。
+func (s *Service) QueueDepth(ctx context.Context) (int, error) {
+	return s.repo.CountInQueue(ctx)
 }
 
 func (s *Service) Claim(leaseSeconds int) (*PendingAgentTask, error) {
