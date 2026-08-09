@@ -23,14 +23,17 @@ func (r *Repository) Create(projectID, authorID string, req CreateIssueRequest, 
 	defer rollback(tx)
 
 	var out Issue
+	// 注：列清单不含 run_id——该列自 021 起无任何代码路径写入（CreateIssueRequest 无 RunID），
+	// HEAD 上的语句 11 列/10 表达式失衡，Create 在 SQL 层必败；此处顺带修正（既有 bug）。
 	err = scanIssue(tx.QueryRow(
 		`INSERT INTO issues
-		 (project_id, title, description, severity, author_id, assignee_id, run_id, report_date, occurred_at, ai_generated, agent_task_id)
-		 VALUES ($1, $2, $3, $4, $5, $6, $7::date, $8, $9, $10)
+		 (project_id, title, description, severity, author_id, assignee_id, report_date, occurred_at, ai_generated, agent_task_id, candidate_id)
+		 VALUES ($1, $2, $3, $4, $5, $6, $7::date, $8, $9, $10, $11)
 		 RETURNING id, project_id, title, description, status, severity, author_id, assignee_id,
-		           ai_generated, agent_task_id, run_id, report_date, occurred_at, resolved_at, created_at, updated_at`,
+		           ai_generated, agent_task_id, candidate_id, run_id, report_date, occurred_at, resolved_at, created_at, updated_at`,
 		projectID, strings.TrimSpace(req.Title), req.Description, defaultSeverity(req.Severity),
-		authorID, nullableStringPtr(req.AssigneeID), reportDate, occurredAt, req.AiGenerated, nullableStringPtr(req.AgentTaskID),
+		authorID, nullableStringPtr(req.AssigneeID), reportDate, occurredAt, req.AiGenerated,
+		nullableStringPtr(req.AgentTaskID), nullableStringPtr(req.CandidateID),
 	), &out)
 	if err != nil {
 		return nil, fmt.Errorf("create issue: %w", err)
@@ -62,7 +65,7 @@ func (r *Repository) GetByID(id string) (*Issue, error) {
 	var out Issue
 	err := scanIssue(r.db.QueryRow(
 		`SELECT id, project_id, title, description, status, severity, author_id, assignee_id,
-		        ai_generated, agent_task_id, run_id, report_date, occurred_at, resolved_at, created_at, updated_at
+		        ai_generated, agent_task_id, candidate_id, run_id, report_date, occurred_at, resolved_at, created_at, updated_at
 		 FROM issues
 		 WHERE id = $1`,
 		id,
@@ -94,7 +97,7 @@ func (r *Repository) List(projectID string, params IssueListParams) ([]Issue, in
 	args = append(args, params.PerPage, (params.Page-1)*params.PerPage)
 	rows, err := r.db.Query(
 		`SELECT id, project_id, title, description, status, severity, author_id, assignee_id,
-		        ai_generated, agent_task_id, run_id, report_date, occurred_at, resolved_at, created_at, updated_at
+		        ai_generated, agent_task_id, candidate_id, run_id, report_date, occurred_at, resolved_at, created_at, updated_at
 		 FROM issues `+where+fmt.Sprintf(" ORDER BY %s LIMIT $%d OFFSET $%d", issueOrderBy(params), len(args)-1, len(args)),
 		args...,
 	)
@@ -121,7 +124,7 @@ func (r *Repository) Update(id string, req UpdateIssueRequest) (*Issue, error) {
 		     updated_at = now()
 		 WHERE id = $1
 		 RETURNING id, project_id, title, description, status, severity, author_id, assignee_id,
-		           ai_generated, agent_task_id, run_id, report_date, occurred_at, resolved_at, created_at, updated_at`,
+		           ai_generated, agent_task_id, candidate_id, run_id, report_date, occurred_at, resolved_at, created_at, updated_at`,
 		id, stringPtrValue(req.Title), req.Description, stringPtrValue(req.Severity), nullableStringPtr(req.AssigneeID),
 	), &out)
 	if err != nil {
@@ -152,7 +155,7 @@ func (r *Repository) TransitionStatus(id, targetStatus, userID, comment string, 
 		     updated_at = now()
 		 WHERE id = $1
 		 RETURNING id, project_id, title, description, status, severity, author_id, assignee_id,
-		           ai_generated, agent_task_id, run_id, report_date, occurred_at, resolved_at, created_at, updated_at`,
+		           ai_generated, agent_task_id, candidate_id, run_id, report_date, occurred_at, resolved_at, created_at, updated_at`,
 		id, targetStatus, targetStatus,
 	), &out)
 	if err != nil {
@@ -334,11 +337,11 @@ type rowScanner interface {
 
 func scanIssue(row rowScanner, item *Issue) error {
 	var reportDate time.Time
-		var assigneeID, agentTaskID, runID sql.NullString
+		var assigneeID, agentTaskID, candidateID, runID sql.NullString
 	var resolvedAt sql.NullTime
 	if err := row.Scan(
 		&item.ID, &item.ProjectID, &item.Title, &item.Description, &item.Status, &item.Severity,
-		&item.AuthorID, &assigneeID, &item.AiGenerated, &agentTaskID, &runID, &reportDate, &item.OccurredAt, &resolvedAt, &item.CreatedAt, &item.UpdatedAt,
+		&item.AuthorID, &assigneeID, &item.AiGenerated, &agentTaskID, &candidateID, &runID, &reportDate, &item.OccurredAt, &resolvedAt, &item.CreatedAt, &item.UpdatedAt,
 	); err != nil {
 		return err
 	}
@@ -347,6 +350,9 @@ func scanIssue(row rowScanner, item *Issue) error {
 	}
 		if agentTaskID.Valid {
 			item.AgentTaskID = &agentTaskID.String
+		}
+		if candidateID.Valid {
+			item.CandidateID = &candidateID.String
 		}
 		if runID.Valid {
 			item.RunID = &runID.String

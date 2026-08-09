@@ -25,6 +25,7 @@ type Issue struct {
 	AssigneeID  *string    `json:"assignee_id,omitempty"`
 	AiGenerated bool       `json:"ai_generated"`
 	AgentTaskID *string    `json:"agent_task_id,omitempty"`
+	CandidateID *string    `json:"candidate_id,omitempty"`
 	ReportDate  string     `json:"report_date"`
 	OccurredAt  time.Time  `json:"occurred_at"`
 	ResolvedAt  *time.Time `json:"resolved_at,omitempty"`
@@ -52,6 +53,7 @@ type CreateIssueRequest struct {
 	RelatedLogIDs []string `json:"related_log_ids,omitempty"`
 	AiGenerated   bool     `json:"ai_generated"`
 	AgentTaskID   *string  `json:"agent_task_id,omitempty"`
+	CandidateID   *string  `json:"candidate_id,omitempty"`
 }
 
 type UpdateIssueRequest struct {

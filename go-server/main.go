@@ -609,6 +609,7 @@ func (e candidateExecutor) Execute(candidate agent.AgentCandidateAction, actingU
 		}
 		req.AiGenerated = true
 		req.AgentTaskID = &candidate.TaskID
+		req.CandidateID = &candidate.ID
 		_, err := e.issues.Create(*candidate.ProjectID, actingUserID, auth.RoleAgent, req)
 		return err
 	case "add_comment":
@@ -632,6 +633,7 @@ func (e candidateExecutor) Execute(candidate agent.AgentCandidateAction, actingU
 		req.ProjectID = candidate.ProjectID
 		req.AiGenerated = true
 		req.AgentTaskID = &candidate.TaskID
+		req.CandidateID = &candidate.ID
 		_, err := e.experiences.Create(actingUserID, auth.RoleAgent, req)
 		return err
 	default:

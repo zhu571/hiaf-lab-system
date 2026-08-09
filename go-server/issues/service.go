@@ -64,7 +64,7 @@ func NewService(repo issueRepository, access ProjectAccessChecker, validators ..
 }
 
 func (s *Service) Create(projectID, userID, userRole string, req CreateIssueRequest) (*Issue, error) {
-	if err := s.validateAgentFields(userID, userRole, req.AiGenerated, req.AgentTaskID); err != nil {
+	if err := s.validateAgentFields(userID, userRole, req.AiGenerated, req.AgentTaskID, req.CandidateID); err != nil {
 		return nil, ErrInvalidInput
 	}
 	req.Title = strings.TrimSpace(req.Title)
@@ -135,9 +135,9 @@ func (s *Service) Create(projectID, userID, userRole string, req CreateIssueRequ
 	return s.repo.Create(projectID, userID, req, occurredAt, reportDate)
 }
 
-func (s *Service) validateAgentFields(userID, userRole string, aiGenerated bool, taskID *string) error {
+func (s *Service) validateAgentFields(userID, userRole string, aiGenerated bool, taskID, candidateID *string) error {
 	if userRole != auth.RoleAgent {
-		if aiGenerated || taskID != nil {
+		if aiGenerated || taskID != nil || candidateID != nil {
 			return ErrInvalidInput
 		}
 		return nil
