@@ -112,8 +112,9 @@ func (s *Service) Create(projectID, userID, userRole string, headers http.Header
 }
 
 // CreateBatch 单事务原子批量插入：逐行复用单条校验规则，收集全部错误一次返回；
-// decodeErrors 由 handler 传入（JSON 结构层错误：unknown_field / invalid_row），与语义错误在同一排序点合并。
-func (s *Service) CreateBatch(projectID, userID, userRole string, headers http.Header, rows []CreateBatchRow, decodeErrors []RowError) (*BatchCreateResult, error) {
+// decodeFailed 由 handler 传入（解码失败行下标集合，占位零值，跳过语义校验）；
+// decodeErrors 为对应行的 JSON 结构层错误（unknown_field / invalid_row），与语义错误在同一排序点合并。
+func (s *Service) CreateBatch(projectID, userID, userRole string, headers http.Header, rows []CreateBatchRow, decodeFailed map[int]bool, decodeErrors []RowError) (*BatchCreateResult, error) {
 	projectID = strings.TrimSpace(projectID)
 	if err := s.requireProject(projectID); err != nil {
 		return nil, err
@@ -131,6 +132,9 @@ func (s *Service) CreateBatch(projectID, userID, userRole string, headers http.H
 	// 逐行语义校验，收集全部错误（不遇错即停）。
 	semanticErrors := make([]RowError, 0, len(rows)*2)
 	for i := range rows {
+		if decodeFailed[i] {
+			continue
+		}
 		s.validateBatchRow(rows[i], i, &semanticErrors)
 	}
 	batchErr := mergeRowErrors(semanticErrors, decodeErrors)
@@ -224,7 +228,9 @@ func (s *Service) validateBatchRuns(rows []CreateBatchRow, headers http.Header, 
 	unique := make(map[string]bool)
 	for i := range rows {
 		if rows[i].RunID != nil {
-			unique[strings.TrimSpace(*rows[i].RunID)] = true
+			if id := strings.TrimSpace(*rows[i].RunID); id != "" {
+				unique[id] = true
+			}
 		}
 	}
 	if len(unique) == 0 {
@@ -235,9 +241,9 @@ func (s *Service) validateBatchRuns(rows []CreateBatchRow, headers http.Header, 
 		runIDs = append(runIDs, id)
 	}
 	var (
-		mu        sync.Mutex
-		missing   = make(map[string]bool)
-		firstErr  error
+		mu       sync.Mutex
+		missing  = make(map[string]bool)
+		firstErr error
 	)
 	jobs := make(chan string)
 	var wg sync.WaitGroup
@@ -295,8 +301,9 @@ func (s *Service) buildBatchTestData(projectID, userID string, row CreateBatchRo
 		RecordedBy: &userID,
 	}
 	if row.RunID != nil {
-		runID := strings.TrimSpace(*row.RunID)
-		td.RunID = &runID
+		if runID := strings.TrimSpace(*row.RunID); runID != "" {
+			td.RunID = &runID
+		}
 	}
 	return td
 }

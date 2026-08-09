@@ -59,31 +59,42 @@ func (h *Handler) CreateBatch(w http.ResponseWriter, r *http.Request) {
 	var raws []json.RawMessage
 	r.Body = http.MaxBytesReader(w, r.Body, batchMaxBodyBytes)
 	if err := json.NewDecoder(r.Body).Decode(&raws); err != nil {
+		var maxBytesErr *http.MaxBytesError
+		if errors.As(err, &maxBytesErr) {
+			common.WriteError(w, r, http.StatusRequestEntityTooLarge, "request_too_large",
+				"请求体超过 512KB 上限", map[string]any{"max": batchMaxBodyBytes})
+			return
+		}
 		common.WriteError(w, r, http.StatusBadRequest, "bad_request", "请求体必须是 JSON 数组", nil)
 		return
 	}
 	if len(raws) == 0 {
+		middleware.SetAuditDetail(r.Context(), map[string]any{"count": 0, "received": 0})
 		common.WriteError(w, r, http.StatusBadRequest, "bad_request", ErrEmptyBatch.Error(), nil)
 		return
 	}
 	if len(raws) > batchMaxRows {
+		middleware.SetAuditDetail(r.Context(), map[string]any{"count": len(raws), "received": len(raws)})
 		common.WriteError(w, r, http.StatusUnprocessableEntity, "batch_too_large", ErrBatchTooLarge.Error(),
 			map[string]any{"max": batchMaxRows, "received": len(raws)})
 		return
 	}
 	// 逐元素 DisallowUnknownFields 解码；解码失败收集该行错误继续（不遇错即停）。
-	// 占位空行保持 rows 下标与请求数组对齐（行级错误按 index 指向请求下标）。
+	// 占位空行保持 rows 下标与请求数组对齐（行级错误按 index 指向请求下标）；
+	// decodeFailed 记录解码失败行下标，service 据此跳过语义校验（避免占位零值补出假 required）。
 	rows := make([]CreateBatchRow, len(raws))
+	decodeFailed := make(map[int]bool)
 	var decodeErrors []RowError
 	for i, raw := range raws {
 		row, rowErrors := decodeBatchRow(i, raw)
 		if len(rowErrors) > 0 {
 			decodeErrors = append(decodeErrors, rowErrors...)
+			decodeFailed[i] = true
 			continue
 		}
 		rows[i] = row
 	}
-	result, err := h.svc.CreateBatch(projectID(r), middleware.EffectiveUserID(r.Context()), claims.Role, r.Header, rows, decodeErrors)
+	result, err := h.svc.CreateBatch(projectID(r), middleware.EffectiveUserID(r.Context()), claims.Role, r.Header, rows, decodeFailed, decodeErrors)
 	if err != nil {
 		// 422 失败也由 Audit 中间件落一条 testdata.batch 记录（含 error_rows），便于追查被拒绝的批量。
 		var batchErr *BatchValidationError

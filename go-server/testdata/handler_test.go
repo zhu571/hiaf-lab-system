@@ -134,21 +134,42 @@ func TestCreateBatchUnknownFieldRowError(t *testing.T) {
 		t.Fatal(err)
 	}
 	raw := envelope.Error.Details["errors"].([]any)
-	// 未知字段行：unknown_field + 占位空行的 3 条 required；其余行继续校验（invalid_enum）——全部收集。
-	if len(raw) != 5 {
-		t.Fatalf("errors = %v, want 5（未知字段行 + 其余行继续校验）", raw)
+	// 解码失败行只报 unknown_field（不再叠加占位空行补出的 required）；其余行继续语义校验（invalid_enum）。
+	if len(raw) != 2 {
+		t.Fatalf("errors = %v, want 2（解码失败行只报 unknown_field，其余行继续校验）", raw)
 	}
 	first := raw[0].(map[string]any)
-	if first["index"].(float64) != 0 || first["field"] != "data_type" || first["code"] != "required" {
-		t.Fatalf("errors[0] = %v", first)
+	if first["index"].(float64) != 0 || first["field"] != "sneaky" || first["code"] != "unknown_field" {
+		t.Fatalf("errors[0] = %v, want unknown_field/sneaky", first)
 	}
-	second := raw[1].(map[string]any)
-	if second["index"].(float64) != 0 || second["field"] != "sneaky" || second["code"] != "unknown_field" {
-		t.Fatalf("errors[1] = %v, want unknown_field/sneaky", second)
-	}
-	last := raw[4].(map[string]any)
+	last := raw[1].(map[string]any)
 	if last["index"].(float64) != 1 || last["field"] != "data_type" || last["code"] != "invalid_enum" {
-		t.Fatalf("errors[4] = %v", last)
+		t.Fatalf("errors[1] = %v", last)
+	}
+}
+
+func TestCreateBatchBodyTooLarge413(t *testing.T) {
+	svc := NewService(&fakeRepository{}, fakeAccess{role: projects.RoleMember}, &fakeRuns{})
+	router := newBatchRouter(svc)
+	// 100 行 × ~6KB notes ≈ 600KB，超过 512KB 上限但低于行数上限，触发 MaxBytesReader 而非 batch_too_large。
+	bigRow := `{"data_type":"cryo","measurement":"t","value":1,"notes":"` + strings.Repeat("x", 6<<10) + `"}`
+	rows := make([]string, 0, 100)
+	for i := 0; i < 100; i++ {
+		rows = append(rows, bigRow)
+	}
+	rec := batchRequest(router, "["+strings.Join(rows, ",")+"]", true)
+	if rec.Code != http.StatusRequestEntityTooLarge {
+		t.Fatalf("status = %d, want 413，body = %s", rec.Code, rec.Body.String())
+	}
+	var envelope errorEnvelope
+	if err := json.Unmarshal(rec.Body.Bytes(), &envelope); err != nil {
+		t.Fatal(err)
+	}
+	if envelope.Error.Code != "request_too_large" {
+		t.Fatalf("code = %q", envelope.Error.Code)
+	}
+	if envelope.Error.Details["max"].(float64) != batchMaxBodyBytes {
+		t.Fatalf("details = %v", envelope.Error.Details)
 	}
 }
 

@@ -939,6 +939,9 @@ Resp 201：完整 `TestData`。错误：400 `bad_request`（参数无效/未知�
 | 排序 | errors 按 index 升序、同 index 内字段序稳定排序；「收集全部错误一次返回」，不遇错即停 |
 | 未知字段 | 行级 `unknown_field`（field=未知键名）；元素非对象 → 行级 `invalid_row`（field=body），不中断其余行 |
 
+`not_a_number` 仅服务内构造可触发（JSON 无法表达 NaN/Inf，属 Go 内部防御校验）；
+解码失败的行跳过语义校验，只返回 `unknown_field`/`invalid_row`（不叠加假 `required`）。
+
 ```json
 { "error": { "code": "validation_failed", "message": "3 行校验失败，请修正后重试",
     "details": { "errors": [
@@ -949,7 +952,8 @@ Resp 201：完整 `TestData`。错误：400 `bad_request`（参数无效/未知�
 ```
 
 **状态码总表**：401（未登录）/ 403（无权限）/ 404（项目不存在）/ 400（非数组、空数组、
-请求体损坏、缺 `Idempotency-Key`）/ 409（幂等键重复）/ 422（超限 `batch_too_large`
+请求体损坏、缺 `Idempotency-Key`）/ 413（请求体超 512KB，`request_too_large`
+`details {max:524288}`）/ 409（幂等键重复）/ 422（超限 `batch_too_large`
 `details {max:100, received:N}`，或行级校验失败 `validation_failed`）/ 500（DB 或
 run 校验基础设施错误）。校验规则与单条逐行一致（含 `quality`/`source` 默认值、
 trim 规范化）；run_id 存在性校验去重并发执行，插入期 FK 竞态违例（SQLSTATE 23503）
@@ -957,7 +961,8 @@ trim 规范化）；run_id 存在性校验去重并发执行，插入期 FK 竞�
 
 **幂等与审计**：与单条同机制（`Idempotency-Key` 防双击/重放 → 409）；审计整批一条
 （action `testdata.batch`）：成功 detail `{count, created_ids[]}`，422 失败 detail
-`{count, error_rows}`。批量端点仅替代前端手工录入路径，单条端点（仪器/Agent）行为不变。
+`{count, error_rows}`，400 空数组/413 超限 detail `{count, received}`。批量端点仅替代
+前端手工录入路径，单条端点（仪器/Agent）行为不变。
 
 ## 4. 模块间通信
 

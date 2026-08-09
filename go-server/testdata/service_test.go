@@ -90,7 +90,7 @@ func TestBatchCreateCollectsAllErrors(t *testing.T) {
 		batchRow(badType, "t", float64Pointer(1), nil),
 		batchRow(DataTypeCryo, "t", nil, nil),
 		batchRow(DataTypeCryo, "t", float64Pointer(1), &badRun),
-	}, nil)
+	}, nil, nil)
 	var batchErr *BatchValidationError
 	if !errors.As(err, &batchErr) {
 		t.Fatalf("error = %v, want BatchValidationError", err)
@@ -118,7 +118,7 @@ func TestBatchCreateCollectsAllErrors(t *testing.T) {
 
 func TestBatchCreateEmptyRejected(t *testing.T) {
 	svc := NewService(&fakeRepository{}, fakeAccess{role: projects.RoleMember}, &fakeRuns{})
-	if _, err := svc.CreateBatch(projectUUID, "creator", auth.RoleMember, nil, nil, nil); !errors.Is(err, ErrEmptyBatch) {
+	if _, err := svc.CreateBatch(projectUUID, "creator", auth.RoleMember, nil, nil, nil, nil); !errors.Is(err, ErrEmptyBatch) {
 		t.Fatalf("empty batch error = %v", err)
 	}
 }
@@ -130,7 +130,7 @@ func TestBatchCreateTooLarge(t *testing.T) {
 	for i := 0; i < batchMaxRows+1; i++ {
 		rows = append(rows, batchRow(DataTypeCryo, "t", float64Pointer(1), nil))
 	}
-	if _, err := svc.CreateBatch(projectUUID, "creator", auth.RoleMember, nil, rows, nil); !errors.Is(err, ErrBatchTooLarge) {
+	if _, err := svc.CreateBatch(projectUUID, "creator", auth.RoleMember, nil, rows, nil, nil); !errors.Is(err, ErrBatchTooLarge) {
 		t.Fatalf("too large error = %v", err)
 	}
 	if repo.batchCalls != 0 {
@@ -147,7 +147,7 @@ func TestBatchCreateRunDedupe(t *testing.T) {
 		batchRow(DataTypeCryo, "t1", float64Pointer(1), &runID),
 		batchRow(DataTypePressure, "t2", float64Pointer(2), &runID),
 		batchRow(DataTypeCryo, "t3", float64Pointer(3), nil),
-	}, nil)
+	}, nil, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -173,7 +173,7 @@ func TestBatchCreateRunNotFound(t *testing.T) {
 		batchRow(DataTypeCryo, "t2", float64Pointer(2), &missingRun),
 		batchRow(DataTypeCryo, "t3", float64Pointer(3), &otherRun),
 		batchRow(DataTypeCryo, "t4", float64Pointer(4), nil),
-	}, nil)
+	}, nil, nil)
 	var batchErr *BatchValidationError
 	if !errors.As(err, &batchErr) {
 		t.Fatalf("error = %v, want BatchValidationError", err)
@@ -199,7 +199,7 @@ func TestBatchCreateSuccess(t *testing.T) {
 		{DataType: " cryo ", Measurement: " target_temp ", Value: float64Pointer(4.2), RunID: &runID,
 			Unit: "K", Quality: stringPointer("suspect"), Notes: " 稳定后读数 "},
 		{DataType: DataTypePressure, Measurement: "cell_pressure", Value: float64Pointer(0.013)},
-	}, nil)
+	}, nil, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -233,7 +233,7 @@ func TestBatchCreateForbidden(t *testing.T) {
 	svc := NewService(repo, fakeAccess{role: projects.RoleViewer}, &fakeRuns{})
 	_, err := svc.CreateBatch(projectUUID, "viewer", auth.RoleViewer, nil, []CreateBatchRow{
 		batchRow(DataTypeCryo, "t", float64Pointer(1), nil),
-	}, nil)
+	}, nil, nil)
 	if !errors.Is(err, ErrForbidden) {
 		t.Fatalf("viewer error = %v, want ErrForbidden（权限前置，先于行校验）", err)
 	}
@@ -249,7 +249,7 @@ func TestBatchCreateFKFallback(t *testing.T) {
 	_, err := svc.CreateBatch(projectUUID, "creator", auth.RoleMember, nil, []CreateBatchRow{
 		batchRow(DataTypeCryo, "t1", float64Pointer(1), &runID),
 		batchRow(DataTypeCryo, "t2", float64Pointer(2), nil),
-	}, nil)
+	}, nil, nil)
 	var batchErr *BatchValidationError
 	if !errors.As(err, &batchErr) {
 		t.Fatalf("error = %v, want BatchValidationError（FK 竞态转行级 422）", err)
@@ -271,20 +271,19 @@ func TestBatchMergeDecodeAndSemanticErrors(t *testing.T) {
 	decodeErrors := []RowError{
 		{Index: 2, Field: "extra_field", Code: "unknown_field", Message: "未知字段 extra_field"},
 	}
-	_, err := svc.CreateBatch(projectUUID, "creator", auth.RoleMember, nil, rows, decodeErrors)
+	_, err := svc.CreateBatch(projectUUID, "creator", auth.RoleMember, nil, rows, map[int]bool{2: true}, decodeErrors)
 	var batchErr *BatchValidationError
 	if !errors.As(err, &batchErr) {
 		t.Fatalf("error = %v, want BatchValidationError", err)
 	}
-	// 合并后 3 条：index1 语义错误、index2 语义错误（value 必填）、index2 解码错误（unknown_field）；
-	// 排序断言：index 升序、同 index 内字段序稳定。
-	if len(batchErr.Errors) != 3 {
-		t.Fatalf("errors = %v, want 3", batchErr.Errors)
+	// decodeFailed 覆盖的 index 跳过语义校验：合并后 2 条——index1 语义错误、index2 解码错误
+	// （unknown_field），index2 不再叠加占位零值的 value required；排序断言：index 升序、同 index 字段序稳定。
+	if len(batchErr.Errors) != 2 {
+		t.Fatalf("errors = %v, want 2", batchErr.Errors)
 	}
 	wants := []RowError{
 		{Index: 1, Field: "data_type", Code: "invalid_enum"},
 		{Index: 2, Field: "extra_field", Code: "unknown_field"},
-		{Index: 2, Field: "value", Code: "required"},
 	}
 	for i, want := range wants {
 		got := batchErr.Errors[i]
@@ -304,8 +303,27 @@ func TestBatchCreateServiceTooLarge(t *testing.T) {
 		rows = append(rows, batchRow(DataTypeCryo, "t", float64Pointer(1), nil))
 	}
 	// 直接调 service（绕过 handler 层拦截），纵深防线仍应生效。
-	if _, err := svc.CreateBatch(projectUUID, "creator", auth.RoleMember, nil, rows, nil); !errors.Is(err, ErrBatchTooLarge) {
+	if _, err := svc.CreateBatch(projectUUID, "creator", auth.RoleMember, nil, rows, nil, nil); !errors.Is(err, ErrBatchTooLarge) {
 		t.Fatalf("error = %v, want ErrBatchTooLarge", err)
+	}
+}
+
+func TestBatchCreateEmptyRunIDTreatedAsUnset(t *testing.T) {
+	repo := &fakeRepository{}
+	runs := &fakeRuns{exists: true}
+	svc := NewService(repo, fakeAccess{role: projects.RoleMember}, runs)
+	emptyRunID := ""
+	result, err := svc.CreateBatch(projectUUID, "creator", auth.RoleMember, nil, []CreateBatchRow{
+		batchRow(DataTypeCryo, "t1", float64Pointer(1), &emptyRunID),
+	}, nil, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if runs.calls != 0 {
+		t.Fatalf("runs.Exists calls = %d, want 0（空 run_id 按未填处理，不发起 HTTP 校验）", runs.calls)
+	}
+	if result.Items[0].RunID != nil {
+		t.Fatalf("RunID = %v, want nil（空 run_id 不落库）", result.Items[0].RunID)
 	}
 }
 
