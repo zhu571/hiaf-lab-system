@@ -356,3 +356,11 @@ Agent system prompt 明确：
 - 每次 Agent prompt 或工具 schema 变更都跑回归测试。
 - 审计记录 `prompt_version`、`tool_schema_version`、候选动作和最终动作差异。
 - 对被拦截的注入样例按月复盘，更新规则。
+
+## 8. 已知风险登记
+
+### D4：ask 全库可查 vs 项目权限（2026-08-09 登记，AI 智能查询系统方案 v5）
+
+- 风险：AI 智能查询系统 `POST /api/v1/ask/chat` 允许任何登录用户经自然语言查询全部项目数据（viewer 亦可），与各模块 `RequireProjectPermission`（main.go 项目路由）存在张力。
+- 现状缓释：DB 层 `ask_reader` 仅 GRANT SELECT 18 张业务主表（迁移 033），users/audit_log 等在 DB 层即不可读；execute 只读事务 + `SET LOCAL ROLE ask_reader` + 表名白名单 + LIMIT 200/256KB 封顶；所有 ask 写 audit_log（action=ask.chat / ask.execute，actor_type=user/system）；chat 限流 10 次/分/用户。
+- 后续收紧方案（独立迭代）：Go 执行层解析 SQL 并强制注入 `project_id IN (用户有权项目)`，对无 project_id 的表按用户项目成员关系过滤。

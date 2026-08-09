@@ -130,6 +130,8 @@ go-server/<module>/
 
 铁律：不允许跨模块直接访问、写入或 join 对方数据库表。跨模块协作只走两条路：对外的 HTTP API，或在 `main.go` 构造期注入的窄接口/适配器（如各模块的 `ProjectAccessAdapter`，agent 模块的 `SetExecutor` / `SetReportReader` / `SetAuditReader` / `SetResultResolver`）。agent 模块的候选执行和 trace 端点全靠注入桥接 logs/audit/issues/experiences，自身不 SELECT `daily_reports`、`audit_log` 等他模块表。
 
+**全库只读例外（ask 模块）**：AI 智能查询系统（`go-server/ask/`）的 `POST /api/v1/ask/execute` 由 SERVICE_TOKEN 调用，在只读事务内 `SET LOCAL ROLE ask_reader` 直读业务表，是上述铁律的唯一只读例外——DB 权限层由迁移 033 的 `ask_reader` 角色 GRANT SELECT 白名单（18 张主表）强制，Go 解析器仅作纵深；仅允许 SELECT 单表，禁写/禁跨表 join/禁多语句。与 agent 模块 `SetExecutor` 桥接先例并列；后续收紧（project_id 过滤）见 `docs/permission-audit.md` D4 风险登记。
+
 ## 6. 编码约定
 
 ### Go 后端

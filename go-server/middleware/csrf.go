@@ -22,6 +22,11 @@ func CSRF(next http.Handler) http.Handler {
 			next.ServeHTTP(w, r)
 			return
 		}
+		// ask/execute 由 SERVICE_TOKEN 鉴权（无 CSRF cookie，见 service_token.go 白名单）
+		if r.URL.Path == "/api/v1/ask/execute" {
+			next.ServeHTTP(w, r)
+			return
+		}
 
 		header := r.Header.Get("X-CSRF-Token")
 		cookie, err := r.Cookie("csrf_token")
