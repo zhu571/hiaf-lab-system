@@ -561,7 +561,7 @@ jobs:
 
 ```bash
 git clone <repo-url>
-cd lab-daily-report
+cd hiaf-lab-system
 git checkout develop
 ```
 
@@ -609,13 +609,13 @@ make migrate-up
 ```bash
 cd go-server
 go mod download
-go run ./cmd/api
+go run .
 ```
 
 检查：
 
 ```bash
-curl http://localhost:8080/healthz
+curl http://localhost:8000/health
 ```
 
 ### 8.6 启动 Agent
@@ -714,7 +714,7 @@ if err != nil {
 
 - 使用参数化 SQL。
 - 每次迁移一个清晰主题。
-- 迁移文件命名：`YYYYMMDDHHMM_create_logs_table.sql`。
+- 迁移文件命名：序号递增的 up/down 文件对，如 `033_xxx.up.sql` / `033_xxx.down.sql`。
 - 重要查询要考虑索引。
 - 项目化业务表新增时默认要有 `project_id`，除非它是 `daily_reports` 这类明确的日容器或系统表。
 - `daily_reports` 不直接承载项目归属，正式项目记录写入 `daily_report_items` 或 `logs`。

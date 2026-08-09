@@ -574,6 +574,29 @@ AI 问答：
 - 出现越权引用或无来源回答时，先关闭相关知识源或问答入口。
 - 修复后必须验证权限过滤和来源引用。
 
+### 8.6 宿主机服务心跳告警（watchdog）
+
+生产部署机（gascell）通过 systemd timer `lab-watchdog.timer` 每 60s 执行一次
+`/usr/local/bin/lab-watchdog.sh`（仓库源文件 `deploy/scripts/watchdog.sh`，SELinux 下的
+安装方式和挂载配置见 `deploy/scripts/README.md`）：
+
+- 探测 `lab-server`（`:8000/health`）和 `lab-ioc`（`:5080/health`）。
+- 单服务连续 3 次失败（≈3 分钟）发 ntfy 告警到 `lab-alerts`，恢复后发"已恢复"通知。
+- 幂等状态落盘 `/tmp/watchdog_state/`，同一状态不重复告警。
+- 只告警、绝不自动重启：仪器安全边界明确排除"探测失败就 restart"的自愈；容器崩溃场景
+  由 compose `restart: unless-stopped` 承担。
+
+日常检查命令：
+
+```bash
+systemctl list-timers lab-watchdog.timer       # 确认 timer 在跑、下次触发时间
+bash /usr/local/bin/lab-watchdog.sh --dry-run  # 冒烟：只报告不告警、不写状态
+journalctl -u lab-watchdog.service             # 查看历史探测输出
+```
+
+二期 TODO（未实现）：`docker inspect` 探测 postgres/influxdb/grafana/ntfy 其余容器健康态；
+IOC 心跳 PV（EPICS）探测，覆盖"进程活着但数据流断"场景。
+
 ## 9. 定期维护任务
 
 ### 9.1 每日任务
