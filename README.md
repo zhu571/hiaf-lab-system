@@ -4,12 +4,21 @@ HIAF 低温气体靶实验室的多人协作日志管理平台。
 
 `go-server/`、`web-ui/`、`py-agent/`、`migrations/`、`deploy/` 已全部落地运行。系统包含 Go API 后端、Vue 3 前端、Python Agent、PostgreSQL 数据库、InfluxDB 时序库、Grafana 监控、EPICS 网关、虚拟 IOC、ntfy 消息通知等模块，通过 Docker Compose 一键部署。
 
+核心能力：
+
+- 多人日志录入、Issue、经验库、项目维度管理，写操作带幂等键和审计日志。
+- AI Agent 辅助解析、分类、生成候选内容（不绕过权限、审计和人工审批边界）；Agent 任务队列带 claim_token 所有权校验，候选动作可回溯完整 AI 动作时间线。
+- 审计日志 SHA-256 hash 链防篡改，`GET /api/v1/audit/verify` 支持增量校验。
+- 自动化规则引擎（admin-only）：按事件触发自动动作，见 `go-server/automation/`。
+- 仪器控制遵循 SCPI 白名单 + 租约 + 人工确认；宿主机 watchdog 心跳告警只告警、不自动重启。
+- InfluxDB 时序数据存储 + Grafana 监控仪表盘；EPICS 通道访问网关 + 虚拟 IOC。
+
 ## 技术栈
 
 | 层 | 技术 |
 |---|---|
 | 后端 | Go 1.22+，chi 路由，标准库 `net/http` |
-| 前端 | Vue 3 + Element Plus + TypeScript，Vite 单文件构建 |
+| 前端 | Vue 3 + Element Plus + TypeScript，Vite 多 chunk 构建（vendor 分包 + 路由懒加载），产物经 go:embed 嵌入后端 |
 | 数据库 | PostgreSQL 16，golang-migrate/migrate |
 | 时序库 | InfluxDB 2.x |
 | 监控 | Grafana |
@@ -23,6 +32,7 @@ HIAF 低温气体靶实验室的多人协作日志管理平台。
 ```text
 hiaf-lab-system/
 ├── go-server/          # Go 后端
+│   ├── main.go         # 入口，注册所有模块路由
 │   ├── auth/           # 认证鉴权
 │   ├── logs/           # 日志管理
 │   ├── issues/         # 问题管理
@@ -33,23 +43,32 @@ hiaf-lab-system/
 │   ├── assembly/       # 装配/组装
 │   ├── runs/           # 实验运行
 │   ├── rfmatch/        # RF 匹配
+│   ├── steptemplates/  # 步骤模板
+│   ├── todos/          # 待办事项
+│   ├── testdata/       # 测试数据
+│   ├── system/         # 系统更新 (版本查询、更新触发、SSE 日志流)
+│   ├── automation/     # 自动化规则引擎 (admin-only)
 │   ├── agent/          # Agent 交互
-│   ├── audit/          # 审计日志
+│   ├── audit/          # 审计日志 (含 hash 链校验)
 │   ├── attachments/    # 附件管理
 │   ├── notify/         # 消息通知
-│   ├── epics-gateway/  # EPICS 通道访问网关
-│   ├── middleware/      # JWT、权限、审计中间件
-│   └── common/          # 共享工具 (DB、响应、错误、request_id)
+│   ├── epics-gateway/  # EPICS 通道访问网关 (Python 脚本 + Dockerfile)
+│   ├── middleware/     # JWT、权限、审计中间件
+│   ├── common/         # 共享工具 (DB、响应、错误、request_id)
+│   ├── cmd/            # 辅助入口 (update-runner / devserver / seed-agent)
+│   └── static/         # go:embed 嵌入的前端构建产物
 ├── py-agent/           # Python Agent
+│   ├── worker.py       # 后台 Worker (任务队列 + 死信 ntfy 告警)
+│   ├── serve.py        # AI 解析 HTTP 服务
 │   ├── tools/          # LightAgent 工具函数 (调 Go REST API)
 │   ├── prompts/        # Prompt 模板
 │   ├── ioc/            # EPICS 虚拟 IOC (pyEpics 模拟硬件 PV)
 │   └── tests/          # 测试
 ├── web-ui/             # Vue 3 前端
 │   ├── src/api/        # API 客户端
-│   ├── src/views/      # 9 个业务页面
+│   ├── src/views/      # 24 个业务页面
 │   └── src/components/ # 通用组件
-├── migrations/         # PostgreSQL 迁移 (21 个版本，43 个文件)
+├── migrations/         # PostgreSQL 迁移 (32 个版本，64 个文件)
 ├── deploy/             # Docker Compose、Dockerfile、frp、Nginx 配置
 └── images/             # 运行时图片附件目录
 ```

@@ -16,21 +16,25 @@ HIAF 低温气体靶实验室的多人协作日志管理平台。系统已完成
 
 - 多人日志录入、Issue、经验库、项目维度管理。
 - AI Agent 辅助解析、分类、生成候选内容，但不得绕过权限、审计和人工审批边界。
+- Agent 任务队列带 claim_token 所有权校验（迁移 028）；候选动作可回溯完整 AI 动作时间线（迁移 030，`GET /api/v1/agent/candidates/{id}/trace`）。
+- 审计日志 SHA-256 hash 链防篡改（迁移 029）：`GET /api/v1/audit/verify` 支持 from_id/to_id 增量校验，`GET /api/v1/audit/events` 提供审计列表。
+- 自动化规则引擎（automation 模块，admin-only）：`/api/v1/admin/automation/rules`。
 - 传感器/EPICS/PLC 数据接入和仪器控制。
 - InfluxDB 时序数据存储 + Grafana 监控仪表盘。
 - EPICS 通道访问网关 + 虚拟 IOC（pyEpics 模拟硬件 PV）。
 - ntfy 消息通知。
 - Web 触发系统更新：UPDATE_ENGINE=go 为默认（server 经 docker.sock 派发独立 runner 容器执行 git pull + compose 重建）；UPDATE_ENGINE=shell 时 runner 容器改跑 `.hermes/update.sh` 兜底，该脚本也可在宿主机手工执行。
+- 宿主机 watchdog 心跳告警（`deploy/scripts/watchdog.sh`，systemd timer 每 60s 探测 lab-server / lab-ioc，只告警不自动重启）。
 
 ## 2. 当前仓库状态
 
 系统已全部落地运行。当前 GitHub 仓库：
 
 - `docs/`：API、权限审计、仪器安全、项目设计、Agent 策略、维护策略等设计文档。
-- `go-server/`：Go 后端，14+ 业务模块。
-- `web-ui/`：Vue 3 + Element Plus 前端，9 个页面。
+- `go-server/`：Go 后端，20+ 个模块包（含 automation、steptemplates、todos、testdata 等）。
+- `web-ui/`：Vue 3 + Element Plus 前端，24 个页面。
 - `py-agent/`：Python LightAgent 服务 + EPICS 虚拟 IOC。
-- `migrations/`：PostgreSQL 迁移脚本（21 个版本）。
+- `migrations/`：PostgreSQL 迁移脚本（32 个版本）。
 - `deploy/`：Docker Compose（10 个服务）、Dockerfile、secrets。
 - `.github/workflows/ci.yml`：Go、前端、Python Agent 三个 CI job。
 
@@ -40,7 +44,7 @@ HIAF 低温气体靶实验室的多人协作日志管理平台。系统已完成
 |----|------|
 | 后端 | Go 1.22+，chi 路由，标准库 `net/http` |
 | 数据库 | PostgreSQL 16，golang-migrate/migrate |
-| 前端 | Vue 3 + Element Plus + vue-i18n（中/英），Vite 单文件构建（JS/CSS 全部内联进 index.html，go:embed 嵌入） |
+| 前端 | Vue 3 + Element Plus + vue-i18n（中/英），Vite 多 chunk 构建（vendor 分包 + 路由懒加载），产物经 go:embed 嵌入 `go-server/static/` |
 | AI Agent | Python 3.11+，LightAgent (`wanxingai/lightagent`) |
 | 时序库 | InfluxDB 2.x |
 | 监控 | Grafana |
@@ -84,16 +88,23 @@ hiaf-lab-system/
 │   ├── assembly/           # 装配/组装模块
 │   ├── runs/               # 实验运行模块
 │   ├── rfmatch/            # RF 匹配模块
+│   ├── steptemplates/      # 步骤模板模块
+│   ├── todos/              # 待办事项模块
+│   ├── testdata/           # 测试数据模块
 │   ├── system/             # 系统更新模块（版本查询、更新触发、SSE 日志流）
-│   ├── cmd/update-runner/  # 更新 runner 入口（独立容器内执行 git pull + compose 重建）
+│   ├── automation/         # 自动化规则引擎模块（admin-only）
+│   ├── cmd/update-runner/  # 更新 runner 入口（独立容器内执行 git pull + compose 重建；cmd/ 下另有 devserver、seed-agent）
 │   ├── agent/              # Agent 交互模块
-│   ├── audit/              # 审计日志模块
+│   ├── audit/              # 审计日志模块（含 hash 链校验、事件列表端点）
 │   ├── attachments/        # 附件管理模块
 │   ├── notify/             # 消息通知模块
-│   ├── epics-gateway/      # EPICS 通道访问网关
+│   ├── epics-gateway/      # EPICS 通道访问网关（Python 脚本 + Dockerfile，非 Go 包）
 │   ├── middleware/         # JWT、权限、审计、日志中间件
-│   └── common/             # DB、响应、错误、request_id 等共享工具
+│   ├── common/             # DB、响应、错误、request_id 等共享工具
+│   └── static/             # go:embed 嵌入的前端构建产物（由 web-ui 构建同步）
 ├── py-agent/               # Python Agent
+│   ├── worker.py           # 后台 Worker（任务队列 + 死信 ntfy 告警）
+│   ├── serve.py            # AI 解析 HTTP 服务
 │   ├── tools/              # LightAgent 工具函数 (只调 Go REST API)
 │   ├── prompts/            # Prompt 模板
 │   ├── ioc/                # EPICS 虚拟 IOC (pyEpics 模拟硬件 PV)
@@ -117,7 +128,7 @@ go-server/<module>/
 └── service_test.go  # 业务逻辑测试
 ```
 
-铁律：模块间只走 HTTP API，不允许跨模块直接访问、写入或 join 对方数据库表。
+铁律：不允许跨模块直接访问、写入或 join 对方数据库表。跨模块协作只走两条路：对外的 HTTP API，或在 `main.go` 构造期注入的窄接口/适配器（如各模块的 `ProjectAccessAdapter`，agent 模块的 `SetExecutor` / `SetReportReader` / `SetAuditReader` / `SetResultResolver`）。agent 模块的候选执行和 trace 端点全靠注入桥接 logs/audit/issues/experiences，自身不 SELECT `daily_reports`、`audit_log` 等他模块表。
 
 ## 6. 编码约定
 

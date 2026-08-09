@@ -24,12 +24,26 @@ cd deploy && ./scripts/init_ntfy.sh
 ./scripts/watchdog.sh --dry-run
 ```
 
+### 生产部署（gascell 部署机，SELinux Enforcing）
+
+部署机仓库路径为 `/home/gascell/hiaf-lab-system`。SELinux Enforcing 下 systemd 无法直接执行
+用户 home 目录里的脚本（`status=203/EXEC`），必须先安装到系统路径并恢复 context：
+
+```bash
+sudo install -m 755 /home/gascell/hiaf-lab-system/deploy/scripts/watchdog.sh /usr/local/bin/lab-watchdog.sh
+sudo restorecon -v /usr/local/bin/lab-watchdog.sh   # 恢复 bin_t context
+```
+
+注意脚本内 `TOKEN_FILE` 默认值按脚本位置解析（`$SCRIPT_DIR/../secrets/...`），安装到
+`/usr/local/bin` 后必须用 `WATCHDOG_NTFY_TOKEN_FILE` 环境变量指向仓库内的凭据文件
+（见下方 cron / systemd 示例）。
+
 ### 宿主机挂载（二选一，60s 间隔）
 
 cron（最短粒度 1 分钟，与设计的 60s 周期一致）：
 
 ```cron
-* * * * * /home/zhuhaofan/hiaf-lab-system/deploy/scripts/watchdog.sh >> /var/log/lab-watchdog.log 2>&1
+* * * * * WATCHDOG_NTFY_TOKEN_FILE=/home/gascell/hiaf-lab-system/deploy/secrets/ntfy_publish_token.txt /usr/local/bin/lab-watchdog.sh >> /var/log/lab-watchdog.log 2>&1
 ```
 
 systemd timer（`/etc/systemd/system/lab-watchdog.{service,timer}`）：
@@ -41,7 +55,8 @@ Description=HIAF lab service watchdog (alert only)
 
 [Service]
 Type=oneshot
-ExecStart=/home/zhuhaofan/hiaf-lab-system/deploy/scripts/watchdog.sh
+Environment=WATCHDOG_NTFY_TOKEN_FILE=/home/gascell/hiaf-lab-system/deploy/secrets/ntfy_publish_token.txt
+ExecStart=/usr/local/bin/lab-watchdog.sh
 ```
 
 ```ini
@@ -62,8 +77,13 @@ sudo systemctl daemon-reload
 sudo systemctl enable --now lab-watchdog.timer
 ```
 
+`Type=oneshot` 的 service 每次执行完即退出，`systemctl status lab-watchdog.service` 显示
+`inactive (dead)` 属正常现象，timer 到点会再次拉起；历史探测输出用
+`journalctl -u lab-watchdog.service` 查看。
+
 注意：
 
-- 告警凭据读 `deploy/secrets/ntfy_publish_token.txt`（先跑 `init_ntfy.sh` 生成）。
-- 仓库路径若不在 `/home/zhuhaofan/hiaf-lab-system`，cron/timer 中的路径需相应修改。
+- 告警凭据读 `deploy/secrets/ntfy_publish_token.txt`（先跑 `init_ntfy.sh` 生成；严禁用
+  `service_token.txt`，那是 Go 内部服务 token，ntfy 侧无该用户）。
+- 仓库路径若不在 `/home/gascell/hiaf-lab-system`，上述安装命令和环境变量中的路径需相应修改。
 - `/tmp` 重启清空只影响失败计数，属可接受范围；如需保留可用 `WATCHDOG_STATE_DIR` 覆盖。

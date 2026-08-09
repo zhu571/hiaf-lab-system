@@ -179,6 +179,7 @@ rg --files
 ```text
 hiaf-lab-system/
 ├── go-server/          # Go 后端
+│   ├── main.go         # 入口，注册所有模块路由
 │   ├── auth/           # 认证鉴权
 │   ├── logs/           # 日志管理
 │   ├── issues/         # 问题管理
@@ -189,14 +190,23 @@ hiaf-lab-system/
 │   ├── assembly/       # 装配/组装
 │   ├── runs/           # 实验运行
 │   ├── rfmatch/        # RF 匹配
+│   ├── steptemplates/  # 步骤模板
+│   ├── todos/          # 待办事项
+│   ├── testdata/       # 测试数据
+│   ├── system/         # 系统更新 (版本查询、更新触发、SSE 日志流)
+│   ├── automation/     # 自动化规则引擎 (admin-only)
 │   ├── agent/          # Agent 交互
-│   ├── audit/          # 审计日志
+│   ├── audit/          # 审计日志 (含 hash 链校验)
 │   ├── attachments/    # 附件管理
 │   ├── notify/         # 消息通知
-│   ├── epics-gateway/  # EPICS 通道访问网关
+│   ├── epics-gateway/  # EPICS 通道访问网关 (Python 脚本 + Dockerfile)
 │   ├── middleware/     # JWT、权限、审计中间件
-│   └── common/          # 共享工具
+│   ├── common/         # 共享工具
+│   ├── cmd/            # 辅助入口 (update-runner / devserver / seed-agent)
+│   └── static/         # go:embed 嵌入的前端构建产物
 ├── py-agent/           # Python Agent
+│   ├── worker.py       # 后台 Worker (任务队列 + 死信 ntfy 告警)
+│   ├── serve.py        # AI 解析 HTTP 服务
 │   ├── tools/          # LightAgent 工具函数 (调 Go REST API)
 │   ├── prompts/        # Prompt 模板
 │   └── ioc/            # EPICS 虚拟 IOC

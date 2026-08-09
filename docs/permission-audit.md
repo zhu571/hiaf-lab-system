@@ -65,6 +65,7 @@ ACL 记录：
 | 报告 `report` | `read`、`generate`、`approve`、`export` |
 | 附件 `attachment` | `read`、`upload`、`delete` |
 | 审计 `audit_event` | `read`、`export` |
+| 自动化规则 `automation_rule` | `read`、`create`、`update`、`delete`（仅 admin，走 `/api/v1/admin/automation/rules`） |
 
 ### 2.4 继承规则
 
@@ -172,6 +173,7 @@ Agent 代用户操作额外字段：
 
 - 审计日志写入 PostgreSQL append-only 表。
 - 应用账号不得拥有审计表 UPDATE/DELETE 权限。
+- 审计表带 SHA-256 hash 链（`prev_hash`/`hash`）防篡改，`GET /api/v1/audit/verify` 可按 from_id/to_id 增量校验链完整性（迁移 029）。
 - 每日导出审计归档到只追加存储目录。
 - 生产审计保留不少于 2 年；仪器控制审计保留不少于 5 年。
 
