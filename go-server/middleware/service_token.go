@@ -25,13 +25,16 @@ func SetServiceToken(token string) {
 	serviceToken = strings.TrimSpace(token)
 }
 
-// ServiceToken 校验白名单路径上的 SERVICE_TOKEN。白名单仅 GET /api/v1/daily-reports/by-date
-// （拉全量用户日报是敏感操作，scope 收敛）。命中且正确 → ctx 标记 serviceCallKey 并跳过 JWT；
-// 非白名单路径直接放行（不消费 token）；白名单上 token 错误 → 401 + 泄露告警。
+// ServiceToken 校验白名单路径上的 SERVICE_TOKEN。白名单按方法分条件匹配：
+// GET /api/v1/daily-reports/by-date（拉全量用户日报是敏感操作，scope 收敛）与
+// POST /api/v1/ask/execute（AI 智能查询内部只读执行端点，见 ask 模块）。
+// 命中且正确 → ctx 标记 serviceCallKey 并跳过 JWT；非白名单路径直接放行（不消费 token）；
+// 白名单上 token 错误 → 401 + 泄露告警。
 func ServiceToken() func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			if !(r.Method == http.MethodGet && r.URL.Path == "/api/v1/daily-reports/by-date") {
+			if !((r.Method == http.MethodGet && r.URL.Path == "/api/v1/daily-reports/by-date") ||
+				(r.Method == http.MethodPost && r.URL.Path == "/api/v1/ask/execute")) {
 				next.ServeHTTP(w, r)
 				return
 			}

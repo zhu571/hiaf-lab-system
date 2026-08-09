@@ -212,9 +212,13 @@ services:
       LLM_TIMEOUT_SECONDS: ${LLM_TIMEOUT_SECONDS:-180}
       # worker 死信告警发 ntfy 的 Bearer token（与 Go 侧 notify 同源凭据，C6 修复）
       NTFY_PUBLISH_TOKEN_FILE: /run/secrets/ntfy_publish_token
+      # ask/execute 的 service_token（与 Go server 的 SERVICE_TOKEN 同源）；
+      # 实际出站调用在 py-agent-interpret（serve.py），此处与下方容器一起注入
+      SERVICE_TOKEN_FILE: /run/secrets/service_token
     secrets:
       - agent_password
       - ntfy_publish_token
+      - service_token
     depends_on:
       server:
         condition: service_healthy
@@ -236,8 +240,11 @@ services:
       DEEPSEEK_BASE_URL: ${DEEPSEEK_BASE_URL:-https://api.deepseek.com}
       DEEPSEEK_FALLBACK_MODEL: ${DEEPSEEK_FALLBACK_MODEL:-}
       PY_AGENT_INTERNAL_TOKEN_FILE: /run/secrets/agent_password
+      # /v1/ask 的 AskEngine 出站调 Go ask/execute 的 service_token（与 server 同源）
+      SERVICE_TOKEN_FILE: /run/secrets/service_token
     secrets:
       - agent_password
+      - service_token
     expose:
       - "8001"
     healthcheck:

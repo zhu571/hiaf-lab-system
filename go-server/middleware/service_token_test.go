@@ -199,3 +199,58 @@ func TestLooksLikeJWT(t *testing.T) {
 		t.Fatal("malformed tokens must not look like JWT")
 	}
 }
+
+func TestServiceTokenAskExecute(t *testing.T) {
+	old := serviceToken
+	defer func() { serviceToken = old }()
+	SetServiceToken("secret-token")
+
+	handler := ServiceToken()(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if !IsServiceCall(r.Context()) {
+			t.Fatal("expected service call context")
+		}
+		w.WriteHeader(http.StatusOK)
+	}))
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest(http.MethodPost, "/api/v1/ask/execute", nil)
+	r.Header.Set("Authorization", "Bearer secret-token")
+	handler.ServeHTTP(w, withRequestID(r))
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d", w.Code)
+	}
+}
+
+func TestServiceTokenAskExecuteWrongToken(t *testing.T) {
+	old := serviceToken
+	defer func() { serviceToken = old }()
+	SetServiceToken("secret-token")
+
+	handler := ServiceToken()(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		t.Fatal("handler must not run on invalid token")
+	}))
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest(http.MethodPost, "/api/v1/ask/execute", nil)
+	r.Header.Set("Authorization", "Bearer wrong")
+	handler.ServeHTTP(w, withRequestID(r))
+	if w.Code != http.StatusUnauthorized {
+		t.Fatalf("expected 401, got %d", w.Code)
+	}
+}
+
+func TestServiceTokenAskExecuteWrongMethod(t *testing.T) {
+	// ask/execute 白名单仅 POST：GET 不放行（无 service call 标记，交由 JWT 流程）。
+	SetServiceToken("secret-token")
+	handler := ServiceToken()(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if IsServiceCall(r.Context()) {
+			t.Fatal("GET ask/execute must not be a service call")
+		}
+		w.WriteHeader(http.StatusOK)
+	}))
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest(http.MethodGet, "/api/v1/ask/execute", nil)
+	r.Header.Set("Authorization", "Bearer secret-token")
+	handler.ServeHTTP(w, withRequestID(r))
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d", w.Code)
+	}
+}

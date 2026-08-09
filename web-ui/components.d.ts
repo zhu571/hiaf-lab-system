@@ -8,6 +8,8 @@ export {}
 declare module 'vue' {
   export interface GlobalComponents {
     AppLayout: typeof import('./src/components/AppLayout.vue')['default']
+    AskDialog: typeof import('./src/components/AskDialog.vue')['default']
+    AskResultPanel: typeof import('./src/components/AskResultPanel.vue')['default']
     CommentSection: typeof import('./src/components/CommentSection.vue')['default']
     DailyReportShell: typeof import('./src/components/DailyReportShell.vue')['default']
     ElAlert: typeof import('element-plus/es')['ElAlert']

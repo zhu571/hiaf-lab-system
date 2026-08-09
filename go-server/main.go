@@ -19,6 +19,7 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
 	"github.com/zhu571/hiaf-lab-system/go-server/agent"
+	"github.com/zhu571/hiaf-lab-system/go-server/ask"
 	"github.com/zhu571/hiaf-lab-system/go-server/assembly"
 	"github.com/zhu571/hiaf-lab-system/go-server/attachments"
 	"github.com/zhu571/hiaf-lab-system/go-server/audit"
@@ -96,6 +97,11 @@ func main() {
 	automationRepo := automation.NewRepository(db)
 	automationSvc := automation.NewService(automationRepo)
 	automationHandler := automation.NewHandler(automationSvc)
+	askRepo := ask.NewRepository(db)
+	askSvc := ask.NewService(askRepo, db)
+	askSvc.AutoConfigure()
+	askSvc.StartupCheck(context.Background())
+	askHandler := ask.NewHandler(askSvc)
 	issuesSvc := issues.NewService(issuesRepo, issues.ProjectAccessAdapter{DB: db, Repo: projectsRepo}, agentSvc)
 	issuesHandler := issues.NewHandler(issuesSvc)
 	experiencesRepo := experiences.NewRepository(db)
@@ -531,6 +537,22 @@ func main() {
 			r.Patch("/done", todosHandler.Done)
 			r.Patch("/defer", todosHandler.Defer)
 			r.Delete("/", todosHandler.Delete)
+		})
+	})
+
+	r.Route("/api/v1/ask", func(r chi.Router) {
+		r.Group(func(r chi.Router) {
+			r.Use(mw.AuthRequired)
+			r.Use(mw.Audit(db))
+			r.Use(mw.RequireIdempotencyKey(db))
+			r.Post("/chat", askHandler.Chat)
+			r.Get("/history", askHandler.History)
+			r.Get("/history/{id}", askHandler.HistoryByID)
+		})
+		r.Group(func(r chi.Router) {
+			r.Use(mw.AuthRequired)
+			r.Use(mw.Audit(db))
+			r.Post("/execute", askHandler.Execute)
 		})
 	})
 
