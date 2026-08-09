@@ -9,8 +9,8 @@ from LightAgent import AsyncToolDispatcher, GuardrailDecision, HookDecision, Lig
 from LightAgent.errors import classify_exception
 
 
-MODEL = "deepseek-v4-pro"
-BASE_URL = "https://api.deepseek.com"
+MODEL = "deepseek-v4-pro"  # dev-only：spike 脚本专用，不跟随部署配置
+BASE_URL = "https://api.deepseek.com"  # dev-only
 ALLOWED_TOOLS = {"create_issue", "add_comment"}
 TOOL_CALLS = []
 INJECTION = re.compile(

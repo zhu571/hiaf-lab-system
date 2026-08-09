@@ -1,11 +1,18 @@
 import json
+import os
 import re
 from datetime import datetime
 from pathlib import Path
 
 
-MODEL = "deepseek-v4-pro"
-BASE_URL = "https://api.deepseek.com"
+# 模型与接入配置走环境变量（默认值保持历史硬编码行为）。
+# stepplan.py/todoplan.py 经 `from tools.parse import MODEL, BASE_URL` 引用，同源生效。
+MODEL = os.environ.get("DEEPSEEK_MODEL", "deepseek-v4-pro")
+BASE_URL = os.environ.get("DEEPSEEK_BASE_URL", "https://api.deepseek.com")
+# 备选模型：本期仅配置化，不实现自动降级（空 = 未配置）。
+FALLBACK_MODEL = os.environ.get("DEEPSEEK_FALLBACK_MODEL", "")
+# worker 对单次 LLM 解析的硬超时（秒），必须小于 worker 的 AGENT_LEASE_SECONDS。
+LLM_TIMEOUT_SECONDS = int(os.environ.get("LLM_TIMEOUT_SECONDS", "180"))
 DAILY_LOG_CATEGORIES = {"general", "assembly", "test", "cryo", "rf", "vacuum", "beam", "data_analysis"}
 INJECTION = re.compile(
     r"忽略(?:之前|以上).*指令|ignore (?:all )?(?:previous|prior).*instructions?"

@@ -5,6 +5,8 @@ from pathlib import Path
 
 import httpx
 
+from tools.parse import MODEL
+
 
 class APIError(RuntimeError):
     pass
@@ -80,7 +82,7 @@ class GoAPI:
     def complete(self, task_id, candidates, confidence=None):
         body = {
             "result": {"candidate_count": len(candidates)},
-            "model": "deepseek-v4-pro",
+            "model": MODEL,
             "prompt_version": "1.0",
             "candidates": candidates,
         }
