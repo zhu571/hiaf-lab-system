@@ -1,5 +1,6 @@
 import concurrent.futures
 import logging
+import os
 import re
 import time
 
@@ -8,6 +9,41 @@ from tools.parse import LLM_TIMEOUT_SECONDS
 
 
 LOG = logging.getLogger("py-agent")
+
+
+def _ntfy_publish_token():
+    # 与 Go 侧 notify.readPublishToken 同源凭据：secret 文件优先，env 兜底。
+    # 凭据是 todo-publisher 的 Bearer token（deploy/secrets/ntfy_publish_token.txt，
+    # 已授 lab-alerts write）；严禁用 service_token——那是 Go 内部服务 token，ntfy 侧无该用户。
+    path = os.environ.get("NTFY_PUBLISH_TOKEN_FILE", "/run/secrets/ntfy_publish_token")
+    try:
+        with open(path, encoding="utf-8") as fh:
+            token = fh.read().strip()
+            if token:
+                return token
+    except OSError:
+        pass
+    return os.environ.get("NTFY_PUBLISH_TOKEN", "").strip()
+
+
+def dead_letter_alert(task_id, detail):
+    # 死信降级告警：fail 也失败时的最后手段，直接发 ntfy（带 Bearer token，C6 修复——
+    # 此前无 token 发布，ntfy auth-default-access: deny-all 下被 403 静默丢弃）。
+    # 任何异常都在此处吞掉，不能再向上抛。
+    try:
+        from urllib.parse import quote
+        from urllib.request import Request, urlopen
+        req = Request("http://ntfy:80/lab-alerts", data=f"任务 {task_id}: {detail}".encode("utf-8"), method="POST")
+        req.add_header("Title", quote("Agent 死信告警", safe=""))
+        req.add_header("Priority", "high")
+        req.add_header("Tags", "robot_face,warning")
+        req.add_header("Click", "http://10.144.144.12:8000/agent-candidates")
+        token = _ntfy_publish_token()
+        if token:
+            req.add_header("Authorization", f"Bearer {token}")
+        urlopen(req, timeout=5)
+    except Exception:
+        LOG.exception("dead letter ntfy alert failed")
 
 
 class LLMTimeoutError(RuntimeError):
@@ -71,19 +107,7 @@ class Worker:
                     LOG.info("fail arrived after reclaim, ignore", extra={"task_id": task_id})
                     return True
                 LOG.exception("could not mark task failed", extra={"task_id": task_id})
-                try:
-                    from urllib.parse import quote
-                    from urllib.request import Request, urlopen
-                    title = quote("Agent 死信告警", safe="")
-                    body = f"任务 {task_id}: {detail}".encode("utf-8")
-                    req = Request("http://ntfy:80/lab-alerts", data=body, method="POST")
-                    req.add_header("Title", title)
-                    req.add_header("Priority", "high")
-                    req.add_header("Tags", "robot_face,warning")
-                    req.add_header("Click", "http://10.144.144.12:8000/agent-candidates")
-                    urlopen(req, timeout=5)
-                except Exception:
-                    LOG.exception("dead letter ntfy alert failed")
+                dead_letter_alert(task_id, detail)
         return True
 
     def _parse_with_timeout(self, raw_text, issues, project_ids):

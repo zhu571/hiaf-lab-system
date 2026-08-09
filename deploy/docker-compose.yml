@@ -210,8 +210,11 @@ services:
       DEEPSEEK_BASE_URL: ${DEEPSEEK_BASE_URL:-https://api.deepseek.com}
       DEEPSEEK_FALLBACK_MODEL: ${DEEPSEEK_FALLBACK_MODEL:-}
       LLM_TIMEOUT_SECONDS: ${LLM_TIMEOUT_SECONDS:-180}
+      # worker 死信告警发 ntfy 的 Bearer token（与 Go 侧 notify 同源凭据，C6 修复）
+      NTFY_PUBLISH_TOKEN_FILE: /run/secrets/ntfy_publish_token
     secrets:
       - agent_password
+      - ntfy_publish_token
     depends_on:
       server:
         condition: service_healthy
