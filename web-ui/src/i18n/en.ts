@@ -827,7 +827,21 @@ export default {
     diffFromCurrent: 'No snapshot for this task; the left pane shows the report’s current raw text (may differ from what the AI saw).',
     diffTruncated: ' (first 2000 chars only)',
     diffNoSource: 'No source text available for comparison',
-    diffLoadFailed: 'Failed to load trace info'
+    diffLoadFailed: 'Failed to load trace info',
+    // Action-flow timeline in the detail drawer (C16, data from the C8 trace endpoint).
+    stageSubmit: 'Report Submitted',
+    stageAiParse: 'AI Parsing',
+    stageCandidate: 'Candidate Generated',
+    stageReview: 'Human Review',
+    stageResult: 'Execution Result',
+    model: 'Model: ',
+    snapshotExpand: 'Raw text snapshot',
+    noSnapshot: 'Pre-migration task; no snapshot',
+    traceUnavailable: 'Trace info unavailable',
+    reviewPending: 'Pending review',
+    resultPending: 'Not executed',
+    resultRejected: 'Rejected; no execution result',
+    viewResult: 'View result'
   },
   rfMatching: {
     // RF matching page (RFMatchingView).

@@ -749,7 +749,51 @@ verify 端点检出。审计路由不挂 Audit 中间件（verify/events 查询�
 }
 ```
 
-## 3.12 系统管理模块（系统更新）
+## 3.12 自动化规则模块（C9 规则引擎一期）
+
+仅 admin 角色可访问（路由挂 `RequireRole(admin)`，写操作挂 Audit + Idempotency-Key）。
+规则表驱动 `daily_report.submitted` 事件的 agent 任务入队（迁移 032 起触发器规则派发，
+替代 014 硬编码）。一期边界由 DB CHECK + service 双重白名单锁死：事件仅
+`daily_report.submitted`，动作仅 `enqueue_agent_task`；PATCH 仅允许切换 `enabled`。
+
+### `GET /api/v1/admin/automation/rules`
+
+规则列表（含 disabled）。响应：
+
+```json
+{
+  "data": {
+    "items": [
+      {
+        "id": "...", "name": "日报提交→issue 候选",
+        "trigger_event": "daily_report.submitted",
+        "action": {"type": "enqueue_agent_task", "mode": "parse_issues"},
+        "enabled": true, "created_by": null,
+        "created_at": "2026-08-09T10:00:00+08:00", "updated_at": "2026-08-09T10:00:00+08:00"
+      }
+    ],
+    "total": 1
+  },
+  "request_id": "req_..."
+}
+```
+
+### `POST /api/v1/admin/automation/rules`
+
+新建规则（Idempotency-Key + 审计）。请求体 `{name, trigger_event, action}`；
+`trigger_event`/`action.type` 非白名单值返回 400 `invalid_rule`（DB CHECK 为兜底）。
+
+### `PATCH /api/v1/admin/automation/rules/{id}`
+
+仅允许切换 `enabled`（Idempotency-Key + 审计）。请求体 `{"enabled": false}`；
+一期不改 `trigger_event`/`action`（避免无 schema 校验的写穿）。规则不存在返回
+404 `rule_not_found`。
+
+### `DELETE /api/v1/admin/automation/rules/{id}`
+
+硬删除（Idempotency-Key + 审计留痕）。规则不存在返回 404 `rule_not_found`。
+
+## 3.13 系统管理模块（系统更新）
 
 仅 admin 角色可访问（路由挂 `RequireRole(admin)`）。更新由 Go 进程触发，执行引擎由
 `UPDATE_ENGINE` 环境变量决定：

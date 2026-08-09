@@ -23,6 +23,7 @@ import (
 	"github.com/zhu571/hiaf-lab-system/go-server/attachments"
 	"github.com/zhu571/hiaf-lab-system/go-server/audit"
 	"github.com/zhu571/hiaf-lab-system/go-server/auth"
+	"github.com/zhu571/hiaf-lab-system/go-server/automation"
 	"github.com/zhu571/hiaf-lab-system/go-server/common"
 	"github.com/zhu571/hiaf-lab-system/go-server/experiences"
 	"github.com/zhu571/hiaf-lab-system/go-server/instruments"
@@ -92,6 +93,9 @@ func main() {
 	agentRepo := agent.NewRepository(db)
 	agentSvc := agent.NewService(agentRepo)
 	agentHandler := agent.NewHandler(agentSvc)
+	automationRepo := automation.NewRepository(db)
+	automationSvc := automation.NewService(automationRepo)
+	automationHandler := automation.NewHandler(automationSvc)
 	issuesSvc := issues.NewService(issuesRepo, issues.ProjectAccessAdapter{DB: db, Repo: projectsRepo}, agentSvc)
 	issuesHandler := issues.NewHandler(issuesSvc)
 	experiencesRepo := experiences.NewRepository(db)
@@ -211,6 +215,14 @@ func main() {
 		r.Post("/", authHandler.AdminCreateUser)
 		r.Patch("/{id}", authHandler.AdminUpdateUser)
 		r.Post("/{id}/reset-password", authHandler.AdminResetPassword)
+	})
+	// 自动化规则（C9 规则引擎一期）— admin only，写操作需审计+幂等
+	r.Route("/api/v1/admin/automation", func(r chi.Router) {
+		r.Use(mw.AuthRequired)
+		r.Use(mw.RequireRole(auth.RoleAdmin))
+		r.Use(mw.Audit(db))
+		r.Use(mw.RequireIdempotencyKey(db))
+		r.Mount("/", automationHandler.Routes())
 	})
 	// 系统更新 — admin only
 	r.Route("/api/v1/admin/system", func(r chi.Router) {

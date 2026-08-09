@@ -793,7 +793,20 @@ export default {
     diffFromCurrent: '该任务无原文快照，左栏为日报当前原文（可能与 AI 解析时不同）。',
     diffTruncated: '（仅截取前 2000 字符）',
     diffNoSource: '无可用原文进行对照',
-    diffLoadFailed: '溯源信息加载失败'
+    diffLoadFailed: '溯源信息加载失败',
+    stageSubmit: '日报提交',
+    stageAiParse: 'AI 解析',
+    stageCandidate: '候选生成',
+    stageReview: '人工审核',
+    stageResult: '执行产物',
+    model: '模型：',
+    snapshotExpand: '原文快照',
+    noSnapshot: '迁移前任务，无快照',
+    traceUnavailable: '溯源信息不可用',
+    reviewPending: '待审核',
+    resultPending: '未执行',
+    resultRejected: '已拒绝，无执行产物',
+    viewResult: '查看产物'
   },
   rfMatching: {
     device: '设备',
