@@ -1,3 +1,4 @@
+import asyncio
 import json
 import os
 import re
@@ -118,7 +119,9 @@ def create_app(interpreter, planner, parser, todo_planner, token):
         try:
             data = await request.json()
             user_input, history, commands = validate_request(data)
-            result = interpreter.interpret(
+            # 同步 LLM 调用放线程池，避免慢请求阻塞整个事件循环（C1 缺口 C）。
+            result = await asyncio.to_thread(
+                interpreter.interpret,
                 str(data.get("instrument_id", ""))[:128], str(data.get("instrument_name", ""))[:256],
                 commands, user_input, history,
             )
@@ -147,7 +150,7 @@ def create_app(interpreter, planner, parser, todo_planner, token):
                 raise ValueError("prompt is invalid")
             if not isinstance(context, dict):
                 raise ValueError("context is invalid")
-            result = planner.plan(kind, prompt.strip(), context)
+            result = await asyncio.to_thread(planner.plan, kind, prompt.strip(), context)
             return JSONResponse(result)
         except (ValueError, json.JSONDecodeError):
             return JSONResponse({"error": "bad_request"}, status_code=400)
@@ -163,7 +166,7 @@ def create_app(interpreter, planner, parser, todo_planner, token):
         try:
             data = await request.json()
             raw_text, projects, report_date = validate_daily_parse(data)
-            result = parser.parse_daily_logs(raw_text, projects, report_date)
+            result = await asyncio.to_thread(parser.parse_daily_logs, raw_text, projects, report_date)
             return JSONResponse(result)
         except (ValueError, json.JSONDecodeError):
             return JSONResponse({"error": "bad_request"}, status_code=400)
@@ -179,7 +182,7 @@ def create_app(interpreter, planner, parser, todo_planner, token):
         try:
             data = await request.json()
             raw_text, user_id = validate_todo_add(data)
-            result = todo_planner.parse_add(raw_text, user_id)
+            result = await asyncio.to_thread(todo_planner.parse_add, raw_text, user_id)
             return JSONResponse(result)
         except (ValueError, json.JSONDecodeError):
             return JSONResponse({"error": "bad_request"}, status_code=400)
@@ -195,7 +198,9 @@ def create_app(interpreter, planner, parser, todo_planner, token):
         try:
             data = await request.json()
             user_id, yesterday_report, open_issues, existing_titles = validate_todo_daily(data)
-            result = todo_planner.generate_daily(user_id, yesterday_report, open_issues, existing_titles)
+            result = await asyncio.to_thread(
+                todo_planner.generate_daily, user_id, yesterday_report, open_issues, existing_titles,
+            )
             return JSONResponse(result)
         except (ValueError, json.JSONDecodeError):
             return JSONResponse({"error": "bad_request"}, status_code=400)
