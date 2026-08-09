@@ -4,6 +4,9 @@
       <el-icon><ArrowLeft /></el-icon>
     </button>
     <h1 class="title">{{ title }}</h1>
+    <button class="ask-btn" type="button" :aria-label="t('ask.title')" @click="emit('ask')">
+      <el-icon><ChatDotRound /></el-icon>
+    </button>
   </header>
 </template>
 
@@ -11,8 +14,10 @@
 import { computed } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
-import { ArrowLeft } from '@element-plus/icons-vue'
+import { ArrowLeft, ChatDotRound } from '@element-plus/icons-vue'
 import { useProjectStore } from '../stores/project'
+
+const emit = defineEmits<{ ask: [] }>()
 
 const route = useRoute()
 const router = useRouter()
@@ -75,7 +80,25 @@ function goBack() {
   width: 48px;
 }
 
-.back-btn:active {
+.ask-btn {
+  align-items: center;
+  background: transparent;
+  border: none;
+  border-radius: var(--radius-sm);
+  color: var(--brand-600);
+  cursor: pointer;
+  display: inline-flex;
+  flex: 0 0 auto;
+  font-size: 18px;
+  height: 48px;
+  justify-content: center;
+  margin-left: auto;
+  padding: 0 12px;
+  width: 48px;
+}
+
+.back-btn:active,
+.ask-btn:active {
   background: var(--surface-2);
 }
 

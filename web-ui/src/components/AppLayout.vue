@@ -1,6 +1,6 @@
 <template>
   <div class="layout">
-    <MobileTopBar v-if="isMobile" />
+    <MobileTopBar v-if="isMobile" @ask="openAskDialog" />
     <aside v-if="!isMobile" class="nav">
       <div class="brand">
         <span class="brand-mark">H</span>
@@ -25,6 +25,10 @@
         </el-badge>
         <span v-else>{{ item.label }}</span>
       </RouterLink>
+      <button type="button" class="nav-link nav-ask" @click="openAskDialog">
+        <el-icon><ChatDotRound /></el-icon>
+        <span>{{ t('nav.aiAsk') }}</span>
+      </button>
       <p class="nav-group">{{ t('nav.systemGroup') }}</p>
       <RouterLink
         v-for="item in systemItems"
@@ -72,6 +76,8 @@
         <span>{{ item.label }}</span>
       </RouterLink>
     </nav>
+
+    <AskDialog />
   </div>
 </template>
 
@@ -79,12 +85,14 @@
 import { computed, onBeforeUnmount, onMounted, ref, watch, type Component } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
-import { ArrowUp, Connection, DataBoard, Document, FolderOpened, HomeFilled, MagicStick, Memo, Monitor, Odometer, Paperclip, Reading, Setting, Tickets, User } from '@element-plus/icons-vue'
+import { ArrowUp, ChatDotRound, Connection, DataBoard, Document, FolderOpened, HomeFilled, MagicStick, Memo, Monitor, Odometer, Paperclip, Reading, Setting, Tickets, User } from '@element-plus/icons-vue'
 import { useMobile } from '../composables/useMobile'
 import { useAuthStore } from '../stores/auth'
 import { useProjectStore } from '../stores/project'
+import { useAskDialog } from '../composables/useAskDialog'
 import { listAgentCandidates } from '../api/agent'
 import MobileTopBar from './MobileTopBar.vue'
+import AskDialog from './AskDialog.vue'
 
 type NavItem = { label: string; path: string; icon: Component }
 
@@ -94,6 +102,7 @@ const router = useRouter()
 const auth = useAuthStore()
 const projects = useProjectStore()
 const { t } = useI18n()
+const { openAskDialog } = useAskDialog()
 
 onMounted(() => {
   projects.load().catch(() => undefined)
@@ -289,6 +298,16 @@ async function onUserCommand(command: string | number | object) {
 .nav-link:hover {
   background: rgba(255, 255, 255, 0.06);
   color: #e6eef6;
+}
+
+.nav-ask {
+  background: none;
+  border: none;
+  cursor: pointer;
+  font-family: inherit;
+  font-size: inherit;
+  text-align: left;
+  width: 100%;
 }
 
 .nav-link.router-link-active {

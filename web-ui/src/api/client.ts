@@ -40,7 +40,8 @@ api.interceptors.request.use((config) => {
   config.headers = AxiosHeaders.from(config.headers)
   const method = (config.method || 'get').toUpperCase()
   if (!['GET', 'HEAD', 'OPTIONS'].includes(method)) {
-    config.headers.set('Idempotency-Key', newIdempotencyKey())
+    // 调用方显式传入的 Idempotency-Key 优先（如 askChat 幂等键），拦截器只兜底自动生成
+    if (!config.headers.get('Idempotency-Key')) config.headers.set('Idempotency-Key', newIdempotencyKey())
     csrfToken = decodeURIComponent(csrfFromCookie() || '')
     if (csrfToken) config.headers.set('X-CSRF-Token', csrfToken)
   }

@@ -1,1 +1,0 @@
-import{l as t}from"./vendor-element-BVX0vfHq.js";import"./vendor-jIAGGQQj.js";function m(e,o){const s=e,r=(s==null?void 0:s.message)||o;t.error(s!=null&&s.requestId?`${r}（request_id: ${s.requestId}）`:r)}export{m as s};
