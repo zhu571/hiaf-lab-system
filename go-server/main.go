@@ -189,6 +189,7 @@ func main() {
 	todosRepo := todos.NewRepository(db)
 	todosSvc := todos.NewService(
 		todosRepo,
+		issuesRepo,
 		todos.NewSnapshot(db),
 		todos.NewDBPermChecker(db),
 		todos.NewAuditWriter(db),

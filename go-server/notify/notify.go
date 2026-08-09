@@ -100,8 +100,3 @@ func InstrumentRestoreFailed(instrument, err string) error {
 func SecurityAlert(title, detail string) error {
 	return sendBoth(AlertTopic, title, detail, WebURL+"/audit", "urgent", []string{"shield"})
 }
-
-// AgentDeadLetter reports an Agent task that entered the dead-letter queue.
-func AgentDeadLetter(taskID, reason string) error {
-	return sendBoth(AlertTopic, "Agent 死信告警", fmt.Sprintf("任务 %s: %s", taskID, reason), WebURL+"/agent-candidates", "high", []string{"robot_face", "warning"})
-}

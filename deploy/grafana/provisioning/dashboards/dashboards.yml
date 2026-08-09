@@ -1,0 +1,12 @@
+apiVersion: 1
+providers:
+  - name: lab-dashboards
+    orgId: 1
+    folder: ""
+    type: file
+    disableDeletion: false
+    updateIntervalSeconds: 30
+    # 禁 UI 改版漂移：面板与代码同源，改动须走仓库提交
+    allowUiUpdates: false
+    options:
+      path: /etc/grafana/dashboards

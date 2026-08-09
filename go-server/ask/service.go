@@ -450,8 +450,10 @@ func prepareSQL(raw string) (sqlText, table string, truncated bool, err error) {
 		}
 		seen[name] = true
 	}
-	if len(seen) > 1 {
-		return "", "", false, fmt.Errorf("%w: v1 仅允许查询单张表", ErrSQLRejected)
+	// 按 FROM 子句表引用 token 数判定（非去重后表数）：堵住同表逗号自连接
+	// （FROM projects p1, projects p2 去重后只剩 1 张表，但笛卡尔积放大照常发生）。
+	if len(fromTables) > 1 {
+		return "", "", false, fmt.Errorf("%w: v1 仅允许查询单张表（禁止逗号自连接）", ErrSQLRejected)
 	}
 	for t := range seen {
 		table = t

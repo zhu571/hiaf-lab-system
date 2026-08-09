@@ -117,7 +117,11 @@ func (h *Handler) Refresh(w http.ResponseWriter, r *http.Request) {
 
 	resp, err := h.svc.RefreshAccessToken(req.RefreshToken)
 	if err != nil {
-		go notify.SecurityAlert("Refresh Token 复用", "检测到可能已撤销的 refresh token")
+		// 降噪（P2-4）：仅真复用（已撤销 token 被重放）才告警；
+		// 正常过期/用户禁用/未知 token 一律静默（mapAuthError 返回既有错误码）。
+		if reuse, rErr := h.svc.IsRefreshTokenReuse(req.RefreshToken); rErr == nil && reuse {
+			go notify.SecurityAlert("Refresh Token 复用", "检测到可能已撤销的 refresh token")
+		}
 		mapAuthError(w, r, err)
 		return
 	}

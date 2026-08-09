@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"strings"
 	"time"
+
+	"github.com/lib/pq"
 )
 
 // Repository 只访问 todos 表（跨表直读一律在 snapshot.go，禁止本文件跨表 SQL）。
@@ -226,11 +228,17 @@ func (r *Repository) Rollover(today string, now time.Time) (int64, error) {
 }
 
 // IssueSync 联动：来源 issue 到终态（resolved/closed）→ 在途待办自动 cancelled（不填完成时间）。
-func (r *Repository) IssueSync() (int64, error) {
+// terminalIDs 由注入的 issueStatusResolver 提供（两段式，本文件不直读 issues 表，见 AGENTS.md §5）；
+// 空集合直接返回 0。幂等：重复执行结果一致。
+func (r *Repository) IssueSync(terminalIDs []string) (int64, error) {
+	if len(terminalIDs) == 0 {
+		return 0, nil
+	}
 	res, err := r.db.Exec(
 		`UPDATE todos SET status='cancelled', updated_at=now()
 		 WHERE status IN ('pending','deferred') AND issue_id IS NOT NULL
-		   AND issue_id IN (SELECT id FROM issues WHERE status IN ('resolved','closed'))`,
+		   AND issue_id = ANY($1)`,
+		pq.Array(terminalIDs),
 	)
 	if err != nil {
 		return 0, fmt.Errorf("issue sync todos: %w", err)

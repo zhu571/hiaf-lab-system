@@ -1,6 +1,7 @@
 package issues
 
 import (
+	"context"
 	"database/sql"
 	"fmt"
 	"strings"
@@ -279,6 +280,28 @@ func (r *Repository) CountLogsByIDs(logIDs []string) (int, error) {
 		return 0, fmt.Errorf("count logs by ids: %w", err)
 	}
 	return count, nil
+}
+
+// TerminalIssueIDs 返回终态（resolved/closed）issue id 集合。
+// 供 todos.IssueSync 经 main.go 注入的窄接口读取（todos 不直读 issues 表，见 AGENTS.md §5）。
+func (r *Repository) TerminalIssueIDs(ctx context.Context) ([]string, error) {
+	rows, err := r.db.QueryContext(ctx, `SELECT id FROM issues WHERE status IN ('resolved','closed')`)
+	if err != nil {
+		return nil, fmt.Errorf("list terminal issue ids: %w", err)
+	}
+	defer rows.Close()
+	var ids []string
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			return nil, fmt.Errorf("scan terminal issue id: %w", err)
+		}
+		ids = append(ids, id)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate terminal issue ids: %w", err)
+	}
+	return ids, nil
 }
 
 func (r *Repository) getComments(issueID string, page, perPage int) ([]Comment, error) {

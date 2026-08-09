@@ -351,6 +351,16 @@ func (s *Service) Logout(rawToken string) error {
 	return s.repo.RevokeRefreshToken(rec.ID)
 }
 
+// IsRefreshTokenReuse 判定 rawToken 是否为已撤销且未过期的 refresh token（真复用重放）。
+// 用于 Refresh 失败分支降噪：仅真复用才告警，过期/禁用/未知 token 一律静默。
+func (s *Service) IsRefreshTokenReuse(rawToken string) (bool, error) {
+	rec, err := s.repo.FindRevokedRefreshToken(rawToken)
+	if err != nil {
+		return false, err
+	}
+	return rec != nil, nil
+}
+
 func loginResponse(user *User, accessToken, refreshToken string) *LoginResponse {
 	info := toUserInfo(user)
 	return &LoginResponse{

@@ -16,8 +16,13 @@ const (
 )
 
 // RunIssueSync issue 联动：resolved/closed → 在途待办 cancelled（23:00 生成前置，0 条也写审计）。
+// 终态 id 集合经注入的 issueStatusResolver 获取（两段式，todos 不直读 issues 表）。
 func (s *Service) RunIssueSync(ctx context.Context) error {
-	count, err := s.repo.IssueSync()
+	ids, err := s.resolver.TerminalIssueIDs(ctx)
+	if err != nil {
+		return err
+	}
+	count, err := s.repo.IssueSync(ids)
 	if err != nil {
 		return err
 	}

@@ -29,6 +29,9 @@ func TestPrepareSQL_Rejected(t *testing.T) {
 		{"comma join with as alias", "SELECT * FROM logs AS l, projects AS p"},
 		{"comma join mixed alias", "SELECT * FROM logs AS l, projects p2"},
 		{"comma join via schema", "SELECT * FROM public.logs, projects"},
+		{"comma self join", "SELECT * FROM projects p1, projects p2"},
+		{"comma self join where", "SELECT * FROM projects p1, projects p2 WHERE p1.id=p2.id"},
+		{"comma projects issues", "SELECT * FROM projects p, issues i"},
 		{"cross-table subquery", "SELECT * FROM logs WHERE id IN (SELECT id FROM projects)"},
 		{"link table in FROM", "SELECT * FROM daily_report_log_links"},
 		{"pg_catalog", "SELECT * FROM pg_catalog.pg_tables"},
@@ -70,6 +73,10 @@ func TestPrepareSQL_Allowed(t *testing.T) {
 		{"quoted table", `SELECT * FROM "logs"`, "logs", true, false},
 		{"existing limit 100", "SELECT * FROM daily_reports LIMIT 100", "daily_reports", false, true},
 		{"explicit limit 200", "SELECT * FROM issues LIMIT 200", "issues", false, true},
+		{"projects plain", "SELECT * FROM projects", "projects", true, false},
+		{"projects schema qualified", "SELECT * FROM public.projects", "projects", true, false},
+		{"projects quoted", `SELECT * FROM "projects"`, "projects", true, false},
+		{"projects alias small limit", "SELECT * FROM projects p LIMIT 5", "projects", false, true},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

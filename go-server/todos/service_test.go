@@ -35,7 +35,6 @@ type fakeRepo struct {
 	forceDeferOK *bool
 	forceEditOK  *bool
 
-	resolvedIssueIDs map[string]bool
 	inflightOverride map[string]bool
 	hintCandidates   []Todo
 
@@ -64,7 +63,7 @@ type fakeRepo struct {
 }
 
 func newFakeRepo() *fakeRepo {
-	return &fakeRepo{todos: map[string]*Todo{}, resolvedIssueIDs: map[string]bool{}}
+	return &fakeRepo{todos: map[string]*Todo{}}
 }
 
 func (r *fakeRepo) copy(t *Todo) *Todo {
@@ -293,13 +292,38 @@ func (r *fakeRepo) Rollover(today string, now time.Time) (int64, error) {
 	return n, nil
 }
 
-func (r *fakeRepo) IssueSync() (int64, error) {
+// fakeResolver 模拟注入的 issueStatusResolver（终态 issue id 集合）。
+type fakeResolver struct {
+	terminalIDs map[string]bool
+	err         error
+}
+
+func newFakeResolver() *fakeResolver {
+	return &fakeResolver{terminalIDs: map[string]bool{}}
+}
+
+func (f *fakeResolver) TerminalIssueIDs(ctx context.Context) ([]string, error) {
+	if f.err != nil {
+		return nil, f.err
+	}
+	ids := make([]string, 0, len(f.terminalIDs))
+	for id := range f.terminalIDs {
+		ids = append(ids, id)
+	}
+	return ids, nil
+}
+
+func (r *fakeRepo) IssueSync(terminalIDs []string) (int64, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	r.issueSyncCalls++
+	terminal := map[string]bool{}
+	for _, id := range terminalIDs {
+		terminal[id] = true
+	}
 	var n int64
 	for _, t := range r.todos {
-		if (t.Status == StatusPending || t.Status == StatusDeferred) && t.IssueID != nil && r.resolvedIssueIDs[*t.IssueID] {
+		if (t.Status == StatusPending || t.Status == StatusDeferred) && t.IssueID != nil && terminal[*t.IssueID] {
 			t.Status = StatusCancelled
 			t.UpdatedAt = testNow()
 			n++
@@ -596,31 +620,33 @@ func min(a, b int) int {
 }
 
 type testDeps struct {
-	repo    *fakeRepo
-	snap    *fakeSnap
-	perm    *fakePerm
-	audit   *fakeAudit
-	llm     *fakeLLM
-	reports *fakeReports
-	ntfy    *fakeNtfy
-	pub     *fakePub
+	repo     *fakeRepo
+	resolver *fakeResolver
+	snap     *fakeSnap
+	perm     *fakePerm
+	audit    *fakeAudit
+	llm      *fakeLLM
+	reports  *fakeReports
+	ntfy     *fakeNtfy
+	pub      *fakePub
 }
 
 func newTestDeps() *testDeps {
 	return &testDeps{
-		repo:    newFakeRepo(),
-		snap:    newFakeSnap(),
-		perm:    newFakePerm(),
-		audit:   newFakeAudit(),
-		llm:     &fakeLLM{},
-		reports: &fakeReports{},
-		ntfy:    &fakeNtfy{},
-		pub:     &fakePub{},
+		repo:     newFakeRepo(),
+		resolver: newFakeResolver(),
+		snap:     newFakeSnap(),
+		perm:     newFakePerm(),
+		audit:    newFakeAudit(),
+		llm:      &fakeLLM{},
+		reports:  &fakeReports{},
+		ntfy:     &fakeNtfy{},
+		pub:      &fakePub{},
 	}
 }
 
 func (d *testDeps) service() *Service {
-	svc := NewService(d.repo, d.snap, d.perm, d.audit, d.llm, d.reports, d.ntfy, d.pub, testLoc, testNow)
+	svc := NewService(d.repo, d.resolver, d.snap, d.perm, d.audit, d.llm, d.reports, d.ntfy, d.pub, testLoc, testNow)
 	svc.publishRetryDelay = 0
 	return svc
 }
