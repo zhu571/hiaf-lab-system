@@ -35,6 +35,7 @@ export default {
     experiences: 'Experiences',
     attachments: 'Attachments',
     aiReview: 'AI Review',
+    pendingReview: 'Pending review candidates',
     // Section header above the system-level menu entries.
     systemGroup: 'System',
     gasControl: 'Gas Control',
@@ -814,7 +815,19 @@ export default {
     approved: 'Approved',
     approveFailed: 'Failed to approve',
     rejected: 'Rejected',
-    rejectFailed: 'Failed to reject'
+    rejectFailed: 'Failed to reject',
+    // Diff view in the detail drawer (C13): source text vs candidate payload.
+    diffTitle: 'Source Comparison',
+    diffModeLine: 'Line',
+    diffModeWord: 'Word',
+    diffSource: 'Report Source',
+    diffCandidate: 'Candidate Content',
+    diffLoading: 'Loading comparison…',
+    diffFromSnapshot: 'The left pane shows the raw text snapshot captured when the AI parsed the report.',
+    diffFromCurrent: 'No snapshot for this task; the left pane shows the report’s current raw text (may differ from what the AI saw).',
+    diffTruncated: ' (first 2000 chars only)',
+    diffNoSource: 'No source text available for comparison',
+    diffLoadFailed: 'Failed to load trace info'
   },
   rfMatching: {
     // RF matching page (RFMatchingView).
@@ -972,7 +985,17 @@ export default {
     status: 'Status',
     action: 'Action',
     noRecords: 'No audit records',
-    loadFailed: 'Failed to load audit records'
+    loadFailed: 'Failed to load audit records',
+    // Events list tab (C12), backed by /api/v1/audit/events.
+    tabEvents: 'Events',
+    tabByRequestId: 'By request_id',
+    actorType: 'Actor Type',
+    actorUser: 'User',
+    actorAgent: 'Agent',
+    filterUserId: 'User ID',
+    rangeStart: 'Start Time',
+    rangeEnd: 'End Time',
+    requestIdCol: 'Request ID'
   },
   dailyHistory: {
     // Daily report history list page (DailyHistoryView).

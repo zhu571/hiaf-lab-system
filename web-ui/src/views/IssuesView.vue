@@ -24,11 +24,21 @@
         <p v-if="grouped[status].length === 0" class="empty-hint">{{ t('issues.empty') }}</p>
       </section>
     </div>
+    <el-pagination
+      v-model:current-page="page"
+      v-model:page-size="perPage"
+      class="pager"
+      layout="total, sizes, prev, pager, next"
+      :page-sizes="[20, 50, 100]"
+      :total="total"
+      @current-change="load"
+      @size-change="onSizeChange"
+    />
     <el-drawer v-model="drawer" size="420" :title="t('issues.detail')">
       <div v-if="selected" class="grid">
         <StatusBadge :value="selected.status" />
         <h3>{{ selected.title }}</h3>
-        <p class="issue-desc">{{ selected.description }}</p>
+        <MarkdownView :source="selected.description" />
         <el-select v-model="targetStatus">
           <el-option v-for="s in statuses" :key="s" :label="s" :value="s" />
         </el-select>
@@ -59,6 +69,7 @@ import { ElMessage } from 'element-plus'
 import { showApiError } from '../composables/useNotify'
 import StatusBadge from '../components/StatusBadge.vue'
 import CommentSection from '../components/CommentSection.vue'
+import MarkdownView from '../components/MarkdownView.vue'
 import { addIssueComment, createIssue, getIssue, listIssues, transitionIssue, type Issue } from '../api/issues'
 import { useProjectStore } from '../stores/project'
 
@@ -72,6 +83,9 @@ const drawer = ref(false)
 const createDialog = ref(false)
 const targetStatus = ref('open')
 const reason = ref('')
+const page = ref(1)
+const perPage = ref(20)
+const total = ref(0)
 const statuses = ['open', 'in_progress', 'resolved', 'closed']
 const severities = ['low', 'medium', 'high', 'critical']
 const draft = reactive({ title: '', severity: 'medium', description: '' })
@@ -80,13 +94,22 @@ const projectId = computed(() => String(route.params.id || projects.current?.id 
 const grouped = computed(() => Object.fromEntries(statuses.map((s) => [s, issues.value.filter((item) => item.status === s)])) as Record<string, Issue[]>)
 
 onMounted(load)
-watch(projectId, load)
+watch(projectId, () => {
+  page.value = 1
+  load()
+})
+
+function onSizeChange() {
+  page.value = 1
+  load()
+}
 
 async function load() {
   await projects.load()
   if (!projectId.value) return
-  const data = await listIssues(projectId.value, { per_page: 100 })
-  issues.value = data.items
+  const data = await listIssues(projectId.value, { page: page.value, per_page: perPage.value })
+  issues.value = data.items ?? []
+  total.value = data.total ?? 0
 }
 
 function switchProject(id: string) {
@@ -133,6 +156,11 @@ async function create() {
   display: grid;
   gap: 16px;
   grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+
+.pager {
+  justify-content: flex-end;
+  margin-top: 14px;
 }
 
 .column {
@@ -261,11 +289,6 @@ async function create() {
   font-size: 12px;
   padding: 16px 0;
   text-align: center;
-}
-
-.issue-desc {
-  color: var(--text-2);
-  white-space: pre-wrap;
 }
 
 @media (max-width: 768px) {

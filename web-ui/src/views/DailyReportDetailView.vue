@@ -13,7 +13,8 @@
           <el-descriptions-item :label="t('dailyReportDetail.summary')">{{ report.summary || '-' }}</el-descriptions-item>
         </el-descriptions>
         <h3>{{ t('dailyReportDetail.rawText') }}</h3>
-        <pre class="raw-text">{{ report.raw_text || t('dailyReportDetail.none') }}</pre>
+        <MarkdownView v-if="report.raw_text" :source="report.raw_text" />
+        <p v-else class="raw-none">{{ t('dailyReportDetail.none') }}</p>
         <h3>{{ t('dailyReportDetail.projectLogs') }}</h3>
         <el-table :data="report.logs || []">
           <el-table-column prop="category" :label="t('dailyReportDetail.category')" width="140" show-overflow-tooltip />
@@ -41,6 +42,7 @@ import { ElMessage } from 'element-plus'
 import { showApiError } from '../composables/useNotify'
 import { useMobile } from '../composables/useMobile'
 import StatusBadge from '../components/StatusBadge.vue'
+import MarkdownView from '../components/MarkdownView.vue'
 import { getReport, type DailyReport } from '../api/logs'
 
 const { t } = useI18n()
@@ -73,14 +75,8 @@ onMounted(async () => {
   font-size: 15px;
 }
 
-.raw-text {
-  background: var(--surface-2);
-  border: 1px solid var(--border);
-  border-radius: 8px;
-  color: var(--text-2);
+.raw-none {
+  color: var(--text-3);
   font-size: 13px;
-  overflow: auto;
-  padding: 10px;
-  white-space: pre-wrap;
 }
 </style>

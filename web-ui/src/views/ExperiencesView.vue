@@ -9,8 +9,8 @@
     </div>
     <section class="panel filters-panel">
       <div class="filters">
-        <el-input v-model="keyword" :placeholder="$t('experiences.keyword')" clearable @change="load" />
-        <el-input v-model="tagText" :placeholder="$t('experiences.tagPlaceholder')" clearable @change="load" />
+        <el-input v-model="keyword" :placeholder="$t('experiences.keyword')" clearable @change="onFilter" />
+        <el-input v-model="tagText" :placeholder="$t('experiences.tagPlaceholder')" clearable @change="onFilter" />
       </div>
     </section>
     <div class="board">
@@ -28,11 +28,21 @@
         <p v-if="grouped[col.status].length === 0" class="empty-hint">{{ $t('experiences.empty') }}</p>
       </section>
     </div>
+    <el-pagination
+      v-model:current-page="page"
+      v-model:page-size="perPage"
+      class="pager"
+      layout="total, sizes, prev, pager, next"
+      :page-sizes="[20, 50, 100]"
+      :total="total"
+      @current-change="load"
+      @size-change="onFilter"
+    />
     <el-drawer v-model="drawer" size="460" :title="$t('experiences.detail')">
       <div v-if="selected" class="grid">
         <StatusBadge :value="selected.status" />
         <h3>{{ selected.title }}</h3>
-        <p class="exp-content">{{ selected.content }}</p>
+        <MarkdownView :source="selected.content" />
         <div class="tags"><el-tag v-for="tag in selected.tags" :key="tag">{{ tag }}</el-tag></div>
         <el-button v-if="selected.status === 'candidate'" type="primary" @click="publish(selected.id)">{{ $t('experiences.publish') }}</el-button>
         <el-button v-if="selected.status === 'published'" @click="archive(selected.id)">{{ $t('experiences.archive') }}</el-button>
@@ -58,6 +68,7 @@ import { useI18n } from 'vue-i18n'
 import { ElMessage } from 'element-plus'
 import { showApiError } from '../composables/useNotify'
 import StatusBadge from '../components/StatusBadge.vue'
+import MarkdownView from '../components/MarkdownView.vue'
 import { archiveExperience, createExperience, listExperiences, publishExperience, type Experience } from '../api/experiences'
 import { useProjectStore } from '../stores/project'
 
@@ -69,6 +80,9 @@ const drawer = ref(false)
 const dialog = ref(false)
 const keyword = ref('')
 const tagText = ref('')
+const page = ref(1)
+const perPage = ref(20)
+const total = ref(0)
 const draft = reactive({ title: '', content: '', tags: '' })
 const columns = [
   { status: 'candidate', labelKey: 'experiences.columnCandidate' },
@@ -88,15 +102,27 @@ const grouped = computed(
 )
 
 onMounted(load)
-watch(projectId, load)
+watch(projectId, () => {
+  page.value = 1
+  load()
+})
+
+function onFilter() {
+  page.value = 1
+  load()
+}
 
 async function load() {
   try {
     await projects.load()
     const results = await Promise.all(
-      columns.map((col) => listExperiences({ status: col.status, keyword: keyword.value, tags: tagText.value, project_id: projectId.value, per_page: 100 }))
+      columns.map((col) =>
+        listExperiences({ status: col.status, keyword: keyword.value, tags: tagText.value, project_id: projectId.value, page: page.value, per_page: perPage.value })
+      )
     )
     items.value = results.flatMap((result) => result.items ?? [])
+    // 三个状态列各自独立分页，总数为三列之和
+    total.value = results.reduce((sum, result) => sum + (result.total ?? 0), 0)
   } catch (err) {
     showApiError(err, t('experiences.loadFailed'))
   }
@@ -106,7 +132,7 @@ function appendTag(tag: string) {
   const tags = new Set(tagText.value.split(',').map((item) => item.trim()).filter(Boolean))
   tags.add(tag)
   tagText.value = Array.from(tags).join(',')
-  load()
+  onFilter()
 }
 
 function open(item: Experience) {
@@ -170,6 +196,11 @@ async function create() {
   display: grid;
   gap: 16px;
   grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.pager {
+  justify-content: flex-end;
+  margin-top: 14px;
 }
 
 .column {
@@ -262,11 +293,6 @@ async function create() {
   font-size: 12px;
   padding: 16px 0;
   text-align: center;
-}
-
-.exp-content {
-  color: var(--text-2);
-  white-space: pre-wrap;
 }
 
 @media (max-width: 768px) {
