@@ -1,4 +1,5 @@
 import sys
+import time
 import unittest
 from pathlib import Path
 from unittest.mock import patch
@@ -11,7 +12,7 @@ from tools.parse import ParseError, _json_array, ensure_safe  # noqa: E402
 from worker import Worker, to_candidate  # noqa: E402
 
 
-TASK = {"id": "task-1", "report_id": "report-1", "acting_user_id": "user-1"}
+TASK = {"id": "task-1", "report_id": "report-1", "acting_user_id": "user-1", "claim_token": "token-1"}
 REPORT = {
     "id": "report-1", "raw_text": "RF 匹配在 3.65MHz 反射异常",
     "logs": [{"project_id": "project-1", "content": "RF 匹配异常，S11 仅 -6dB"}],
@@ -42,11 +43,11 @@ class FakeAPI:
         self.searches.append((project_id, status, keyword))
         return self.issues
 
-    def complete(self, task_id, candidates, confidence):
-        self.completed.append((task_id, candidates, confidence))
+    def complete(self, task_id, candidates, confidence, claim_token=None):
+        self.completed.append((task_id, candidates, confidence, claim_token))
 
-    def fail(self, task_id, error):
-        self.failed.append((task_id, error))
+    def fail(self, task_id, error, claim_token=None):
+        self.failed.append((task_id, error, claim_token))
 
 
 class FakeParser:
@@ -107,6 +108,41 @@ class WorkerTests(unittest.TestCase):
         Worker(api, FakeParser()).run_once()
         self.assertTrue(api.completed)
         self.assertFalse(getattr(api, "create_issue", None))
+
+    def test_claim_token_is_passed_to_complete_and_fail(self):
+        api = FakeAPI()
+        Worker(api, FakeParser()).run_once()
+        self.assertEqual(api.completed[0][3], "token-1")
+        api2 = FakeAPI()
+        Worker(api2, FakeParser(error=RuntimeError("boom"))).run_once()
+        self.assertEqual(api2.failed[0][2], "token-1")
+
+    def test_llm_hard_timeout_marks_task_failed(self):
+        class SlowParser:
+            def parse(self, *_args):
+                time.sleep(1.5)
+
+        api = FakeAPI()
+        Worker(api, SlowParser(), llm_timeout=0.1).run_once()
+        self.assertFalse(api.completed)
+        self.assertEqual(api.failed, [(TASK["id"], "llm timeout", "token-1")])
+
+    def test_fail_rejected_as_stale_is_silent(self):
+        class ReclaimedAPI(FakeAPI):
+            def fail(self, task_id, error, claim_token=None):
+                raise APIError("invalid_agent_lease: Agent 任务租约无效或已过期")
+
+        api = ReclaimedAPI()
+        self.assertTrue(Worker(api, FakeParser(error=RuntimeError("boom"))).run_once())
+
+    def test_complete_rejected_as_stale_skips_fail(self):
+        class LostCompleteAPI(FakeAPI):
+            def complete(self, *args, **kwargs):
+                raise APIError("invalid_agent_lease: Agent 任务租约无效或已过期")
+
+        api = LostCompleteAPI()
+        self.assertTrue(Worker(api, FakeParser()).run_once())
+        self.assertFalse(api.failed)
 
     def test_complete_uses_stable_idempotency_key(self):
         keys = []

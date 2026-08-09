@@ -79,7 +79,7 @@ class GoAPI:
         )
         return (data or {}).get("items") or []
 
-    def complete(self, task_id, candidates, confidence=None):
+    def complete(self, task_id, candidates, confidence=None, claim_token=None):
         body = {
             "result": {"candidate_count": len(candidates)},
             "model": MODEL,
@@ -88,15 +88,20 @@ class GoAPI:
         }
         if confidence is not None:
             body["agent_confidence"] = confidence
+        if claim_token:
+            body["claim_token"] = claim_token
         return self._request(
             "POST", f"/api/v1/agent/tasks/{task_id}/complete", json=body,
             headers={"Idempotency-Key": f"agent-complete-{task_id}"},
         )
 
-    def fail(self, task_id, error):
+    def fail(self, task_id, error, claim_token=None):
+        body = {"error": sanitize_error(error)}
+        if claim_token:
+            body["claim_token"] = claim_token
         return self._request(
             "POST", f"/api/v1/agent/tasks/{task_id}/fail",
-            json={"error": sanitize_error(error)},
+            json=body,
             headers={"Idempotency-Key": f"agent-fail-{task_id}"},
         )
 
