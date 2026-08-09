@@ -51,7 +51,13 @@ func (h *Handler) Complete(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if len(req.Candidates) > 0 {
-		go notify.Send("lab-system", "Agent 待审核", fmt.Sprintf("%d 条候选需人工确认", len(req.Candidates)), notify.WebURL+"/agent-candidates", "default", nil)
+		// 通知带报告日期（C11）：report_date 由 worker 随快照回传（030），
+		// 旧任务无该字段时退回原格式。agent 模块不读 daily_reports。
+		message := fmt.Sprintf("%d 条候选需人工确认", len(req.Candidates))
+		if task.ReportDate != nil && *task.ReportDate != "" {
+			message = fmt.Sprintf("%d 条候选需人工确认（日报 %s）", len(req.Candidates), *task.ReportDate)
+		}
+		go notify.Send("lab-system", "Agent 待审核", message, notify.WebURL+"/agent-candidates", "default", nil)
 	}
 	common.WriteSuccess(w, r, task)
 }

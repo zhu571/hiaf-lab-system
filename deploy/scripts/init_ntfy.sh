@@ -1,7 +1,9 @@
 #!/usr/bin/env bash
 # ntfy 账号/ACL 初始化（幂等，可在宿主机重复执行）：
 #   1. 建 todo-publisher 账号 + 签发不过期 access token → deploy/secrets/ntfy_publish_token.txt
-#   2. 通配 ACL：todo-publisher 对 lab-todos-* 与 lab-alerts 有 write 权限
+#   2. 通配 ACL：todo-publisher 对 lab-todos-*、lab-alerts 与 lab-system 有 write 权限
+#      （server.yml 为 auth-default-access: deny-all，lab-system 是 agent 候选/更新通知主题，
+#        无显式 ACL 时通知会被 403 静默丢弃）
 #   3. 批量建 per-user 账号 todo-{username} + 各自 lab-todos-{sha256(user_id)[:16]} read-only ACL
 #   4. 生成 service_token（todos scheduler 拉日报用）
 #   5. 修正 /etc/ntfy 属主为 server 容器 UID（默认 1000，与 compose UPDATE_RUN_UID 对齐）
@@ -52,6 +54,9 @@ docker exec "$NTFY_CONTAINER" ntfy access todo-publisher 'lab-todos-*' write >/d
   docker exec "$NTFY_CONTAINER" ntfy access todo-publisher 'lab-todos-*' write
 docker exec "$NTFY_CONTAINER" ntfy access todo-publisher lab-alerts write >/dev/null 2>&1 || \
   docker exec "$NTFY_CONTAINER" ntfy access todo-publisher lab-alerts write
+# lab-system：agent 候选待审核 / 系统更新通知主题（deny-all 下无 ACL 即 403 静默，C11 修复）
+docker exec "$NTFY_CONTAINER" ntfy access todo-publisher lab-system write >/dev/null 2>&1 || \
+  docker exec "$NTFY_CONTAINER" ntfy access todo-publisher lab-system write
 
 if [ ! -s "$SECRETS_DIR/ntfy_publish_token.txt" ]; then
   TOKEN="$(docker exec "$NTFY_CONTAINER" ntfy token add --label=lab-todos-publish todo-publisher | awk '/^tk_/{print $1; exit}')"
