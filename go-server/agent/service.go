@@ -55,11 +55,11 @@ func (s *Service) Complete(taskID string, req CompleteTaskRequest) (*PendingAgen
 	return s.repo.Complete(taskID, req)
 }
 
-func (s *Service) Fail(taskID, detail string) (*PendingAgentTask, error) {
+func (s *Service) Fail(taskID, detail, claimToken string) (*PendingAgentTask, error) {
 	if strings.TrimSpace(taskID) == "" || strings.TrimSpace(detail) == "" {
 		return nil, ErrInvalidInput
 	}
-	return s.repo.Fail(taskID, sanitizeError(detail), 3)
+	return s.repo.Fail(taskID, sanitizeError(detail), 3, claimToken)
 }
 
 func (s *Service) ListCandidates(status string, page, perPage int) (*CandidateListResult, error) {

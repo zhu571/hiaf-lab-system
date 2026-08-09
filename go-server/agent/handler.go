@@ -65,7 +65,7 @@ func (h *Handler) Fail(w http.ResponseWriter, r *http.Request) {
 		common.WriteError(w, r, http.StatusBadRequest, "bad_request", "请求体解析失败", nil)
 		return
 	}
-	task, err := h.svc.Fail(chi.URLParam(r, "id"), req.Error)
+	task, err := h.svc.Fail(chi.URLParam(r, "id"), req.Error, req.ClaimToken)
 	if err != nil {
 		h.writeError(w, r, err)
 		return

@@ -25,6 +25,7 @@ type PendingAgentTask struct {
 	ActingUserID    string          `json:"acting_user_id"`
 	Status          string          `json:"status"`
 	Attempts        int             `json:"attempts"`
+	ClaimToken      *string         `json:"claim_token,omitempty"`
 	ClaimedAt       *time.Time      `json:"claimed_at,omitempty"`
 	LeaseExpiresAt  *time.Time      `json:"lease_expires_at,omitempty"`
 	NextAttemptAt   *time.Time      `json:"next_attempt_at,omitempty"`
@@ -69,6 +70,7 @@ type CompleteTaskRequest struct {
 	PromptVersion   string           `json:"prompt_version"`
 	AgentConfidence *float64         `json:"agent_confidence,omitempty"`
 	Candidates      []CandidateInput `json:"candidates"`
+	ClaimToken      string           `json:"claim_token"`
 }
 
 type ClaimTaskRequest struct {
@@ -76,7 +78,8 @@ type ClaimTaskRequest struct {
 }
 
 type FailTaskRequest struct {
-	Error string `json:"error"`
+	Error      string `json:"error"`
+	ClaimToken string `json:"claim_token"`
 }
 
 type ReviewRequest struct {

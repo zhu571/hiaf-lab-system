@@ -1,7 +1,9 @@
 package agent
 
 import (
+	"crypto/rand"
 	"database/sql"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"time"
@@ -28,10 +30,16 @@ func (r *Repository) ValidateTask(taskID, actingUserID string) (bool, error) {
 }
 
 func (r *Repository) Claim(leaseSeconds int) (*PendingAgentTask, error) {
+	// 每次领取生成新所有权 token（028）：Complete/Fail 必须持同一 token，
+	// 租约过期被重领后 token 被覆盖，旧 worker 的迟到写全部被拒。
+	claimToken, err := newClaimToken()
+	if err != nil {
+		return nil, fmt.Errorf("generate claim token: %w", err)
+	}
 	var task PendingAgentTask
-	err := scanTask(r.db.QueryRow(
+	err = scanTask(r.db.QueryRow(
 		`UPDATE pending_agent_tasks
-		 SET status = 'processing', claimed_at = now(),
+		 SET status = 'processing', claimed_at = now(), claim_token = $2,
 		     lease_expires_at = now() + $1 * interval '1 second',
 		     next_attempt_at = NULL, last_error = NULL, updated_at = now()
 		 WHERE id = (
@@ -45,10 +53,10 @@ func (r *Repository) Claim(leaseSeconds int) (*PendingAgentTask, error) {
 		     FOR UPDATE SKIP LOCKED
 		     LIMIT 1
 		 )
-		 RETURNING id, report_id, acting_user_id, status, attempts, claimed_at,
+		 RETURNING id, report_id, acting_user_id, status, attempts, claim_token, claimed_at,
 		           lease_expires_at, next_attempt_at, completed_at, last_error,
 		           result, model, prompt_version, agent_confidence, created_at, updated_at`,
-		leaseSeconds,
+		leaseSeconds, claimToken,
 	), &task)
 	if err != nil {
 		if err == sql.ErrNoRows {
@@ -57,6 +65,14 @@ func (r *Repository) Claim(leaseSeconds int) (*PendingAgentTask, error) {
 		return nil, fmt.Errorf("claim agent task: %w", err)
 	}
 	return &task, nil
+}
+
+func newClaimToken() (string, error) {
+	buf := make([]byte, 32)
+	if _, err := rand.Read(buf); err != nil {
+		return "", err
+	}
+	return hex.EncodeToString(buf), nil
 }
 
 func (r *Repository) Complete(taskID string, req CompleteTaskRequest) (*PendingAgentTask, error) {
@@ -68,7 +84,7 @@ func (r *Repository) Complete(taskID string, req CompleteTaskRequest) (*PendingA
 
 	var task PendingAgentTask
 	if err := scanTask(tx.QueryRow(
-		`SELECT id, report_id, acting_user_id, status, attempts, claimed_at,
+		`SELECT id, report_id, acting_user_id, status, attempts, claim_token, claimed_at,
 		        lease_expires_at, next_attempt_at, completed_at, last_error,
 		        result, model, prompt_version, agent_confidence, created_at, updated_at
 		 FROM pending_agent_tasks WHERE id = $1 FOR UPDATE`, taskID,
@@ -77,6 +93,10 @@ func (r *Repository) Complete(taskID string, req CompleteTaskRequest) (*PendingA
 			return nil, ErrTaskNotFound
 		}
 		return nil, fmt.Errorf("lock agent task: %w", err)
+	}
+	// 所有权校验：只有持本次领取 token 的 worker 可以完成该任务（028）。
+	if req.ClaimToken == "" || task.ClaimToken == nil || *task.ClaimToken != req.ClaimToken {
+		return nil, ErrInvalidLease
 	}
 	if task.Status == TaskDone {
 		return &task, nil
@@ -105,7 +125,7 @@ func (r *Repository) Complete(taskID string, req CompleteTaskRequest) (*PendingA
 		     result = $2::jsonb, model = $3, prompt_version = $4,
 		     agent_confidence = $5, updated_at = now()
 		 WHERE id = $1
-		 RETURNING id, report_id, acting_user_id, status, attempts, claimed_at,
+		 RETURNING id, report_id, acting_user_id, status, attempts, claim_token, claimed_at,
 		           lease_expires_at, next_attempt_at, completed_at, last_error,
 		           result, model, prompt_version, agent_confidence, created_at, updated_at`,
 		task.ID, string(req.Result), req.Model, req.PromptVersion, req.AgentConfidence,
@@ -118,7 +138,7 @@ func (r *Repository) Complete(taskID string, req CompleteTaskRequest) (*PendingA
 	return &task, nil
 }
 
-func (r *Repository) Fail(taskID, lastError string, maxAttempts int) (*PendingAgentTask, error) {
+func (r *Repository) Fail(taskID, lastError string, maxAttempts int, claimToken string) (*PendingAgentTask, error) {
 	var task PendingAgentTask
 	err := scanTask(r.db.QueryRow(
 		`UPDATE pending_agent_tasks
@@ -127,11 +147,11 @@ func (r *Repository) Fail(taskID, lastError string, maxAttempts int) (*PendingAg
 		     next_attempt_at = CASE WHEN attempts + 1 >= $3 THEN NULL
 		                            ELSE now() + ((attempts + 1) * interval '1 minute') END,
 		     lease_expires_at = NULL, last_error = $2, updated_at = now()
-		 WHERE id = $1 AND status = 'processing' AND lease_expires_at > now()
-		 RETURNING id, report_id, acting_user_id, status, attempts, claimed_at,
+		 WHERE id = $1 AND claim_token = $4 AND status = 'processing' AND lease_expires_at > now()
+		 RETURNING id, report_id, acting_user_id, status, attempts, claim_token, claimed_at,
 		           lease_expires_at, next_attempt_at, completed_at, last_error,
 		           result, model, prompt_version, agent_confidence, created_at, updated_at`,
-		taskID, lastError, maxAttempts,
+		taskID, lastError, maxAttempts, claimToken,
 	), &task)
 	if err != nil {
 		if err == sql.ErrNoRows {
@@ -316,18 +336,19 @@ func getCandidate(q queryer, id, suffix string) (*AgentCandidateAction, string, 
 type rowScanner interface{ Scan(...any) error }
 
 func scanTask(row rowScanner, task *PendingAgentTask) error {
-	var actingUserID, lastError, model, promptVersion sql.NullString
+	var actingUserID, claimToken, lastError, model, promptVersion sql.NullString
 	var claimedAt, leaseExpiresAt, nextAttemptAt, completedAt sql.NullTime
 	var result []byte
 	var confidence sql.NullFloat64
 	if err := row.Scan(
-		&task.ID, &task.ReportID, &actingUserID, &task.Status, &task.Attempts,
+		&task.ID, &task.ReportID, &actingUserID, &task.Status, &task.Attempts, &claimToken,
 		&claimedAt, &leaseExpiresAt, &nextAttemptAt, &completedAt, &lastError,
 		&result, &model, &promptVersion, &confidence, &task.CreatedAt, &task.UpdatedAt,
 	); err != nil {
 		return err
 	}
 	task.ActingUserID = actingUserID.String
+	task.ClaimToken = nullStringPtr(claimToken)
 	task.ClaimedAt = nullTimePtr(claimedAt)
 	task.LeaseExpiresAt = nullTimePtr(leaseExpiresAt)
 	task.NextAttemptAt = nullTimePtr(nextAttemptAt)
