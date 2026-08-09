@@ -311,6 +311,7 @@ func main() {
 			r.Post("/assembly/apply-template", assemblyHandler.ApplyTemplate)
 			r.Get("/test-data", testDataHandler.List)
 			r.Post("/test-data", testDataHandler.Create)
+			r.Post("/test-data/batch", testDataHandler.CreateBatch)
 			r.Get("/rf-matching", rfMatchingHandler.List)
 			r.Post("/rf-matching", rfMatchingHandler.Create)
 

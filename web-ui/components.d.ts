@@ -63,6 +63,7 @@ declare module 'vue' {
     RouterView: typeof import('vue-router')['RouterView']
     StatusBadge: typeof import('./src/components/StatusBadge.vue')['default']
     StepItemsEditor: typeof import('./src/components/StepItemsEditor.vue')['default']
+    TestDataBatchEditor: typeof import('./src/components/TestDataBatchEditor.vue')['default']
   }
   export interface ComponentCustomProperties {
     vLoading: typeof import('element-plus/es')['ElLoadingDirective']
