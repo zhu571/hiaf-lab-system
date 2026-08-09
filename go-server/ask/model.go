@@ -64,4 +64,5 @@ type agentAskResponse struct {
 	Table     string           `json:"table"`
 	RowCount  int              `json:"row_count"`
 	Truncated bool             `json:"truncated"`
+	Model     string           `json:"model"`
 }

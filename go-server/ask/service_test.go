@@ -34,8 +34,17 @@ func TestPrepareSQL_Rejected(t *testing.T) {
 		{"pg_catalog", "SELECT * FROM pg_catalog.pg_tables"},
 		{"information_schema", "SELECT * FROM information_schema.tables"},
 		{"current_setting", "SELECT current_setting('statement_timeout')"},
+		{"set_config", "SELECT set_config('statement_timeout', '1000', false)"},
 		{"current_user", "SELECT current_user"},
 		{"version()", "SELECT version()"},
+		{"into write", "SELECT * INTO backup_logs FROM logs"},
+		{"for share", "SELECT * FROM logs FOR SHARE"},
+		{"subquery single table", "SELECT id, (SELECT count(*) FROM logs) FROM logs"},
+		{"subquery in where", "SELECT * FROM logs WHERE id IN (SELECT id FROM logs)"},
+		{"union", "SELECT * FROM logs UNION SELECT * FROM issues"},
+		{"intersect", "SELECT * FROM logs INTERSECT SELECT * FROM logs"},
+		{"except", "SELECT * FROM logs EXCEPT SELECT * FROM logs"},
+		{"window over", "SELECT row_number() OVER (ORDER BY id) FROM logs"},
 		{"non-select leading", "DELETE FROM logs"},
 		{"empty", "   "},
 	}
@@ -75,9 +84,6 @@ func TestPrepareSQL_Allowed(t *testing.T) {
 				if !strings.Contains(out, "LIMIT 200") {
 					t.Fatalf("expected LIMIT 200 in %q", out)
 				}
-				if !truncated {
-					t.Fatalf("expected truncated=true when capping, got %q", out)
-				}
 			}
 			if tc.wantUnchanged {
 				if out != strings.TrimSpace(tc.sql) {
@@ -99,8 +105,8 @@ func TestPrepareSQL_LimitRewrite(t *testing.T) {
 	if !strings.Contains(out, "LIMIT 200") || strings.Contains(out, "5000") {
 		t.Fatalf("LIMIT 5000 not rewritten: %q", out)
 	}
-	if !truncated {
-		t.Fatal("expected truncated=true")
+	if truncated {
+		t.Fatal("LIMIT rewrite is not actual truncation, must not set truncated")
 	}
 
 	out, _, _, err = prepareSQL("SELECT * FROM logs LIMIT ALL")
@@ -117,6 +123,33 @@ func TestPrepareSQL_LimitRewrite(t *testing.T) {
 	}
 	if !strings.Contains(out, "LIMIT 200") || !strings.Contains(out, "OFFSET 10") {
 		t.Fatalf("rewrite dropped OFFSET or kept 5000: %q", out)
+	}
+}
+
+func TestPrepareSQL_LimitStringLiteralUntouched(t *testing.T) {
+	out, _, _, err := prepareSQL(`SELECT * FROM logs WHERE content = 'limit 5000'`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(out, "'limit 5000'") {
+		t.Fatalf("string literal must not be rewritten: %q", out)
+	}
+	if !strings.Contains(out, "LIMIT 200") {
+		t.Fatalf("expected appended LIMIT 200: %q", out)
+	}
+}
+
+func TestPrepareSQL_StringLiteralKeywordsAllowed(t *testing.T) {
+	cases := []string{
+		`SELECT * FROM logs WHERE content = 'from users'`,
+		`SELECT * FROM logs WHERE content = 'into the woods'`,
+		`SELECT * FROM logs WHERE content = 'delete me'`,
+		`SELECT * FROM logs WHERE content = 'limit 5000'`,
+	}
+	for _, sql := range cases {
+		if _, _, _, err := prepareSQL(sql); err != nil {
+			t.Fatalf("string literal keyword falsely rejected %q: %v", sql, err)
+		}
 	}
 }
 
@@ -142,19 +175,28 @@ func TestDedupColumns(t *testing.T) {
 
 func TestNormalizeValue(t *testing.T) {
 	now := time.Date(2026, 8, 9, 12, 0, 0, 0, time.UTC)
-	if got := normalizeValue(now); got != "2026-08-09T12:00:00Z" {
+	if got := normalizeValue(now, ""); got != "2026-08-09T12:00:00Z" {
 		t.Fatalf("time: got %v", got)
 	}
-	if got := normalizeValue([]byte(`{"a":1}`)); got == nil {
+	if got := normalizeValue([]byte(`{"a":1}`), "jsonb"); got == nil {
 		t.Fatal("valid JSONB should be preserved")
 	}
-	if got := normalizeValue([]byte{0x00, 0xff, 0x01}); got != nil {
-		t.Fatalf("bytea should be skipped, got %v", got)
+	if got := normalizeValue([]byte{0x00, 0xff, 0x01}, "bytea"); got != "00ff01" {
+		t.Fatalf("bytea should be hex, got %v", got)
 	}
-	if got := normalizeValue(3.14); got != 3.14 {
+	// UUID 列：lib/pq 返回 16 字节 []byte，须格式化为标准 UUID 字符串。
+	uuidBytes := []byte{0x3a, 0x60, 0x27, 0x02, 0x02, 0xb6, 0x49, 0x59, 0x95, 0x7c, 0xac, 0xd6, 0xec, 0xbd, 0x97, 0xca}
+	if got := normalizeValue(uuidBytes, "uuid"); got != "3a602702-02b6-4959-957c-acd6ecbd97ca" {
+		t.Fatalf("uuid: got %v", got)
+	}
+	// 无列类型上下文时按 16 字节兜底。
+	if got := normalizeValue(uuidBytes, ""); got != "3a602702-02b6-4959-957c-acd6ecbd97ca" {
+		t.Fatalf("uuid fallback: got %v", got)
+	}
+	if got := normalizeValue(3.14, ""); got != 3.14 {
 		t.Fatalf("float: got %v", got)
 	}
-	if normalizeValue(nil) != nil {
+	if normalizeValue(nil, "") != nil {
 		t.Fatal("nil should stay nil")
 	}
 }

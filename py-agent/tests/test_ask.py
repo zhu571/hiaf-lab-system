@@ -1,5 +1,6 @@
 import json
 import sys
+import threading
 import unittest
 from pathlib import Path
 
@@ -8,6 +9,7 @@ from starlette.testclient import TestClient
 
 sys.path.insert(0, str(Path(__file__).parents[1]))
 
+from tools import ask as ask_module
 from tools.ask import AskEngine
 from tools.api import APIError
 from tools.parse import ParseError
@@ -74,6 +76,7 @@ class AskEngineTests(unittest.TestCase):
         engine.plan_agent = plan_agent
         engine.integrate_agent = integrate_agent
         engine.client = httpx.Client(transport=httpx.MockTransport(handler))
+        engine._client_lock = threading.Lock()
         engine.go_api_base = "http://test"
         engine.service_token = "secret"
         return engine
@@ -103,6 +106,36 @@ class AskEngineTests(unittest.TestCase):
         with self.assertRaises(ParseError):
             engine.ask(VALID_QUESTION, VALID_SCHEMA)
         self.assertEqual(engine.plan_agent.calls, 2)  # 规划被调用两次（重试一次）
+
+    def test_execute_422_retries_once_then_success(self):
+        # 422（SQL 被拒类 4xx）与 400 同策略：回填 prompt 重试一次后成功
+        engine = self.make_engine(
+            plan_results=[plan_json(), plan_json(sql="SELECT id FROM issues")],
+            integrate_results=["查询成功。"],
+            execute_statuses=(422, 200),
+        )
+        result = engine.ask(VALID_QUESTION, VALID_SCHEMA)
+        self.assertEqual(engine.plan_agent.calls, 2)
+        self.assertEqual(result["answer"], "查询成功。")
+
+    def test_execute_401_maps_api_error_without_retry(self):
+        # 鉴权失败不是 SQL 被拒：直接 502，不触发第二次规划
+        engine = self.make_engine(
+            plan_results=[plan_json()],
+            execute_statuses=(401,),
+        )
+        with self.assertRaises(APIError):
+            engine.ask(VALID_QUESTION, VALID_SCHEMA)
+        self.assertEqual(engine.plan_agent.calls, 1)
+
+    def test_execute_403_maps_api_error_without_retry(self):
+        engine = self.make_engine(
+            plan_results=[plan_json()],
+            execute_statuses=(403,),
+        )
+        with self.assertRaises(APIError):
+            engine.ask(VALID_QUESTION, VALID_SCHEMA)
+        self.assertEqual(engine.plan_agent.calls, 1)
 
     def test_execute_4xx_then_success(self):
         engine = self.make_engine(
@@ -145,6 +178,18 @@ class AskEngineTests(unittest.TestCase):
         engine.service_token = ""
         with self.assertRaises(APIError):
             engine.ask(VALID_QUESTION, VALID_SCHEMA)
+
+    def test_run_steps_not_in_project_tables(self):
+        # run_steps 无 project_id 列（迁移 025，只有 run_id）：不得强制其 SELECT 包含 project_id
+        self.assertNotIn("run_steps", AskEngine.PROJECT_TABLES)
+        for table in ("issues", "logs", "experiment_runs", "experiences"):
+            self.assertIn(table, AskEngine.PROJECT_TABLES)
+
+    def test_run_steps_not_forced_project_id_in_plan_prompt(self):
+        # 规划 prompt 的项目表清单同步移除 run_steps（与 PROJECT_TABLES 一致）
+        prompt = (Path(ask_module.__file__).parents[1] / "prompts" / "ask_plan.txt").read_text()
+        self.assertNotIn("run_steps", prompt)
+        self.assertIn("project_id", prompt)
 
 
 class ValidateAskTests(unittest.TestCase):
