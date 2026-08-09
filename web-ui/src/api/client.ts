@@ -125,9 +125,11 @@ api.interceptors.response.use(
       redirectToLogin()
     }
     const message = error.response?.data?.error?.message || error.message || '请求失败'
-    const err = new Error(message) as Error & { requestId?: string; status?: number }
+    const err = new Error(message) as Error & { requestId?: string; status?: number; details?: unknown }
     err.requestId = error.response?.data?.request_id
     err.status = error.response?.status
+    // 最小加法透传后端 error.details（批量录入 422 的逐行错误依赖；其它页面无视该字段）
+    err.details = error.response?.data?.error?.details
     return Promise.reject(err)
   }
 )

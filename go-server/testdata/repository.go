@@ -5,6 +5,8 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+
+	"github.com/lib/pq"
 )
 
 const testDataColumns = `id, project_id, run_id, data_type, measurement, value, unit,
@@ -26,6 +28,46 @@ func (r *Repository) Create(td *TestData) error {
 		return fmt.Errorf("create test data: %w", err)
 	}
 	return nil
+}
+
+// CreateBatch 在单个事务内逐条 INSERT ... RETURNING，任一失败整体回滚。
+// 逐条而非 multi-VALUES：① RETURNING 直接回填 id（审计 created_ids 需要）；
+// ② 失败时可精确定位违例行 index（run_id FK 竞态兜底依赖）；③ 与单条 Create 复用同一 INSERT 语句模板。
+func (r *Repository) CreateBatch(items []*TestData) error {
+	tx, err := r.db.Begin()
+	if err != nil {
+		return fmt.Errorf("begin test data batch: %w", err)
+	}
+	defer tx.Rollback()
+	for i, td := range items {
+		if err := scanTestData(tx.QueryRow(
+			`INSERT INTO test_data
+			 (project_id, run_id, data_type, measurement, value, unit, quality, source, measured_at, notes, recorded_by)
+			 VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)
+			 RETURNING `+testDataColumns,
+			td.ProjectID, nullableString(td.RunID), td.DataType, td.Measurement, td.Value, td.Unit,
+			td.Quality, td.Source, td.MeasuredAt, nullableText(td.Notes), nullableString(td.RecordedBy),
+		), td); err != nil {
+			if isRunFKViolation(err) {
+				return &RowError{Index: i, Field: "run_id", Code: "run_not_found", Message: "实验批次不存在"}
+			}
+			return fmt.Errorf("create test data batch row %d: %w", i, err)
+		}
+	}
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("commit test data batch: %w", err)
+	}
+	return nil
+}
+
+// isRunFKViolation 识别 run_id 外键违例（SQLSTATE 23503）：
+// 出现在「校验 → 插入」窗口内 run 被硬删/软删时，与 service 层预校验语义一致。
+func isRunFKViolation(err error) bool {
+	var pqErr *pq.Error
+	if !errors.As(err, &pqErr) || pqErr.Code != "23503" {
+		return false
+	}
+	return strings.Contains(pqErr.Constraint, "run_id") || strings.Contains(pqErr.Detail, "(run_id)")
 }
 
 func (r *Repository) GetByID(id string) (*TestData, error) {

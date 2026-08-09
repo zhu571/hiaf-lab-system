@@ -8,43 +8,7 @@
       <el-tab-pane v-if="!isViewer" :label="$t('testData.entry')" name="entry">
         <section class="panel">
           <h3 class="panel-title">{{ $t('testData.entryTitle') }}</h3>
-          <el-form label-position="top" @submit.prevent>
-            <div class="form-grid">
-              <el-form-item :label="$t('testData.dataType')" required>
-                <el-select v-model="draft.data_type" :placeholder="$t('testData.dataTypePlaceholder')">
-                  <el-option v-for="t in dataTypes" :key="t" :label="t" :value="t" />
-                </el-select>
-              </el-form-item>
-              <el-form-item :label="$t('testData.measurement')" required>
-                <el-input v-model="draft.measurement" :placeholder="$t('testData.measurementPlaceholder')" />
-              </el-form-item>
-              <el-form-item :label="$t('testData.value')" required>
-                <el-input-number v-model="draft.value" :controls="false" :placeholder="$t('testData.value')" />
-              </el-form-item>
-              <el-form-item :label="$t('testData.unit')">
-                <el-input v-model="draft.unit" :placeholder="$t('testData.unitPlaceholder')" />
-              </el-form-item>
-              <el-form-item :label="$t('testData.quality')">
-                <el-select v-model="draft.quality">
-                  <el-option v-for="q in entryQualities" :key="q" :label="q" :value="q" />
-                </el-select>
-              </el-form-item>
-              <el-form-item :label="$t('testData.measuredAt')">
-                <el-date-picker v-model="draft.measured_at" type="datetime" :placeholder="$t('testData.timePlaceholder')" />
-              </el-form-item>
-              <el-form-item :label="$t('testData.linkedRun')">
-                <el-select v-model="draft.run_id" :placeholder="$t('testData.runPlaceholder')" clearable>
-                  <el-option v-for="r in runs" :key="r.id" :label="r.name" :value="r.id" />
-                </el-select>
-              </el-form-item>
-              <el-form-item :label="$t('testData.notes')" class="span-all">
-                <el-input v-model="draft.notes" :placeholder="$t('testData.notesPlaceholder')" />
-              </el-form-item>
-            </div>
-            <div class="form-actions">
-              <el-button type="primary" :loading="submitting" @click="submit">{{ $t('testData.submit') }}</el-button>
-            </div>
-          </el-form>
+          <TestDataBatchEditor :project-id="projectId" :runs="runs" @submitted="onBatchSubmitted" />
         </section>
       </el-tab-pane>
 
@@ -158,15 +122,16 @@
 </template>
 
 <script setup lang="ts">
-import { computed, onMounted, reactive, ref, watch } from 'vue'
+import { computed, onMounted, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useRoute } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { createTestData, deleteTestData, listTestData, type TestData, type TestDataPayload } from '../api/testdata'
+import { deleteTestData, listTestData, type TestData } from '../api/testdata'
 import { listRuns, type ExperimentRun } from '../api/runs'
 import { useAuthStore } from '../stores/auth'
 import { showApiError } from '../composables/useNotify'
 import ResponsiveTable from '../components/ResponsiveTable.vue'
+import TestDataBatchEditor from '../components/TestDataBatchEditor.vue'
 
 const { t } = useI18n()
 const route = useRoute()
@@ -175,7 +140,6 @@ const auth = useAuthStore()
 const items = ref<TestData[]>([])
 const runs = ref<ExperimentRun[]>([])
 const loading = ref(false)
-const submitting = ref(false)
 const error = ref('')
 const page = ref(1)
 const perPage = 20
@@ -184,19 +148,7 @@ const dataType = ref('')
 const quality = ref('')
 
 const dataTypes = ['cryo', 'pressure', 'voltage', 'rf_voltage', 'efficiency']
-const entryQualities = ['normal', 'outlier', 'suspect']
 const qualities = ['normal', 'outlier', 'suspect', 'invalid']
-
-const draft = reactive({
-  data_type: '',
-  measurement: '',
-  value: undefined as number | undefined,
-  unit: '',
-  quality: 'normal',
-  measured_at: null as Date | null,
-  run_id: '',
-  notes: ''
-})
 
 const isViewer = computed(() => auth.user?.role === 'viewer')
 // projectId source of truth is the route param (guaranteed by ProjectLayout)
@@ -287,54 +239,9 @@ function onFilter() {
   load()
 }
 
-function resetDraft() {
-  draft.data_type = ''
-  draft.measurement = ''
-  draft.value = undefined
-  draft.unit = ''
-  draft.quality = 'normal'
-  draft.measured_at = null
-  draft.run_id = ''
-  draft.notes = ''
-}
-
-async function submit() {
-  if (!draft.data_type) {
-    ElMessage.warning(t('testData.dataTypeRequired'))
-    return
-  }
-  if (!draft.measurement.trim()) {
-    ElMessage.warning(t('testData.measurementRequired'))
-    return
-  }
-  if (draft.value === undefined || Number.isNaN(draft.value)) {
-    ElMessage.warning(t('testData.valueRequired'))
-    return
-  }
-  // backend enables DisallowUnknownFields, only submit whitelisted fields
-  const payload: TestDataPayload = {
-    data_type: draft.data_type,
-    measurement: draft.measurement.trim(),
-    value: draft.value,
-    quality: draft.quality
-  }
-  const unit = draft.unit.trim()
-  if (unit) payload.unit = unit
-  if (draft.measured_at) payload.measured_at = new Date(draft.measured_at).toISOString()
-  if (draft.run_id) payload.run_id = draft.run_id
-  const notes = draft.notes.trim()
-  if (notes) payload.notes = notes
-  submitting.value = true
-  try {
-    await createTestData(projectId.value, payload)
-    ElMessage.success(t('testData.created'))
-    resetDraft()
-    await load()
-  } catch (err) {
-    showApiError(err, t('testData.createFailed'))
-  } finally {
-    submitting.value = false
-  }
+// 批量录入成功 → 刷新列表（批量编辑器内部已清空表格）
+async function onBatchSubmitted() {
+  await load()
 }
 
 async function invalidate(row: TestData) {
@@ -386,27 +293,6 @@ function formatTime(v?: string) {
 .hint {
   font-size: 12px;
   font-weight: 400;
-}
-
-.form-grid {
-  display: grid;
-  gap: 0 14px;
-  grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
-}
-
-.form-grid .el-select,
-.form-grid .el-input-number,
-.form-grid .el-date-editor {
-  width: 100%;
-}
-
-.span-all {
-  grid-column: 1 / -1;
-}
-
-.form-actions {
-  display: flex;
-  justify-content: flex-end;
 }
 
 .filters-panel {

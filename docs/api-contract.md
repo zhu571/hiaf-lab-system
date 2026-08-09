@@ -878,6 +878,87 @@ access token 过期返回 `401`，前端应刷新 token 后重新建立 SSE 连�
 `seq` 单调递增，是重连去重的唯一依据：前端按 `seq` 丢弃重复帧，历史回放保证
 `done` 事件在长回放后仍可达。
 
+## 3.14 测试数据模块
+
+### `GET /api/v1/projects/{pid}/test-data`
+
+按项目分页列出测试数据。Query：`run_id`/`data_type`/`quality`（过滤，均需合法值，
+否则 400）、`page`/`per_page`（默认 1/20，per_page ≤100）。默认过滤 `quality='invalid'`。
+Resp 200：`{items: TestData[], total, page, per_page}`。权限：项目 viewer 及以上。
+
+### `POST /api/v1/projects/{pid}/test-data`
+
+单条录入。Body 为 `TestDataPayload`（**开启 DisallowUnknownFields，未知字段 → 400**）：
+
+```json
+{ "data_type": "cryo", "measurement": "target_temp", "value": 4.2, "unit": "K",
+  "quality": "normal", "measured_at": "2026-08-09T10:30:00+08:00",
+  "run_id": "70000000-0000-4000-8000-000000000001", "notes": "稳定后读数" }
+```
+
+必填：`data_type`（5 枚举）、`measurement`（≤128）、`value`（数值）；`quality`/`source`
+缺省 `normal`/`manual`；`unit` ≤16；`run_id` 可选，须为存在的实验批次 UUID。
+Resp 201：完整 `TestData`。错误：400 `bad_request`（参数无效/未知字段）、403 `permission_denied`、
+404 `project_not_found`、409 `duplicate_idempotency_key`。需 `Idempotency-Key`，写审计
+（action `test_data.create`）。权限：项目 member 及以上（仪器/Agent 自动录入路径亦走此端点）。
+
+### `PATCH /api/v1/test-data/{id}`
+
+更新单条（仅 `measurement`/`value`/`unit`/`quality`/`measured_at`/`notes` 可改；
+`data_type`/`run_id` 不可改，传入 → 400）。需 `Idempotency-Key`。Resp 200：更新后的 `TestData`。
+
+### `DELETE /api/v1/test-data/{id}`
+
+标记无效（`quality='invalid'`，非硬删除）。需 `Idempotency-Key`。Resp 200：`{id}`。
+权限：admin / 记录人本人 / 项目 owner，否则 403。
+
+### `POST /api/v1/projects/{pid}/test-data/batch`
+
+批量录入（**首个数组体写端点，N ≤100，事务原子**：任一失败整批回滚并逐行报错）。
+
+**请求**：JSON 数组（1–100 个元素；每个元素与单条 `TestDataPayload` 同构，
+逐元素开启 `DisallowUnknownFields`）。`value` 支持 0 且缺失时报错（`*float64` 语义）。
+
+```json
+[
+  { "data_type": "cryo", "measurement": "target_temp", "value": 4.2, "unit": "K",
+    "quality": "normal", "measured_at": "2026-08-09T10:30:00+08:00",
+    "run_id": "70000000-0000-4000-8000-000000000001", "notes": "稳定后读数" },
+  { "data_type": "pressure", "measurement": "cell_pressure", "value": 0.013 }
+]
+```
+
+**Resp 201**：`{ "count": N, "items": [TestData×N] }`（`count == len(items)`，顺序 = 请求行序）。
+
+**错误结构**（`error.details.errors[]`，0-based `index` 指向请求数组下标即表格行序）：
+
+| 字段 | 语义 |
+|------|------|
+| `error.code` | `validation_failed`（行级）/ `batch_too_large`（超限）/ `bad_request`（结构）/ 既有 403/404/500 码 |
+| `error.details.errors[]` | 行级错误：`index`（数组下标）、`field`（data_type/measurement/value/unit/quality/source/measured_at/run_id/notes/body）、`code` ∈ `required`/`not_a_number`/`invalid_enum`/`too_long`/`invalid_uuid`/`run_not_found`/`unknown_field`/`invalid_row`、`message`（中文可展示文案） |
+| 排序 | errors 按 index 升序、同 index 内字段序稳定排序；「收集全部错误一次返回」，不遇错即停 |
+| 未知字段 | 行级 `unknown_field`（field=未知键名）；元素非对象 → 行级 `invalid_row`（field=body），不中断其余行 |
+
+```json
+{ "error": { "code": "validation_failed", "message": "3 行校验失败，请修正后重试",
+    "details": { "errors": [
+      { "index": 0, "field": "data_type", "code": "invalid_enum", "message": "数据类型不在允许枚举内" },
+      { "index": 1, "field": "value",     "code": "required",     "message": "数值必填" },
+      { "index": 2, "field": "run_id",    "code": "run_not_found","message": "实验批次不存在" }
+    ] } }, "request_id": "req_…" }
+```
+
+**状态码总表**：401（未登录）/ 403（无权限）/ 404（项目不存在）/ 400（非数组、空数组、
+请求体损坏、缺 `Idempotency-Key`）/ 409（幂等键重复）/ 422（超限 `batch_too_large`
+`details {max:100, received:N}`，或行级校验失败 `validation_failed`）/ 500（DB 或
+run 校验基础设施错误）。校验规则与单条逐行一致（含 `quality`/`source` 默认值、
+trim 规范化）；run_id 存在性校验去重并发执行，插入期 FK 竞态违例（SQLSTATE 23503）
+回退为行级 `run_not_found`（422），**任何路径不产生部分成功**。
+
+**幂等与审计**：与单条同机制（`Idempotency-Key` 防双击/重放 → 409）；审计整批一条
+（action `testdata.batch`）：成功 detail `{count, created_ids[]}`，422 失败 detail
+`{count, error_rows}`。批量端点仅替代前端手工录入路径，单条端点（仪器/Agent）行为不变。
+
 ## 4. 模块间通信
 
 | 调用方 | 被调用方 | 协议 | 用途 |

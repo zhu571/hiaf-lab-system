@@ -34,6 +34,17 @@ export function createTestData(projectId: string, data: TestDataPayload) {
   return request<TestData>({ url: `/projects/${projectId}/test-data`, method: 'POST', data })
 }
 
+// 批量录入：请求体为数组（≤100 条），任一失败整批回滚并返回逐行错误（422 validation_failed）
+export type TestDataBatchRow = TestDataPayload
+
+export function createTestDataBatch(projectId: string, rows: TestDataBatchRow[]) {
+  return request<{ count: number; items: TestData[] }>({
+    url: `/projects/${projectId}/test-data/batch`,
+    method: 'POST',
+    data: rows
+  })
+}
+
 export function listTestData(projectId: string, params: Record<string, string | number> = {}) {
   return request<{ items: TestData[]; total: number; page: number }>({ url: `/projects/${projectId}/test-data`, params })
 }

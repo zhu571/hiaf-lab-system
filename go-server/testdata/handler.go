@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"net/http"
 	"strconv"
+	"time"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/zhu571/hiaf-lab-system/go-server/common"
@@ -40,6 +41,146 @@ func (h *Handler) Create(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	common.WriteCreated(w, r, td)
+}
+
+// CreateBatch 批量录入：请求体为数组（≤100 条），事务原子，任一失败整批回滚并逐行报错。
+func (h *Handler) CreateBatch(w http.ResponseWriter, r *http.Request) {
+	middleware.SetAuditAction(r.Context(), "testdata.batch")
+	if !requireIdempotencyKey(w, r) {
+		return
+	}
+	claims := middleware.GetUserClaims(r.Context())
+	if claims == nil {
+		common.WriteError(w, r, http.StatusUnauthorized, "unauthorized", "未登录", nil)
+		return
+	}
+	// 先解出 []json.RawMessage：非数组/空数组 → 400（结构性问题，非行级）；
+	// 长度 > 100 → 422 batch_too_large（不解析元素）。
+	var raws []json.RawMessage
+	r.Body = http.MaxBytesReader(w, r.Body, batchMaxBodyBytes)
+	if err := json.NewDecoder(r.Body).Decode(&raws); err != nil {
+		common.WriteError(w, r, http.StatusBadRequest, "bad_request", "请求体必须是 JSON 数组", nil)
+		return
+	}
+	if len(raws) == 0 {
+		common.WriteError(w, r, http.StatusBadRequest, "bad_request", ErrEmptyBatch.Error(), nil)
+		return
+	}
+	if len(raws) > batchMaxRows {
+		common.WriteError(w, r, http.StatusUnprocessableEntity, "batch_too_large", ErrBatchTooLarge.Error(),
+			map[string]any{"max": batchMaxRows, "received": len(raws)})
+		return
+	}
+	// 逐元素 DisallowUnknownFields 解码；解码失败收集该行错误继续（不遇错即停）。
+	// 占位空行保持 rows 下标与请求数组对齐（行级错误按 index 指向请求下标）。
+	rows := make([]CreateBatchRow, len(raws))
+	var decodeErrors []RowError
+	for i, raw := range raws {
+		row, rowErrors := decodeBatchRow(i, raw)
+		if len(rowErrors) > 0 {
+			decodeErrors = append(decodeErrors, rowErrors...)
+			continue
+		}
+		rows[i] = row
+	}
+	result, err := h.svc.CreateBatch(projectID(r), middleware.EffectiveUserID(r.Context()), claims.Role, r.Header, rows, decodeErrors)
+	if err != nil {
+		// 422 失败也由 Audit 中间件落一条 testdata.batch 记录（含 error_rows），便于追查被拒绝的批量。
+		var batchErr *BatchValidationError
+		if errors.As(err, &batchErr) {
+			middleware.SetAuditDetail(r.Context(), map[string]any{"count": len(rows), "error_rows": len(batchErr.Errors)})
+			common.WriteError(w, r, http.StatusUnprocessableEntity, "validation_failed", batchErr.Error(),
+				map[string]any{"errors": batchErr.Errors})
+			return
+		}
+		if errors.Is(err, ErrBatchTooLarge) {
+			common.WriteError(w, r, http.StatusUnprocessableEntity, "batch_too_large", err.Error(),
+				map[string]any{"max": batchMaxRows, "received": len(rows)})
+			return
+		}
+		if errors.Is(err, ErrEmptyBatch) {
+			common.WriteError(w, r, http.StatusBadRequest, "bad_request", err.Error(), nil)
+			return
+		}
+		h.writeError(w, r, err)
+		return
+	}
+	// 审计整批一条：详情含条数与创建 id 列表（顺序 = 请求行序），不刷 N 条。
+	ids := make([]string, 0, len(result.Items))
+	for _, item := range result.Items {
+		ids = append(ids, item.ID)
+	}
+	middleware.SetAuditDetail(r.Context(), map[string]any{"count": result.Count, "created_ids": ids})
+	common.WriteCreated(w, r, result)
+}
+
+// batchMaxBodyBytes：512KB 防御纵深，100 行上限下足够。
+const batchMaxBodyBytes = 512 << 10
+
+// batchAllowedFields 与 CreateBatchRow 字段白名单一致。
+var batchAllowedFields = map[string]bool{
+	"data_type": true, "run_id": true, "measurement": true, "value": true,
+	"unit": true, "quality": true, "source": true, "measured_at": true, "notes": true,
+}
+
+// decodeBatchRow 行级 JSON 结构解析（handler 职责边界，service 只做语义层）：
+// 非对象 → invalid_row（field=body）；未知字段 → unknown_field（field=未知键名）；
+// 值类型错误 → 逐个字段探针定位失败字段（invalid_row）。
+func decodeBatchRow(index int, raw json.RawMessage) (CreateBatchRow, []RowError) {
+	var probe map[string]json.RawMessage
+	if err := json.Unmarshal(raw, &probe); err != nil || probe == nil {
+		return CreateBatchRow{}, []RowError{{Index: index, Field: "body", Code: "invalid_row", Message: "该行必须是 JSON 对象"}}
+	}
+	for key := range probe {
+		if !batchAllowedFields[key] {
+			return CreateBatchRow{}, []RowError{{Index: index, Field: key, Code: "unknown_field", Message: "未知字段 " + key}}
+		}
+	}
+	var row CreateBatchRow
+	decoder := json.NewDecoder(bytes.NewReader(raw))
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(&row); err != nil {
+		fields := batchRowInvalidFields(probe)
+		rowErrors := make([]RowError, 0, len(fields))
+		for _, field := range fields {
+			rowErrors = append(rowErrors, RowError{Index: index, Field: field, Code: "invalid_row", Message: "字段格式不正确"})
+		}
+		return CreateBatchRow{}, rowErrors
+	}
+	return row, nil
+}
+
+var batchFieldTypeProbes = []struct {
+	name  string
+	probe func(raw json.RawMessage) error
+}{
+	{"data_type", func(raw json.RawMessage) error { var v string; return json.Unmarshal(raw, &v) }},
+	{"measurement", func(raw json.RawMessage) error { var v string; return json.Unmarshal(raw, &v) }},
+	{"value", func(raw json.RawMessage) error { var v float64; return json.Unmarshal(raw, &v) }},
+	{"unit", func(raw json.RawMessage) error { var v string; return json.Unmarshal(raw, &v) }},
+	{"quality", func(raw json.RawMessage) error { var v string; return json.Unmarshal(raw, &v) }},
+	{"source", func(raw json.RawMessage) error { var v string; return json.Unmarshal(raw, &v) }},
+	{"measured_at", func(raw json.RawMessage) error { var v time.Time; return json.Unmarshal(raw, &v) }},
+	{"run_id", func(raw json.RawMessage) error { var v string; return json.Unmarshal(raw, &v) }},
+	{"notes", func(raw json.RawMessage) error { var v string; return json.Unmarshal(raw, &v) }},
+}
+
+// batchRowInvalidFields 按字段序找出解码失败的具体字段（值类型错误时精确定位到列）。
+func batchRowInvalidFields(probe map[string]json.RawMessage) []string {
+	var fields []string
+	for _, f := range batchFieldTypeProbes {
+		raw, ok := probe[f.name]
+		if !ok {
+			continue
+		}
+		if err := f.probe(raw); err != nil {
+			fields = append(fields, f.name)
+		}
+	}
+	if len(fields) == 0 {
+		return []string{"body"}
+	}
+	return fields
 }
 
 func (h *Handler) List(w http.ResponseWriter, r *http.Request) {
