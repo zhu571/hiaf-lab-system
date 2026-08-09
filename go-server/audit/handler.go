@@ -19,17 +19,21 @@ type Handler struct {
 }
 
 type Record struct {
-	ID        int64          `json:"id"`
-	RequestID string         `json:"request_id"`
-	UserID    *string        `json:"user_id,omitempty"`
-	Username  string         `json:"username"`
-	Method    string         `json:"method"`
-	Path      string         `json:"path"`
-	Action    string         `json:"action"`
-	Status    int            `json:"status_code"`
-	ClientIP  string         `json:"client_ip"`
-	Detail    map[string]any `json:"detail,omitempty"`
-	CreatedAt time.Time      `json:"created_at"`
+	ID             int64          `json:"id"`
+	RequestID      string         `json:"request_id"`
+	UserID         *string        `json:"user_id,omitempty"`
+	Username       string         `json:"username"`
+	Method         string         `json:"method"`
+	Path           string         `json:"path"`
+	Action         string         `json:"action"`
+	Status         int            `json:"status_code"`
+	ClientIP       string         `json:"client_ip"`
+	Detail         map[string]any `json:"detail,omitempty"`
+	CreatedAt      time.Time      `json:"created_at"`
+	ActorType      string         `json:"actor_type,omitempty"`
+	ActingUserID   *string        `json:"acting_user_id,omitempty"`
+	AgentTaskID    *string        `json:"agent_task_id,omitempty"`
+	IdempotencyKey *string        `json:"idempotency_key,omitempty"`
 }
 
 func NewHandler(db *sql.DB) *Handler {
@@ -94,6 +98,37 @@ func scanRecord(row scanner) (Record, error) {
 	}
 	if len(detail) > 0 {
 		_ = json.Unmarshal(detail, &rec.Detail)
+	}
+	return rec, nil
+}
+
+// scanRecordFull 额外扫描 014 迁移引入的代理/幂等四列（trace 审计段用）。
+func scanRecordFull(row scanner) (Record, error) {
+	var rec Record
+	var userID, actingUserID, agentTaskID, idempotencyKey, actorType sql.NullString
+	var detail []byte
+	if err := row.Scan(
+		&rec.ID, &rec.RequestID, &userID, &rec.Username, &rec.Method, &rec.Path,
+		&rec.Action, &rec.Status, &rec.ClientIP, &detail, &rec.CreatedAt,
+		&actorType, &actingUserID, &agentTaskID, &idempotencyKey,
+	); err != nil {
+		return rec, fmt.Errorf("scan audit record: %w", err)
+	}
+	if userID.Valid {
+		rec.UserID = &userID.String
+	}
+	if len(detail) > 0 {
+		_ = json.Unmarshal(detail, &rec.Detail)
+	}
+	rec.ActorType = actorType.String
+	if actingUserID.Valid {
+		rec.ActingUserID = &actingUserID.String
+	}
+	if agentTaskID.Valid {
+		rec.AgentTaskID = &agentTaskID.String
+	}
+	if idempotencyKey.Valid {
+		rec.IdempotencyKey = &idempotencyKey.String
 	}
 	return rec, nil
 }

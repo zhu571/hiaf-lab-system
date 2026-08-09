@@ -98,6 +98,12 @@ func (h *Handler) ApproveCandidate(w http.ResponseWriter, r *http.Request) {
 		h.writeError(w, r, err)
 		return
 	}
+	// 审计明细（C8）：候选摘要留痕，与 logs/handler.go AiParseReport 同一模式。
+	middleware.SetAuditDetail(r.Context(), map[string]any{
+		"candidate_id": item.ID,
+		"action_type":  item.ActionType,
+		"title":        candidateTitle(item.Payload),
+	})
 	common.WriteSuccess(w, r, item)
 }
 
@@ -120,7 +126,39 @@ func (h *Handler) RejectCandidate(w http.ResponseWriter, r *http.Request) {
 		h.writeError(w, r, err)
 		return
 	}
+	middleware.SetAuditDetail(r.Context(), map[string]any{
+		"candidate_id":  item.ID,
+		"action_type":   item.ActionType,
+		"title":         candidateTitle(item.Payload),
+		"review_reason": req.Reason,
+	})
 	common.WriteSuccess(w, r, item)
+}
+
+// TraceCandidate 返回候选全链路溯源（admin/maintainer，路由层已限角色）。
+func (h *Handler) TraceCandidate(w http.ResponseWriter, r *http.Request) {
+	claims := middleware.GetUserClaims(r.Context())
+	if claims == nil {
+		common.WriteError(w, r, http.StatusUnauthorized, "unauthorized", "未登录", nil)
+		return
+	}
+	trace, err := h.svc.GetCandidateTrace(chi.URLParam(r, "id"), claims.UserID, claims.Role)
+	if err != nil {
+		h.writeError(w, r, err)
+		return
+	}
+	common.WriteSuccess(w, r, trace)
+}
+
+// candidateTitle 从候选 payload 提取标题摘要供审计明细使用（不落 payload 全文）。
+func candidateTitle(payload json.RawMessage) string {
+	var parsed struct {
+		Title string `json:"title"`
+	}
+	if err := json.Unmarshal(payload, &parsed); err != nil {
+		return ""
+	}
+	return parsed.Title
 }
 
 func queryInt(r *http.Request, key string, fallback int) int {

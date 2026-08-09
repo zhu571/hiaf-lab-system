@@ -90,4 +90,12 @@ func TestCandidateIDRoundtripPostgres(t *testing.T) {
 	if listed == nil || listed.CandidateID == nil || *listed.CandidateID != candidateID {
 		t.Fatalf("listed candidate_id = %#v", listed)
 	}
+	byCandidate, err := repo.GetByCandidateID(candidateID)
+	if err != nil || byCandidate == nil || byCandidate.ID != created.ID {
+		t.Fatalf("get by candidate = %#v, %v", byCandidate, err)
+	}
+	missing, err := repo.GetByCandidateID("00000000-0000-0000-0000-000000009999")
+	if err != nil || missing != nil {
+		t.Fatalf("get by missing candidate = %#v, %v", missing, err)
+	}
 }

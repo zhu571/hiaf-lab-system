@@ -4,6 +4,7 @@ import (
 	"context"
 	"embed"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io/fs"
 	"log/slog"
@@ -121,6 +122,12 @@ func main() {
 		commonEnv("ATTACHMENT_DIR", "./uploads/"))
 	attachmentsHandler := attachments.NewHandler(attachmentsSvc)
 	agentSvc.SetExecutor(candidateExecutor{issues: issuesSvc, experiences: experiencesSvc})
+	// trace 端点（C8）的三个只读注入：日报当前值（logs）、审计行（audit）、
+	// 执行产物反查（issues/experiences）——agent 模块不跨模块读表。
+	auditSvc := audit.NewService(db)
+	agentSvc.SetReportReader(reportReaderBridge{svc: logsSvc})
+	agentSvc.SetAuditReader(auditReaderBridge{svc: auditSvc})
+	agentSvc.SetResultResolver(resultResolverBridge{issues: issuesRepo, experiences: experiencesRepo})
 	sensorsSvc, err := sensors.NewService()
 	if err != nil {
 		slog.Error("failed to create sensors service", "error", err)
@@ -243,6 +250,7 @@ func main() {
 		r.Use(mw.RequireRole(auth.RoleAdmin, auth.RoleMaintainer))
 		r.Use(mw.Audit(db))
 		r.Get("/", agentHandler.ListCandidates)
+		r.Get("/{id}/trace", agentHandler.TraceCandidate)
 		r.Post("/{id}/approve", agentHandler.ApproveCandidate)
 		r.Post("/{id}/reject", agentHandler.RejectCandidate)
 	})
@@ -595,6 +603,83 @@ func commonEnv(key, def string) string {
 type candidateExecutor struct {
 	issues      *issues.Service
 	experiences *experiences.Service
+}
+
+// reportReaderBridge 经 logs 模块 service 读日报当前值（trace 用）。
+// 无权限/不存在时降级为 nil（trace 容忍 report 段为空），其他错误上抛。
+type reportReaderBridge struct {
+	svc *logs.Service
+}
+
+func (b reportReaderBridge) GetReportCurrent(reportID, userID, userRole string) (*agent.TraceReport, error) {
+	report, err := b.svc.GetReportByID(reportID, userID, userRole)
+	if err != nil {
+		if errors.Is(err, logs.ErrReportNotFound) || errors.Is(err, logs.ErrNotReportOwner) {
+			return nil, nil
+		}
+		return nil, err
+	}
+	return &agent.TraceReport{ID: report.ID, ReportDate: report.ReportDate, RawText: report.RawText}, nil
+}
+
+// auditReaderBridge 经 audit 模块只读接口取任务相关审计行（trace 用）。
+type auditReaderBridge struct {
+	svc *audit.Service
+}
+
+func (b auditReaderBridge) ListByAgentTaskID(taskID string) ([]agent.AuditEvent, error) {
+	records, err := b.svc.ListByAgentTaskID(taskID)
+	if err != nil {
+		return nil, err
+	}
+	events := make([]agent.AuditEvent, 0, len(records))
+	for _, rec := range records {
+		events = append(events, agent.AuditEvent{
+			ID:          rec.ID,
+			RequestID:   rec.RequestID,
+			Username:    rec.Username,
+			Method:      rec.Method,
+			Path:        rec.Path,
+			Action:      rec.Action,
+			StatusCode:  rec.Status,
+			ActorType:   rec.ActorType,
+			AgentTaskID: rec.AgentTaskID,
+			Detail:      rec.Detail,
+			CreatedAt:   rec.CreatedAt,
+		})
+	}
+	return events, nil
+}
+
+// resultResolverBridge 按 candidate_id 反查执行产物（trace 用），
+// 查询落在 issues/experiences 各自仓储（本表列），不跨模块 join。
+type resultResolverBridge struct {
+	issues      *issues.Repository
+	experiences *experiences.Repository
+}
+
+func (b resultResolverBridge) IssueByCandidateID(candidateID string) (*agent.TraceResult, error) {
+	issue, err := b.issues.GetByCandidateID(candidateID)
+	if err != nil || issue == nil {
+		return nil, err
+	}
+	return &agent.TraceResult{
+		IssueID: &issue.ID,
+		Title:   issue.Title,
+		URL:     "/projects/" + issue.ProjectID + "/issues/" + issue.ID,
+	}, nil
+}
+
+func (b resultResolverBridge) ExperienceByCandidateID(candidateID string) (*agent.TraceResult, error) {
+	exp, err := b.experiences.GetByCandidateID(candidateID)
+	if err != nil || exp == nil {
+		return nil, err
+	}
+	return &agent.TraceResult{
+		ExperienceID: &exp.ID,
+		Title:        exp.Title,
+		URL:          "/experiences",
+	}, nil
 }
 
 func (e candidateExecutor) Execute(candidate agent.AgentCandidateAction, actingUserID string) error {

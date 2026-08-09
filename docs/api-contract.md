@@ -607,6 +607,38 @@ middleware 与 instruments service 双重校验；租约与独立 ACL 后续接�
 
 ## 3.9 Agent 模块
 
+### `POST /api/v1/agent/tasks/claim`
+
+领取待处理任务（agent 角色 + Idempotency-Key）。响应含 `claim_token`（028）：
+每次领取轮换，后续 complete/fail 必须携带同一 token，否则 409 `invalid_agent_lease`。
+
+### `POST /api/v1/agent/tasks/{task_id}/complete` / `POST /api/v1/agent/tasks/{task_id}/fail`
+
+agent 角色 + Idempotency-Key。请求体含 `claim_token`（028 所有权校验）；
+complete 另可携带 `raw_text_snapshot`、`report_date`（030 审计链快照，
+Go 侧计算 `raw_text_sha256` 落库；旧 worker 缺省时保持 NULL）。
+
+### `GET /api/v1/agent/candidates/{id}/trace`
+
+admin/maintainer。候选全链路溯源（030）：
+
+```json
+{
+  "candidate": {},
+  "task": {
+    "model": "deepseek-v4-pro", "prompt_version": "1.0", "agent_confidence": 0.9,
+    "raw_text_snapshot": "AI 当时看到的日报原文", "raw_text_sha256": "...", "report_date": "2026-08-08"
+  },
+  "report": {"id": "...", "report_date": "2026-08-08", "raw_text": "当前值"},
+  "result": {"issue_id": "...", "title": "...", "url": "/projects/.../issues/..."},
+  "audit": []
+}
+```
+
+`report` 经 logs 模块注入读取（无权限时降级为 null）；`result` 经 issues/experiences
+按 `candidate_id` 反链注入反查；`audit` 经 audit 模块注入读取。030 迁移前完成的
+存量任务无快照，`raw_text_snapshot`/`raw_text_sha256`/`report_date` 为 null。
+
 ### `POST /api/v1/agent/tasks`
 
 创建 Agent 任务。

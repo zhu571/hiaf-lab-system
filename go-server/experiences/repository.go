@@ -75,6 +75,26 @@ func (r *Repository) GetByID(id string) (*Experience, error) {
 	return &out, nil
 }
 
+// GetByCandidateID 按来源候选反查经验（030 反链；仅供 main.go 装配的 trace
+// 结果解析器注入使用，不跨模块读表——candidate_id 是本表列）。
+func (r *Repository) GetByCandidateID(candidateID string) (*Experience, error) {
+	var out Experience
+	err := scanExperience(r.db.QueryRow(
+		`SELECT id, project_id, title, content, tags_json, status, author_id, reviewer_id,
+		        ai_generated, agent_task_id, candidate_id, published_at, created_at, updated_at
+		 FROM experiences
+		 WHERE candidate_id = $1`,
+		candidateID,
+	), &out)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("get experience by candidate: %w", err)
+	}
+	return &out, nil
+}
+
 func (r *Repository) List(params ExperienceListParams) ([]Experience, int, error) {
 	params.Page, params.PerPage = normalizePage(params.Page, params.PerPage)
 	if params.PerPage > 100 {

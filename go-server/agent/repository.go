@@ -323,6 +323,25 @@ func (r *Repository) GetCandidate(id string) (*AgentCandidateAction, string, err
 	return getCandidate(r.db, id, "")
 }
 
+// GetTask 按 id 读取任务（trace 端点用，含 030 快照字段，不加锁）。
+func (r *Repository) GetTask(taskID string) (*PendingAgentTask, error) {
+	var task PendingAgentTask
+	err := scanTask(r.db.QueryRow(
+		`SELECT id, report_id, acting_user_id, status, attempts, claim_token, claimed_at,
+		        lease_expires_at, next_attempt_at, completed_at, last_error,
+		        result, model, prompt_version, agent_confidence,
+		        raw_text_snapshot, raw_text_sha256, report_date, created_at, updated_at
+		 FROM pending_agent_tasks WHERE id = $1`, taskID,
+	), &task)
+	if err != nil {
+		if err == sql.ErrNoRows {
+			return nil, ErrTaskNotFound
+		}
+		return nil, fmt.Errorf("get agent task: %w", err)
+	}
+	return &task, nil
+}
+
 type queryer interface {
 	QueryRow(query string, args ...any) *sql.Row
 }

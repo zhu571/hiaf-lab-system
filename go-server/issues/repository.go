@@ -85,6 +85,26 @@ func (r *Repository) GetByID(id string) (*Issue, error) {
 	return &out, nil
 }
 
+// GetByCandidateID 按来源候选反查 issue（030 反链；仅供 main.go 装配的 trace
+// 结果解析器注入使用，不跨模块读表——candidate_id 是本表列）。
+func (r *Repository) GetByCandidateID(candidateID string) (*Issue, error) {
+	var out Issue
+	err := scanIssue(r.db.QueryRow(
+		`SELECT id, project_id, title, description, status, severity, author_id, assignee_id,
+		        ai_generated, agent_task_id, candidate_id, run_id, report_date, occurred_at, resolved_at, created_at, updated_at
+		 FROM issues
+		 WHERE candidate_id = $1`,
+		candidateID,
+	), &out)
+	if err != nil {
+		if err == sql.ErrNoRows {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("get issue by candidate: %w", err)
+	}
+	return &out, nil
+}
+
 func (r *Repository) List(projectID string, params IssueListParams) ([]Issue, int, error) {
 	params.Page, params.PerPage = normalizePage(params.Page, params.PerPage)
 	where, args := buildIssueWhere(projectID, params)

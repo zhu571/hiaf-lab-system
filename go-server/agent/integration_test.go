@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"os"
 	"testing"
 
@@ -186,5 +187,156 @@ func TestQueueAndCandidateLifecyclePostgres(t *testing.T) {
 		if attempt < 3 {
 			db.Exec(`UPDATE pending_agent_tasks SET next_attempt_at = now() - interval '1 second' WHERE id = $1`, failedTask.ID)
 		}
+	}
+}
+
+type fakeTraceReportReader struct{ report *TraceReport }
+
+func (f fakeTraceReportReader) GetReportCurrent(string, string, string) (*TraceReport, error) {
+	return f.report, nil
+}
+
+type fakeTraceAuditReader struct{ events []AuditEvent }
+
+func (f fakeTraceAuditReader) ListByAgentTaskID(string) ([]AuditEvent, error) { return f.events, nil }
+
+type fakeTraceResolver struct{ result *TraceResult }
+
+func (f fakeTraceResolver) IssueByCandidateID(string) (*TraceResult, error)      { return f.result, nil }
+func (f fakeTraceResolver) ExperienceByCandidateID(string) (*TraceResult, error) { return f.result, nil }
+
+func TestCandidateTracePostgres(t *testing.T) {
+	dsn := os.Getenv("TEST_DATABASE_URL")
+	if dsn == "" {
+		t.Skip("TEST_DATABASE_URL is not set")
+	}
+	db, err := sql.Open("postgres", dsn)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+
+	const userID = "00000000-0000-0000-0000-00000000c140"
+	const reportID = "00000000-0000-0000-0000-00000000c141"
+	const legacyReportID = "00000000-0000-0000-0000-00000000c142"
+	defer func() {
+		db.Exec(`DELETE FROM agent_candidate_actions WHERE task_id IN (SELECT id FROM pending_agent_tasks WHERE report_id IN ($1, $2))`, reportID, legacyReportID)
+		db.Exec(`DELETE FROM pending_agent_tasks WHERE report_id IN ($1, $2)`, reportID, legacyReportID)
+		db.Exec(`DELETE FROM daily_reports WHERE id IN ($1, $2)`, reportID, legacyReportID)
+		db.Exec(`DELETE FROM users WHERE id = $1`, userID)
+	}()
+	db.Exec(`DELETE FROM agent_candidate_actions WHERE task_id IN (SELECT id FROM pending_agent_tasks WHERE report_id IN ($1, $2))`, reportID, legacyReportID)
+	db.Exec(`DELETE FROM pending_agent_tasks WHERE report_id IN ($1, $2)`, reportID, legacyReportID)
+	db.Exec(`DELETE FROM daily_reports WHERE id IN ($1, $2)`, reportID, legacyReportID)
+	db.Exec(`DELETE FROM users WHERE id = $1`, userID)
+	if _, err := db.Exec(`INSERT INTO users (id, username, password_hash) VALUES ($1, 'agent-trace-user', 'unused')`, userID); err != nil {
+		t.Fatal(err)
+	}
+	for i, id := range []string{reportID, legacyReportID} {
+		if _, err := db.Exec(`INSERT INTO daily_reports (id, report_date, author_id) VALUES ($1, $3::date, $2)`, id, userID, fmt.Sprintf("2099-03-0%d", i+1)); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := db.Exec(`UPDATE daily_reports SET content_status = 'submitted' WHERE id = $1`, id); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := db.Exec(`UPDATE pending_agent_tasks SET created_at = $2 WHERE report_id = $1`, id, fmt.Sprintf("2000-01-0%d", i+1)); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	repo := NewRepository(db)
+	svc := NewService(repo)
+	svc.SetReportReader(fakeTraceReportReader{report: &TraceReport{ID: reportID, ReportDate: "2099-03-01", RawText: "当前日报文本"}})
+	svc.SetAuditReader(fakeTraceAuditReader{events: []AuditEvent{{ID: 1, RequestID: "req_trace_1", Action: "agent.tasks.complete"}}})
+	svc.SetResultResolver(fakeTraceResolver{result: &TraceResult{Title: "产物标题", URL: "/projects/prj/issues/iss"}})
+
+	// 正常任务：complete 带快照 + 一个 create_issue 候选。
+	task, err := svc.Claim(30)
+	if err != nil || task == nil || task.ReportID != reportID {
+		t.Fatalf("claim = %#v, %v", task, err)
+	}
+	task, err = svc.Complete(task.ID, CompleteTaskRequest{
+		Result: json.RawMessage(`{"ok":true}`), Model: "test", PromptVersion: "v1", ClaimToken: *task.ClaimToken,
+		RawTextSnapshot: "快照文本", ReportDate: "2099-03-01",
+		Candidates: []CandidateInput{{ActionType: "create_issue", Payload: json.RawMessage(`{"title":"trace 候选"}`)}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	listed, err := svc.ListCandidates(CandidatePending, 1, 50)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var candidateID string
+	for _, item := range listed.Items {
+		if item.TaskID == task.ID {
+			candidateID = item.ID
+		}
+	}
+	if candidateID == "" {
+		t.Fatal("candidate not listed")
+	}
+
+	trace, err := svc.GetCandidateTrace(candidateID, userID, "admin")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if trace.Candidate == nil || trace.Candidate.ID != candidateID {
+		t.Fatalf("trace candidate = %#v", trace.Candidate)
+	}
+	if trace.Task.Model == nil || *trace.Task.Model != "test" || trace.Task.PromptVersion == nil || *trace.Task.PromptVersion != "v1" {
+		t.Fatalf("trace task model = %#v %#v", trace.Task.Model, trace.Task.PromptVersion)
+	}
+	if trace.Task.RawTextSnapshot == nil || *trace.Task.RawTextSnapshot != "快照文本" {
+		t.Fatalf("trace snapshot = %#v", trace.Task.RawTextSnapshot)
+	}
+	if trace.Task.RawTextSHA256 == nil || len(*trace.Task.RawTextSHA256) != 64 {
+		t.Fatalf("trace sha256 = %#v", trace.Task.RawTextSHA256)
+	}
+	if trace.Task.ReportDate == nil || *trace.Task.ReportDate != "2099-03-01" {
+		t.Fatalf("trace report_date = %#v", trace.Task.ReportDate)
+	}
+	if trace.Report == nil || trace.Report.RawText != "当前日报文本" {
+		t.Fatalf("trace report = %#v", trace.Report)
+	}
+	if len(trace.Audit) != 1 || trace.Audit[0].RequestID != "req_trace_1" {
+		t.Fatalf("trace audit = %#v", trace.Audit)
+	}
+	if trace.Result == nil || trace.Result.Title != "产物标题" {
+		t.Fatalf("trace result = %#v", trace.Result)
+	}
+
+	// 存量任务降级：complete 不带快照，trace 三字段为 null。
+	legacy, err := svc.Claim(30)
+	if err != nil || legacy == nil || legacy.ReportID != legacyReportID {
+		t.Fatalf("claim legacy = %#v, %v", legacy, err)
+	}
+	legacy, err = svc.Complete(legacy.ID, CompleteTaskRequest{
+		Result: json.RawMessage(`{"ok":true}`), Model: "test", PromptVersion: "v1", ClaimToken: *legacy.ClaimToken,
+		Candidates: []CandidateInput{{ActionType: "create_issue", Payload: json.RawMessage(`{"title":"legacy 候选"}`)}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	listed, err = svc.ListCandidates(CandidatePending, 1, 50)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var legacyCandidateID string
+	for _, item := range listed.Items {
+		if item.TaskID == legacy.ID {
+			legacyCandidateID = item.ID
+		}
+	}
+	legacyTrace, err := svc.GetCandidateTrace(legacyCandidateID, userID, "admin")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if legacyTrace.Task.RawTextSnapshot != nil || legacyTrace.Task.RawTextSHA256 != nil || legacyTrace.Task.ReportDate != nil {
+		t.Fatalf("legacy trace must degrade to null: %#v", legacyTrace.Task)
+	}
+
+	if _, err := svc.GetCandidateTrace("00000000-0000-0000-0000-000000009999", userID, "admin"); !errors.Is(err, ErrCandidateNotFound) {
+		t.Fatalf("trace missing candidate err = %v", err)
 	}
 }

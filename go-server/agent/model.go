@@ -100,3 +100,55 @@ type CandidateListResult struct {
 	Page    int                    `json:"page"`
 	PerPage int                    `json:"per_page"`
 }
+
+// CandidateTrace 是 GET /api/v1/agent/candidates/{id}/trace 的响应（030 审计链）：
+// 谁看到什么（task 快照）、谁批准（audit）、产出什么（result）一条可查。
+type CandidateTrace struct {
+	Candidate *AgentCandidateAction `json:"candidate"`
+	Task      TraceTask             `json:"task"`
+	Report    *TraceReport          `json:"report"`
+	Result    *TraceResult          `json:"result"`
+	Audit     []AuditEvent          `json:"audit"`
+}
+
+// TraceTask 是任务的审计视角字段；快照三字段对 030 迁移前完成的存量任务为 null（降级）。
+type TraceTask struct {
+	ID              string   `json:"id"`
+	Status          string   `json:"status"`
+	Model           *string  `json:"model,omitempty"`
+	PromptVersion   *string  `json:"prompt_version,omitempty"`
+	AgentConfidence *float64 `json:"agent_confidence,omitempty"`
+	RawTextSnapshot *string  `json:"raw_text_snapshot"`
+	RawTextSHA256   *string  `json:"raw_text_sha256"`
+	ReportDate      *string  `json:"report_date"`
+}
+
+// TraceReport 是日报当前值（经 logs 模块注入读取，可为 null：无权限或异常降级）。
+type TraceReport struct {
+	ID         string `json:"id"`
+	ReportDate string `json:"report_date"`
+	RawText    string `json:"raw_text"`
+}
+
+// TraceResult 是候选的执行产物（经 issues/experiences 注入按 candidate_id 反查）。
+type TraceResult struct {
+	IssueID      *string `json:"issue_id,omitempty"`
+	ExperienceID *string `json:"experience_id,omitempty"`
+	Title        string  `json:"title"`
+	URL          string  `json:"url"`
+}
+
+// AuditEvent 是 trace 内嵌的审计行（经 audit 模块注入读取，agent 不直接查 audit_log）。
+type AuditEvent struct {
+	ID          int64          `json:"id"`
+	RequestID   string         `json:"request_id"`
+	Username    string         `json:"username"`
+	Method      string         `json:"method"`
+	Path        string         `json:"path"`
+	Action      string         `json:"action"`
+	StatusCode  int            `json:"status_code"`
+	ActorType   string         `json:"actor_type"`
+	AgentTaskID *string        `json:"agent_task_id,omitempty"`
+	Detail      map[string]any `json:"detail,omitempty"`
+	CreatedAt   time.Time      `json:"created_at"`
+}
