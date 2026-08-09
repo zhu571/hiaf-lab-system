@@ -112,6 +112,10 @@ type auditRow struct {
 }
 
 // insertAuditLog 是 audit_log 的共享 INSERT 写入器。
+// 029 hash 链并发正确性：BIGSERIAL 的 nextval 在 BEFORE INSERT 触发器执行前已分配，
+// 仅触发器内加锁会产生"id 序 ≠ 锁序"分叉；因此 advisory lock 前置到本函数——
+// INSERT 同一事务先取 pg_advisory_xact_lock(714001)，id 分配发生在锁内、id 序==链序。
+// 触发器内锁保留（同事务可重入），防 psql 直插等非应用层写入。
 func insertAuditLog(ctx context.Context, db *sql.DB, row auditRow) error {
 	// detail 是 JSONB：lib/pq 不接受 map 直接传参，必须先 Marshal（[]byte 按 JSONB 写入）。
 	var detail any
@@ -122,7 +126,15 @@ func insertAuditLog(ctx context.Context, db *sql.DB, row auditRow) error {
 		}
 		detail = data
 	}
-	_, err := db.ExecContext(ctx,
+	tx, err := db.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("begin audit tx: %w", err)
+	}
+	defer tx.Rollback()
+	if _, err := tx.ExecContext(ctx, `SELECT pg_advisory_xact_lock(714001)`); err != nil {
+		return fmt.Errorf("acquire audit chain lock: %w", err)
+	}
+	if _, err := tx.ExecContext(ctx,
 		`INSERT INTO audit_log
 		 (request_id, user_id, username, method, path, action, status_code, client_ip,
 		  actor_type, acting_user_id, agent_task_id, idempotency_key, detail)
@@ -140,8 +152,10 @@ func insertAuditLog(ctx context.Context, db *sql.DB, row auditRow) error {
 		row.agentTaskID,
 		row.idempotencyKey,
 		detail,
-	)
-	return err
+	); err != nil {
+		return err
+	}
+	return tx.Commit()
 }
 
 // WriteSystemAudit 追加一条 actor_type='system' 的审计行。

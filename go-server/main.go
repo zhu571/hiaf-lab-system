@@ -87,7 +87,8 @@ func main() {
 		slog.Warn("logs ai-parse autoconfigure failed", "error", err)
 	}
 	logsHandler := logs.NewHandler(logsSvc)
-	auditHandler := audit.NewHandler(db)
+	auditSvc := audit.NewService(db)
+	auditHandler := audit.NewHandler(auditSvc)
 	agentRepo := agent.NewRepository(db)
 	agentSvc := agent.NewService(agentRepo)
 	agentHandler := agent.NewHandler(agentSvc)
@@ -124,7 +125,6 @@ func main() {
 	agentSvc.SetExecutor(candidateExecutor{issues: issuesSvc, experiences: experiencesSvc})
 	// trace 端点（C8）的三个只读注入：日报当前值（logs）、审计行（audit）、
 	// 执行产物反查（issues/experiences）——agent 模块不跨模块读表。
-	auditSvc := audit.NewService(db)
 	agentSvc.SetReportReader(reportReaderBridge{svc: logsSvc})
 	agentSvc.SetAuditReader(auditReaderBridge{svc: auditSvc})
 	agentSvc.SetResultResolver(resultResolverBridge{issues: issuesRepo, experiences: experiencesRepo})
@@ -232,6 +232,9 @@ func main() {
 	})
 	r.Route("/api/v1/audit", func(r chi.Router) {
 		r.Use(mw.AuthRequired)
+		// /verify 与 /events 必须先于 /{request_id} 注册（chi 按注册序匹配，静态段否则会被吞）。
+		r.Get("/verify", auditHandler.VerifyChain)
+		r.Get("/events", auditHandler.ListEvents)
 		r.Get("/{request_id}", auditHandler.GetByRequestID)
 	})
 	r.Route("/api/v1/agent/tasks", func(r chi.Router) {

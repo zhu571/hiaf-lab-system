@@ -666,6 +666,9 @@ admin/maintainer。候选全链路溯源（030）：
 
 ### `POST /api/v1/notifications/events`
 
+> ⚠️ 预告，尚未实现（文档超前于实现）。当前告警由 Go 侧 `notify.Send` 直发 ntfy，
+> 无统一事件入口。
+
 内部服务提交告警事件，由通知模块按规则路由到 ntfy 或 MeoW。
 
 请求：
@@ -685,9 +688,66 @@ admin/maintainer。候选全链路溯源（030）：
 
 ## 3.11 审计模块
 
+仅 admin/maintainer 可查（handler 内角色校验）。`audit_log` 自 029 迁移起带
+SHA-256 hash 链（`prev_hash`/`hash`）：每条记录的 `hash = sha256(prev_hash|规范化内容)`，
+创世块 `prev_hash` 为 64 个 `0`。写入被应用层 advisory lock 串行化，篡改/删行可被
+verify 端点检出。审计路由不挂 Audit 中间件（verify/events 查询不自审计）。
+
+### `GET /api/v1/audit/{request_id}`
+
+按 request_id 查审计行（029 起响应含 `actor_type`/`acting_user_id`/`agent_task_id`/
+`idempotency_key`/`prev_hash`/`hash`）。
+
+响应：
+
+```json
+{
+  "data": {
+    "items": [
+      {
+        "id": 101, "request_id": "req_20260808_000001", "user_id": "...", "username": "admin",
+        "method": "POST", "path": "/api/v1/issues", "action": "issues.create", "status_code": 201,
+        "client_ip": "10.0.0.1", "detail": {}, "created_at": "2026-08-08T10:00:00+08:00",
+        "actor_type": "user", "acting_user_id": null, "agent_task_id": null,
+        "idempotency_key": "...", "prev_hash": "...", "hash": "..."
+      }
+    ],
+    "total": 1
+  },
+  "request_id": "req_20260808_000002"
+}
+```
+
+### `GET /api/v1/audit/verify`
+
+全链重算校验，O(n) 单趟。支持 `?from_id=&to_id=` 增量区间（定期抽查用；`from_id`
+以该行之前最近一行的 hash 为锚点，缺省 0=不设界）。
+
+响应：
+
+```json
+{
+  "data": {"valid": true, "total": 1234, "checked": 1234, "first_broken_id": null, "message": "链校验通过"},
+  "request_id": "req_20260808_000003"
+}
+```
+
+`valid=false` 时 `first_broken_id` 指向首个断链/篡改行，`message` 说明原因。
+
 ### `GET /api/v1/audit/events`
 
-仅 admin 或安全审计员可查。支持 `actor_id`、`acting_user_id`、`object_type`、`object_id`、`from`、`to`。
+审计列表端点。查询参数：`action`（精确匹配）、`user_id`（UUID）、`actor_type`
+（user/agent/system）、`from`/`to`（RFC3339，`created_at` 区间）、`page`（默认 1）、
+`per_page`（默认 20，上限 100）。按写入顺序倒序（最新在前）。
+
+响应：
+
+```json
+{
+  "data": {"items": [/* 同 GET /api/v1/audit/{request_id} 的 Record 结构 */], "total": 1234, "page": 1, "per_page": 20},
+  "request_id": "req_20260808_000004"
+}
+```
 
 ## 3.12 系统管理模块（系统更新）
 
