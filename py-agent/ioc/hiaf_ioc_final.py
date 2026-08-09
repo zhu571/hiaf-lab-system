@@ -867,11 +867,17 @@ class HiafGasCellIOC(PVGroup):
         ntfy_url = os.getenv("NTFY_URL", "http://ntfy:80")
         topic = os.getenv("NTFY_TOPIC", "lab-system")
         try:
+            headers = {"Title": "IOC", "Priority": "3"}
+            # P0-1：deny-all 下无凭据发送被 403 静默丢弃，须带 todo-publisher 的 Bearer token
+            #（hiaf_config 内 secret 文件优先、env 兜底；空则等价于旧行为）
+            token = hiaf_config.NTFY_PUBLISH_TOKEN
+            if token:
+                headers["Authorization"] = f"Bearer {token}"
             async with aiohttp.ClientSession() as session:
                 await session.post(
                     f"{ntfy_url}/{topic}",
                     data=message.encode(),
-                    headers={"Title": "IOC", "Priority": "3"},
+                    headers=headers,
                     timeout=aiohttp.ClientTimeout(total=5),
                 )
         except Exception as e:

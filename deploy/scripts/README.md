@@ -6,7 +6,8 @@
 
 ntfy 账号/ACL 初始化（幂等）。创建 todo-publisher 账号并签发 `deploy/secrets/ntfy_publish_token.txt`，
 配置 `lab-todos-*` / `lab-alerts` / `lab-system` 的 write ACL，批量同步 per-user 只读账号，
-生成 `service_token.txt`。前置：`docker compose up -d` 已启动。
+生成 `service_token.txt` 与 `agent_password.txt`（py-agent 以 agent@system 登录 Go 侧的密码，
+缺省时生成，已有文件不覆盖）。前置：`docker compose up -d` 已启动。
 
 ```bash
 cd deploy && ./scripts/init_ntfy.sh

@@ -208,6 +208,12 @@ cp deploy/.env.example deploy/.env
 docker compose -f deploy/docker-compose.yml up -d
 ```
 
+> **AI 辅助服务降级说明（P0-3）**：server 对 `py-agent-interpret` 的依赖仅为
+> `service_started`（不要求健康）。interpret 未就绪/崩溃重启期间，`ask/chat`、
+> 日志 AI 解析、仪器 NL 命令返回 502 `upstream_error`（前端已有对应错误提示）；
+> `/health` 始终 200；日志录入、权限、审计、仪器控制等其余业务完全不受影响。
+> interpret 自身恢复健康后 AI 功能自动恢复。
+
 ### 单独开发 Go 后端
 
 ```bash

@@ -20,6 +20,9 @@ INFLUX_BUCKET = os.getenv('INFLUX_BUCKET', 'lab-bucket')
 INFLUX_WRITE_SEC = 10.0
 MEOW_NAME = os.getenv("MEOW_NAME", "")
 
+# ntfy 发布凭据（todo-publisher 的 Bearer token，deny-all 下无凭据发送被 403 丢弃，P0-1）
+NTFY_PUBLISH_TOKEN = _read_secret('NTFY_PUBLISH_TOKEN')
+
 # ── Tag → PV-name mappings ──
 TEMP_TAGS: list[tuple[str, str]] = [
     ("218数据_T1", "Temp:T1"),

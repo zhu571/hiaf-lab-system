@@ -30,10 +30,11 @@ services:
       - ../migrations:/migrations
     secrets:
       - db_password
+      - ntfy_publish_token
     entrypoint:
       - "/bin/sh"
       - "-c"
-      - "PASSWORD=$$(cat /run/secrets/db_password); ENCODED=$$(PASSWORD=\"$$PASSWORD\" python3 -c \"import os, urllib.parse; print(urllib.parse.quote_plus(os.environ['PASSWORD']))\"); migrate -path /migrations -database postgres://lab:$$ENCODED@postgres:5432/lab?sslmode=disable up || { curl -s -X POST http://ntfy:80/lab-system -H 'Title: 数据库迁移失败' -H 'Priority: urgent' -H 'Tags: warning' -d 'migration failed' >/dev/null 2>&1; exit 1; }"
+      - "PASSWORD=$$(cat /run/secrets/db_password); ENCODED=$$(PASSWORD=\"$$PASSWORD\" python3 -c \"import os, urllib.parse; print(urllib.parse.quote_plus(os.environ['PASSWORD']))\"); migrate -path /migrations -database postgres://lab:$$ENCODED@postgres:5432/lab?sslmode=disable up || { TOKEN=$$(cat /run/secrets/ntfy_publish_token 2>/dev/null || true); curl -s -X POST http://ntfy:80/lab-system -H 'Title: 数据库迁移失败' -H 'Priority: urgent' -H 'Tags: warning' -H \"Authorization: Bearer $$TOKEN\" -d 'migration failed' >/dev/null 2>&1; exit 1; }"
 
   epics-gateway:
     build:
@@ -97,8 +98,12 @@ services:
       INFLUX_ORG: ${INFLUXDB_ORG:-lab-org}
       INFLUX_BUCKET: ${INFLUXDB_BUCKET:-lab-bucket}
       SENSOR_DB_PATH: /data/sensor_history.db
+      # ntfy 发布凭据（lab-system 主题 todo-publisher 的 Bearer token；deny-all 下无凭据发
+      # 送会被 403 静默丢弃，P0-1 修复：IOC 仪器域告警恢复）
+      NTFY_PUBLISH_TOKEN_FILE: /run/secrets/ntfy_publish_token
     secrets:
       - influxdb_token
+      - ntfy_publish_token
     volumes:
       - /opt/lab-monitor/sqlite:/data
     deploy:
@@ -187,7 +192,7 @@ services:
       epics-gateway:
         condition: service_started
       py-agent-interpret:
-        condition: service_healthy
+        condition: service_started
     healthcheck:
       test: ["CMD-SHELL", "wget -qO- http://localhost:8000/health || exit 1"]
       interval: 10s
