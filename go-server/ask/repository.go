@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"time"
 )
 
 // historyColumns 列表/明细共用列（不含 rows 大字段；明细另行取 rows）。
@@ -85,10 +86,26 @@ func (r *Repository) getHistoryWhere(where string, args ...any) (*AskHistory, er
 	if err := json.Unmarshal(columns, &h.Columns); err != nil {
 		return nil, fmt.Errorf("unmarshal columns: %w", err)
 	}
-	if err := json.Unmarshal(rows, &h.Rows); err != nil {
-		return nil, fmt.Errorf("unmarshal rows: %w", err)
+	// 034 保留策略将 90 天前快照置 NULL：NULL 列扫描得到 nil []byte，
+	// json.Unmarshal(nil, ...) 会报 unexpected end of JSON input，必须跳过。
+	if len(rows) > 0 {
+		if err := json.Unmarshal(rows, &h.Rows); err != nil {
+			return nil, fmt.Errorf("unmarshal rows: %w", err)
+		}
 	}
 	return h, nil
+}
+
+// NullifyOldSnapshots 将 cutoff 之前且快照非空的行置 NULL（保留策略，P2-3）。
+// 返回受影响行数；置 NULL 后空间由 autovacuum 自然回收，无需手动 VACUUM。
+func (r *Repository) NullifyOldSnapshots(cutoff time.Time) (int64, error) {
+	res, err := r.db.Exec(
+		`UPDATE ask_history SET rows = NULL WHERE created_at < $1 AND rows IS NOT NULL`, cutoff,
+	)
+	if err != nil {
+		return 0, fmt.Errorf("nullify ask_history snapshots: %w", err)
+	}
+	return res.RowsAffected()
 }
 
 func scanHistory(rows *sql.Rows) ([]AskHistory, error) {

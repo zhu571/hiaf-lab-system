@@ -1,6 +1,7 @@
 package agent
 
 import (
+	"context"
 	"crypto/rand"
 	"crypto/sha256"
 	"database/sql"
@@ -28,6 +29,18 @@ func (r *Repository) ValidateTask(taskID, actingUserID string) (bool, error) {
 		return false, fmt.Errorf("validate agent task: %w", err)
 	}
 	return valid, nil
+}
+
+// CountInQueue 统计队列深度：pending + processing（迁移 013/014 schema：
+// status ∈ pending/processing/done/failed/dead）。/metrics 的 lab_agent_queue_depth 用。
+func (r *Repository) CountInQueue(ctx context.Context) (int, error) {
+	var n int
+	if err := r.db.QueryRowContext(ctx,
+		`SELECT COUNT(*) FROM pending_agent_tasks WHERE status IN ('pending','processing')`,
+	).Scan(&n); err != nil {
+		return 0, fmt.Errorf("count agent queue: %w", err)
+	}
+	return n, nil
 }
 
 func (r *Repository) Claim(leaseSeconds int) (*PendingAgentTask, error) {

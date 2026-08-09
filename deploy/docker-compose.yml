@@ -292,6 +292,27 @@ services:
       - "10.144.144.12:8087:80"
     restart: unless-stopped
 
+  prometheus:
+    # 锁版本（P2-2）：升级遵循 docs/maintenance-strategy.md 双 MINOR/3 个月窗口策略
+    image: docker.m.daocloud.io/prom/prometheus:v2.53.0
+    container_name: lab-prometheus
+    command:
+      - --config.file=/etc/prometheus/prometheus.yml
+      - --storage.tsdb.retention.time=90d
+      - --storage.tsdb.path=/prometheus
+    volumes:
+      - ./prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - /opt/lab-monitor/prometheus:/prometheus
+    ports:
+      # 默认仅绑定 127.0.0.1（同 Grafana 模式）
+      - "${PROMETHEUS_BIND_ADDR:-127.0.0.1}:9090:9090"
+    deploy:
+      resources:
+        limits:
+          cpus: "0.5"
+          memory: "512M"
+    restart: unless-stopped
+
 volumes:
   pgdata:
   influxdb_config:

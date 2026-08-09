@@ -88,3 +88,59 @@ sudo systemctl enable --now lab-watchdog.timer
   `service_token.txt`，那是 Go 内部服务 token，ntfy 侧无该用户）。
 - 仓库路径若不在 `/home/gascell/hiaf-lab-system`，上述安装命令和环境变量中的路径需相应修改。
 - `/tmp` 重启清空只影响失败计数，属可接受范围；如需保留可用 `WATCHDOG_STATE_DIR` 覆盖。
+
+## 离线部署与镜像打包
+
+gascell 部署机无外网，运行时镜像与构建期基础镜像需在有外网的机器上预拉取/打包后导入
+（daocloud 镜像前缀用于内网可达的镜像源，goproxy.cn / 清华 pip 源 / npm registry 镜像
+解决构建期的依赖下载）。
+
+### 运行时镜像清单（与 docker-compose.yml 的 `image:` 引用逐一对应，含 P1-3/P2-2 新增）
+
+```text
+postgres:16-alpine                                        # postgres 服务（无前缀；离线环境需在 .env/daemon.json 配置镜像源）
+docker.m.daocloud.io/influxdb:2-alpine                    # influxdb
+binwiederhier/ntfy:v2.27.0                                # ntfy 服务 + deploy/Dockerfile ntfy-cli 构建阶段
+docker.m.daocloud.io/grafana/grafana:11.1.0               # grafana（P1-3 锁版）
+docker.m.daocloud.io/prom/prometheus:v2.53.0              # prometheus（P2-2 锁版）
+```
+
+### 构建期基础镜像清单（目标机 `docker compose build` 所需，已逐文件核对 FROM 行）
+
+```text
+binwiederhier/ntfy:v2.27.0            # deploy/Dockerfile:2（ntfy-cli 阶段，与运行时同镜像）
+node:20-alpine                        # deploy/Dockerfile:5（前端构建）
+golang:1.22-alpine                    # deploy/Dockerfile:14（Go 构建）
+alpine:3.20                           # deploy/Dockerfile:29（server 运行阶段）
+migrate/migrate:v4.17.0               # deploy/Dockerfile.migrate:1（迁移工具）
+python:3.12-alpine                    # deploy/Dockerfile.migrate:3（迁移告警发送，含 curl）
+python:3.11-slim                      # py-agent/Dockerfile:1、go-server/epics-gateway/Dockerfile:1
+docker.m.daocloud.io/library/python:3.11-slim  # py-agent/ioc/Dockerfile:1（ioc 已用 daocloud 前缀）
+```
+
+### 导出 / 导入
+
+```bash
+# 有外网机器（或在首次部署前的主机）：
+docker pull <上述全部镜像>
+docker save -o lab-images.tar <上述全部镜像>          # 较大（GB 级），确认磁盘空间
+
+# 传输（U 盘 / 内网 scp / 离线网闸）后目标机：
+docker load -i lab-images.tar
+```
+
+### 本地构建镜像（server / py-agent / migrate / ioc / epics-gateway）
+
+不走 save/load——目标机 `docker compose build` 构建，需内网可达的依赖源：
+
+- Go module 代理：`deploy/Dockerfile:16` 已用 goproxy.cn，离线时改配内网代理（`GOPROXY`）。
+- npm registry：前端构建需内网 npm 镜像源（web-ui 构建阶段）。
+- pip 镜像源：`py-agent/ioc/Dockerfile:3` 已用清华源；`py-agent/Dockerfile:5` 需在构建时注入
+  `PIP_INDEX_URL`（compose 未配置时默认走公网，离线环境构建会失败）。
+
+### 升级流程
+
+1. 先在有外网机器拉取新版本镜像并 `docker save` → 传输 → 目标机 `docker load`。
+2. 仓库版本升级后 compose 指明确版本号（禁止 `latest`）→ `docker compose up -d`。
+3. 校验：`docker images` 与上述清单 diff 为空；`docker compose ps` 全部 healthy。
+4. 离线镜像包随升级一并更新至备份存储（见 docs/maintenance-strategy.md 备份/恢复章节）。
