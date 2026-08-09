@@ -5,6 +5,7 @@ import (
 	"errors"
 	"log/slog"
 	"net/http"
+	"regexp"
 	"strconv"
 
 	"github.com/go-chi/chi/v5"
@@ -15,6 +16,8 @@ import (
 type Handler struct{ svc *Service }
 
 func NewHandler(svc *Service) *Handler { return &Handler{svc: svc} }
+
+var uuidRe = regexp.MustCompile(`^[0-9a-fA-F-]{36}$`)
 
 // Chat POST /api/v1/ask/chat —— 用户提问入口（JWT+CSRF+Idempotency-Key+审计）。
 func (h *Handler) Chat(w http.ResponseWriter, r *http.Request) {
@@ -83,7 +86,12 @@ func (h *Handler) HistoryByID(w http.ResponseWriter, r *http.Request) {
 		common.WriteError(w, r, http.StatusUnauthorized, "unauthorized", "未登录", nil)
 		return
 	}
-	item, err := h.svc.GetByUser(chi.URLParam(r, "id"), middleware.EffectiveUserID(r.Context()))
+	id := chi.URLParam(r, "id")
+	if !uuidRe.MatchString(id) {
+		h.writeError(w, r, ErrNotFound) // 非法 UUID 直接 404，不送 PG（防 500）
+		return
+	}
+	item, err := h.svc.GetByUser(id, middleware.EffectiveUserID(r.Context()))
 	if err != nil {
 		h.writeError(w, r, err)
 		return

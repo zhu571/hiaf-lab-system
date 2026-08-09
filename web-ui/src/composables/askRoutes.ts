@@ -1,6 +1,9 @@
 // AI 问答「查看详情」跳转映射（方案 §4 跳转映射表，前端维护）。
 // v1 严格单表：行 id 归属唯一表，映射成立；无映射的表（logs、instrument_results、
 // 关联表等）只展示不跳转。项目类表行须含 project_id，否则不跳。
+// instrument_results：查询白名单可读，但无独立列表/详情页（数据在
+// /projects/:pid/instruments/:id/results 内嵌展示，且行无 project_id 列），
+// 保持不映射更安全——点击「查看详情」只会误导，故维持现状只展示不跳转。
 
 type RouteSpec =
   | { kind: 'detail'; build: (id: string) => string }

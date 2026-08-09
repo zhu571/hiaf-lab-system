@@ -1,5 +1,6 @@
 import json
 import os
+import threading
 from pathlib import Path
 
 import httpx
@@ -9,7 +10,7 @@ from tools.parse import MODEL, BASE_URL, ParseError, ensure_safe, _json_object
 
 
 class _ExecuteRejected(Exception):
-    """Go 执行端点返回 4xx（SQL 被拒）：可重试——错误信息回填 prompt 让 LLM 改 SQL。"""
+    """Go 执行端点返回 SQL 被拒类 4xx（400/422 等，401/403 除外）：可重试——错误信息回填 prompt 让 LLM 改 SQL。"""
 
 
 def read_service_token():
@@ -33,6 +34,8 @@ class AskEngine:
       NoToolHook + tools=[] + registry 重置），不新建 LLM 客户端。
     - 执行用 httpx 直调 Go 内部端点 POST {GO_API_BASE}/api/v1/ask/execute，
       鉴权 Authorization: Bearer {SERVICE_TOKEN}（service_token，与 agent_password 是两套凭证）。
+      401/403（凭据问题）与 5xx/网络错误 → APIError（502 provider_unavailable）；
+      仅 SQL 被拒类 4xx（400/422 等）回填 prompt 重试一次。
     - 总超时 60s 由 serve 层 asyncio.wait_for 兜底（规划 25s + 执行 5s + 整合 25s + 余量）。
     """
 
@@ -40,9 +43,11 @@ class AskEngine:
     EXECUTE_TIMEOUT = 5          # 执行调用超时（秒）
     ROWS_TEXT_BUDGET = 20 * 1024  # 整合阶段行集文本截断上限（~20KB）
     # 项目类表：规划 prompt 硬约束 SELECT 必须包含 project_id 列（方案 §4）。
+    # 注：run_steps 表无 project_id 列（仅 run_id 关联 experiment_runs，迁移 025），
+    # 故不在此清单中（run_steps 仍可单表只读查询，只是不强制 project_id 列）。
     PROJECT_TABLES = frozenset({
         "issues", "test_data", "rf_matching_records", "assembly_steps", "logs",
-        "experiment_runs", "run_steps", "experiences",
+        "experiment_runs", "experiences",
     })
 
     def __init__(self, api_key, go_api_base=None, service_token=None,
@@ -70,6 +75,9 @@ class AskEngine:
         )
         self.go_api_base = (go_api_base or os.environ["GO_API_BASE"]).rstrip("/")
         self.service_token = service_token if service_token is not None else read_service_token()
+        # 共享 httpx.Client：serve 层 asyncio.to_thread 会并发调用 ask，
+        # _execute 用锁串行化出站请求，避免跨线程复用连接（httpx.Client 非线程安全）。
+        self._client_lock = threading.Lock()
         self.client = httpx.Client(timeout=self.EXECUTE_TIMEOUT)
 
     @staticmethod
@@ -132,9 +140,9 @@ class AskEngine:
         return {"sql": sql, "reason": str(item.get("reason", "")).strip()}
 
     def _execute_with_retry(self, plan, question, schema, history):
-        """执行 + 4xx 重试一次：失败信息回填 prompt 让 LLM 改 SQL，再执行一次，仍失败 → ParseError。
+        """执行 + SQL 被拒（4xx）重试一次：失败信息回填 prompt 让 LLM 改 SQL，再执行一次，仍失败 → ParseError。
 
-        Go 不可达 / 5xx → APIError（502 provider_unavailable）。
+        Go 不可达 / 5xx / 401 / 403 → APIError（502 provider_unavailable，不重试）。
         """
         error = ""
         for attempt in range(2):
@@ -181,15 +189,19 @@ class AskEngine:
         if not self.service_token:
             raise APIError("service token is not configured")
         try:
-            response = self.client.post(
-                self.go_api_base + "/api/v1/ask/execute",
-                json={"sql": sql},
-                headers={"Authorization": "Bearer " + self.service_token},
-            )
+            with self._client_lock:
+                response = self.client.post(
+                    self.go_api_base + "/api/v1/ask/execute",
+                    json={"sql": sql},
+                    headers={"Authorization": "Bearer " + self.service_token},
+                )
         except (httpx.TimeoutException, httpx.TransportError) as exc:
             raise APIError("Go API unavailable") from exc
         if response.status_code >= 500:
             raise APIError(f"Go API unavailable ({response.status_code})")
+        if response.status_code in (401, 403):
+            # 鉴权失败是环境/凭据问题，不是 SQL 被拒：回填 prompt 重试无意义，直接 502。
+            raise APIError(f"Go API rejected credentials ({response.status_code})")
         if 400 <= response.status_code < 500:
             raise _ExecuteRejected(self._rejection_message(response))
         try:

@@ -58,6 +58,7 @@ func TestAskRepository(t *testing.T) {
 		Rows:       []map[string]any{{"id": "r1", "project_id": "p1", "content": "x"}},
 		RowCount:   1,
 		DurationMS: 42,
+		Model:      "deepseek-chat",
 		CreatedAt:  time.Now(),
 	}
 	if err := repo.SaveAsk(h); err != nil {
@@ -88,6 +89,9 @@ func TestAskRepository(t *testing.T) {
 	}
 	if got.Answer != h.Answer || len(got.Rows) != 1 || got.Rows[0]["id"] != "r1" {
 		t.Fatalf("GetHistory mismatch: %+v", got)
+	}
+	if got.Model != "deepseek-chat" {
+		t.Fatalf("model not persisted: %q", got.Model)
 	}
 
 	// 归属校验：本人可读，他人不可读。

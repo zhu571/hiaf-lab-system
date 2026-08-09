@@ -1,5 +1,5 @@
 <template>
-  <el-drawer v-model="askOpen" size="720" :title="t('ask.title')" class="ask-drawer">
+  <el-drawer v-model="askOpen" :size="isMobile ? '96%' : '720px'" :title="t('ask.title')" class="ask-drawer">
     <div class="ask-shell">
       <el-tabs v-model="activeTab" class="ask-tabs">
         <el-tab-pane :label="t('ask.chat')" name="chat">
@@ -98,6 +98,7 @@ import { useRouter } from 'vue-router'
 import { ArrowLeft, ArrowRight } from '@element-plus/icons-vue'
 import AskResultPanel, { type AskResultData } from './AskResultPanel.vue'
 import { useAskDialog } from '../composables/useAskDialog'
+import { useMobile } from '../composables/useMobile'
 import { askChat, askHistory, askHistoryDetail, type AskHistoryDetail as AskHistoryDetailType, type AskHistoryItem } from '../api/ask'
 import { newIdempotencyKey } from '../api/client'
 import { showApiError } from '../composables/useNotify'
@@ -112,6 +113,7 @@ type Turn = {
 
 const { t } = useI18n()
 const router = useRouter()
+const isMobile = useMobile()
 const { askOpen } = useAskDialog()
 
 const activeTab = ref('chat')
@@ -201,6 +203,8 @@ watch(activeTab, (tab) => {
 })
 
 async function loadHistory() {
+  // 清 detail 状态：切 tab / 翻页后回到列表视图，避免残留上一条明细
+  detail.value = null
   historyLoading.value = true
   try {
     const data = await askHistory({ page: historyPage.value, per_page: historyPerPage })

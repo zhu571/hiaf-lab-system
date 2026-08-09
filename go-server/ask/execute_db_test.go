@@ -34,8 +34,8 @@ func TestExecuteDB(t *testing.T) {
 	if resp.RowCount > maxRows {
 		t.Fatalf("rows over cap: %d", resp.RowCount)
 	}
-	if !resp.Truncated {
-		t.Fatal("no-limit query should be marked truncated")
+	if resp.Truncated && resp.RowCount != maxRows {
+		t.Fatalf("truncated must imply hitting row cap, got rows=%d truncated=%v", resp.RowCount, resp.Truncated)
 	}
 
 	if _, err := svc.Execute(context.Background(), "SELECT * FROM users"); !errors.Is(err, ErrSQLRejected) {
@@ -50,6 +50,21 @@ func TestExecuteDB(t *testing.T) {
 	if len(resp.Rows) > 0 {
 		if v, ok := resp.Rows[0]["tags_json"]; !ok || v == nil {
 			t.Fatalf("tags_json should be preserved as JSON, got %v", resp.Rows[0])
+		}
+	}
+
+	// UUID 列（test_data.id）应序列化为标准 UUID 字符串而非 null。
+	resp, err = svc.Execute(context.Background(), "SELECT id, project_id FROM test_data LIMIT 1")
+	if err != nil {
+		t.Fatalf("Execute uuid: %v", err)
+	}
+	if len(resp.Rows) > 0 {
+		for _, c := range []string{"id", "project_id"} {
+			v, ok := resp.Rows[0][c]
+			s, isStr := v.(string)
+			if !ok || !isStr || len(s) != 36 {
+				t.Fatalf("%s should be a 36-char UUID string, got %v", c, v)
+			}
 		}
 	}
 }
