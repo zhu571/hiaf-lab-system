@@ -10,7 +10,6 @@ import (
 	"strings"
 
 	"github.com/zhu571/hiaf-lab-system/go-server/common"
-	"github.com/zhu571/hiaf-lab-system/go-server/notify"
 )
 
 type serviceCallKeyType string
@@ -26,15 +25,18 @@ func SetServiceToken(token string) {
 }
 
 // ServiceToken 校验白名单路径上的 SERVICE_TOKEN。白名单按方法分条件匹配：
-// GET /api/v1/daily-reports/by-date（拉全量用户日报是敏感操作，scope 收敛）与
-// POST /api/v1/ask/execute（AI 智能查询内部只读执行端点，见 ask 模块）。
+// GET /api/v1/daily-reports/by-date（拉全量用户日报是敏感操作，scope 收敛）、
+// POST /api/v1/ask/execute（AI 智能查询内部只读执行端点，见 ask 模块）与
+// POST /api/v1/alerts/report、/api/v1/alerts/resolve（告警中心写端点，见 alert 模块）。
 // 命中且正确 → ctx 标记 serviceCallKey 并跳过 JWT；非白名单路径直接放行（不消费 token）；
 // 白名单上 token 错误 → 401 + 泄露告警。
 func ServiceToken() func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			if !((r.Method == http.MethodGet && r.URL.Path == "/api/v1/daily-reports/by-date") ||
-				(r.Method == http.MethodPost && r.URL.Path == "/api/v1/ask/execute")) {
+				(r.Method == http.MethodPost && r.URL.Path == "/api/v1/ask/execute") ||
+				(r.Method == http.MethodPost && r.URL.Path == "/api/v1/alerts/report") ||
+				(r.Method == http.MethodPost && r.URL.Path == "/api/v1/alerts/resolve")) {
 				next.ServeHTTP(w, r)
 				return
 			}
@@ -56,8 +58,10 @@ func ServiceToken() func(http.Handler) http.Handler {
 				return
 			}
 			if serviceToken == "" || subtle.ConstantTimeCompare([]byte(header), []byte(serviceToken)) != 1 {
-				slog.Error("service token rejected", "ip", r.RemoteAddr, "path", r.URL.Path)
-				go notify.SecurityAlert("SERVICE_TOKEN 校验失败", "来源 IP: "+r.RemoteAddr)
+				slog.Error("service token rejected", "ip", requestSourceIP(r), "path", r.URL.Path)
+				// 校验失败属安全事件：收敛到告警中心（原 notify.SecurityAlert 直发，
+				// 改走 alert 模块统一聚合去重，critical/security 双通道不变）。
+				ReportAlert("critical", "security", "SERVICE_TOKEN 校验失败", "来源 IP: "+requestSourceIP(r))
 				common.WriteError(w, r, http.StatusUnauthorized, "unauthorized", "service token 无效", nil)
 				return
 			}

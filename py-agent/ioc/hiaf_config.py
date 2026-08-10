@@ -23,6 +23,11 @@ MEOW_NAME = os.getenv("MEOW_NAME", "")
 # ntfy 发布凭据（todo-publisher 的 Bearer token，deny-all 下无凭据发送被 403 丢弃，P0-1）
 NTFY_PUBLISH_TOKEN = _read_secret('NTFY_PUBLISH_TOKEN')
 
+# 告警中心（Go alert 模块，方案 2026-08-09）：service_token 调 POST /api/v1/alerts/
+# report|resolve（compose 挂载 /run/secrets/service_token）；与 ntfy 发布 token 是两套凭证。
+SERVICE_TOKEN = _read_secret('SERVICE_TOKEN')
+ALERT_API_BASE = os.getenv('GO_API_BASE', 'http://server:8000').rstrip('/')
+
 # ── Tag → PV-name mappings ──
 TEMP_TAGS: list[tuple[str, str]] = [
     ("218数据_T1", "Temp:T1"),

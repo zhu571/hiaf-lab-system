@@ -28,6 +28,7 @@ const DailyReportShell = () => import('../components/DailyReportShell.vue')
 const ProjectLayout = () => import('../components/ProjectLayout.vue')
 const ProjectDashboard = () => import('../components/ProjectDashboard.vue')
 const ManualView = () => import('../views/ManualView.vue')
+const AlertCenterView = () => import('../views/AlertCenterView.vue')
 
 const router = createRouter({
   history: createWebHistory(),
@@ -66,6 +67,7 @@ const router = createRouter({
     { path: '/todos', component: TodoView, meta: { requiresAuth: true, titleKey: 'nav.todos' } },
     { path: '/experiences', component: ExperiencesView, meta: { titleKey: 'nav.experiences' } },
     { path: '/audit', component: AuditView, meta: { titleKey: 'nav.audit' } },
+    { path: '/alerts', component: AlertCenterView, meta: { requiresAuth: true, titleKey: 'nav.alert' } },
     { path: '/settings', component: SettingsView, meta: { titleKey: 'nav.settings' } },
     { path: '/manual', component: ManualView, meta: { requiresAuth: true, titleKey: 'nav.manual' } },
     { path: '/daily-reports/:id', component: DailyReportDetailView, meta: { titleKey: 'mobile.title.dailyReportDetail' } },

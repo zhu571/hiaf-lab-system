@@ -13,6 +13,13 @@ func CSRF(next http.Handler) http.Handler {
 			next.ServeHTTP(w, r)
 			return
 		}
+		// service token 调用（告警 report/resolve 等白名单端点）无 CSRF cookie，
+		// 由 ServiceToken 中间件鉴权（先例：ask/execute）；IsServiceCall 只在
+		// 白名单路径为 true，用户 JWT 通道仍强校验 CSRF。
+		if IsServiceCall(r.Context()) {
+			next.ServeHTTP(w, r)
+			return
+		}
 		if r.URL.Path == "/api/v1/auth/login" || r.URL.Path == "/api/v1/auth/refresh" || r.URL.Path == "/api/v1/auth/register" || r.URL.Path == "/api/v1/auth/logout" {
 			next.ServeHTTP(w, r)
 			return

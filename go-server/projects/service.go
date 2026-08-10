@@ -37,7 +37,11 @@ func NewService(repo *Repository, issueCounter IssueCounter, logCounter LogCount
 	return &Service{repo: repo, issueCounter: issueCounter, logCounter: logCounter}
 }
 
-func (s *Service) Create(req CreateProjectRequest, userID string) (*Project, error) {
+func (s *Service) Create(req CreateProjectRequest, userID, role string) (*Project, error) {
+	// D11：项目创建限 maintainer+admin（viewer 不可）；路由 RequireRole 之外的同语义纵深校验。
+	if role != auth.RoleAdmin && role != auth.RoleMaintainer {
+		return nil, ErrForbidden
+	}
 	code := strings.TrimSpace(req.Code)
 	name := strings.TrimSpace(req.Name)
 	if code == "" || name == "" {

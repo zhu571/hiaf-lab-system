@@ -5,8 +5,6 @@ import (
 	"log/slog"
 	"sync"
 	"time"
-
-	"github.com/zhu571/hiaf-lab-system/go-server/notify"
 )
 
 // Scheduler 编排四个定时 job（单实例假设：docker compose 单 server 容器天然满足，
@@ -25,10 +23,14 @@ func NewScheduler(svc *Service, loc *time.Location, now func() time.Time) *Sched
 	return &Scheduler{
 		svc: svc, loc: loc, now: now, interval: time.Minute,
 		tracker: &FailureTracker{},
-		sendAlert: func(title, msg string) error {
-			return notify.Send(notify.AlertTopic, title, msg, notify.WebURL+"/", "high", []string{"warning"})
-		},
+		// sendAlert 由 main.go 注入（alertSvc.Report，level=warning/source=todos，
+		// 统一聚合去重后推送）；未注入时连续失败告警静默，保持 scheduler 可测。
 	}
+}
+
+// SetAlertReporter 注入连续失败告警上报器（main.go 接 alertSvc.Report）。
+func (s *Scheduler) SetAlertReporter(fn func(title, msg string) error) {
+	s.sendAlert = fn
 }
 
 // Run 启动调度循环：启动时顺延补跑（错过 08:30 则补跑，幂等）；ctx 取消后

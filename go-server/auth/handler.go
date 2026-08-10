@@ -1,18 +1,22 @@
 package auth
 
 import (
+	"context"
 	"crypto/rand"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"log/slog"
+	"net"
 	"net/http"
 	"os"
+	"strconv"
 	"sync"
 	"time"
 
 	"github.com/go-chi/chi/v5"
+	"github.com/zhu571/hiaf-lab-system/go-server/alert"
 	"github.com/zhu571/hiaf-lab-system/go-server/common"
 	"github.com/zhu571/hiaf-lab-system/go-server/middleware"
 	"github.com/zhu571/hiaf-lab-system/go-server/notify"
@@ -20,15 +24,36 @@ import (
 
 // Handler exposes auth HTTP endpoints.
 type Handler struct {
-	svc          *Service
-	cookieSecure bool
-	regIPMu      sync.Mutex
-	regIPCalls   sync.Map // IP string -> []time.Time
+	svc           *Service
+	cookieSecure  bool
+	regIPMu       sync.Mutex
+	regIPCalls    sync.Map // IP string -> []time.Time
+	loginIPMu     sync.Mutex
+	loginIPCalls  sync.Map // IP string -> []time.Time（跨用户名聚合，S1）
+	now           func() time.Time
+	alertReporter alert.Reporter
 }
 
 // NewHandler creates a new auth handler.
 func NewHandler(svc *Service) *Handler {
-	return &Handler{svc: svc, cookieSecure: os.Getenv("COOKIE_SECURE") == "true"}
+	return &Handler{svc: svc, cookieSecure: os.Getenv("COOKIE_SECURE") == "true", now: time.Now}
+}
+
+// SetAlertReporter 注入告警上报窄接口（main.go 接 alertSvc；安全事件收敛到告警中心）。
+func (h *Handler) SetAlertReporter(r alert.Reporter) {
+	h.alertReporter = r
+}
+
+// reportAlert 异步上报告警中心（未注入或失败仅记日志，不影响业务路径）。
+func (h *Handler) reportAlert(level, source, title, detail string) {
+	if h.alertReporter == nil {
+		return
+	}
+	go func() {
+		if _, err := h.alertReporter.Report(context.Background(), level, source, title, detail); err != nil {
+			slog.Error("alert report failed", "error", err, "source", source, "title", title)
+		}
+	}()
 }
 
 func (h *Handler) SetCookieSecure(secure bool) {
@@ -56,6 +81,11 @@ func (h *Handler) Routes(audit ...func(http.Handler) http.Handler) chi.Router {
 
 // Register creates a new user account.
 func (h *Handler) Register(w http.ResponseWriter, r *http.Request) {
+	// S2：开放注册开关，默认关闭（管理员开号）。
+	if os.Getenv("ALLOW_REGISTER") != "true" {
+		common.WriteError(w, r, http.StatusForbidden, "registration_disabled", "注册已关闭，请联系管理员开通账号", nil)
+		return
+	}
 	ip := getClientIP(r)
 	if !h.allowRegisterIP(ip) {
 		common.WriteError(w, r, http.StatusTooManyRequests, "rate_limit_exceeded", "注册请求过于频繁，请稍后再试", nil)
@@ -67,6 +97,7 @@ func (h *Handler) Register(w http.ResponseWriter, r *http.Request) {
 		common.WriteError(w, r, http.StatusBadRequest, "bad_request", "请求体解析失败", nil)
 		return
 	}
+	middleware.SetAuditUsername(r.Context(), req.Username)
 
 	user, err := h.svc.Register(req.Username, req.Password)
 	if err != nil {
@@ -81,19 +112,39 @@ func (h *Handler) Register(w http.ResponseWriter, r *http.Request) {
 
 // Login authenticates a user and returns a token pair.
 func (h *Handler) Login(w http.ResponseWriter, r *http.Request) {
+	// S1：IP 级滑动窗口限流（跨用户名聚合），账户锁定 5 次/15min/用户名作第二道（service 内）。
+	ip := getClientIP(r)
+	if !h.allowLoginIP(ip) {
+		h.reportAlert("warning", "security", "登录 IP 限流", "来源 IP "+ip+" 登录尝试过于频繁")
+		common.WriteError(w, r, http.StatusTooManyRequests, "rate_limit_exceeded", "登录请求过于频繁，请稍后再试", nil)
+		return
+	}
+
 	var req LoginRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		common.WriteError(w, r, http.StatusBadRequest, "bad_request", "请求体解析失败", nil)
 		return
 	}
+	middleware.SetAuditUsername(r.Context(), req.Username)
 
-	resp, err := h.svc.Login(req.Username, req.Password)
+	resp, newIP, err := h.svc.Login(req.Username, req.Password, ip)
 	if err != nil {
+		// S5：任意用户名连续失败 5 次触发账户锁定 → 告警（告警中心按 source+title 去重）。
+		if errors.Is(err, ErrAccountLocked) {
+			h.reportAlert("critical", "security", "登录失败账户锁定", "用户 "+req.Username+" 连续失败 5 次已锁定（来源 IP "+ip+"）")
+		}
 		if req.Username == "admin" {
-			go notify.SecurityAlert("管理员登录失败", "用户 "+req.Username+" 尝试登录失败")
+			h.reportAlert("warning", "security", "管理员登录失败", "用户 "+req.Username+" 尝试登录失败")
 		}
 		mapAuthError(w, r, err)
 		return
+	}
+	// S5：新 IP 成功登录告警；last_login 更新由 Audit 中间件与审计行同一事务落库（迁移 036）。
+	if newIP {
+		h.reportAlert("warning", "security", "新 IP 登录", "用户 "+resp.User.Username+" 从新 IP "+ip+" 登录")
+	}
+	if ip != "" {
+		middleware.SetAuditLastLogin(r.Context(), resp.User.ID, ip)
 	}
 
 	h.setTokenCookies(w, resp.AccessToken, resp.RefreshToken)
@@ -103,6 +154,11 @@ func (h *Handler) Login(w http.ResponseWriter, r *http.Request) {
 
 // Refresh rotates a refresh token and issues a new token pair.
 func (h *Handler) Refresh(w http.ResponseWriter, r *http.Request) {
+	// S1：refresh 与 login 共享同一 IP 级滑动窗口（跨用户名聚合）。
+	if !h.allowLoginIP(getClientIP(r)) {
+		common.WriteError(w, r, http.StatusTooManyRequests, "rate_limit_exceeded", "登录请求过于频繁，请稍后再试", nil)
+		return
+	}
 	if !requireIdempotencyKey(w, r) {
 		return
 	}
@@ -120,7 +176,7 @@ func (h *Handler) Refresh(w http.ResponseWriter, r *http.Request) {
 		// 降噪（P2-4）：仅真复用（已撤销 token 被重放）才告警；
 		// 正常过期/用户禁用/未知 token 一律静默（mapAuthError 返回既有错误码）。
 		if reuse, rErr := h.svc.IsRefreshTokenReuse(req.RefreshToken); rErr == nil && reuse {
-			go notify.SecurityAlert("Refresh Token 复用", "检测到可能已撤销的 refresh token")
+			h.reportAlert("critical", "security", "Refresh Token 复用", "检测到可能已撤销的 refresh token")
 		}
 		mapAuthError(w, r, err)
 		return
@@ -280,36 +336,78 @@ func (h *Handler) AdminResetPassword(w http.ResponseWriter, r *http.Request) {
 	common.WriteSuccess(w, r, resp)
 }
 
+// getClientIP 只读来源门规范化的来源 IP（S4，禁止再信任 XFF/RemoteAddr）。
+// 来源门未挂载时（单测/降级）回退真实 TCP 对端 host。
 func getClientIP(r *http.Request) string {
-	ip := r.RemoteAddr
-	if fwd := r.Header.Get("X-Forwarded-For"); fwd != "" {
-		ip = fwd
+	if ip := middleware.GetSourceIP(r.Context()); ip != "" {
+		return ip
 	}
-	return ip
+	return hostOnly(r.RemoteAddr)
 }
 
-func (h *Handler) allowRegisterIP(ip string) bool {
-	now, cutoff := time.Now(), time.Now().Add(-time.Hour)
-	h.regIPMu.Lock()
-	defer h.regIPMu.Unlock()
+func hostOnly(addr string) string {
+	if h, _, err := net.SplitHostPort(addr); err == nil {
+		return h
+	}
+	return addr
+}
 
-	val, _ := h.regIPCalls.Load(ip)
-	var calls []time.Time
+// allowRegisterIP 注册限流：5 次/小时/IP（S2 收紧，原 10 次）。
+func (h *Handler) allowRegisterIP(ip string) bool {
+	return h.slideWindow(&h.regIPMu, &h.regIPCalls, ip, 5, time.Hour)
+}
+
+// allowLoginIP 登录 IP 级滑动窗口（S1）：LOGIN_RATE_LIMIT_IP_MAX 次 /
+// LOGIN_RATE_LIMIT_IP_WINDOW，跨用户名聚合（键仅 IP）；置 0 关闭。
+func (h *Handler) allowLoginIP(ip string) bool {
+	max := envInt("LOGIN_RATE_LIMIT_IP_MAX", 20)
+	if max <= 0 {
+		return true
+	}
+	return h.slideWindow(&h.loginIPMu, &h.loginIPCalls, ip, max, envDuration("LOGIN_RATE_LIMIT_IP_WINDOW", 15*time.Minute))
+}
+
+// slideWindow 滑动窗口计数：窗口外旧调用剔除，达到上限拒绝，否则记录本次。
+func (h *Handler) slideWindow(mu *sync.Mutex, calls *sync.Map, ip string, max int, window time.Duration) bool {
+	now, cutoff := h.now(), h.now().Add(-window)
+	mu.Lock()
+	defer mu.Unlock()
+
+	val, _ := calls.Load(ip)
+	var list []time.Time
 	if val != nil {
-		calls = val.([]time.Time)[:0]
-		for _, call := range val.([]time.Time) {
-			if call.After(cutoff) {
-				calls = append(calls, call)
+		list = val.([]time.Time)[:0]
+		for _, c := range val.([]time.Time) {
+			if c.After(cutoff) {
+				list = append(list, c)
 			}
 		}
 	}
 
-	if len(calls) >= 10 {
-		h.regIPCalls.Store(ip, calls)
+	if len(list) >= max {
+		calls.Store(ip, list)
 		return false
 	}
-	h.regIPCalls.Store(ip, append(calls, now))
+	calls.Store(ip, append(list, now))
 	return true
+}
+
+func envInt(key string, def int) int {
+	if v := os.Getenv(key); v != "" {
+		if n, err := strconv.Atoi(v); err == nil {
+			return n
+		}
+	}
+	return def
+}
+
+func envDuration(key string, def time.Duration) time.Duration {
+	if v := os.Getenv(key); v != "" {
+		if d, err := time.ParseDuration(v); err == nil {
+			return d
+		}
+	}
+	return def
 }
 
 func toUserInfo(user *User) UserInfo {

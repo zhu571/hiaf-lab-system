@@ -16,6 +16,7 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
 	"github.com/zhu571/hiaf-lab-system/go-server/agent"
+	"github.com/zhu571/hiaf-lab-system/go-server/alert"
 	"github.com/zhu571/hiaf-lab-system/go-server/ask"
 	"github.com/zhu571/hiaf-lab-system/go-server/assembly"
 	"github.com/zhu571/hiaf-lab-system/go-server/attachments"
@@ -28,6 +29,7 @@ import (
 	"github.com/zhu571/hiaf-lab-system/go-server/issues"
 	"github.com/zhu571/hiaf-lab-system/go-server/logs"
 	mw "github.com/zhu571/hiaf-lab-system/go-server/middleware"
+	"github.com/zhu571/hiaf-lab-system/go-server/notify"
 	"github.com/zhu571/hiaf-lab-system/go-server/projects"
 	"github.com/zhu571/hiaf-lab-system/go-server/rfmatch"
 	"github.com/zhu571/hiaf-lab-system/go-server/runs"
@@ -65,6 +67,19 @@ func main() {
 	defer db.Close()
 	port := commonEnv("PORT", "8000")
 
+	// 告警中心模块（方案 2026-08-09_alert-center）：先于各接入点构造，
+	// 经窄接口注入 middleware/auth/instruments/todos（模块间不跨模块直连）。
+	alertRepo := alert.NewRepository(db)
+	alertSvc := alert.NewService(alertRepo, alertNotifySender{}, db)
+	alertSvc.SetClickURL(notify.WebURL + "/alerts")
+	alertHandler := alert.NewHandler(alertSvc)
+	// middleware 内的告警触发点（agent 缺 acting_user_id / SERVICE_TOKEN 校验失败）
+	// 走注入器，避免 middleware → alert 的 import 环（先例：SetAgentQueueProvider）。
+	mw.SetAlertReporter(func(ctx context.Context, level, source, title, detail string) error {
+		_, err := alertSvc.Report(ctx, level, source, title, detail)
+		return err
+	})
+
 	authRepo := auth.NewRepository(db)
 	mw.TokenVersionValidator = func(userID string, version int) bool {
 		user, err := authRepo.GetByID(userID)
@@ -76,6 +91,7 @@ func main() {
 	}
 	authSvc := auth.NewService(authRepo, []byte(jwtSecret))
 	authHandler := auth.NewHandler(authSvc)
+	authHandler.SetAlertReporter(alertSvc)
 	projectsRepo := projects.NewRepository(db)
 	issuesRepo := issues.NewRepository(db)
 	logsRepo := logs.NewRepository(db)
@@ -160,11 +176,13 @@ func main() {
 		InstrumentID: "e5063a",
 		Addr:         e5063aAddr,
 		Terminator:   "\n",
+		Reporter:     alertSvc,
 	})
 	hiokiWorker := instruments.NewInstrumentWorker(instruments.WorkerConfig{
 		InstrumentID: "hioki_im3536",
 		Addr:         hiokiAddr,
 		Terminator:   "\r\n",
+		Reporter:     alertSvc,
 	})
 	workers := map[string]*instruments.InstrumentWorker{
 		"e5063a":       e5063aWorker,
@@ -172,7 +190,7 @@ func main() {
 	}
 	if addr := os.Getenv("KEYSIGHT_33210A_ADDR"); addr != "" {
 		workers["keysight_33210a"] = instruments.NewInstrumentWorker(instruments.WorkerConfig{
-			InstrumentID: "keysight_33210a", Addr: addr, Terminator: "\n",
+			InstrumentID: "keysight_33210a", Addr: addr, Terminator: "\n", Reporter: alertSvc,
 		})
 	}
 	for id, worker := range workers {
@@ -181,6 +199,7 @@ func main() {
 		}
 	}
 	instrumentsHandler := instruments.NewHandler(instrumentsSvc, db, workers)
+	instrumentsHandler.SetAlertReporter(alertSvc)
 	sensorsHandler := sensors.NewHandler(sensorsSvc)
 
 	repoRoot := commonEnv("REPO_ROOT", "/opt/hiaf-lab-system")
@@ -208,6 +227,8 @@ func main() {
 	todosHandler := todos.NewHandler(todosSvc)
 
 	r := chi.NewRouter()
+	// 来源门必须先于 chi RealIP：RealIP 会改写 r.RemoteAddr，先取数才能拿到真实 TCP 对端。
+	r.Use(mw.SourceGate())
 	r.Use(middleware.RealIP)
 	r.Use(mw.RequestID)
 	r.Use(mw.ServiceToken())
@@ -309,7 +330,8 @@ func main() {
 		r.Use(mw.Audit(db))
 		r.Use(mw.RequireIdempotencyKey(db))
 		r.Get("/", projectsHandler.List)
-		r.Post("/", projectsHandler.Create)
+		// D11：项目创建限 maintainer+admin（viewer 不可），service 内同语义校验纵深。
+		r.With(mw.RequireRole(auth.RoleAdmin, auth.RoleMaintainer)).Post("/", projectsHandler.Create)
 
 		r.Route("/{id}", func(r chi.Router) {
 			r.Use(mw.RequireProjectPermission(db, mw.PermRead))
@@ -570,6 +592,22 @@ func main() {
 		})
 	})
 
+	// 告警中心（方案 2026-08-09_alert-center，§4 鉴权矩阵）：
+	//   report/resolve 双通道 —— 内部 SERVICE_TOKEN（白名单见 service_token.go，
+	//   CSRF/幂等 IsServiceCall 豁免）→ AuthRequired 放行；resolve 用户通道
+	//   JWT + RequireRoleOrService(admin, maintainer) + CSRF + Idempotency-Key。
+	//   report 不挂 Idempotency-Key（聚合窗口 + 部分唯一索引天然幂等，先例 ask/execute）。
+	//   list/detail 全员 JWT 可读。不挂 AgentContext（report/resolve 拒收 agent 代理头）。
+	r.Route("/api/v1/alerts", func(r chi.Router) {
+		r.Use(mw.AuthRequired)
+		r.Use(mw.Audit(db))
+		r.Post("/report", alertHandler.Report)
+		r.With(mw.RequireRoleOrService(auth.RoleAdmin, auth.RoleMaintainer),
+			mw.RequireIdempotencyKey(db)).Post("/resolve", alertHandler.Resolve)
+		r.Get("/", alertHandler.List)
+		r.Get("/{id}", alertHandler.Get)
+	})
+
 	// Serve embedded frontend with SPA fallback
 	staticFS, fsErr := fs.Sub(frontendFiles, "static")
 	if fsErr != nil {
@@ -598,11 +636,18 @@ func main() {
 	defer stop()
 	if os.Getenv("TODOS_SCHEDULER_ENABLED") != "false" {
 		sched := todos.NewScheduler(todosSvc, loc, time.Now)
+		// 连续失败告警收敛到告警中心（warning/todos），由 alert 模块聚合去重后推送。
+		sched.SetAlertReporter(func(title, msg string) error {
+			_, err := alertSvc.Report(context.Background(), "warning", "todos", title, msg)
+			return err
+		})
 		go sched.Run(ctx)
 		slog.Info("todos scheduler enabled")
 	}
 	// ask_history 快照保留任务（P2-3）：立即执行一次 + 每 24h，90 天前快照置 NULL。
 	go askSvc.StartRetentionTask(ctx)
+	// 告警中心维护任务：TTL 24h 兜底（启动立即 + 每小时）+ 90 天滚动清理（每日 04:00）。
+	go alertSvc.StartMaintenance(ctx)
 
 	srv := &http.Server{Addr: ":" + port, Handler: r}
 	go func() {

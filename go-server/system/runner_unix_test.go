@@ -48,6 +48,12 @@ func TestBuildRunnerCmdGoEngine(t *testing.T) {
 	if !hasArg(args, "-e") || !hasArg(args, "UPDATE_DONE_FILE=/updates/lab-update-upd_abc1234567.done") {
 		t.Errorf("缺少 UPDATE_DONE_FILE env: %v", args)
 	}
+	if !hasArg(args, "UPDATE_SERVER_URL=http://localhost:8000") {
+		t.Errorf("缺少 UPDATE_SERVER_URL env（告警中心上报闭环）: %v", args)
+	}
+	if !hasArg(args, "SERVICE_TOKEN_FILE=/opt/hiaf-lab-system/deploy/secrets/service_token.txt") {
+		t.Errorf("缺少 SERVICE_TOKEN_FILE env（告警中心上报闭环）: %v", args)
+	}
 }
 
 func TestBuildRunnerCmdShellEngine(t *testing.T) {

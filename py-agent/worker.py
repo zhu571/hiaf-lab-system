@@ -1,4 +1,5 @@
 import concurrent.futures
+import json
 import logging
 import os
 import re
@@ -9,6 +10,23 @@ from tools.parse import LLM_TIMEOUT_SECONDS
 
 
 LOG = logging.getLogger("py-agent")
+
+
+def _service_token():
+    # 与 Go 侧 middleware.ReadServiceToken 同源凭据：secret 文件优先，env 兜底
+    # （compose 已挂载 /run/secrets/service_token，见 docker-compose.yml py-agent）。
+    # 用于调告警中心内部端点（alerts/report、alerts/resolve）；与 ntfy 的
+    # ntfy_publish_token 是两套凭证，用途不同。
+    path = os.environ.get("SERVICE_TOKEN_FILE", "")
+    if path:
+        try:
+            with open(path, encoding="utf-8") as fh:
+                token = fh.read().strip()
+                if token:
+                    return token
+        except OSError:
+            pass
+    return os.environ.get("SERVICE_TOKEN", "").strip()
 
 
 def _ntfy_publish_token():
@@ -26,10 +44,38 @@ def _ntfy_publish_token():
     return os.environ.get("NTFY_PUBLISH_TOKEN", "").strip()
 
 
+def _report_dead_letter(task_id, detail):
+    # 死信收敛到告警中心（方案 §8.1 #11）：HTTP 调 POST /api/v1/alerts/report，
+    # 带 SERVICE_TOKEN（compose 已挂载 /run/secrets/service_token）。返回是否成功，
+    # 失败由调用方回退 ntfy 直发兜底（双保险，死信本就是最后手段）。
+    try:
+        from urllib.request import Request, urlopen
+        base = os.environ.get("GO_API_BASE", "http://server:8000").rstrip("/")
+        body = json.dumps({
+            "level": "critical",
+            "source": "agent",
+            "title": "Agent 死信告警",
+            "detail": f"任务 {task_id}: {detail}",
+        }).encode("utf-8")
+        req = Request(f"{base}/api/v1/alerts/report", data=body, method="POST")
+        req.add_header("Content-Type", "application/json")
+        token = _service_token()
+        if token:
+            req.add_header("Authorization", f"Bearer {token}")
+        with urlopen(req, timeout=5) as resp:
+            return 200 <= resp.status < 300
+    except Exception:
+        LOG.exception("dead letter alert report failed")
+        return False
+
+
 def dead_letter_alert(task_id, detail):
-    # 死信降级告警：fail 也失败时的最后手段，直接发 ntfy（带 Bearer token，C6 修复——
-    # 此前无 token 发布，ntfy auth-default-access: deny-all 下被 403 静默丢弃）。
+    # 死信降级告警：先上报告警中心（聚合去重 + 历史可查），上报失败时回退
+    # ntfy 直发兜底（带 Bearer token，C6 修复——此前无 token 发布，ntfy
+    # auth-default-access: deny-all 下被 403 静默丢弃）。
     # 任何异常都在此处吞掉，不能再向上抛。
+    if _report_dead_letter(task_id, detail):
+        return
     try:
         from urllib.parse import quote
         from urllib.request import Request, urlopen

@@ -3,6 +3,8 @@ package projects
 import (
 	"errors"
 	"testing"
+
+	"github.com/zhu571/hiaf-lab-system/go-server/auth"
 )
 
 func TestTargetStatus(t *testing.T) {
@@ -48,6 +50,17 @@ func TestAdminOnlyAction(t *testing.T) {
 	for _, action := range []string{"activate", "complete", "archive", "reactivate", "delete", ""} {
 		if adminOnlyAction(action) {
 			t.Errorf("adminOnlyAction(%q) = true, want false", action)
+		}
+	}
+}
+
+// D11：项目创建限 maintainer+admin，viewer/member 在 service 层即被拒（纵深校验）。
+func TestCreateProjectRoleRestriction(t *testing.T) {
+	svc := NewService(nil, nil, nil)
+	req := CreateProjectRequest{Code: "P1", Name: "项目一"}
+	for _, role := range []string{auth.RoleViewer, auth.RoleMember} {
+		if _, err := svc.Create(req, "user-1", role); !errors.Is(err, ErrForbidden) {
+			t.Fatalf("Create with role %s: got %v, want ErrForbidden", role, err)
 		}
 	}
 }

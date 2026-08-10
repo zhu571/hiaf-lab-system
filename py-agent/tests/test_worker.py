@@ -1,3 +1,4 @@
+import json
 import sys
 import tempfile
 import time
@@ -10,7 +11,7 @@ sys.path.insert(0, str(Path(__file__).parents[1]))
 import httpx  # noqa: E402
 from tools.api import APIError, GoAPI  # noqa: E402
 from tools.parse import ParseError, _json_array, ensure_safe  # noqa: E402
-from worker import Worker, _ntfy_publish_token, dead_letter_alert, to_candidate  # noqa: E402
+from worker import Worker, _ntfy_publish_token, _service_token, dead_letter_alert, to_candidate  # noqa: E402
 
 
 TASK = {"id": "task-1", "report_id": "report-1", "acting_user_id": "user-1", "claim_token": "token-1"}
@@ -216,6 +217,78 @@ class WorkerTests(unittest.TestCase):
                 patch("urllib.request.urlopen", fake_urlopen):
             dead_letter_alert(TASK["id"], "boom")
         self.assertIsNone(captured["auth"])
+
+    def test_service_token_prefers_secret_file(self):
+        with tempfile.NamedTemporaryFile("w", suffix=".txt") as fh:
+            fh.write("tk_svc_file\n")
+            fh.flush()
+            with patch.dict("os.environ", {"SERVICE_TOKEN_FILE": fh.name, "SERVICE_TOKEN": "tk_svc_env"}):
+                self.assertEqual(_service_token(), "tk_svc_file")
+
+    def test_service_token_env_fallback_when_file_missing(self):
+        with patch.dict("os.environ", {"SERVICE_TOKEN_FILE": "/nonexistent/token", "SERVICE_TOKEN": "tk_svc_env"}):
+            self.assertEqual(_service_token(), "tk_svc_env")
+
+    def test_dead_letter_reports_to_alert_center_with_service_token(self):
+        calls = []
+
+        class FakeResp:
+            status = 200
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *_args):
+                return False
+
+        def fake_urlopen(req, timeout=None):
+            calls.append(req)
+            return FakeResp()
+
+        with tempfile.NamedTemporaryFile("w", suffix=".txt") as fh:
+            fh.write("tk_service\n")
+            fh.flush()
+            with patch.dict("os.environ", {
+                "SERVICE_TOKEN_FILE": fh.name,
+                "GO_API_BASE": "http://server:8000",
+                "NTFY_PUBLISH_TOKEN_FILE": "/nonexistent/token",
+            }, clear=False), patch("urllib.request.urlopen", fake_urlopen):
+                dead_letter_alert(TASK["id"], "boom")
+        # 上报成功：只调 report，不回退 ntfy 直发
+        self.assertEqual(len(calls), 1)
+        req = calls[0]
+        self.assertEqual(req.full_url, "http://server:8000/api/v1/alerts/report")
+        self.assertEqual(req.get_method(), "POST")
+        self.assertEqual(req.get_header("Authorization"), "Bearer tk_service")
+        # urllib add_header 内部 capitalize（Content-Type → Content-type），get_header 原样查会漏；改用大小写不敏感
+        self.assertEqual(req.get_header("Content-type"), "application/json")
+        payload = json.loads(req.data.decode("utf-8"))
+        self.assertEqual(payload["level"], "critical")
+        self.assertEqual(payload["source"], "agent")
+        self.assertEqual(payload["title"], "Agent 死信告警")
+        self.assertIn(TASK["id"], payload["detail"])
+        self.assertIn("boom", payload["detail"])
+
+    def test_dead_letter_report_failure_falls_back_to_ntfy(self):
+        calls = []
+
+        def fake_urlopen(req, timeout=None):
+            calls.append(req.full_url)
+            if req.full_url.endswith("/api/v1/alerts/report"):
+                raise ConnectionError("server down")
+
+        with patch.dict("os.environ", {
+            "SERVICE_TOKEN_FILE": "/nonexistent/token",
+            "SERVICE_TOKEN": "tk_svc",
+            "GO_API_BASE": "http://server:8000",
+            "NTFY_PUBLISH_TOKEN_FILE": "/nonexistent/token",
+            "NTFY_PUBLISH_TOKEN": "",
+        }, clear=False), patch("urllib.request.urlopen", fake_urlopen):
+            dead_letter_alert(TASK["id"], "boom")
+        # 上报失败 → ntfy 直发兜底（双保险）
+        self.assertEqual(len(calls), 2)
+        self.assertTrue(calls[0].endswith("/api/v1/alerts/report"))
+        self.assertEqual(calls[1], "http://ntfy:80/lab-alerts")
 
 
 if __name__ == "__main__":
