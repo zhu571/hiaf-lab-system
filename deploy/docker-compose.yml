@@ -114,9 +114,14 @@ services:
       # ntfy 发布凭据（lab-system 主题 todo-publisher 的 Bearer token；deny-all 下无凭据发
       # 送会被 403 静默丢弃，P0-1 修复：IOC 仪器域告警恢复）
       NTFY_PUBLISH_TOKEN_FILE: /run/secrets/ntfy_publish_token
+      # 告警中心（方案 §8.1 #12）：调 Go alert report/resolve 用 service_token
+      #（与 ntfy 发布 token 是两套凭证）；GO_API_BASE 指向 server 的 compose 网络地址
+      SERVICE_TOKEN_FILE: /run/secrets/service_token
+      GO_API_BASE: http://server:8000
     secrets:
       - influxdb_token
       - ntfy_publish_token
+      - service_token
     volumes:
       - /opt/lab-monitor/sqlite:/data
     deploy:

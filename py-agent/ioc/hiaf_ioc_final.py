@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import json
 import logging
 import logging.config
 import os
@@ -401,7 +402,7 @@ class HiafGasCellIOC(PVGroup):
                 if self._disconnect_warned:
                     now_w = time.monotonic()
                     if now_w - self._last_ntfy_recovery_warn > self._ntfy_cooldown:
-                        await self._send_ntfy("OPC UA 已恢复")
+                        await self._resolve_alert("OPC UA 断连 >30s")
                         self._last_ntfy_recovery_warn = now_w
                     self._disconnect_warned = False
                 return True
@@ -417,12 +418,15 @@ class HiafGasCellIOC(PVGroup):
                 self._subscription = None
                 self._subscription_healthy = False
 
-        # R5: ntfy alert on prolonged disconnection
+        # R5: alert center on prolonged disconnection
         if self._reconnect_backoff >= 30.0 and not self._disconnect_warned:
             self._disconnect_warned = True
             now_w = time.monotonic()
             if now_w - self._last_ntfy_disconnect_warn > self._ntfy_cooldown:
-                await self._send_ntfy("OPC UA 断连 >30s")
+                await self._report_alert(
+                    "error", "OPC UA 断连 >30s",
+                    "OPC UA 连接中断超过 30s，进入指数退避重连",
+                )
                 self._last_ntfy_disconnect_warn = now_w
 
         # Backoff: exponential with jitter (R1)
@@ -607,14 +611,15 @@ class HiafGasCellIOC(PVGroup):
                     self._subscription = None
                     self._subscription_healthy = False
 
-                # R5: ntfy alert if >50% sensors failed
+                # R5: alert center if >50% sensors failed
                 if total_count > 0:
                     fail_rate = failed_count / total_count
                     if fail_rate > 0.5:
                         now_w = time.monotonic()
                         if now_w - self._last_ntfy_failrate_warn > self._ntfy_cooldown:
-                            await self._send_ntfy(
-                                f"传感器读取失败率 {fail_rate:.0%} ({failed_count}/{total_count})"
+                            await self._report_alert(
+                                "warning", "传感器读取失败率超阈值",
+                                f"传感器读取失败率 {fail_rate:.0%}（{failed_count}/{total_count}）",
                             )
                             self._last_ntfy_failrate_warn = now_w
 
@@ -797,7 +802,10 @@ class HiafGasCellIOC(PVGroup):
                 self._data_loss_cnt += 1
                 if self._data_loss_cnt % 10 == 1:
                     LOGGER.warning("data_loss_cnt=%d queue_depth=%d", self._data_loss_cnt, qsize)
-                    await self._send_ntfy(f"订阅数据丢失 {self._data_loss_cnt} 次")
+                    await self._report_alert(
+                        "warning", "订阅数据丢失",
+                        f"订阅数据已累计丢失 {self._data_loss_cnt} 次（队列深度 {qsize}）",
+                    )
             self._sensor_values[tag] = val
             pv = self._sensor_pvs.get(tag)
             if pv is not None:
@@ -882,6 +890,53 @@ class HiafGasCellIOC(PVGroup):
                 )
         except Exception as e:
             LOGGER.debug("ntfy send failed: %s", e)
+
+    # ── R5: alert center helper（方案 §8.1 #12 / §8.2）──
+    async def _report_alert(self, level: str, title: str, detail: str) -> None:
+        # 收敛到告警中心：POST /api/v1/alerts/report，带 service_token
+        #（compose 挂载 /run/secrets/service_token，见 hiaf_config.SERVICE_TOKEN）。
+        # 上报失败时回退 _send_ntfy 直发兜底（双保险，不降低送达率）；
+        # 60s 冷却由调用方保留（上游节流，与 alert 模块 10min 聚合窗口叠加）。
+        try:
+            body = json.dumps({
+                "level": level, "source": "ioc", "title": title, "detail": detail,
+            }).encode("utf-8")
+            headers = {"Content-Type": "application/json"}
+            token = hiaf_config.SERVICE_TOKEN
+            if token:
+                headers["Authorization"] = f"Bearer {token}"
+            async with aiohttp.ClientSession() as session:
+                async with session.post(
+                    f"{hiaf_config.ALERT_API_BASE}/api/v1/alerts/report",
+                    data=body, headers=headers,
+                    timeout=aiohttp.ClientTimeout(total=5),
+                ) as resp:
+                    if resp.status >= 300:
+                        raise RuntimeError(f"alert report HTTP {resp.status}")
+        except Exception as e:
+            LOGGER.debug("alert report failed, fallback to ntfy: %s", e)
+            await self._send_ntfy(title)
+
+    async def _resolve_alert(self, title: str) -> None:
+        # 内部恢复上报（方案 §8.2）：POST /api/v1/alerts/resolve 按 source+title
+        # 幂等解除 active 告警（不匹配也返回 success）。恢复消息不再直发 ntfy
+        #（行为变化见方案 §12，历史在告警中心可查）。
+        try:
+            body = json.dumps({"source": "ioc", "title": title}).encode("utf-8")
+            headers = {"Content-Type": "application/json"}
+            token = hiaf_config.SERVICE_TOKEN
+            if token:
+                headers["Authorization"] = f"Bearer {token}"
+            async with aiohttp.ClientSession() as session:
+                async with session.post(
+                    f"{hiaf_config.ALERT_API_BASE}/api/v1/alerts/resolve",
+                    data=body, headers=headers,
+                    timeout=aiohttp.ClientTimeout(total=5),
+                ) as resp:
+                    if resp.status >= 300:
+                        raise RuntimeError(f"alert resolve HTTP {resp.status}")
+        except Exception as e:
+            LOGGER.debug("alert resolve failed: %s", e)
 
     # ── OPC UA safe reads ──
     async def _safe_read_node(self, node) -> float | None:
