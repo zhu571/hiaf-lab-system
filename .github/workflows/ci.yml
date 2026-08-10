@@ -173,13 +173,26 @@ jobs:
           # Compile-only test check: -exec=true skips running the Windows test binaries on Linux.
           CGO_ENABLED=0 GOOS=windows GOARCH=amd64 go test -exec=true ./...
 
+  migration-test:
+    name: Database migrations up/down check
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Test all migrations up and down
+        run: |
+          if [ ! -d migrations ] || ! ls migrations/*.up.sql >/dev/null 2>&1; then
+            echo "migrations not found; not implemented yet, skipping."
+            exit 0
+          fi
+          bash scripts/test-migrations.sh
+
   frontend-test:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
-          node-version: "20"
+          node-version: "22"
       - name: Test and build frontend
         run: |
           if [ ! -f web-ui/package.json ]; then
@@ -194,6 +207,15 @@ jobs:
           npm ci
           npm test --if-present
           npm run build --if-present
+      - name: Check static sync
+        run: |
+          if [ ! -f web-ui/package.json ]; then
+            echo "web-ui/package.json not found; frontend not implemented yet, skipping."
+            exit 0
+          fi
+          cd web-ui
+          # dist 由上一步 npm run build 产出（steps 共享工作区），此处只做一致性 diff
+          diff -rq dist ../go-server/static || (echo "::error::web-ui/dist 与 go-server/static 不一致，请 rsync 同步" && exit 1)
 
   python-check:
     runs-on: ubuntu-latest

@@ -364,6 +364,7 @@ export default {
     a5Trip: 'A5 联锁已触发（代码 {code}）',
     dataInvalid: '数据失效',
     chartTitle: 'A1 / 阀位 / Setpoint',
+    chartAria: '气压控制趋势图',
     chartHint: '最近 120 个有效采样点',
     loadFailed: '数据加载失败',
     panel: '控制面板',
@@ -673,6 +674,7 @@ export default {
     empty: '暂无待办',
     loadFailed: '待办加载失败',
     loadProjectsFailed: '项目列表加载失败',
+    priority: '优先级',
     priorityHigh: '高',
     priorityMedium: '中',
     priorityLow: '低',
@@ -852,6 +854,7 @@ export default {
     viewResult: '查看产物'
   },
   rfMatching: {
+    title: 'RF 匹配',
     device: '设备',
     allDevices: '全部设备',
     status: '状态',
@@ -1062,6 +1065,7 @@ export default {
   dailyReport: {
     title: '日报录入',
     submit: '提交日报',
+    submitted: '日报已提交',
     todayRecord: '今日记录',
     addAttachment: '📎 添加附件',
     saveRaw: '保存原文',
@@ -1142,6 +1146,9 @@ export default {
     createdAt: '创建时间',
     startedAt: '开始时间',
     endedAt: '结束时间',
+    created: '已创建',
+    started: '已开始',
+    ended: '已结束',
     description: '描述',
     statusTimeline: '状态时间线',
     stepsTab: '步骤',
@@ -1261,7 +1268,8 @@ export default {
     linkFailed: '关联失败',
     unlinked: '已解绑',
     unlinkFailed: '解绑失败',
-    metadataSaved: '元数据已保存'
+    metadataSaved: '元数据已保存',
+    saveFailed: '保存失败'
   },
   issuesFallback: {
     selectProject: '请先在项目页面选择一个项目',
