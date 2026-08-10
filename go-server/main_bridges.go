@@ -29,7 +29,8 @@ import (
 type alertNotifySender struct{}
 
 func (alertNotifySender) Send(topic, title, msg, clickURL, priority string, tags []string) error {
-	return notify.Send(alert.Topic, title, msg, notify.WebURL+"/alerts", priority, tags)
+	// 双通道：ntfy + MeoW（用户要求告警也走 MeoW 并写明具体错误；msg=detail 即错误详情）
+	return notify.SendBoth(alert.Topic, title, msg, notify.WebURL+"/alerts", priority, tags)
 }
 
 func (alertNotifySender) SendBoth(topic, title, msg, clickURL, priority string, tags []string) error {
