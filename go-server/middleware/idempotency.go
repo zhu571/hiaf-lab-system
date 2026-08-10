@@ -15,6 +15,12 @@ func RequireIdempotencyKey(db *sql.DB) func(http.Handler) http.Handler {
 				next.ServeHTTP(w, r)
 				return
 			}
+			// service token 调用（告警 resolve 等内部端点）无 Idempotency-Key：
+			// 由 SERVICE_TOKEN + 业务幂等（唯一索引/窗口）保证；用户通道保留强校验。
+			if IsServiceCall(r.Context()) {
+				next.ServeHTTP(w, r)
+				return
+			}
 
 			key := r.Header.Get("Idempotency-Key")
 			if key == "" {

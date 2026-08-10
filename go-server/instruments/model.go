@@ -4,6 +4,8 @@ import (
 	"encoding/json"
 	"net"
 	"time"
+
+	"github.com/zhu571/hiaf-lab-system/go-server/alert"
 )
 
 // CommandLogEntry is an audited instrument command execution.
@@ -182,6 +184,9 @@ type WorkerConfig struct {
 	Terminator   string
 	RateLimit    int
 	RateWindow   time.Duration
+	// Reporter 是告警中心上报窄接口（main.go 注入 alertSvc；nil 时跳过上报，
+	// 断开/恢复失败/限流与重连成功 resolve 均走该通道）。
+	Reporter alert.Reporter
 }
 
 // QueueCommand is a structured whitelist command waiting for execution.

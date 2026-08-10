@@ -964,6 +964,88 @@ trim 规范化）；run_id 存在性校验去重并发执行，插入期 FK 竞�
 `{count, error_rows}`，400 空数组/413 超限 detail `{count, received}`。批量端点仅替代
 前端手工录入路径，单条端点（仪器/Agent）行为不变。
 
+## 3.15 告警中心模块（Alert Center）
+
+统一上报、聚合去重、状态管理、历史可查（方案 `docs/../.hermes/plans/2026-08-09_alert-center.md`）。
+数据表 `alerts`（迁移 035）：`level`（info/warning/error/critical）、`source` 枚举
+（security/instruments/todos/updater/agent/ioc/watchdog）、`status`（active/resolved）、
+`occurrence_count`、`first_seen/last_seen`、`resolved_at/resolved_by`。
+
+**鉴权矩阵**：
+
+| 端点 | 通道 | 鉴权 | CSRF | 幂等 | 审计 |
+|------|------|------|------|------|------|
+| `POST /alerts/report` | 内部 | SERVICE_TOKEN 白名单 → AuthRequired 放行 | 豁免（IsServiceCall） | 不挂（聚合窗口+唯一索引天然幂等） | Audit，actor_type=system |
+| `POST /alerts/resolve` | 用户 | JWT + RequireRoleOrService(admin, maintainer) | 校验 X-CSRF-Token | RequireIdempotencyKey | Audit，actor=user |
+| `POST /alerts/resolve` | 内部 | SERVICE_TOKEN 白名单 → AuthRequired 放行 | 豁免（IsServiceCall） | 豁免（IsServiceCall） | Audit，actor_type=system |
+| `GET /alerts`、`GET /alerts/{id}` | 用户 | JWT（全员可读） | 无（GET） | 无 | 无 |
+
+安全约束：report/resolve 不挂 AgentContext（拒收 X-Acting-User-ID / X-Agent-Task-ID，
+杜绝 agent 冒充）；不提供 DELETE/PATCH 端点（告警只增改，active↔resolved）。
+
+### `POST /api/v1/alerts/report`
+
+仅内部服务可调用（SERVICE_TOKEN；用户 JWT 一律 403）。请求体字段级校验：
+`title` ≤256 字符、`detail` ≤2000 字符（防洪）、`level`/`source` 枚举校验、`source+title` 非空。
+
+```json
+{ "level": "warning", "source": "watchdog", "title": "lab-server 健康检查失败", "detail": "已连续 3 次探测失败" }
+```
+
+**Resp 200**：
+
+```json
+{ "data": { "alert_id": "…", "deduplicated": false, "occurrence_count": 1 }, "request_id": "req_…" }
+```
+
+- `deduplicated=true` 表示 last_seen 距今 ≤10min 窗口内合并（计数+1，未发 ntfy）；
+- 窗口外复发复用 active 行（计数重置 1、清 resolved_at）并重发；
+- 同 source+title 任意时刻至多 1 条 active 行（部分唯一索引 `uq_alerts_active_source_title` 为并发防双发最终防线）；
+- 401（token 错）、400（枚举/长度校验失败）、403（用户通道）。
+
+### `POST /api/v1/alerts/resolve`
+
+双通道。请求体二选一：`{ "id": "uuid" }`（用户通道）或 `{ "source": "…", "title": "…" }`（内部恢复上报）。
+
+```json
+// 用户（admin/maintainer）：{"id": "…"}
+// 内部（SERVICE_TOKEN）：{"source": "ioc", "title": "OPC UA 断连 >30s"}
+```
+
+**Resp 200**：`{ "data": { "resolved": true }, "request_id": "req_…" }`
+
+- 匹配不到 active 行 → 幂等 success（detail 由审计记录 `matched:false`）；
+- `resolved_by`：用户通道记 username，内部通道记 `system`，TTL 兜底记 `ttl`；
+- 用户通道：403（非 admin/maintainer）、401（未登录）、400（缺 Idempotency-Key）、
+  409（Idempotency-Key 复用）；内部通道：401（service token 无效）；
+- resolve 不自动发 ntfy（恢复通知在线化，历史可查）。
+
+### `GET /api/v1/alerts`
+
+全员只读（JWT）。Params：`status=active|resolved`（可选，active 默认按 `last_seen` DESC；
+resolved 按 `resolved_at` DESC）、`limit`（默认 50，上限 200）、`offset`（默认 0）。
+非法 status → 400。
+
+**Resp 200**：
+
+```json
+{ "data": { "items": [ { "id": "…", "level": "warning", "source": "watchdog",
+    "title": "lab-server 健康检查失败", "detail": "…", "status": "active",
+    "occurrence_count": 3, "first_seen": "…", "last_seen": "…",
+    "resolved_at": null, "resolved_by": "" } ],
+  "total": 1, "limit": 50, "offset": 0 }, "request_id": "req_…" }
+```
+
+### `GET /api/v1/alerts/{id}`
+
+单条详情（不存在或非法 UUID → 404）。
+
+### 维护任务（非 HTTP）
+
+- TTL 兜底：每小时 + 启动立即执行一次，`active 且 last_seen < now()-24h` → 置 resolved（`resolved_by='ttl'`）；
+- 90 天滚动清理：每日 04:00（Asia/Shanghai），`resolved 且 resolved_at < now()-90d` → DELETE（active 永不删）；
+- 两任务单语句天然幂等，仅影响行数 >0 时写系统审计（action `alerts.ttl`/`alerts.cleanup`，detail 带 count）。
+
 ## 4. 模块间通信
 
 | 调用方 | 被调用方 | 协议 | 用途 |

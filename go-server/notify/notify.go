@@ -78,7 +78,9 @@ func meowSend(title, body string) error {
 	return nil
 }
 
-func sendBoth(topic, title, message, clickURL, priority string, tags []string) error {
+// SendBoth 走 ntfy + MeoW 双通道（等价旧 sendBoth，供 alert 模块 critical/error
+// 上报适配器复用；返回值语义与 Send 一致——ntfy 失败即返回错误，MeoW 失败仅日志）。
+func SendBoth(topic, title, message, clickURL, priority string, tags []string) error {
 	ntfyErr := Send(topic, title, message, clickURL, priority, tags)
 	if err := meowSend(title, message); err != nil {
 		log.Printf("MeoW notification failed: %v", err)
@@ -88,15 +90,15 @@ func sendBoth(topic, title, message, clickURL, priority string, tags []string) e
 
 // InstrumentEmergency reports an instrument emergency stop.
 func InstrumentEmergency(instrument, user string) error {
-	return sendBoth(AlertTopic, "仪器急停", fmt.Sprintf("%s 被 %s 紧急停止", instrument, user), WebURL+"/", "urgent", []string{"rotating_light"})
+	return SendBoth(AlertTopic, "仪器急停", fmt.Sprintf("%s 被 %s 紧急停止", instrument, user), WebURL+"/", "urgent", []string{"rotating_light"})
 }
 
 // InstrumentRestoreFailed reports that an instrument could not be restored.
 func InstrumentRestoreFailed(instrument, err string) error {
-	return sendBoth(AlertTopic, "仪器恢复失败", fmt.Sprintf("%s: %s", instrument, err), WebURL+"/", "high", []string{"warning"})
+	return SendBoth(AlertTopic, "仪器恢复失败", fmt.Sprintf("%s: %s", instrument, err), WebURL+"/", "high", []string{"warning"})
 }
 
 // SecurityAlert reports a security event.
 func SecurityAlert(title, detail string) error {
-	return sendBoth(AlertTopic, title, detail, WebURL+"/audit", "urgent", []string{"shield"})
+	return SendBoth(AlertTopic, title, detail, WebURL+"/audit", "urgent", []string{"shield"})
 }

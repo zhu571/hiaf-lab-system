@@ -1,6 +1,7 @@
 package instruments
 
 import (
+	"context"
 	"database/sql"
 	"encoding/json"
 	"errors"
@@ -16,19 +17,20 @@ import (
 
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
+	"github.com/zhu571/hiaf-lab-system/go-server/alert"
 	"github.com/zhu571/hiaf-lab-system/go-server/common"
 	"github.com/zhu571/hiaf-lab-system/go-server/middleware"
-	"github.com/zhu571/hiaf-lab-system/go-server/notify"
 )
 
 // Handler holds the instruments service and implements HTTP handlers.
 type Handler struct {
-	svc     *Service
-	db      *sql.DB
-	workers map[string]*InstrumentWorker
-	epoch   int64
-	nlMu    sync.Mutex
-	nlCalls map[string][]time.Time
+	svc           *Service
+	db            *sql.DB
+	workers       map[string]*InstrumentWorker
+	epoch         int64
+	nlMu          sync.Mutex
+	nlCalls       map[string][]time.Time
+	alertReporter alert.Reporter
 }
 
 // NewHandler creates an instruments Handler.
@@ -40,6 +42,23 @@ func NewHandler(svc *Service, db *sql.DB, workerMaps ...map[string]*InstrumentWo
 		}
 	}
 	return &Handler{svc: svc, db: db, workers: workers, epoch: time.Now().Unix(), nlCalls: map[string][]time.Time{}}
+}
+
+// SetAlertReporter 注入告警上报窄接口（main.go 接 alertSvc；急停等安全事件收敛到告警中心）。
+func (h *Handler) SetAlertReporter(r alert.Reporter) {
+	h.alertReporter = r
+}
+
+// reportAlert 异步上报告警中心（未注入或失败仅记日志，不影响业务路径）。
+func (h *Handler) reportAlert(level, source, title, detail string) {
+	if h.alertReporter == nil {
+		return
+	}
+	go func() {
+		if _, err := h.alertReporter.Report(context.Background(), level, source, title, detail); err != nil {
+			slog.Error("alert report failed", "error", err, "source", source, "title", title)
+		}
+	}()
 }
 
 // InstrumentStatus handles GET /api/v1/instruments/{id}/status.
@@ -337,7 +356,8 @@ func (h *Handler) EmergencyStop(w http.ResponseWriter, r *http.Request) {
 		common.WriteError(w, r, http.StatusServiceUnavailable, "instrument_unavailable", err.Error(), nil)
 		return
 	}
-	go notify.InstrumentEmergency(id, middleware.GetUserClaims(r.Context()).Username)
+	h.reportAlert("critical", "instruments", "仪器急停",
+		fmt.Sprintf("%s 被 %s 紧急停止", id, middleware.GetUserClaims(r.Context()).Username))
 	common.WriteSuccess(w, r, map[string]string{"status": "emergency_stop_queued"})
 }
 

@@ -1,7 +1,9 @@
 package system
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -483,6 +485,9 @@ func (p *Pipeline) rollback(ctx context.Context) {
 		p.log.Linef("[ERROR] ==============================================")
 		p.notify(ctx, "系统更新失败-迁移变更阻塞", "urgent", "warning,skull",
 			fmt.Sprintf("Rollback to %s blocked: schema may have changed. Manual migrate down required.", oldShort))
+		// 更新失败额外上报告警中心（保留上方 ntfy 直发；告警中心统一聚合去重）。
+		p.reportAlert(ctx, "系统更新失败-迁移变更阻塞",
+			fmt.Sprintf("Rollback to %s blocked: schema may have changed. Manual migrate down required.", oldShort))
 		// 仓库停在 OLD_SHA（与当前运行的旧镜像一致）；若切回 main，
 		// 工作区是新代码而运行的是旧镜像，下次更新的 diff 检测会空转。
 		p.returnToBranchAt(ctx, p.oldSHA)
@@ -506,6 +511,9 @@ func (p *Pipeline) rollback(ctx context.Context) {
 	}
 
 	p.notify(ctx, "系统更新失败-已回滚", "urgent", "warning",
+		fmt.Sprintf("Rollback to %s after update %s failed", oldShort, shortSHA(p.newSHA)))
+	// 更新失败额外上报告警中心（保留上方 ntfy 直发）。
+	p.reportAlert(ctx, "系统更新失败-已回滚",
 		fmt.Sprintf("Rollback to %s after update %s failed", oldShort, shortSHA(p.newSHA)))
 
 	// 同上：仓库与运行的旧镜像保持一致（OLD_SHA），但必须回到 main 分支，
@@ -692,4 +700,56 @@ func (p *Pipeline) notify(ctx context.Context, title, priority, tags, body strin
 	}
 	defer resp.Body.Close()
 	_, _ = io.Copy(io.Discard, resp.Body)
+}
+
+// reportAlert 将更新失败上报告警中心（runner 容器内 Go 直发，复用 SERVICE_TOKEN_FILE：
+// 优先 env 指定路径，默认仓库 deploy/secrets/service_token.txt；server 地址取
+// UPDATE_SERVER_URL env，默认 http://localhost:8000，与 UPDATE_NTFY_URL 同网栈）。
+// 与 p.notify 互补：ntfy 直发保留（D6 双保险），此处额外收拢到告警中心统一去重。
+// 配置缺失/失败仅记 WARN 日志，不影响更新流程与既有通知。
+func (p *Pipeline) reportAlert(ctx context.Context, title, detail string) {
+	serverURL := os.Getenv("UPDATE_SERVER_URL")
+	if serverURL == "" {
+		serverURL = "http://localhost:8000"
+	}
+	tokenFile := os.Getenv("SERVICE_TOKEN_FILE")
+	if tokenFile == "" {
+		tokenFile = filepath.Join(p.cfg.RepoRoot, "deploy", "secrets", "service_token.txt")
+	}
+	token, err := os.ReadFile(tokenFile)
+	if err != nil {
+		p.log.Linef("[WARN]  告警中心上报跳过（service token 不可读）: %v", err)
+		return
+	}
+	tokenStr := strings.TrimSpace(string(token))
+	if tokenStr == "" {
+		p.log.Linef("[WARN]  告警中心上报跳过（service token 为空）")
+		return
+	}
+	payload, err := json.Marshal(map[string]string{
+		"level": "warning", "source": "updater", "title": title, "detail": detail,
+	})
+	if err != nil {
+		p.log.Linef("[WARN]  告警中心上报跳过（序列化失败）: %v", err)
+		return
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost,
+		strings.TrimRight(serverURL, "/")+"/api/v1/alerts/report", bytes.NewReader(payload))
+	if err != nil {
+		p.log.Linef("[WARN]  告警中心上报请求构造失败: %v", err)
+		return
+	}
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Authorization", "Bearer "+tokenStr)
+	client := &http.Client{Timeout: 5 * time.Second}
+	resp, err := client.Do(req)
+	if err != nil {
+		p.log.Linef("[WARN]  告警中心上报失败: %v", err)
+		return
+	}
+	defer resp.Body.Close()
+	_, _ = io.Copy(io.Discard, resp.Body)
+	if resp.StatusCode >= http.StatusOK && resp.StatusCode < http.StatusMultipleChoices {
+		p.log.Linef("[UPDATE] 告警中心上报成功")
+	}
 }

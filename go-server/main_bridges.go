@@ -6,12 +6,14 @@ import (
 	"fmt"
 
 	"github.com/zhu571/hiaf-lab-system/go-server/agent"
+	"github.com/zhu571/hiaf-lab-system/go-server/alert"
 	"github.com/zhu571/hiaf-lab-system/go-server/assembly"
 	"github.com/zhu571/hiaf-lab-system/go-server/audit"
 	"github.com/zhu571/hiaf-lab-system/go-server/auth"
 	"github.com/zhu571/hiaf-lab-system/go-server/experiences"
 	"github.com/zhu571/hiaf-lab-system/go-server/issues"
 	"github.com/zhu571/hiaf-lab-system/go-server/logs"
+	"github.com/zhu571/hiaf-lab-system/go-server/notify"
 	"github.com/zhu571/hiaf-lab-system/go-server/runs"
 	"github.com/zhu571/hiaf-lab-system/go-server/steptemplates"
 )
@@ -19,6 +21,20 @@ import (
 // main_bridges.go：main.go 装配用的桥接适配器（纯组织性拆分，P2-5）。
 // agent 模块的候选执行与 trace 读取、assembly/runs 的模板读取都经这些适配器
 // 在 main.go 构造期注入，业务模块间不跨模块读表。本文件不含装配逻辑。
+
+// alertNotifySender 是 alert 模块 Sender 窄接口的 notify 适配器：
+// 主题固定 lab-alerts（告警中心统一主题），点击落地告警中心页 /alerts；
+// SendBoth 走 ntfy + MeoW 双通道（critical/error，等价现状 SecurityAlert/
+// InstrumentEmergency 的 sendBoth，不降低送达率）。alert 模块自身不 import notify。
+type alertNotifySender struct{}
+
+func (alertNotifySender) Send(topic, title, msg, clickURL, priority string, tags []string) error {
+	return notify.Send(alert.Topic, title, msg, notify.WebURL+"/alerts", priority, tags)
+}
+
+func (alertNotifySender) SendBoth(topic, title, msg, clickURL, priority string, tags []string) error {
+	return notify.SendBoth(alert.Topic, title, msg, notify.WebURL+"/alerts", priority, tags)
+}
 
 type candidateExecutor struct {
 	issues      *issues.Service

@@ -1,11 +1,13 @@
 package instruments
 
 import (
+	"context"
 	"fmt"
+	"log/slog"
 	"sync"
 	"time"
 
-	"github.com/zhu571/hiaf-lab-system/go-server/notify"
+	"github.com/zhu571/hiaf-lab-system/go-server/alert"
 )
 
 const (
@@ -173,16 +175,18 @@ func (w *InstrumentWorker) execute(cmd *QueueCommand) {
 	}
 	if w.connection() == nil {
 		if err = w.reconnect(); err != nil {
-			go notify.Send("lab-instruments", "仪器断开: "+w.cfg.InstrumentID, err.Error(), notify.WebURL, "default", []string{"warning"})
+			w.reportAlert("warning", "仪器断开: "+w.cfg.InstrumentID, err.Error())
 			w.setState(WorkerStateNeedsReconnect)
 			w.respond(cmd, CommandResult{Command: cmd.Name, Duration: time.Since(started), Error: err})
 			return
 		}
+		// 重连成功 → 解除「仪器断开」告警（幂等：无 active 行时 no-op）。
+		w.resolveAlert("仪器断开: " + w.cfg.InstrumentID)
 	}
 	response, err := w.connection().Send(scpi)
 	if err != nil {
 		w.closeConnection()
-		go notify.InstrumentRestoreFailed(w.cfg.InstrumentID, err.Error())
+		w.reportAlert("error", "仪器恢复失败: "+w.cfg.InstrumentID, err.Error())
 		w.setState(WorkerStateNeedsReconnect)
 	} else {
 		w.setState(WorkerStateRunning)
@@ -221,7 +225,7 @@ func (w *InstrumentWorker) rateLimitExceeded(now time.Time) bool {
 		return false
 	}
 	if !w.rateLimited {
-		go notify.Send("lab-instruments", "仪器限流: "+w.cfg.InstrumentID, "命令频率过高", notify.WebURL, "default", []string{"warning"})
+		w.reportAlert("warning", "仪器限流: "+w.cfg.InstrumentID, "命令频率过高")
 	}
 	w.rateLimited = true
 	w.rateLimitedAt = now
@@ -266,6 +270,31 @@ func (w *InstrumentWorker) setState(state WorkerState) {
 	w.mu.Lock()
 	w.state = state
 	w.mu.Unlock()
+}
+
+// reportAlert 异步上报告警中心（source=instruments；未注入 Reporter 时静默，
+// 保持 worker 单测无注入可运行）。
+func (w *InstrumentWorker) reportAlert(level, title, detail string) {
+	if w.cfg.Reporter == nil {
+		return
+	}
+	go func() {
+		if _, err := w.cfg.Reporter.Report(context.Background(), level, "instruments", title, detail); err != nil {
+			slog.Error("instrument alert report failed", "error", err, "instrument", w.cfg.InstrumentID)
+		}
+	}()
+}
+
+// resolveAlert 异步解除「仪器断开」类告警（幂等：无 active 行时 no-op）。
+func (w *InstrumentWorker) resolveAlert(title string) {
+	if w.cfg.Reporter == nil {
+		return
+	}
+	go func() {
+		if err := w.cfg.Reporter.ResolveBySource(context.Background(), "instruments", title, alert.ResolvedBySystem); err != nil {
+			slog.Error("instrument alert resolve failed", "error", err, "instrument", w.cfg.InstrumentID)
+		}
+	}()
 }
 
 func (w *InstrumentWorker) respond(cmd *QueueCommand, result CommandResult) {

@@ -8,7 +8,6 @@ import (
 
 	"github.com/go-chi/chi/v5"
 	"github.com/zhu571/hiaf-lab-system/go-server/common"
-	"github.com/zhu571/hiaf-lab-system/go-server/notify"
 )
 
 type agentContextKey string
@@ -46,7 +45,7 @@ func AgentContext(db *sql.DB) func(http.Handler) http.Handler {
 			}
 			if actingUserID == "" || taskID == "" {
 				if actingUserID == "" {
-					go notify.SecurityAlert("Agent 缺 acting_user_id", "来源 IP: "+r.RemoteAddr)
+					ReportAlert("critical", "security", "Agent 缺 acting_user_id", "来源 IP: "+r.RemoteAddr)
 				}
 				common.WriteError(w, r, http.StatusBadRequest, "invalid_agent_context", "Agent 请求缺少代理用户或任务 ID", nil)
 				return
@@ -67,7 +66,7 @@ func AgentContext(db *sql.DB) func(http.Handler) http.Handler {
 				return
 			}
 			if !valid {
-				go notify.SecurityAlert("Agent 缺 acting_user_id", "来源 IP: "+r.RemoteAddr)
+				ReportAlert("critical", "security", "Agent 缺 acting_user_id", "来源 IP: "+r.RemoteAddr)
 				common.WriteError(w, r, http.StatusForbidden, "invalid_agent_task", "Agent 任务无效或不属于代理用户", nil)
 				return
 			}

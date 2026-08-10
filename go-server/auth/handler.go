@@ -1,6 +1,7 @@
 package auth
 
 import (
+	"context"
 	"crypto/rand"
 	"encoding/hex"
 	"encoding/json"
@@ -13,6 +14,7 @@ import (
 	"time"
 
 	"github.com/go-chi/chi/v5"
+	"github.com/zhu571/hiaf-lab-system/go-server/alert"
 	"github.com/zhu571/hiaf-lab-system/go-server/common"
 	"github.com/zhu571/hiaf-lab-system/go-server/middleware"
 	"github.com/zhu571/hiaf-lab-system/go-server/notify"
@@ -20,15 +22,33 @@ import (
 
 // Handler exposes auth HTTP endpoints.
 type Handler struct {
-	svc          *Service
-	cookieSecure bool
-	regIPMu      sync.Mutex
-	regIPCalls   sync.Map // IP string -> []time.Time
+	svc           *Service
+	cookieSecure  bool
+	regIPMu       sync.Mutex
+	regIPCalls    sync.Map // IP string -> []time.Time
+	alertReporter alert.Reporter
 }
 
 // NewHandler creates a new auth handler.
 func NewHandler(svc *Service) *Handler {
 	return &Handler{svc: svc, cookieSecure: os.Getenv("COOKIE_SECURE") == "true"}
+}
+
+// SetAlertReporter 注入告警上报窄接口（main.go 接 alertSvc；安全事件收敛到告警中心）。
+func (h *Handler) SetAlertReporter(r alert.Reporter) {
+	h.alertReporter = r
+}
+
+// reportAlert 异步上报告警中心（未注入或失败仅记日志，不影响业务路径）。
+func (h *Handler) reportAlert(level, source, title, detail string) {
+	if h.alertReporter == nil {
+		return
+	}
+	go func() {
+		if _, err := h.alertReporter.Report(context.Background(), level, source, title, detail); err != nil {
+			slog.Error("alert report failed", "error", err, "source", source, "title", title)
+		}
+	}()
 }
 
 func (h *Handler) SetCookieSecure(secure bool) {
@@ -90,7 +110,7 @@ func (h *Handler) Login(w http.ResponseWriter, r *http.Request) {
 	resp, err := h.svc.Login(req.Username, req.Password)
 	if err != nil {
 		if req.Username == "admin" {
-			go notify.SecurityAlert("管理员登录失败", "用户 "+req.Username+" 尝试登录失败")
+			h.reportAlert("warning", "security", "管理员登录失败", "用户 "+req.Username+" 尝试登录失败")
 		}
 		mapAuthError(w, r, err)
 		return
@@ -120,7 +140,7 @@ func (h *Handler) Refresh(w http.ResponseWriter, r *http.Request) {
 		// 降噪（P2-4）：仅真复用（已撤销 token 被重放）才告警；
 		// 正常过期/用户禁用/未知 token 一律静默（mapAuthError 返回既有错误码）。
 		if reuse, rErr := h.svc.IsRefreshTokenReuse(req.RefreshToken); rErr == nil && reuse {
-			go notify.SecurityAlert("Refresh Token 复用", "检测到可能已撤销的 refresh token")
+			h.reportAlert("critical", "security", "Refresh Token 复用", "检测到可能已撤销的 refresh token")
 		}
 		mapAuthError(w, r, err)
 		return
