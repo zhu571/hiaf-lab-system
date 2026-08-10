@@ -1,0 +1,4 @@
+# 开发/测试依赖（与生产 requirements.txt 分离，生产镜像不装）
+# 用途：py-agent unittest 覆盖率（P3，测试策略方案 §7）。unittest 无内置覆盖率，
+# 需 coverage.py；仅 CI python-check 与 scripts/test-py.sh 安装本文件。
+coverage==7.8.0

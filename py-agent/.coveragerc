@@ -1,0 +1,15 @@
+# py-agent coverage 配置（P3，测试策略方案 §7）
+# 口径：只统计 py-agent 生产代码。
+#   - 本地 .venv 由 hermes venv 克隆而来，site-packages 路径可能指向其他 venv
+#     （如 ~/.hermes/...），一律省略依赖库，报告聚焦本仓库文件；
+#   - tests/ 测试自身代码同样排除——与 Go（go tool cover 天然排除 *_test.go）、
+#     vitest（默认排除 __tests__）跨层口径一致，避免测试文件拖高比例造成虚高。
+[run]
+omit =
+    */site-packages/*
+    */tests/*
+
+[report]
+omit =
+    */site-packages/*
+    */tests/*
