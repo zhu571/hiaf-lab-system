@@ -130,14 +130,27 @@ jobs:
       - uses: actions/setup-go@v5
         with:
           go-version: "1.22"
+      - name: Apply migrations
+        env:
+          PGID: ${{ job.services.postgres.id }}
+        run: |
+          set -euo pipefail
+          for f in migrations/*.up.sql; do
+            echo "applying $f"
+            docker exec -i "$PGID" psql -U lab -d lab_test < "$f"
+          done
       - name: Test and vet Go backend
+        env:
+          TEST_DATABASE_URL: postgres://lab:lab@localhost:5432/lab_test?sslmode=disable
         run: |
           if [ ! -f go-server/go.mod ]; then
             echo "go-server/go.mod not found; Go backend not implemented yet, skipping."
             exit 0
           fi
           cd go-server
-          go test -race ./...
+          # -p 1：db 测试共用同一 TEST_DATABASE_URL，跨包固定 UUID 种子并行会撞主键 flaky
+          #（如 agent 与 issues 的 b140 用户），按测试策略方案 §4.3.1 串行化包级测试。
+          go test -race -p 1 ./...
           go vet ./...
 
   windows-cross-compile:
@@ -200,3 +213,6 @@ jobs:
             python -m pip install -r py-agent/requirements.txt
           fi
           python -m compileall -q py-agent
+      - name: Run unit tests
+        run: |
+          python -m unittest discover -s py-agent/tests -v

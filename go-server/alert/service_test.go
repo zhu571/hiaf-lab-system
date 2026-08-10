@@ -121,7 +121,7 @@ func TestResolveBySourceValidation(t *testing.T) {
 	}
 }
 
-// ---------- 集成测试（TEST_DATABASE_URL，迁移 001-035 全量应用） ----------
+// ---------- 集成测试（TEST_DATABASE_URL，CI/本地按 scripts/test-go.sh 应用全量迁移 001-036） ----------
 
 func openAlertTestDB(t *testing.T) *sql.DB {
 	t.Helper()

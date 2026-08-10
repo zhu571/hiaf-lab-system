@@ -11,7 +11,7 @@ import (
 	_ "github.com/lib/pq"
 )
 
-// 032 规则表 CRUD（需要 TEST_DATABASE_URL，迁移 001-032 全量应用）。
+// 032 规则表 CRUD（需要 TEST_DATABASE_URL，CI/本地按 scripts/test-go.sh 应用全量迁移 001-036）。
 // 只增删本用例自建规则，不动种子规则（其他包的 agent 集成测试依赖种子规则入队）。
 func TestAutomationRulesCRUDPostgres(t *testing.T) {
 	dsn := os.Getenv("TEST_DATABASE_URL")
