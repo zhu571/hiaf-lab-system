@@ -150,8 +150,18 @@ jobs:
           cd go-server
           # -p 1：db 测试共用同一 TEST_DATABASE_URL，跨包固定 UUID 种子并行会撞主键 flaky
           #（如 agent 与 issues 的 b140 用户），按测试策略方案 §4.3.1 串行化包级测试。
-          go test -race -p 1 ./...
+          # -coverprofile：覆盖率透明化（P3，方案 §5），只报告不设硬阈值、不阻塞。
+          go test -race -p 1 -coverprofile=/tmp/hiaf-coverage.out ./...
           go vet ./...
+      - name: Coverage summary (non-blocking)
+        run: |
+          if [ -f /tmp/hiaf-coverage.out ]; then
+            echo "== Go 覆盖率汇总（P3，不设门禁，人工盯下降趋势）"
+            go tool cover -func=/tmp/hiaf-coverage.out | tail -1 \
+              || echo "coverage summary failed (non-blocking); check profile manually."
+          else
+            echo "no coverage profile produced; skipping."
+          fi
 
   windows-cross-compile:
     name: Windows cross-compile check

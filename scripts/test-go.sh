@@ -98,5 +98,39 @@ done
 echo "== go test -race -count=1 -p 1 ./...（TEST_DATABASE_URL=$TEST_DATABASE_URL）"
 # -p 1：db 测试共用同一 TEST_DATABASE_URL，跨包固定 UUID 种子并行会撞主键 flaky
 #（如 agent 与 issues 的 b140 用户），按测试策略方案 §4.3.1 串行化包级测试。
+# -coverprofile：覆盖率透明化（P3，方案 §5）——只报告不设硬阈值，人工盯下降趋势。
+COVERAGE_OUT="${COVERAGE_OUT:-/tmp/hiaf-coverage.out}"
 cd "$REPO_ROOT/go-server"
-go test -race -count=1 -p 1 ./...
+go test -race -count=1 -p 1 -coverprofile="$COVERAGE_OUT" ./...
+
+echo
+echo "================ Go 覆盖率汇总（不设门禁，人工盯） ================"
+go tool cover -func="$COVERAGE_OUT" | tail -1
+echo
+echo "核心包明细（方案 §5 建议关注 ≥60%，参考值非硬门禁）："
+# 从 coverprofile（行格式「file:range 语句数 覆盖数」，-race 下 mode: atomic）按包聚合语句级覆盖率
+# 注意：变量赋值必须用 -v（mawk 不认程序后的 name=value 参数，会当文件打开）
+awk -v names="auth projects logs issues testdata runs ask alert" '
+BEGIN { n = split(names, arr, " ") }
+/^mode:/ { next }
+$2 + 0 > 0 {
+    for (i = 1; i <= n; i++) {
+        name = arr[i]
+        # 路径形态不固定：脚本 cd 到 go-server 后 go test 输出 cwd 相对路径 auth/x.go，
+        # 仓库根相对/绝对/模块路径前缀时则形如 [..]/go-server/auth/x.go —— 统一按
+        # 「包名作为路径段」(^|/)name/ 匹配；8 个包名在 go-server 目录树无同名子串目录，无误伤。
+        if ($1 ~ ("(^|/)" name "/")) {
+            total[name] += $2
+            covered[name] += ($3 > 0 ? $2 : 0)
+            seen[name] = 1
+        }
+    }
+}
+END {
+    for (i = 1; i <= n; i++) {
+        name = arr[i]
+        if (!seen[name]) { printf "  %-10s 无覆盖数据（包内无测试）\n", name; continue }
+        pct = (total[name] > 0) ? (covered[name] * 100 / total[name]) : 0
+        printf "  %-10s %6.1f%%  (%d/%d 条语句)\n", name, pct, covered[name], total[name]
+    }
+}' "$COVERAGE_OUT"
