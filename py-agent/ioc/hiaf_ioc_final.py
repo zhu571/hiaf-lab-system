@@ -369,8 +369,8 @@ class HiafGasCellIOC(PVGroup):
 
         # R5: ntfy alert dedup
         self._last_ntfy_disconnect_warn = 0.0
-        self._last_ntfy_recovery_warn = 0.0
         self._last_ntfy_failrate_warn = 0.0
+        self._last_ntfy_dataloss_warn = 0.0
         self._ntfy_cooldown = 60.0
         self._disconnect_warned = False
 
@@ -398,12 +398,11 @@ class HiafGasCellIOC(PVGroup):
                     k for k in self._pump_nodes
                     if any(s in k for s in ['DP3', 'DP4', '循环泵', '压缩机', '低温循环泵'])
                 ]
-                # R5: send recovery alert
+                # R5: send recovery alert（恢复即无条件 resolve，服务端幂等；
+                # 不加 60s 冷却门控——否则距上次 resolve <60s 时被跳过且
+                # _disconnect_warned 已复位，active 告警会滞留到 TTL 才消失）
                 if self._disconnect_warned:
-                    now_w = time.monotonic()
-                    if now_w - self._last_ntfy_recovery_warn > self._ntfy_cooldown:
-                        await self._resolve_alert("OPC UA 断连 >30s")
-                        self._last_ntfy_recovery_warn = now_w
+                    await self._resolve_alert("OPC UA 断连 >30s")
                     self._disconnect_warned = False
                 return True
             except Exception:
@@ -419,8 +418,10 @@ class HiafGasCellIOC(PVGroup):
                 self._subscription_healthy = False
 
         # R5: alert center on prolonged disconnection
+        #（冷却不通过时不置 _disconnect_warned，保持下轮可重试；
+        #  门控收敛到 report 本身——否则容器启动 <60s 即达阈值时被冷却
+        #  跳过且标记已告警，导致永不再上报）
         if self._reconnect_backoff >= 30.0 and not self._disconnect_warned:
-            self._disconnect_warned = True
             now_w = time.monotonic()
             if now_w - self._last_ntfy_disconnect_warn > self._ntfy_cooldown:
                 await self._report_alert(
@@ -428,6 +429,7 @@ class HiafGasCellIOC(PVGroup):
                     "OPC UA 连接中断超过 30s，进入指数退避重连",
                 )
                 self._last_ntfy_disconnect_warn = now_w
+                self._disconnect_warned = True
 
         # Backoff: exponential with jitter (R1)
         if self._reconnect_backoff > 0:
@@ -801,11 +803,15 @@ class HiafGasCellIOC(PVGroup):
             if qsize > QUEUE_CRITICAL_WATERMARK:
                 self._data_loss_cnt += 1
                 if self._data_loss_cnt % 10 == 1:
-                    LOGGER.warning("data_loss_cnt=%d queue_depth=%d", self._data_loss_cnt, qsize)
-                    await self._report_alert(
-                        "warning", "订阅数据丢失",
-                        f"订阅数据已累计丢失 {self._data_loss_cnt} 次（队列深度 {qsize}）",
-                    )
+                    # 60s 冷却门控，与 failrate 告警同款（否则 ~1 次/秒刷屏）
+                    now_w = time.monotonic()
+                    if now_w - self._last_ntfy_dataloss_warn > self._ntfy_cooldown:
+                        LOGGER.warning("data_loss_cnt=%d queue_depth=%d", self._data_loss_cnt, qsize)
+                        await self._report_alert(
+                            "warning", "订阅数据丢失",
+                            f"订阅数据已累计丢失 {self._data_loss_cnt} 次（队列深度 {qsize}）",
+                        )
+                        self._last_ntfy_dataloss_warn = now_w
             self._sensor_values[tag] = val
             pv = self._sensor_pvs.get(tag)
             if pv is not None:
@@ -871,11 +877,13 @@ class HiafGasCellIOC(PVGroup):
             self._subscription_healthy = False
 
     # ── R5: ntfy alert helper ──
-    async def _send_ntfy(self, message: str) -> None:
+    async def _send_ntfy(self, message: str, topic: str | None = None,
+                         title: str = "IOC", priority: str = "3") -> None:
+        # 默认 topic 对齐 lab-alerts（与 watchdog/agent 死信一致），可用 NTFY_TOPIC 覆盖
+        topic = topic or os.getenv("NTFY_TOPIC", "lab-alerts")
         ntfy_url = os.getenv("NTFY_URL", "http://ntfy:80")
-        topic = os.getenv("NTFY_TOPIC", "lab-system")
         try:
-            headers = {"Title": "IOC", "Priority": "3"}
+            headers = {"Title": title, "Priority": priority}
             # P0-1：deny-all 下无凭据发送被 403 静默丢弃，须带 todo-publisher 的 Bearer token
             #（hiaf_config 内 secret 文件优先、env 兜底；空则等价于旧行为）
             token = hiaf_config.NTFY_PUBLISH_TOKEN
@@ -915,7 +923,7 @@ class HiafGasCellIOC(PVGroup):
                         raise RuntimeError(f"alert report HTTP {resp.status}")
         except Exception as e:
             LOGGER.debug("alert report failed, fallback to ntfy: %s", e)
-            await self._send_ntfy(title)
+            await self._send_ntfy(f"{title}：{detail}", topic="lab-alerts")
 
     async def _resolve_alert(self, title: str) -> None:
         # 内部恢复上报（方案 §8.2）：POST /api/v1/alerts/resolve 按 source+title

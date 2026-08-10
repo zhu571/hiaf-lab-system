@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"strings"
 	"time"
+	"unicode"
 
 	"github.com/google/uuid"
 	"github.com/zhu571/hiaf-lab-system/go-server/middleware"
@@ -20,7 +21,7 @@ var (
 	ErrAccountLocked      = errors.New("账户已锁定，请15分钟后再试")
 	ErrAccountDisabled    = errors.New("账户已停用，请联系管理员")
 	ErrUsernameTaken      = errors.New("用户名已存在")
-	ErrPasswordTooShort   = errors.New("密码长度至少8位")
+	ErrPasswordTooShort   = errors.New("密码至少10位，且需包含字母和数字")
 	ErrInvalidRole        = errors.New("用户角色无效")
 	ErrInvalidLanguage    = errors.New("语言偏好无效")
 	ErrCannotModifySelf   = errors.New("不能通过用户管理修改自己的账户")
@@ -98,7 +99,7 @@ func (s *Service) AdminCreateUser(req AdminCreateUserRequest) (*AdminResetPasswo
 		}
 		password = generated
 	}
-	if len(password) < 8 {
+	if !validatePassword(password) {
 		return nil, nil, ErrPasswordTooShort
 	}
 	taken, err := s.repo.IsUsernameTaken(req.Username)
@@ -173,7 +174,7 @@ func (s *Service) AdminResetPassword(id, password string) (*AdminResetPasswordRe
 		}
 		password = generated
 	}
-	if len(password) < 8 {
+	if !validatePassword(password) {
 		return nil, ErrPasswordTooShort
 	}
 	user, err := s.repo.GetByID(id)
@@ -195,7 +196,7 @@ func (s *Service) AdminResetPassword(id, password string) (*AdminResetPasswordRe
 
 // Register creates a new user account.
 func (s *Service) Register(username, password string) (*User, error) {
-	if len(password) < 8 {
+	if !validatePassword(password) {
 		return nil, ErrPasswordTooShort
 	}
 
@@ -216,62 +217,66 @@ func (s *Service) Register(username, password string) (*User, error) {
 }
 
 // Login authenticates a user and returns token pair.
-func (s *Service) Login(username, password string) (*LoginResponse, error) {
+// 第三个返回值 newIP 表示当前来源 IP 与 users.last_login_ip 不同（S5 新 IP 登录告警依据；
+// clientIP 为空即无法判定来源时恒为 false）。
+func (s *Service) Login(username, password, clientIP string) (*LoginResponse, bool, error) {
 	user, err := s.repo.GetByUsername(username)
 	if err != nil {
-		return nil, err
+		return nil, false, err
 	}
 	if user == nil {
 		// Use constant timing to avoid user enumeration.
 		_, _ = hashPassword(password)
 		_, _, _ = s.repo.IncrementFailedAttempts(username)
-		return nil, ErrInvalidCredentials
+		return nil, false, ErrInvalidCredentials
 	}
 
 	if user.LockedUntil != nil && time.Now().Before(*user.LockedUntil) {
-		return nil, ErrAccountLocked
+		return nil, false, ErrAccountLocked
 	}
 
 	if user.Disabled {
-		return nil, ErrAccountDisabled
+		return nil, false, ErrAccountDisabled
 	}
 
 	if !verifyPassword(user.PasswordHash, password) {
 		attempts, lockedUntil, err := s.repo.IncrementFailedAttempts(username)
 		if err != nil {
-			return nil, err
+			return nil, false, err
 		}
 		if lockedUntil != nil && time.Now().Before(*lockedUntil) {
-			return nil, ErrAccountLocked
+			return nil, false, ErrAccountLocked
 		}
 		_ = attempts
-		return nil, ErrInvalidCredentials
+		return nil, false, ErrInvalidCredentials
 	}
 
 	if err := s.repo.ResetFailedAttempts(username); err != nil {
-		return nil, err
+		return nil, false, err
 	}
 
 	accessToken, err := middleware.GenerateToken(user.ID, user.Username, user.Role, user.TokenVersion, s.jwtKey)
 	if err != nil {
-		return nil, fmt.Errorf("issue access token: %w", err)
+		return nil, false, fmt.Errorf("issue access token: %w", err)
 	}
 
 	refreshToken, family, err := generateRefreshToken()
 	if err != nil {
-		return nil, fmt.Errorf("generate refresh token: %w", err)
+		return nil, false, fmt.Errorf("generate refresh token: %w", err)
 	}
 
 	if err := s.repo.StoreRefreshToken(user.ID, refreshToken, family); err != nil {
-		return nil, err
+		return nil, false, err
 	}
 
-	return loginResponse(user, accessToken, refreshToken), nil
+	// S5：last_login_ip 为空（NULL/首登）也视为新 IP，触发告警并更新。
+	newIP := clientIP != "" && user.LastLoginIP != clientIP
+	return loginResponse(user, accessToken, refreshToken), newIP, nil
 }
 
 // ChangePassword updates the password for an authenticated user.
 func (s *Service) ChangePassword(userID, oldPassword, newPassword string) error {
-	if len(newPassword) < 8 {
+	if !validatePassword(newPassword) {
 		return ErrPasswordTooShort
 	}
 
@@ -449,4 +454,22 @@ func validLanguage(language string) bool {
 	default:
 		return false
 	}
+}
+
+// validatePassword 强密码校验（D12）：长度≥10 且同时含字母和数字。
+// 应用于注册、管理员开号、改密三处；存量账号不强制改，下次改密时校验。
+func validatePassword(pw string) bool {
+	if len(pw) < 10 {
+		return false
+	}
+	hasLetter, hasDigit := false, false
+	for _, r := range pw {
+		switch {
+		case unicode.IsLetter(r):
+			hasLetter = true
+		case unicode.IsDigit(r):
+			hasDigit = true
+		}
+	}
+	return hasLetter && hasDigit
 }

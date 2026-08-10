@@ -58,10 +58,10 @@ func ServiceToken() func(http.Handler) http.Handler {
 				return
 			}
 			if serviceToken == "" || subtle.ConstantTimeCompare([]byte(header), []byte(serviceToken)) != 1 {
-				slog.Error("service token rejected", "ip", r.RemoteAddr, "path", r.URL.Path)
+				slog.Error("service token rejected", "ip", requestSourceIP(r), "path", r.URL.Path)
 				// 校验失败属安全事件：收敛到告警中心（原 notify.SecurityAlert 直发，
 				// 改走 alert 模块统一聚合去重，critical/security 双通道不变）。
-				ReportAlert("critical", "security", "SERVICE_TOKEN 校验失败", "来源 IP: "+r.RemoteAddr)
+				ReportAlert("critical", "security", "SERVICE_TOKEN 校验失败", "来源 IP: "+requestSourceIP(r))
 				common.WriteError(w, r, http.StatusUnauthorized, "unauthorized", "service token 无效", nil)
 				return
 			}

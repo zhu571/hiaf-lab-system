@@ -93,8 +93,12 @@ func (s *Service) Report(ctx context.Context, level, source, title, detail strin
 			sendErr = s.sender.Send(Topic, title, detail, s.clickURL, priority, tags)
 		}
 		if sendErr != nil {
-			// 发送失败不影响落库/去重（聚合窗口与唯一索引仍生效）。
+			// 发送失败不影响落库/去重（聚合窗口与唯一索引仍生效），
+			// 失败信息追加进 detail 便于事后定位。
 			slog.Error("alert send failed", "error", sendErr, "source", source, "title", title)
+			if derr := s.repo.AppendDetail(ctx, res.AlertID, "；通知发送失败: "+sendErr.Error()); derr != nil {
+				slog.Error("alert send failure detail append failed", "error", derr)
+			}
 		}
 	}
 	return res, nil

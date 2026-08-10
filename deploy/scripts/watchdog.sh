@@ -72,7 +72,7 @@ send_alert() {
     -H "Title: $title"
     -H "Priority: $priority"
     -H "Tags: $tags"
-    -H "Click: $WEB_URL/"
+    -H "Click: $WEB_URL/alerts"
     -d "$body"
   )
   if [ -n "$token" ]; then

@@ -18,11 +18,12 @@ func NewRepository(db *sql.DB) *Repository { return &Repository{db: db} }
 //  1. SELECT ... FOR UPDATE 锁定同 source+title 的 active 行；
 //  2. 命中且窗口内（last_seen 距今 ≤10min）→ 计数+1、刷新 last_seen/detail，不重发；
 //  3. 命中但窗口外（复发）→ 计数重置 1、刷新 last_seen/detail、清 resolved_at，重发；
-//  4. 未命中 → INSERT；并发撞部分唯一索引 → ON CONFLICT 窗口判定累加/重置。
+//  4. 未命中 → INSERT；并发撞部分唯一索引 → ON CONFLICT 只可能撞窗口内新行，
+//     一律按合并处理（不重发），计数累加/重置由 SQL 判定。
 //
 // 窗口判定在 2/3 用注入时钟 now 求值（单测可控）；ON CONFLICT 分支用 SQL now()，
-// 极小概率窗口判定偏差只影响「是否重发 ntfy」，唯一索引保证绝无双 active 行
-// （硬约束：行唯一是防双发的最终防线）。
+// 只影响计数累加/重置，不影响「是否重发」（并发冲突必为窗口内新行，不重发）。
+// 唯一索引保证绝无双 active 行（硬约束：行唯一是防双发的最终防线）。
 func (r *Repository) Report(ctx context.Context, level, source, title, detail string, now time.Time) (*ReportResult, error) {
 	tx, err := r.db.BeginTx(ctx, nil)
 	if err != nil {
@@ -45,10 +46,10 @@ func (r *Repository) Report(ctx context.Context, level, source, title, detail st
 
 	switch {
 	case errors.Is(err, sql.ErrNoRows):
-		// 未命中 → INSERT；并发撞唯一索引 → ON CONFLICT 窗口判定。
-		// RETURNING 中 xmax=0 判定「本次为插入」（并发冲突更新时 xmax 非 0），
-		// out_of_window 判定 ON CONFLICT 分支是否窗口外复发（决定是否重发）。
-		var inserted, outOfWindow bool
+		// 未命中 → INSERT；并发撞唯一索引 → ON CONFLICT 只可能撞窗口内新行
+		// （窗口外的行会被本事务的 SELECT 命中，走上面的复发分支），一律不重发。
+		// RETURNING 中 xmax=0 判定「本次为插入」（并发冲突更新时 xmax 非 0）。
+		var inserted bool
 		err = tx.QueryRowContext(ctx,
 			`INSERT INTO alerts (level, source, title, detail)
 			 VALUES ($1, $2, $3, $4)
@@ -61,16 +62,14 @@ func (r *Repository) Report(ctx context.Context, level, source, title, detail st
 			   last_seen = now(),
 			   detail = EXCLUDED.detail,
 			   resolved_at = NULL
-			 RETURNING id, occurrence_count, first_seen,
-			   (xmax = 0) AS inserted,
-			   (alerts.last_seen < now() - interval '10 minutes') AS out_of_window`,
+			 RETURNING id, occurrence_count, first_seen, (xmax = 0) AS inserted`,
 			level, source, title, detail,
-		).Scan(&id, &occurrenceCount, &firstSeen, &inserted, &outOfWindow)
+		).Scan(&id, &occurrenceCount, &firstSeen, &inserted)
 		if err != nil {
 			return nil, err
 		}
-		// 全新 active 行 → 发 ntfy；并发窗口内合并 → 不发；并发窗口外复发 → 重发。
-		deduplicated = !inserted && !outOfWindow
+		// 全新 active 行 → 发 ntfy；并发撞窗口内新行 → 合并不重发。
+		deduplicated = !inserted
 	case err != nil:
 		return nil, err
 	default:
@@ -120,6 +119,13 @@ func (r *Repository) Get(ctx context.Context, id string) (*Alert, error) {
 		return nil, ErrNotFound
 	}
 	return a, err
+}
+
+// AppendDetail 将发送失败信息追加进告警 detail（便于事后定位；不影响聚合语义）。
+func (r *Repository) AppendDetail(ctx context.Context, id, note string) error {
+	_, err := r.db.ExecContext(ctx,
+		`UPDATE alerts SET detail = detail || $2 WHERE id = $1`, id, note)
+	return err
 }
 
 // List 按可选 status 过滤分页；active 按 last_seen DESC，resolved 按 resolved_at DESC。

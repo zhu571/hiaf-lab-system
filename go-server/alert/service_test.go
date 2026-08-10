@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -15,11 +16,13 @@ import (
 
 // ---------- 纯逻辑单测（无 DB） ----------
 
-// fakeSender 记录发送调用（Send=仅 ntfy / SendBoth=ntfy+MeoW 双通道）。
+// fakeSender 记录发送调用（Send=仅 ntfy / SendBoth=ntfy+MeoW 双通道）；
+// failErr 非 nil 时发送返回该错误（测发送失败 detail 记录）。
 type fakeSender struct {
-	mu    sync.Mutex
-	sends []sentMsg
-	both  []sentMsg
+	mu      sync.Mutex
+	sends   []sentMsg
+	both    []sentMsg
+	failErr error
 }
 
 type sentMsg struct {
@@ -30,6 +33,9 @@ type sentMsg struct {
 func (f *fakeSender) Send(topic, title, msg, clickURL, priority string, tags []string) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
+	if f.failErr != nil {
+		return f.failErr
+	}
 	f.sends = append(f.sends, sentMsg{topic, title, msg, clickURL, priority, tags})
 	return nil
 }
@@ -37,6 +43,9 @@ func (f *fakeSender) Send(topic, title, msg, clickURL, priority string, tags []s
 func (f *fakeSender) SendBoth(topic, title, msg, clickURL, priority string, tags []string) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
+	if f.failErr != nil {
+		return f.failErr
+	}
 	f.both = append(f.both, sentMsg{topic, title, msg, clickURL, priority, tags})
 	return nil
 }
@@ -222,6 +231,31 @@ func TestReportWindowDedup(t *testing.T) {
 	}
 }
 
+// TestReportSendFailureRecordsDetail 发送失败不影响落库/去重，但失败信息
+// 必须追加进 detail（便于事后定位）。
+func TestReportSendFailureRecordsDetail(t *testing.T) {
+	svc, sender, db, _ := newTestService(t, time.Now())
+	defer db.Close()
+	sender.failErr = errors.New("ntfy timeout")
+
+	res, err := svc.Report(context.Background(), LevelWarning, SourceUpdater, "发送失败测试", "正文")
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := mustAlert(t, db, res.AlertID)
+	if !strings.Contains(got.Detail, "通知发送失败: ntfy timeout") {
+		t.Fatalf("detail must record send failure, got %q", got.Detail)
+	}
+	// 发送失败不重试、不算重发，但记录仍然落库且去重语义不变。
+	res2, err := svc.Report(context.Background(), LevelWarning, SourceUpdater, "发送失败测试", "再报")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !res2.Deduplicated || res2.OccurrenceCount != 2 {
+		t.Fatalf("dedup after send failure: %+v", res2)
+	}
+}
+
 // TestResolveIdempotent 不匹配 active 行 → 幂等 success（不报错）。
 func TestResolveIdempotent(t *testing.T) {
 	base := time.Now()
@@ -333,7 +367,8 @@ func TestTTLAndCleanup(t *testing.T) {
 
 // TestConcurrentReport 并发防双发：50 goroutine 同 source+title 同时上报 →
 // 恰 1 条 active 行（部分唯一索引最终防线），行锁累加 occurrence_count=50，
-// 且仅 1 次发送（同一窗口内合并）。
+// 且仅 1 次发送（同一窗口内合并）。ON CONFLICT 分支（xmax≠0）只可能撞窗口内
+// 新行（窗口外的行会被 SELECT 命中走复发分支），deduplicated=!inserted 一律不重发。
 func TestConcurrentReport(t *testing.T) {
 	base := time.Now()
 	svc, sender, db, _ := newTestService(t, base)

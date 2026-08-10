@@ -213,15 +213,23 @@ func TestResolveDualChannel(t *testing.T) {
 		t.Fatalf("idempotent resolve: expected 200, got %d", rr.Code)
 	}
 
-	// maintainer → 200（按 source+title）。
+	// maintainer 按 source+title → 400（用户通道必须按 id 解除）。
 	if _, err := svc.Report(context.Background(), LevelWarning, SourceWatchdog, "lab-server 健康检查失败", "再犯"); err != nil {
 		t.Fatal(err)
 	}
 	rr = httptest.NewRecorder()
 	stack.ServeHTTP(rr, testRequest(t, http.MethodPost, "/api/v1/alerts/resolve",
 		`{"source":"watchdog","title":"lab-server 健康检查失败"}`, alertJWT(t, seedMaintainerID, "maint1", "maintainer"), true, "key-maint"))
+	if rr.Code != http.StatusBadRequest {
+		t.Fatalf("maintainer resolve by source: expected 400, got %d: %s", rr.Code, rr.Body.String())
+	}
+
+	// maintainer 按 id → 200。
+	rr = httptest.NewRecorder()
+	stack.ServeHTTP(rr, testRequest(t, http.MethodPost, "/api/v1/alerts/resolve",
+		`{"id":"`+res.AlertID+`"}`, alertJWT(t, seedMaintainerID, "maint1", "maintainer"), true, "key-maint-id"))
 	if rr.Code != http.StatusOK {
-		t.Fatalf("maintainer resolve by source: expected 200, got %d: %s", rr.Code, rr.Body.String())
+		t.Fatalf("maintainer resolve by id: expected 200, got %d: %s", rr.Code, rr.Body.String())
 	}
 
 	// service token → 200（无 CSRF、无 Idempotency-Key，双豁免）。
@@ -313,6 +321,7 @@ func TestListDetailOverHTTP(t *testing.T) {
 		Data struct {
 			Items []Alert `json:"items"`
 			Total int     `json:"total"`
+			Limit int     `json:"limit"`
 		} `json:"data"`
 	}
 	if err := json.Unmarshal(rr.Body.Bytes(), &list); err != nil {
@@ -320,6 +329,19 @@ func TestListDetailOverHTTP(t *testing.T) {
 	}
 	if list.Data.Total != 2 || len(list.Data.Items) != 2 {
 		t.Fatalf("list: total=%d items=%d", list.Data.Total, len(list.Data.Items))
+	}
+
+	// limit 超上限 → 响应返回截断后的实际值（5000 → 200）。
+	rr = httptest.NewRecorder()
+	stack.ServeHTTP(rr, testRequest(t, http.MethodGet, "/api/v1/alerts?limit=5000", "", alertJWT(t, seedViewerID, "bob", "viewer"), false, ""))
+	if rr.Code != http.StatusOK {
+		t.Fatalf("list limit truncation: expected 200, got %d", rr.Code)
+	}
+	if err := json.Unmarshal(rr.Body.Bytes(), &list); err != nil {
+		t.Fatal(err)
+	}
+	if list.Data.Limit != maxListLimit {
+		t.Fatalf("list limit must be truncated to %d, got %d", maxListLimit, list.Data.Limit)
 	}
 
 	// list 非法 status → 400。
@@ -353,6 +375,18 @@ func TestListDetailOverHTTP(t *testing.T) {
 	stack.ServeHTTP(rr, req)
 	if rr.Code != http.StatusNotFound {
 		t.Fatalf("invalid uuid: expected 404, got %d", rr.Code)
+	}
+
+	// 36 位但分组错误的 UUID → 404（不进 PG 防 500）。
+	badUUID := "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+	rctx3 := chi.NewRouteContext()
+	rctx3.URLParams.Add("id", badUUID)
+	req = testRequest(t, http.MethodGet, "/api/v1/alerts/"+badUUID, "", alertJWT(t, seedViewerID, "bob", "viewer"), false, "")
+	req = req.WithContext(context.WithValue(req.Context(), chi.RouteCtxKey, rctx3))
+	rr = httptest.NewRecorder()
+	stack.ServeHTTP(rr, req)
+	if rr.Code != http.StatusNotFound {
+		t.Fatalf("malformed 36-char uuid: expected 404, got %d", rr.Code)
 	}
 
 	// 无 token → 401。

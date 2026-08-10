@@ -132,3 +132,47 @@ func TestIsRefreshTokenReuse(t *testing.T) {
 		t.Fatalf("expired revoked token must not be reuse: reuse=%v err=%v", reuse, err)
 	}
 }
+
+// S1 用户名维度：5 次/15min/用户名账户锁定（第二道防线，独立于 IP 级限流）。
+// 需要 TEST_DATABASE_URL（同文件其余用例）。
+func TestIncrementFailedAttemptsLocksAfterFive(t *testing.T) {
+	db := openAuthTestDB(t)
+	r := NewRepository(db)
+	username := fmt.Sprintf("locktest-%d", time.Now().UnixNano())
+	_, err := db.Exec(`INSERT INTO users (id, username, password_hash, display_name, role, must_change_pw, disabled)
+		VALUES (gen_random_uuid(), $1, 'x', 'Lock Test', 'member', false, false)`, username)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { db.Exec(`DELETE FROM users WHERE username = $1`, username) })
+
+	for i := 1; i <= 5; i++ {
+		attempts, lockedUntil, err := r.IncrementFailedAttempts(username)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if attempts != i {
+			t.Fatalf("attempts = %d, want %d", attempts, i)
+		}
+		if i == 5 && lockedUntil == nil {
+			t.Fatal("5th failure must set locked_until")
+		}
+	}
+	user, err := r.GetByUsername(username)
+	if err != nil || user == nil {
+		t.Fatalf("get locked user: %v", err)
+	}
+	if user.LockedUntil == nil {
+		t.Fatal("user must be locked after 5 failures")
+	}
+	if err := r.ResetFailedAttempts(username); err != nil {
+		t.Fatal(err)
+	}
+	user2, err := r.GetByUsername(username)
+	if err != nil || user2 == nil {
+		t.Fatalf("get reset user: %v", err)
+	}
+	if user2.LockedUntil != nil {
+		t.Fatal("reset must clear lock")
+	}
+}

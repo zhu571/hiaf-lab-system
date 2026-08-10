@@ -227,6 +227,8 @@ func main() {
 	todosHandler := todos.NewHandler(todosSvc)
 
 	r := chi.NewRouter()
+	// 来源门必须先于 chi RealIP：RealIP 会改写 r.RemoteAddr，先取数才能拿到真实 TCP 对端。
+	r.Use(mw.SourceGate())
 	r.Use(middleware.RealIP)
 	r.Use(mw.RequestID)
 	r.Use(mw.ServiceToken())
@@ -328,7 +330,8 @@ func main() {
 		r.Use(mw.Audit(db))
 		r.Use(mw.RequireIdempotencyKey(db))
 		r.Get("/", projectsHandler.List)
-		r.Post("/", projectsHandler.Create)
+		// D11：项目创建限 maintainer+admin（viewer 不可），service 内同语义校验纵深。
+		r.With(mw.RequireRole(auth.RoleAdmin, auth.RoleMaintainer)).Post("/", projectsHandler.Create)
 
 		r.Route("/{id}", func(r chi.Router) {
 			r.Use(mw.RequireProjectPermission(db, mw.PermRead))

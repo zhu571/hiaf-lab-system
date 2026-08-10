@@ -36,7 +36,7 @@ func (h *Handler) Create(w http.ResponseWriter, r *http.Request) {
 		common.WriteError(w, r, http.StatusBadRequest, "bad_request", "请求体解析失败", nil)
 		return
 	}
-	project, err := h.svc.Create(req, middleware.EffectiveUserID(r.Context()))
+	project, err := h.svc.Create(req, middleware.EffectiveUserID(r.Context()), claims.Role)
 	if err != nil {
 		h.writeError(w, r, err, nil)
 		return

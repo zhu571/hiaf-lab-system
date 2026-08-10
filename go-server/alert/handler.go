@@ -17,7 +17,7 @@ type Handler struct{ svc *Service }
 
 func NewHandler(svc *Service) *Handler { return &Handler{svc: svc} }
 
-var uuidRe = regexp.MustCompile(`^[0-9a-fA-F-]{36}$`)
+var uuidRe = regexp.MustCompile(`^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$`)
 
 // Report POST /api/v1/alerts/report —— 仅内部服务可调用（SERVICE_TOKEN 白名单 +
 // handler 级 IsServiceCall 强制，杜绝用户/agent 冒充）。审计由 Audit 中间件落
@@ -43,7 +43,7 @@ func (h *Handler) Report(w http.ResponseWriter, r *http.Request) {
 
 // Resolve POST /api/v1/alerts/resolve —— 双通道：
 //   - 用户通道：JWT + RequireRoleOrService(admin, maintainer) + CSRF + Idempotency-Key，
-//     按 {id} 解除（resolved_by=username）；
+//     必须按 {id} 解除（resolved_by=username；拒绝 source+title，防用户越权批量解除）；
 //   - 内部通道：SERVICE_TOKEN（CSRF/幂等豁免），按 {source,title} 解除（resolved_by=system）。
 //
 // 匹配不到 active 行 → 幂等 success（detail 由审计记录）。
@@ -58,6 +58,10 @@ func (h *Handler) Resolve(w http.ResponseWriter, r *http.Request) {
 	matched := false
 	if claims := middleware.GetUserClaims(r.Context()); claims != nil {
 		resolvedBy = claims.Username
+		if req.ID == "" {
+			common.WriteError(w, r, http.StatusBadRequest, "bad_request", "用户通道必须按 id 解除告警", nil)
+			return
+		}
 	}
 
 	if req.ID != "" {
@@ -94,6 +98,9 @@ func (h *Handler) List(w http.ResponseWriter, r *http.Request) {
 	if limit < 1 {
 		common.WriteError(w, r, http.StatusBadRequest, "bad_request", "limit 非法", nil)
 		return
+	}
+	if limit > maxListLimit {
+		limit = maxListLimit
 	}
 	if offset < 0 {
 		common.WriteError(w, r, http.StatusBadRequest, "bad_request", "offset 非法", nil)

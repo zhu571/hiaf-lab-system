@@ -1,6 +1,7 @@
 package auth
 
 import (
+	"errors"
 	"strings"
 	"testing"
 )
@@ -100,5 +101,35 @@ func TestValidLanguage(t *testing.T) {
 		if validLanguage(lang) {
 			t.Errorf("validLanguage(%q) should be false", lang)
 		}
+	}
+}
+
+// D12：强密码校验器——长度≥10 且同时含字母和数字。
+func TestValidatePassword(t *testing.T) {
+	weak := []string{"", "short", "abcdefghij", "ABCDEFGHIJ", "1234567890", "abcdefgh9", "密码密码密码密码"}
+	for _, pw := range weak {
+		if validatePassword(pw) {
+			t.Errorf("validatePassword(%q) = true, want false", pw)
+		}
+	}
+	strong := []string{"password123", "1234567890a", "Passw0rd!!", "abcd1234EF", "密码abc12345"}
+	for _, pw := range strong {
+		if !validatePassword(pw) {
+			t.Errorf("validatePassword(%q) = false, want true", pw)
+		}
+	}
+}
+
+// D12：弱密码在注册/管理员开号/改密三处入口均被拒（校验先于 repo 访问，nil repo 即可验证）。
+func TestWeakPasswordRejectedAtService(t *testing.T) {
+	svc := NewService(nil, nil)
+	if _, err := svc.Register("user1", "weak1"); !errors.Is(err, ErrPasswordTooShort) {
+		t.Fatalf("Register weak password: got %v, want ErrPasswordTooShort", err)
+	}
+	if err := svc.ChangePassword("uid", "old", "weak1"); !errors.Is(err, ErrPasswordTooShort) {
+		t.Fatalf("ChangePassword weak password: got %v, want ErrPasswordTooShort", err)
+	}
+	if _, _, err := svc.AdminCreateUser(AdminCreateUserRequest{Username: "user2", Password: "weak1"}); !errors.Is(err, ErrPasswordTooShort) {
+		t.Fatalf("AdminCreateUser weak password: got %v, want ErrPasswordTooShort", err)
 	}
 }

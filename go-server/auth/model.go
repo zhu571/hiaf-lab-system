@@ -30,6 +30,8 @@ type User struct {
 	FailedAttempts int        `json:"-"`
 	TokenVersion   int        `json:"-"`
 	LockedUntil    *time.Time `json:"-"`
+	LastLoginIP    string     `json:"-"`
+	LastLoginAt    *time.Time `json:"-"`
 	CreatedAt      time.Time  `json:"created_at"`
 	UpdatedAt      time.Time  `json:"updated_at"`
 }

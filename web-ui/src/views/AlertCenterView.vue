@@ -15,7 +15,13 @@
             <el-table-column :label="t('alert.source')" width="110">
               <template #default="{ row }">{{ sourceLabel(row.source) }}</template>
             </el-table-column>
-            <el-table-column prop="title" :label="t('alert.colTitle')" show-overflow-tooltip />
+            <el-table-column :label="t('alert.colTitle')">
+              <template #default="{ row }">
+                <el-tooltip :content="row.detail" placement="top-start" :show-after="300" :disabled="!row.detail">
+                  <span class="title-cell">{{ row.title }}</span>
+                </el-tooltip>
+              </template>
+            </el-table-column>
             <el-table-column :label="t('alert.occurrence')" width="90" align="center">
               <template #default="{ row }">
                 <el-badge :value="row.occurrence_count" :max="999" type="warning" />
@@ -96,6 +102,14 @@
               </div>
             </template>
           </ResponsiveTable>
+          <el-pagination
+            v-model:current-page="page"
+            class="pager"
+            layout="total, prev, pager, next"
+            :page-size="HISTORY_PAGE_SIZE"
+            :total="total"
+            @current-change="load"
+          />
         </section>
       </el-tab-pane>
     </el-tabs>
@@ -121,28 +135,44 @@ const tab = ref<'active' | 'resolved'>('active')
 const rows = ref<AlertRecord[]>([])
 const loading = ref(false)
 const resolvingId = ref('')
+const page = ref(1)
+const total = ref(0)
+const loadSeq = ref(0)
 
-// 历史 tab 仅展示 90 天内（后端滚动清理），一次拉 200 条（服务端 limit 上限）
-const HISTORY_LIMIT = 200
+// 历史 tab 仅展示 90 天内（后端滚动清理），每页 50 条 + offset 简单分页
+const HISTORY_PAGE_SIZE = 50
 
 onMounted(load)
 
 function onTabChange() {
+  page.value = 1
   load()
 }
 
 async function load() {
+  // 递增序号：切 tab/翻页竞态时丢弃过期响应，避免旧 tab 数据覆盖新 tab
+  const seq = ++loadSeq.value
   loading.value = true
   try {
     const status = tab.value
-    const params: Record<string, string | number> = { status, limit: status === 'resolved' ? HISTORY_LIMIT : 100 }
+    const params: Record<string, string | number> = { status }
+    if (status === 'resolved') {
+      params.limit = HISTORY_PAGE_SIZE
+      params.offset = (page.value - 1) * HISTORY_PAGE_SIZE
+    } else {
+      params.limit = 100
+    }
     const data = await listAlerts(params)
+    if (seq !== loadSeq.value) return
     rows.value = data.items ?? []
+    total.value = data.total ?? 0
   } catch (err) {
+    if (seq !== loadSeq.value) return
     rows.value = []
+    total.value = 0
     showApiError(err, t('alert.loadFailed'))
   } finally {
-    loading.value = false
+    if (seq === loadSeq.value) loading.value = false
   }
 }
 
@@ -219,5 +249,17 @@ async function onResolve(row: AlertRecord) {
   flex-wrap: wrap;
   font-size: 12px;
   gap: 12px;
+}
+
+.title-cell {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.pager {
+  justify-content: flex-end;
+  margin-top: 14px;
 }
 </style>

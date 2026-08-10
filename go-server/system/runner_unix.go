@@ -200,6 +200,11 @@ func buildRunnerCmd(cfg RunnerSpawnConfig) []string {
 		"-e", "UPDATE_COMPOSE_FILE="+cfg.ComposeFile,
 		"-e", "UPDATE_NTFY_URL="+cfg.NtfyURL,
 		"-e", "UPDATE_BACKUP_DIR="+cfg.BackupDir,
+		// 告警中心上报闭环：runner 容器以 --network host 运行，server 地址必须用
+		// 宿主可达地址（server 发布 8000:8000，compose DNS 名 server:8000 不解析）；
+		// service token 走仓库 rw 挂载下的 deploy/secrets/service_token.txt。
+		"-e", "UPDATE_SERVER_URL=http://localhost:8000",
+		"-e", "SERVICE_TOKEN_FILE="+filepath.Join(cfg.RepoRoot, "deploy", "secrets", "service_token.txt"),
 		"-e", "GIT_TERMINAL_PROMPT=0",
 	)
 	args = append(args, cfg.RunnerImage)

@@ -22,6 +22,21 @@ type auditDetailKeyType string
 
 const auditDetailKey auditDetailKeyType = "audit_detail"
 
+type auditUsernameKeyType string
+
+const auditUsernameKey auditUsernameKeyType = "audit_username"
+
+type auditLastLoginKeyType string
+
+const auditLastLoginKey auditLastLoginKeyType = "audit_last_login"
+
+// pendingLastLogin 登录成功后由 auth handler 经 SetAuditLastLogin 登记，
+// Audit 中间件在同一事务内与审计行一起落库（S5：last_login 与审计一致）。
+type pendingLastLogin struct {
+	userID string
+	ip     string
+}
+
 // responseWriter wraps http.ResponseWriter to capture the written status code.
 type responseWriter struct {
 	http.ResponseWriter
@@ -41,6 +56,10 @@ func Audit(db *sql.DB) func(next http.Handler) http.Handler {
 			r = r.WithContext(context.WithValue(r.Context(), auditActionKey, &actionOverride))
 			detail := map[string]any(nil)
 			r = r.WithContext(context.WithValue(r.Context(), auditDetailKey, &detail))
+			reqUsername := ""
+			r = r.WithContext(context.WithValue(r.Context(), auditUsernameKey, &reqUsername))
+			lastLogin := &pendingLastLogin{}
+			r = r.WithContext(context.WithValue(r.Context(), auditLastLoginKey, lastLogin))
 			rw := &responseWriter{ResponseWriter: w, statusCode: http.StatusOK}
 			next.ServeHTTP(rw, r)
 			if (r.Method == http.MethodGet || r.Method == http.MethodHead || r.Method == http.MethodOptions) && actionOverride == "" {
@@ -61,6 +80,10 @@ func Audit(db *sql.DB) func(next http.Handler) http.Handler {
 				// 落 actor_type='system' 便于审计区分系统内部调用。
 				actorType = "system"
 			}
+			// S6：登录/注册无 claims，username 由 handler 经 SetAuditUsername 登记（只记用户名，绝不记密码）。
+			if username == "" {
+				username = auditUsername(r.Context())
+			}
 
 			action := strings.TrimPrefix(r.URL.Path, "/api/v1/")
 			action = strings.ReplaceAll(action, "/", ".")
@@ -68,10 +91,7 @@ func Audit(db *sql.DB) func(next http.Handler) http.Handler {
 				action = actionOverride
 			}
 
-			clientIP := r.RemoteAddr
-			if fwd := r.Header.Get("X-Forwarded-For"); fwd != "" {
-				clientIP = fwd
-			}
+			clientIP := requestSourceIP(r)
 
 			if err := insertAuditLog(r.Context(), db, auditRow{
 				requestID:      common.GetRequestID(r.Context()),
@@ -87,6 +107,7 @@ func Audit(db *sql.DB) func(next http.Handler) http.Handler {
 				agentTaskID:    nullString(AgentTaskID(r.Context())),
 				idempotencyKey: nullString(r.Header.Get("Idempotency-Key")),
 				detail:         detail,
+				lastLogin:      lastLogin,
 			}); err != nil {
 				slog.Error("audit log insert failed", "error", err, "request_id", common.GetRequestID(r.Context()))
 			}
@@ -109,6 +130,7 @@ type auditRow struct {
 	agentTaskID    sql.NullString
 	idempotencyKey sql.NullString
 	detail         map[string]any
+	lastLogin      *pendingLastLogin
 }
 
 // insertAuditLog 是 audit_log 的共享 INSERT 写入器。
@@ -133,6 +155,15 @@ func insertAuditLog(ctx context.Context, db *sql.DB, row auditRow) error {
 	defer tx.Rollback()
 	if _, err := tx.ExecContext(ctx, `SELECT pg_advisory_xact_lock(714001)`); err != nil {
 		return fmt.Errorf("acquire audit chain lock: %w", err)
+	}
+	// S5：登录成功时 last_login 更新与审计行同一事务落库，避免两处不一致。
+	if row.lastLogin != nil && row.lastLogin.userID != "" {
+		if _, err := tx.ExecContext(ctx,
+			`UPDATE users SET last_login_ip = $2, last_login_at = now() WHERE id = $1`,
+			row.lastLogin.userID, row.lastLogin.ip,
+		); err != nil {
+			return err
+		}
 	}
 	if _, err := tx.ExecContext(ctx,
 		`INSERT INTO audit_log
@@ -197,4 +228,27 @@ func nullString(s string) sql.NullString {
 		return sql.NullString{Valid: false}
 	}
 	return sql.NullString{String: s, Valid: true}
+}
+
+// SetAuditUsername 登记无 claims 请求（登录/注册）的请求体用户名，供审计行 username 列使用。
+// 只记用户名，绝不记录密码字段。handler 通过指针间接写入，Audit 中间件响应后统一读值落库。
+func SetAuditUsername(ctx context.Context, username string) {
+	if p, _ := ctx.Value(auditUsernameKey).(*string); p != nil {
+		*p = username
+	}
+}
+
+// SetAuditLastLogin 登记登录成功后的 last_login 更新（userID + 来源 IP），
+// 由 Audit 中间件在同一事务内与审计行一起落库（S5）。
+func SetAuditLastLogin(ctx context.Context, userID, ip string) {
+	if p, _ := ctx.Value(auditLastLoginKey).(*pendingLastLogin); p != nil {
+		*p = pendingLastLogin{userID: userID, ip: ip}
+	}
+}
+
+func auditUsername(ctx context.Context) string {
+	if p, _ := ctx.Value(auditUsernameKey).(*string); p != nil {
+		return *p
+	}
+	return ""
 }

@@ -48,16 +48,20 @@ func (r *Repository) CreateUserWithProfile(username, passwordHash, displayName, 
 func (r *Repository) GetByUsername(username string) (*User, error) {
 	var user User
 	var lockedUntil sql.NullTime
+	var lastLoginIP sql.NullString
+	var lastLoginAt sql.NullTime
 
 	err := r.db.QueryRow(
 		`SELECT id, username, password_hash, display_name, role, must_change_pw,
-		        failed_attempts, token_version, locked_until, created_at, updated_at, disabled, language
+		        failed_attempts, token_version, locked_until, created_at, updated_at, disabled, language,
+		        last_login_ip, last_login_at
 		 FROM users
 		 WHERE username = $1`,
 		username,
 	).Scan(
 		&user.ID, &user.Username, &user.PasswordHash, &user.DisplayName, &user.Role,
 		&user.MustChangePW, &user.FailedAttempts, &user.TokenVersion, &lockedUntil, &user.CreatedAt, &user.UpdatedAt, &user.Disabled, &user.Language,
+		&lastLoginIP, &lastLoginAt,
 	)
 	if err != nil {
 		if err == sql.ErrNoRows {
@@ -67,6 +71,10 @@ func (r *Repository) GetByUsername(username string) (*User, error) {
 	}
 	if lockedUntil.Valid {
 		user.LockedUntil = &lockedUntil.Time
+	}
+	user.LastLoginIP = lastLoginIP.String
+	if lastLoginAt.Valid {
+		user.LastLoginAt = &lastLoginAt.Time
 	}
 	return &user, nil
 }
