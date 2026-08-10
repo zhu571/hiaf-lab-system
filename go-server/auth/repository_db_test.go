@@ -10,7 +10,7 @@ import (
 	_ "github.com/lib/pq"
 )
 
-// 集成测试：需要 TEST_DATABASE_URL（CI/本地按 AGENTS.md 起 postgres 并跑完 001-033 迁移）。
+// 集成测试：需要 TEST_DATABASE_URL（CI/本地按 scripts/test-go.sh 应用全量迁移 001-036）。
 // 覆盖 P2-4：FindRevokedRefreshToken / IsRefreshTokenReuse（真复用重放检测）。
 // 本测试写真实 refresh_tokens 表，结束后清理所有本用例创建的行。
 

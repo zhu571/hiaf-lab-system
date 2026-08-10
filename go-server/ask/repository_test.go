@@ -10,7 +10,7 @@ import (
 	_ "github.com/lib/pq"
 )
 
-// 集成测试：需要 TEST_DATABASE_URL（CI/本地起 postgres 并跑完迁移 001-033）。
+// 集成测试：需要 TEST_DATABASE_URL（CI/本地按 scripts/test-go.sh 应用全量迁移 001-036）。
 // 结束后清理本用例创建的行。ask_history.user_id 引用 users(id)，
 // 用例使用固定 UUID 用户（迁移 001 种子用户范围 00000000-0000-0000-0000-0000000000a1+）。
 

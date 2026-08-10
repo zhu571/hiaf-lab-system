@@ -8,7 +8,7 @@ import (
 	_ "github.com/lib/pq"
 )
 
-// 031 C10 触发器加固回归（需要 TEST_DATABASE_URL，迁移 001-032 全量应用）：
+// 031 C10 触发器加固回归（需要 TEST_DATABASE_URL，CI/本地按 scripts/test-go.sh 应用全量迁移 001-036）：
 //  1. 在途去重：任务 pending 时重复 submit → UPDATE 成功（不再炸唯一约束）且仍只有一个任务；
 //  2. 退回再提交：历史任务 done 后重新 submit → 追加新任务行（历史保留）。
 //

@@ -9,7 +9,7 @@ import (
 	_ "github.com/lib/pq"
 )
 
-// 集成测试：需要 TEST_DATABASE_URL（CI/本地按 AGENTS.md 起 postgres 并跑完 001-027 迁移）。
+// 集成测试：需要 TEST_DATABASE_URL（CI/本地按 scripts/test-go.sh 应用全量迁移 001-036）。
 // 本测试写真实 todos 表，结束后清理所有本用例创建的行。
 
 const (

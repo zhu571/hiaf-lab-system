@@ -14,7 +14,7 @@ import (
 
 // service token by-date 全链路测试（方案 §10）：SERVICE_TOKEN 白名单 + user_id 参数 +
 // latest=true 回退 + 普通 JWT 忽略 user_id 强制取自己 + actor_type='system' 审计。
-// 需要 TEST_DATABASE_URL（迁移 001-027 全量应用）。
+// 需要 TEST_DATABASE_URL（CI/本地按 scripts/test-go.sh 应用全量迁移 001-036）。
 
 const (
 	svcUserA = "00000000-0000-0000-0000-00000000c001"

@@ -13,7 +13,7 @@ import (
 )
 
 // WriteSystemAudit 回归：detail 是 JSONB 列，lib/pq 不接受 map 直传（必须先 Marshal）。
-// 需要 TEST_DATABASE_URL（迁移 001 建 audit_log.detail）。
+// 需要 TEST_DATABASE_URL（CI/本地按 scripts/test-go.sh 应用全量迁移 001-036，001 建 audit_log.detail）。
 func TestWriteSystemAuditDB(t *testing.T) {
 	dsn := os.Getenv("TEST_DATABASE_URL")
 	if dsn == "" {

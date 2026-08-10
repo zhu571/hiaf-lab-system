@@ -11,7 +11,7 @@ import (
 )
 
 // 幂等中间件复用验证（方案 §10）：同 Idempotency-Key 重复提交只生效一次。
-// 需要 TEST_DATABASE_URL（迁移 023 建 idempotency_keys 表）。
+// 需要 TEST_DATABASE_URL（CI/本地按 scripts/test-go.sh 应用全量迁移 001-036，023 建 idempotency_keys 表）。
 func TestRequireIdempotencyKeyReplay(t *testing.T) {
 	dsn := os.Getenv("TEST_DATABASE_URL")
 	if dsn == "" {
