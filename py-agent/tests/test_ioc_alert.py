@@ -252,6 +252,7 @@ class IocCooldownTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_dataloss_alert_fires_when_cooldown_expired(self):
         ioc = make_ioc()
+        ioc._last_ntfy_dataloss_warn = time.monotonic() - 61.0
         ioc._report_alert = AsyncMock()
         ioc._sub_queue = FakeSubQueue(QUEUE_CRITICAL_WATERMARK + 1)
         with self.assertRaises(asyncio.CancelledError):
