@@ -9,7 +9,6 @@ export type SensorPoint = {
   time: string
   tag: string
   value: number
-  meta?: Record<string, string>
 }
 
 export type SensorPoints = {

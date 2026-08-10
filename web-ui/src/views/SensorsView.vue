@@ -1,84 +1,82 @@
 <template>
   <div class="page">
     <div class="toolbar">
-      <h2>{{ t('sensors.title') }}</h2>
+      <div class="dash-title">
+        <h2>{{ t('sensors.title') }}</h2>
+        <p class="dash-sub">{{ t('sensors.subtitle') }}</p>
+      </div>
       <div class="toolbar-right">
-        <span class="muted">{{ $t('sensors.autoRefresh') }}</span>
+        <span class="muted">{{ t('sensors.autoRefresh') }}</span>
         <el-switch v-model="autoRefresh" />
-        <el-button :icon="Refresh" circle :title="$t('sensors.refresh')" @click="loadAll" />
+        <el-button :icon="Refresh" circle :loading="refreshing" :title="t('sensors.refresh')" @click="manualRefresh" />
       </div>
     </div>
 
-    <!-- Latest Readings -->
+    <!-- 最新读数 -->
     <section class="panel">
       <div class="panel-head">
-        <h3 class="panel-title">{{ $t('sensors.latest') }}</h3>
+        <span class="panel-icon"><el-icon><Odometer /></el-icon></span>
+        <h3 class="panel-title">{{ t('sensors.latest') }}</h3>
+        <span class="panel-meta">{{ t('sensors.countInfo', { n: latestPoints.length }) }}</span>
+        <span class="panel-meta">{{ t('sensors.lastUpdated', { time: lastUpdatedText }) }}</span>
+        <span class="muted measurement-label">{{ t('sensors.measurementLabel') }}</span>
         <el-select
           v-model="selectedMeasurements"
           multiple
           collapse-tags
           collapse-tags-tooltip
-          :placeholder="$t('sensors.allMeasurements')"
+          :placeholder="t('sensors.selectMeasurements')"
           class="measure-select"
-          @change="loadLatest"
+          @change="onLatestSelectionChange"
         >
           <el-option v-for="m in MEASUREMENTS" :key="m.value" :label="m.label" :value="m.value" />
         </el-select>
       </div>
       <el-alert v-if="latestError" :title="latestError" type="error" show-icon :closable="false">
-        <el-button size="small" @click="loadLatest">{{ $t('sensors.retry') }}</el-button>
+        <el-button size="small" @click="loadLatest()">{{ t('sensors.retry') }}</el-button>
       </el-alert>
-      <template v-else>
-        <div v-loading="latestLoading" class="reading-grid">
-          <div v-for="point in latestPoints" :key="point.tag || point.time" class="reading-card">
+      <div v-loading="latestLoading" class="reading-grid">
+        <div v-for="point in latestPoints" :key="point.tag || point.time" class="reading-card">
+          <div class="reading-row">
+            <el-tag size="small" effect="plain" class="reading-badge">{{ measurementLabel(point.tag) }}</el-tag>
             <span class="reading-tag">{{ point.tag || '—' }}</span>
-            <strong class="reading-value">{{ fmtValue(point.value) }}</strong>
-            <span class="muted reading-time">{{ formatTime(point.time) }}</span>
-            <div v-if="point.meta && Object.keys(point.meta).length" class="reading-meta">
-              <el-tag v-for="(v, k) in point.meta" :key="k" size="small" effect="plain">{{ k }}: {{ v }}</el-tag>
-            </div>
+            <el-tag v-if="staleLevel(point.time)" size="small" effect="plain" :type="staleLevel(point.time) ?? 'warning'">
+              {{ t('sensors.stale') }}
+            </el-tag>
           </div>
-          <el-empty v-if="!latestLoading && !latestPoints.length" :description="t('sensors.noReadings')" class="grid-empty" />
+          <strong class="reading-value">{{ fmtValue(point.value) }}<span v-if="unitOf(point.tag)" class="reading-unit">{{ unitOf(point.tag) }}</span></strong>
+          <span class="muted reading-time">{{ formatTime(point.time) }}</span>
         </div>
-      </template>
+        <el-empty v-if="!latestLoading && !latestPoints.length" :description="t('sensors.noReadings')" class="grid-empty" />
+      </div>
     </section>
 
     <!-- 历史趋势 -->
     <section class="panel chart-panel">
       <div class="panel-head">
-        <h3 class="panel-title">{{ t('sensors.history') }} <span class="muted hint">{{ t('sensors.historyHint') }}</span></h3>
+        <span class="panel-icon"><el-icon><TrendCharts /></el-icon></span>
+        <h3 class="panel-title">{{ t('sensors.history') }}</h3>
+        <span class="panel-meta hint-meta">{{ t('sensors.historyHint') }}</span>
         <div class="chart-controls">
-          <el-select v-model="historyMeasurement" class="chart-measure" @change="loadHistory">
+          <el-select v-model="historyMeasurement" class="chart-measure" @change="onMeasurementChange">
             <el-option v-for="m in MEASUREMENTS" :key="m.value" :label="m.label" :value="m.value" />
           </el-select>
-          <el-select v-model="historyRange" class="chart-range" @change="loadHistory">
+          <el-select
+            :model-value="rangeZoomed ? undefined : historyRange"
+            class="chart-range"
+            :placeholder="t('sensors.chart.customRange')"
+            @change="onRangeChange"
+          >
             <el-option v-for="r in RANGES" :key="r.from" :label="r.label" :value="r.from" />
           </el-select>
         </div>
       </div>
-      <el-alert v-if="historyError" :title="historyError" type="error" show-icon :closable="false">
-        <el-button size="small" @click="loadHistory">{{ $t('sensors.retry') }}</el-button>
+      <el-alert v-if="historyError" :title="historyError" :type="historyErrorType" show-icon :closable="false">
+        <el-button v-if="historyErrorType === 'error'" size="small" @click="loadHistory()">{{ t('sensors.retry') }}</el-button>
       </el-alert>
-      <div v-else v-loading="historyLoading">
+      <div v-loading="historyLoading" class="chart-body" :class="{ syncing: historySyncing && !historyLoading }">
         <template v-if="chartGroups.length">
-          <div class="chart-scroll">
-          <svg class="trend-chart" :viewBox="`0 0 ${CHART_W} ${CHART_H}`" preserveAspectRatio="xMidYMid meet">
-            <line class="axis" :x1="PAD_X" :y1="CHART_H - PAD_Y" :x2="CHART_W - PAD_X" :y2="CHART_H - PAD_Y" />
-            <line class="axis" :x1="PAD_X" :y1="PAD_Y" :x2="PAD_X" :y2="CHART_H - PAD_Y" />
-            <g v-for="group in chartGroups" :key="group.name">
-              <polyline
-                v-if="group.points.length >= 2"
-                :points="polyline(group)"
-                :stroke="group.color"
-                fill="none"
-                stroke-linecap="round"
-                stroke-linejoin="round"
-                stroke-width="2"
-              />
-              <circle v-for="(c, i) in chartCoords(group)" :key="i" :cx="c.x" :cy="c.y" :fill="group.color" r="2.5" />
-            </g>
-          </svg>
-          </div>
+          <SensorTrendChart :groups="chartGroups" :window-key="windowKey" :window-size-ms="windowSizeMs" @zoom-change="onZoomChange" />
           <div class="legend">
             <span v-for="group in chartGroups" :key="group.name" class="legend-item">
               <i class="legend-dot" :style="{ background: group.color }" />
@@ -87,7 +85,7 @@
             </span>
           </div>
         </template>
-        <el-empty v-else-if="!historyLoading" :description="t('sensors.noDataInRange')" />
+        <el-empty v-else-if="!historyLoading && !historyError" :description="t('sensors.noDataInRange')" />
       </div>
     </section>
   </div>
@@ -96,11 +94,15 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { Refresh } from '@element-plus/icons-vue'
+import { Odometer, Refresh, TrendCharts } from '@element-plus/icons-vue'
 import { getHistory, getLatest, type SensorPoint } from '../api/sensors'
 import { showApiError } from '../composables/useNotify'
+import SensorTrendChart, { type ChartGroup, type ChartPoint } from '../components/SensorTrendChart.vue'
 
-const { t } = useI18n()
+const { t, locale } = useI18n()
+
+// 时间显示跟随界面语言（§3.9 P1-5，DashboardView dateLocale 模式）
+const dateLocale = computed(() => (locale.value === 'zh' ? 'zh-CN' : 'en-US'))
 
 // 与后端 INFLUXDB_MEASUREMENTS 默认值一致（go-server/sensors/service.go）
 const MEASUREMENTS = computed(() => [
@@ -119,9 +121,20 @@ const RANGES = computed(() => [
     { label: t('sensors.range.7d'), from: '-7d', interval: '1h' }
   ])
 
-const REFRESH_MS = 5000
+// 显示层静态单位约定：后端暂无 unit 字段，后续后端返回 unit 时替换为动态值（§3.6 P1-2）
+const UNIT_MAP: Record<string, string> = {
+  pressure: 'Pa',
+  vacuum: 'Pa',
+  control: '%',
+  temperature: 'K',
+  pump: '%'
+}
 
-const selectedMeasurements = ref<string[]>([])
+const REFRESH_MS = 5000
+const HISTORY_REFRESH_MS = 30000
+
+// P0-3：默认显式选中 5 个已知测量项，消除「空选择 = 后端整桶查询」歧义
+const selectedMeasurements = ref<string[]>(MEASUREMENTS.value.map((m) => m.value))
 const latestPoints = ref<SensorPoint[]>([])
 const latestLoading = ref(false)
 const latestError = ref('')
@@ -131,19 +144,21 @@ const historyRange = ref('-1h')
 const historyPoints = ref<SensorPoint[]>([])
 const historyLoading = ref(false)
 const historyError = ref('')
+const historyErrorType = ref<'error' | 'warning'>('error')
+const historySyncing = ref(false)
+// 自定义态哨兵：唯一由组件 zoom-change 事件驱动（§4.2.2 定稿）
+const rangeZoomed = ref(false)
 
 const autoRefresh = ref(true)
-let timer: number | undefined
+const refreshing = ref(false)
+const lastUpdatedAt = ref<Date | null>(null)
+let latestTimer: number | undefined
+let historyTimer: number | undefined
+let hiddenPaused = false
+let historySeq = 0
 
-// 趋势图：viewBox 坐标与调色板
-const CHART_W = 640
-const CHART_H = 260
-const PAD_X = 28
-const PAD_Y = 20
+// 趋势图调色板
 const palette = ['var(--brand-500)', 'var(--ok)', 'var(--warn)', 'var(--danger)', '#7a5af8', '#0d5a70', '#c2477e', '#5a8a3c']
-
-type ChartPoint = { time: number; value: number }
-type ChartGroup = { name: string; color: string; points: ChartPoint[] }
 
 const chartGroups = computed<ChartGroup[]>(() => {
   const groups = new Map<string, ChartPoint[]>()
@@ -162,73 +177,147 @@ const chartGroups = computed<ChartGroup[]>(() => {
   }))
 })
 
-function chartCoords(group: ChartGroup) {
-  const n = group.points.length
-  const values = group.points.map((p) => p.value)
-  const min = Math.min(...values)
-  const max = Math.max(...values)
-  return group.points.map((p, i) => ({
-    x: n === 1 ? CHART_W / 2 : PAD_X + (i / (n - 1)) * (CHART_W - 2 * PAD_X),
-    y: max === min ? CHART_H / 2 : CHART_H - PAD_Y - ((p.value - min) / (max - min)) * (CHART_H - 2 * PAD_Y)
-  }))
-}
+// windowKey 变化 → SensorTrendChart 复位 xWindow（§4.5）。
+// rangeNonce 保证缩放态下重新点击当前已选档也触发复位（§4.2.2「点击任一档」语义）。
+const rangeNonce = ref(0)
+const windowKey = computed(() => `${historyMeasurement.value}:${historyRange.value}:${rangeNonce.value}`)
+const windowSizeMs = computed(() => {
+  const map: Record<string, number> = { '-1h': 3600e3, '-6h': 21600e3, '-24h': 86400e3, '-7d': 604800e3 }
+  return map[historyRange.value] || 3600e3
+})
 
-function polyline(group: ChartGroup) {
-  return chartCoords(group)
-    .map((c) => `${c.x.toFixed(1)},${c.y.toFixed(1)}`)
-    .join(' ')
-}
+/* ---------- 刷新机制（§3.2 P0-2） ---------- */
 
 onMounted(() => {
-  loadAll()
-  timer = window.setInterval(() => {
-    if (autoRefresh.value) loadAll()
-  }, REFRESH_MS)
+  document.addEventListener('visibilitychange', onVisibilityChange)
 })
 
 onBeforeUnmount(() => {
-  window.clearInterval(timer)
+  document.removeEventListener('visibilitychange', onVisibilityChange)
+  stopTimers()
 })
 
-watch(autoRefresh, (on) => {
-  if (on) loadAll()
-})
+// autoRefresh 开关同时管辖 latest 5s + history 30s 两个定时器（§3.2 定稿）
+watch(
+  autoRefresh,
+  (on) => {
+    if (on) {
+      startTimers()
+      loadAll()
+    } else {
+      stopTimers()
+    }
+  },
+  { immediate: true }
+)
 
-function loadAll() {
-  loadLatest()
-  loadHistory()
+function startTimers() {
+  stopTimers()
+  latestTimer = window.setInterval(() => {
+    if (!document.hidden) loadLatest({ silent: true })
+  }, REFRESH_MS)
+  historyTimer = window.setInterval(() => {
+    if (!document.hidden) loadHistory({ silent: true })
+  }, HISTORY_REFRESH_MS)
 }
 
-async function loadLatest() {
-  latestLoading.value = true
+function stopTimers() {
+  window.clearInterval(latestTimer)
+  window.clearInterval(historyTimer)
+  latestTimer = undefined
+  historyTimer = undefined
+}
+
+// 页面隐藏暂停、恢复可见重启（§3.2 定稿，AppLayout visibilitychange 先例）
+function onVisibilityChange() {
+  if (document.hidden) {
+    if (!hiddenPaused) {
+      hiddenPaused = true
+      stopTimers()
+    }
+  } else if (hiddenPaused) {
+    hiddenPaused = false
+    if (autoRefresh.value) {
+      startTimers()
+      loadLatest({ silent: true })
+    }
+  }
+}
+
+async function loadAll(opts: { silent?: boolean } = {}) {
+  await Promise.all([loadLatest(opts), loadHistory(opts)])
+}
+
+// 手动刷新：el-button loading 态天然防重（§3.2 定稿），走静默入口不闪遮罩
+async function manualRefresh() {
+  refreshing.value = true
+  try {
+    await loadAll({ silent: true })
+  } finally {
+    refreshing.value = false
+  }
+}
+
+async function loadLatest(opts: { silent?: boolean } = {}) {
+  if (!opts.silent) latestLoading.value = true
   latestError.value = ''
   try {
     const data = await getLatest(selectedMeasurements.value)
     latestPoints.value = data.points ? [...data.points].sort((a, b) => a.tag.localeCompare(b.tag)) : []
+    lastUpdatedAt.value = new Date()
   } catch (err) {
     latestError.value = err instanceof Error ? err.message : t('sensors.latestFailed')
-    // 自动刷新期间的失败不打 toast，避免刷屏；手动刷新（点击）时提示
-    if (!autoRefresh.value) showApiError(err, t('sensors.latestFailed'))
+    // 轮询期失败静默降级到面板内警示条，不打 toast 刷屏（§3.2）
+    if (!opts.silent) showApiError(err, t('sensors.latestFailed'))
   } finally {
     latestLoading.value = false
   }
 }
 
-async function loadHistory() {
+async function loadHistory(opts: { silent?: boolean } = {}) {
   if (!historyMeasurement.value) return
-  historyLoading.value = true
+  const seq = ++historySeq
+  if (!opts.silent) historyLoading.value = true
+  if (opts.silent) historySyncing.value = true
   historyError.value = ''
   const range = RANGES.value.find((r) => r.from === historyRange.value) || RANGES.value[0]
   try {
     const data = await getHistory(historyMeasurement.value, range.from, '', range.interval)
+    if (seq !== historySeq) return
     historyPoints.value = data.points || []
   } catch (err) {
+    if (seq !== historySeq) return
     historyError.value = err instanceof Error ? err.message : t('sensors.historyFailed')
-    if (!autoRefresh.value) showApiError(err, t('sensors.historyFailed'))
+    historyErrorType.value = opts.silent ? 'warning' : 'error'
+    if (!opts.silent) showApiError(err, t('sensors.historyFailed'))
   } finally {
-    historyLoading.value = false
+    if (seq === historySeq) {
+      historyLoading.value = false
+      historySyncing.value = false
+    }
   }
 }
+
+function onLatestSelectionChange() {
+  loadLatest()
+}
+
+function onMeasurementChange() {
+  loadHistory()
+}
+
+// 快捷档点击：切 range + loadHistory + 复位为跟随模式（§4.2.2）
+function onRangeChange(value: string) {
+  historyRange.value = value
+  rangeNonce.value++
+  loadHistory()
+}
+
+function onZoomChange(e: { zoomed: boolean }) {
+  rangeZoomed.value = e.zoomed
+}
+
+/* ---------- 展示辅助 ---------- */
 
 function fmtValue(v: number) {
   if (v === 0) return '0'
@@ -238,7 +327,41 @@ function fmtValue(v: number) {
 }
 
 function formatTime(v?: string) {
-  return v ? new Date(v).toLocaleString('zh-CN', { hour12: false }) : '—'
+  return v ? new Date(v).toLocaleString(dateLocale.value, { hour12: false }) : '—'
+}
+
+const lastUpdatedText = computed(() => (lastUpdatedAt.value ? formatTime(lastUpdatedAt.value.toISOString()) : '—'))
+
+// 卡片归属：已知测量项前缀匹配（大小写不敏感）→ 未知徽标兜底（§3.3 定稿）
+function measurementOf(tag: string): string | null {
+  const lower = tag.toLowerCase()
+  for (const m of MEASUREMENTS.value) {
+    if (lower.startsWith(m.value)) return m.value
+  }
+  return null
+}
+
+function measurementLabel(tag: string) {
+  const m = measurementOf(tag)
+  return m ? t(`sensors.measurement.${m}`) : t('sensors.unknown')
+}
+
+function unitOf(tag: string) {
+  const m = measurementOf(tag)
+  return m && UNIT_MAP[m] ? UNIT_MAP[m] : ''
+}
+
+// 新鲜度：>60s warning、>10min danger（§3.4 P0-4）
+function ageSeconds(time?: string) {
+  if (!time) return Number.POSITIVE_INFINITY
+  const t = new Date(time).getTime()
+  return Number.isNaN(t) ? Number.POSITIVE_INFINITY : (Date.now() - t) / 1000
+}
+
+function staleLevel(time?: string): 'warning' | 'danger' | null {
+  const age = ageSeconds(time)
+  if (!Number.isFinite(age) || age <= 60) return null
+  return age > 600 ? 'danger' : 'warning'
 }
 </script>
 
@@ -249,12 +372,21 @@ function formatTime(v?: string) {
   gap: 10px;
 }
 
+.dash-title h2 {
+  font-size: 22px;
+}
+
+.dash-sub {
+  color: var(--text-3);
+  font-size: 13px;
+  margin-top: 2px;
+}
+
 .panel-head {
   align-items: center;
   display: flex;
   flex-wrap: wrap;
   gap: 10px;
-  justify-content: space-between;
   margin-bottom: 14px;
 }
 
@@ -262,13 +394,41 @@ function formatTime(v?: string) {
   font-size: 15px;
 }
 
-.hint {
+.panel-icon {
+  align-items: center;
+  background: var(--brand-050);
+  border-radius: 8px;
+  color: var(--brand-600);
+  display: inline-flex;
+  flex-shrink: 0;
+  font-size: 15px;
+  height: 28px;
+  justify-content: center;
+  width: 28px;
+}
+
+.panel-meta {
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  color: var(--text-3);
   font-size: 12px;
+  font-variant-numeric: tabular-nums;
+  padding: 2px 10px;
+  white-space: nowrap;
+}
+
+.hint-meta {
   font-weight: 400;
 }
 
 .measure-select {
+  margin-left: auto;
   min-width: 220px;
+}
+
+.measurement-label {
+  font-size: 12px;
 }
 
 .reading-grid {
@@ -290,6 +450,17 @@ function formatTime(v?: string) {
   padding: 12px 14px;
 }
 
+.reading-row {
+  align-items: center;
+  display: flex;
+  gap: 6px;
+  min-width: 0;
+}
+
+.reading-badge {
+  flex-shrink: 0;
+}
+
 .reading-tag {
   color: var(--text-3);
   font-size: 12px;
@@ -304,15 +475,15 @@ function formatTime(v?: string) {
   font-variant-numeric: tabular-nums;
 }
 
-.reading-time {
-  font-size: 11px;
+.reading-unit {
+  color: var(--text-3);
+  font-size: 13px;
+  font-weight: 400;
+  margin-left: 4px;
 }
 
-.reading-meta {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 4px;
-  margin-top: 4px;
+.reading-time {
+  font-size: 11px;
 }
 
 .chart-panel {
@@ -323,6 +494,7 @@ function formatTime(v?: string) {
   display: flex;
   flex-wrap: wrap;
   gap: 10px;
+  margin-left: auto;
 }
 
 .chart-measure {
@@ -333,15 +505,12 @@ function formatTime(v?: string) {
   width: 140px;
 }
 
-.trend-chart {
-  display: block;
-  height: auto;
-  width: 100%;
+.chart-body {
+  transition: opacity 0.2s;
 }
 
-.axis {
-  stroke: var(--border-strong);
-  stroke-width: 1;
+.chart-body.syncing {
+  opacity: 0.6;
 }
 
 .legend {
@@ -373,12 +542,15 @@ function formatTime(v?: string) {
     width: 100%;
   }
 
-  .chart-scroll {
-    overflow-x: auto;
+  .measure-select,
+  .chart-controls {
+    margin-left: 0;
   }
+}
 
-  .trend-chart {
-    width: 640px;
+@media (max-width: 480px) {
+  .reading-grid {
+    grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
   }
 }
 </style>
