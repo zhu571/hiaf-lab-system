@@ -23,20 +23,24 @@ func (r *Repository) Create(template *StepTemplate, items []StepTemplateItem) (*
 	defer tx.Rollback()
 
 	var t StepTemplate
+	var description, sourcePrompt sql.NullString
 	err = tx.QueryRow(
 		`INSERT INTO step_templates (name, kind, description, source_prompt, ai_generated, created_by)
 		 VALUES ($1,$2,$3,$4,$5,$6)
 		 RETURNING `+templateColumns,
 		template.Name, template.Kind, nullText(template.Description),
 		nullText(template.SourcePrompt), template.AIGenerated, template.CreatedBy,
-	).Scan(&t.ID, &t.Name, &t.Kind, &t.Description, &t.SourcePrompt, &t.AIGenerated,
+	).Scan(&t.ID, &t.Name, &t.Kind, &description, &sourcePrompt, &t.AIGenerated,
 		&t.CreatedBy, &t.CreatedAt, &t.UpdatedAt)
 	if err != nil {
 		return nil, fmt.Errorf("insert template: %w", err)
 	}
+	t.Description = description.String
+	t.SourcePrompt = sourcePrompt.String
 
 	for _, item := range items {
 		var it StepTemplateItem
+		var itDesc sql.NullString
 		metaJSON, err := json.Marshal(itemMeta(item.Meta))
 		if err != nil {
 			return nil, fmt.Errorf("marshal item meta: %w", err)
@@ -46,11 +50,12 @@ func (r *Repository) Create(template *StepTemplate, items []StepTemplateItem) (*
 			 VALUES ($1,$2,$3,$4,$5,$6)
 			 RETURNING `+itemColumns,
 			t.ID, item.Name, nullText(item.Description), item.StepOrder, item.DependsOnOrder, metaJSON,
-		).Scan(&it.ID, &it.TemplateID, &it.Name, &it.Description, &it.StepOrder,
+		).Scan(&it.ID, &it.TemplateID, &it.Name, &itDesc, &it.StepOrder,
 			&it.DependsOnOrder, &it.Meta, &it.CreatedAt, &it.UpdatedAt)
 		if err != nil {
 			return nil, fmt.Errorf("insert template item: %w", err)
 		}
+		it.Description = itDesc.String
 	}
 
 	if err := tx.Commit(); err != nil {

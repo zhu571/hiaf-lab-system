@@ -162,7 +162,7 @@ func (s *Service) Create(userID, userRole string, req CreateTemplateRequest) (*S
 		return nil, err
 	}
 	if err := validateCreateRequest(req); err != nil {
-		return nil, err
+		return nil, fmt.Errorf("%w: %v", ErrInvalidInput, err)
 	}
 	items := reorderAndNormalizeItems(req.Items)
 	template := &StepTemplate{
