@@ -1,0 +1,24 @@
+# ============================================================
+# lab-backup.timer — 每日 03:00 触发 lab-backup.service（10h 优化 A 项）
+#
+# 与 lab-backup.service 同目录安装（部署步骤见 lab-backup.service 文件头注释）：
+#   sudo cp deploy/systemd/lab-backup.timer /etc/systemd/system/
+#   sudo systemctl daemon-reload
+#   sudo systemctl enable --now lab-backup.timer
+#
+# 说明：
+#   - Type=oneshot 的 service 每次执行完即退出，`systemctl status lab-backup.service`
+#     显示 inactive (dead) 属正常现象，timer 到点会再次拉起。
+#   - Persistent=true：错过计划时间（如停机）后，下次开机补跑一次。
+#   - 备份内容轮转（保留 14 天）由 backup.sh 内部 find -mtime +14 -delete 完成。
+#   - 验证：systemctl list-timers lab-backup.timer
+# ============================================================
+[Unit]
+Description=Run HIAF lab database backup daily at 03:00
+
+[Timer]
+OnCalendar=*-*-* 03:00:00
+Persistent=true
+
+[Install]
+WantedBy=timers.target
