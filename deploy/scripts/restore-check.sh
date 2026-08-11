@@ -91,11 +91,11 @@ echo "表数：临时库 $REST_TABLES / 生产 $PROD_TABLES"
   exit 1
 }
 
-# 校验 2：迁移版本号（应含迁移 001-037 的全部版本）
-MIGRATED="$(psql_exec "$TEMP_DB" "SELECT count(*) FROM schema_migrations")"
-echo "已应用迁移：$MIGRATED / 期望 $EXPECTED_MIGRATIONS"
-[ "${MIGRATED:-0}" = "$EXPECTED_MIGRATIONS" ] || {
-  echo "失败：schema_migrations 版本数 $MIGRATED ≠ $EXPECTED_MIGRATIONS（缺失迁移）"
+# 校验 2：迁移版本号（golang-migrate 的 schema_migrations 只存当前版本一行，应 = 37）
+MIG_VERSION="$(psql_exec "$TEMP_DB" "SELECT version FROM schema_migrations LIMIT 1")"
+echo "已应用迁移：v${MIG_VERSION:-0} / 期望 v$EXPECTED_MIGRATIONS"
+[ "${MIG_VERSION:-0}" = "$EXPECTED_MIGRATIONS" ] || {
+  echo "失败：schema_migrations 版本 ${MIG_VERSION:-0} ≠ $EXPECTED_MIGRATIONS（缺失迁移）"
   exit 1
 }
 
