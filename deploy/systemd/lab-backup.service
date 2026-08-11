@@ -1,0 +1,42 @@
+# ============================================================
+# lab-backup.service — 数据库每日定时备份（10h 优化 A 项）
+#
+# 部署（gascell 部署机，SELinux Enforcing，参照 deploy/scripts/README.md
+# watchdog 先例：systemd 无法直接执行 home 目录脚本 status=203/EXEC，
+# 必须先安装到系统路径并恢复 bin_t context）：
+#
+#   sudo install -m 755 deploy/scripts/backup.sh /usr/local/bin/lab-backup.sh
+#   sudo restorecon -v /usr/local/bin/lab-backup.sh      # 恢复 bin_t context
+#   sudo cp deploy/systemd/lab-backup.service /etc/systemd/system/
+#   sudo cp deploy/systemd/lab-backup.timer  /etc/systemd/system/
+#   sudo systemctl daemon-reload
+#   sudo systemctl enable --now lab-backup.timer
+#
+# 验证：
+#   sudo systemctl list-timers lab-backup.timer          # 确认下次触发时间
+#   sudo systemctl start lab-backup.service              # 手动触发一次（继承下方 Environment，flock 防重入）
+#   ls -lh /opt/lab-backups/                             # 确认 dump 文件生成（0600）
+#   journalctl -u lab-backup.service                     # 查看备份日志
+#
+# 注意：
+#   - 脚本安装到 /usr/local/bin 后，脚本内 `$SCRIPT_DIR/../secrets/...` 相对路径
+#     失效，必须用下方 Environment 显式指向仓库绝对路径（README watchdog 示例同款），
+#     告警中心不可用时的 ntfy 直发兜底同样依赖 BACKUP_NTFY_TOKEN_FILE 注入。
+#   - 若改为直接从仓库路径执行（不走 /usr/local/bin），需同步修改下方 ExecStart
+#     与 Environment 里的仓库路径，并确认 SELinux context 允许执行（建议仍走
+#     /usr/local/bin + restorecon，与 lab-watchdog 部署记录一致）。
+#   - 备份脚本需连接 docker.sock：若 journalctl 出现连接被拒/AVC 记录
+#     （`ausearch -m avc -ts recent | grep lab-backup`），说明 bin_t 域被策略拦截，
+#     参照 lab-watchdog 部署记录放行后再启用。
+#   - 仓库路径若不在 /home/gascell/hiaf-lab-system，以下路径需相应修改。
+# ============================================================
+[Unit]
+Description=HIAF lab database daily backup (pg_dump to /opt/lab-backups)
+
+[Service]
+Type=oneshot
+Environment=BACKUP_COMPOSE_FILE=/home/gascell/hiaf-lab-system/deploy/docker-compose.yml
+Environment=BACKUP_SERVICE_TOKEN_FILE=/home/gascell/hiaf-lab-system/deploy/secrets/service_token.txt
+Environment=BACKUP_NTFY_TOKEN_FILE=/home/gascell/hiaf-lab-system/deploy/secrets/ntfy_publish_token.txt
+Environment=BACKUP_API_URL=http://10.144.144.12:8000
+ExecStart=/usr/local/bin/lab-backup.sh
