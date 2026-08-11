@@ -235,6 +235,11 @@ jobs:
           cd web-ui
           # dist 由上一步 npm run build 产出（steps 共享工作区），此处只做一致性 diff
           diff -rq dist ../go-server/static || (echo "::error::web-ui/dist 与 go-server/static 不一致，请 rsync 同步" && exit 1)
+      - name: Coverage report (non-blocking)
+        run: |
+          cd web-ui
+          # vitest --coverage（@vitest/coverage-v8，stores/utils/i18n）：纯报告不阻塞 job
+          npm run test:coverage || echo "::warning::vitest coverage report skipped"
 
   python-check:
     runs-on: ubuntu-latest
@@ -258,6 +263,12 @@ jobs:
       - name: Run unit tests
         run: |
           python -m unittest discover -s py-agent/tests -v
+      - name: Coverage report (non-blocking)
+        run: |
+          # coverage.py 在 requirements-dev.txt（生产依赖分离）；纯报告不阻塞 job
+          python -m pip install coverage >/dev/null 2>&1 || true
+          cd py-agent
+          coverage run -m unittest discover -s tests -q && coverage report -m || echo "::warning::python coverage report skipped"
 
   # Playwright E2E 冒烟（测试策略方案 §4.4 / P2）：手动 workflow_dispatch 触发，
   # 不纳入 PR/push 必检——起完整栈（postgres + go build + vite + playwright）成本高。
