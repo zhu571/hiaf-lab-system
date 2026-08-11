@@ -404,6 +404,38 @@ for svc in postgres influxdb grafana ntfy epics-gateway ioc py-agent-interpret s
   check_health "$svc"
 done
 
+# ---- 附加验证 1：数据库 schema 版本（migrations vs schema_migrations）----
+log "验证数据库 schema 版本 …"
+EXPECTED_SCHEMA=$(ls "$REPO_ROOT"/migrations/*.up.sql | wc -l | tr -d '[:space:]')
+ACTUAL_SCHEMA=$(docker compose -f "$COMPOSE_FILE" exec -T postgres psql -U lab -tAc "SELECT version FROM schema_migrations ORDER BY version DESC LIMIT 1" 2>/dev/null | tr -d '[:space:]' || true)
+if [ -z "$ACTUAL_SCHEMA" ] || [ "$ACTUAL_SCHEMA" != "$EXPECTED_SCHEMA" ]; then
+  err "schema 版本不匹配: 期望 $EXPECTED_SCHEMA，实际 ${ACTUAL_SCHEMA:-无法读取}"
+  ALL_HEALTHY=false
+else
+  log "schema 版本 OK: $ACTUAL_SCHEMA"
+fi
+
+# ---- 附加验证 2：前端产物（防 embed 白屏回归）----
+log "验证前端产物（server 容器内 embed 的 static）…"
+EMBEDDED_JS=$(docker compose -f "$COMPOSE_FILE" exec -T server sh -c 'ls /app/static/assets/*.js 2>/dev/null | head -1' 2>/dev/null || true)
+if [ -z "$EMBEDDED_JS" ]; then
+  err "server 容器内未发现前端静态产物（/app/static/assets/*.js 为空，疑似白屏风险）"
+  ALL_HEALTHY=false
+else
+  log "容器内产物: $(basename "$EMBEDDED_JS")"
+  if [ -d "$REPO_ROOT/web-ui/dist/assets" ]; then
+    LOCAL_JS=$(ls "$REPO_ROOT"/web-ui/dist/assets/*.js 2>/dev/null | head -1)
+    if [ "$(basename "$LOCAL_JS")" != "$(basename "$EMBEDDED_JS")" ]; then
+      err "前端产物不一致: 容器 $(basename "$EMBEDDED_JS") vs 工作区 $(basename "$LOCAL_JS")，请检查 embed/构建是否过期"
+      ALL_HEALTHY=false
+    else
+      log "前端产物与工作区 web-ui/dist 一致"
+    fi
+  else
+    warn "工作区无 web-ui/dist，跳过产物对比（容器内产物已验证非空）"
+  fi
+fi
+
 log ""
 if $ALL_HEALTHY; then
   log "=========================================="
