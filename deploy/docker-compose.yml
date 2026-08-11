@@ -1,7 +1,15 @@
+# 全局日志轮转（10h 优化 C）：所有容器 json-file 单文件最大 10m、最多 3 个，防日志撑爆磁盘
+x-logging: &default-logging
+  driver: json-file
+  options:
+    max-size: "10m"
+    max-file: "3"
+
 services:
   postgres:
     image: postgres:16-alpine
     container_name: lab-postgres
+    logging: *default-logging
     environment:
       POSTGRES_USER: lab
       POSTGRES_DB: lab
@@ -23,6 +31,7 @@ services:
       context: ..
       dockerfile: deploy/Dockerfile.migrate
     container_name: lab-migrate
+    logging: *default-logging
     depends_on:
       postgres:
         condition: service_healthy
@@ -39,6 +48,7 @@ services:
   epics-gateway:
     build:
       context: ../go-server/epics-gateway
+    logging: *default-logging
     environment:
       EPICS_CA_ADDR_LIST: ${EPICS_CA_ADDR_LIST:-ioc:5064}
       EPICS_CA_AUTO_ADDR_LIST: "NO"
@@ -49,6 +59,7 @@ services:
   influxdb:
     image: docker.m.daocloud.io/influxdb:2-alpine
     container_name: lab-influxdb
+    logging: *default-logging
     restart: unless-stopped
     ports:
       - "8086:8086"
@@ -72,6 +83,7 @@ services:
     # 锁版本（P1-3）：升级遵循 docs/maintenance-strategy.md 双 MINOR/3 个月窗口策略
     image: docker.m.daocloud.io/grafana/grafana:11.1.0
     container_name: lab-grafana
+    logging: *default-logging
     restart: unless-stopped
     # admin 密码走 secret：Grafana 官方镜像不支持 *_FILE 环境变量，entrypoint 内 cat 注入
     entrypoint: ["/bin/sh", "-c", "export GF_SECURITY_ADMIN_PASSWORD=$$(cat /run/secrets/grafana_admin_password); exec /run.sh"]
@@ -96,6 +108,7 @@ services:
   ioc:
     build: ../py-agent/ioc
     container_name: lab-ioc
+    logging: *default-logging
     restart: unless-stopped
     ports:
       - "5064:5064"
@@ -144,6 +157,7 @@ services:
       context: ..
       dockerfile: deploy/Dockerfile
     container_name: lab-server
+    logging: *default-logging
     user: "${UPDATE_RUN_UID:-1000}:${UPDATE_RUN_GID:-1000}"
     group_add:
       - "${UPDATE_DOCKER_GID:-993}"
@@ -229,6 +243,7 @@ services:
       context: ../py-agent
       dockerfile: Dockerfile
     container_name: lab-py-agent
+    logging: *default-logging
     environment:
       GO_API_BASE: http://server:8000
       AGENT_USERNAME: agent@system
@@ -261,6 +276,7 @@ services:
     build:
       context: ../py-agent
       dockerfile: Dockerfile
+    logging: *default-logging
     command: ["python", "serve.py"]
     environment:
       # AskEngine 出站调 Go ask/execute 的内部地址（与 py-agent worker 一致，server:8000）
@@ -289,6 +305,7 @@ services:
     # 镜像锁定版本（与 deploy/Dockerfile 的 ntfy-cli 阶段一致：auth-file schema 兼容）
     image: binwiederhier/ntfy:v2.27.0
     container_name: lab-ntfy
+    logging: *default-logging
     command: serve
     volumes:
       - ntfy-cache:/var/cache/ntfy
@@ -304,6 +321,7 @@ services:
     # 锁版本（P2-2）：升级遵循 docs/maintenance-strategy.md 双 MINOR/3 个月窗口策略
     image: docker.m.daocloud.io/prom/prometheus:v2.53.0
     container_name: lab-prometheus
+    logging: *default-logging
     command:
       - --config.file=/etc/prometheus/prometheus.yml
       - --storage.tsdb.retention.time=90d
