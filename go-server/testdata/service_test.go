@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -371,12 +372,15 @@ func (f fakeAccess) CanAccessProject(_, _, _ string, minRole string) (bool, erro
 func (f fakeAccess) ProjectRole(_, _, _ string) (string, error) { return f.role, nil }
 
 type fakeRuns struct {
+	mu      sync.Mutex
 	exists  bool
 	missing map[string]bool // 命中该集合的 run_id 视为不存在
 	calls   int
 }
 
 func (f *fakeRuns) Exists(runID string, _ http.Header) (bool, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
 	f.calls++
 	if f.missing[runID] {
 		return false, nil
