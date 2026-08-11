@@ -15,6 +15,10 @@ type sourceIPKeyType string
 
 const sourceIPKey sourceIPKeyType = "source_ip"
 
+type sourceKindKeyType string
+
+const sourceKindKey sourceKindKeyType = "source_kind"
+
 // 网段 / Caddy 虚拟 IP 常量（可 env 覆盖，见 SourceGate）。
 const (
 	defaultSourceGateLANCIDR   = "10.144.144.0/24"
@@ -59,6 +63,7 @@ func SourceGate() func(http.Handler) http.Handler {
 				r.Header.Del("X-Forwarded-For")
 			}
 			ctx := context.WithValue(r.Context(), sourceIPKey, srcIP)
+			ctx = context.WithValue(ctx, sourceKindKey, kind.String())
 			if !enabled {
 				next.ServeHTTP(w, r.WithContext(ctx))
 				return
@@ -102,6 +107,21 @@ func classifySource(peer, xff, secretHeader string, proxyIP net.IP, lanNet *net.
 	return sourceKindPublic, peer
 }
 
+// String 返回来源分类的日志字段值（与 GetSourceKind 约定一致）。
+func (k sourceKind) String() string {
+	switch k {
+	case sourceKindProxy:
+		return "proxy"
+	case sourceKindSuspicious:
+		return "suspicious"
+	case sourceKindInternal:
+		return "internal"
+	case sourceKindPublic:
+		return "public"
+	}
+	return "unknown"
+}
+
 // sourceWriteAllowed 公网写路径白名单（不按 HTTP 方法一刀切）：
 // AI 只读辅助端点 + 认证端点 + 急停显式例外（D7）放行，其余写一律拒。
 func sourceWriteAllowed(method, path string) bool {
@@ -138,6 +158,12 @@ func firstXFF(v string) string {
 func GetSourceIP(ctx context.Context) string {
 	ip, _ := ctx.Value(sourceIPKey).(string)
 	return ip
+}
+
+// GetSourceKind 返回来源门判定的来源分类（proxy/suspicious/internal/public；未经过来源门返回空串）。
+func GetSourceKind(ctx context.Context) string {
+	kind, _ := ctx.Value(sourceKindKey).(string)
+	return kind
 }
 
 // requestSourceIP 供 middleware 内部读取：优先来源门 IP，缺失（未挂载/单测）回退真实 TCP 对端。
