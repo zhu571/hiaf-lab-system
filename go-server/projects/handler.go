@@ -25,6 +25,7 @@ func (h *Handler) Create(w http.ResponseWriter, r *http.Request) {
 	if !requireIdempotencyKey(w, r) {
 		return
 	}
+	middleware.SetAuditAction(r.Context(), "projects.create")
 	claims := middleware.GetUserClaims(r.Context())
 	if claims == nil {
 		common.WriteError(w, r, http.StatusUnauthorized, "unauthorized", "未登录", nil)
@@ -71,6 +72,7 @@ func (h *Handler) Update(w http.ResponseWriter, r *http.Request) {
 	if !requireIdempotencyKey(w, r) {
 		return
 	}
+	middleware.SetAuditAction(r.Context(), "projects.update")
 	var req UpdateProjectRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		common.WriteError(w, r, http.StatusBadRequest, "bad_request", "请求体解析失败", nil)
@@ -88,6 +90,7 @@ func (h *Handler) TransitionStatus(w http.ResponseWriter, r *http.Request) {
 	if !requireIdempotencyKey(w, r) {
 		return
 	}
+	middleware.SetAuditAction(r.Context(), "projects.transition")
 	claims := middleware.GetUserClaims(r.Context())
 	if claims == nil {
 		common.WriteError(w, r, http.StatusUnauthorized, "unauthorized", "未登录", nil)
@@ -125,6 +128,7 @@ func (h *Handler) AddMember(w http.ResponseWriter, r *http.Request) {
 	if !requireIdempotencyKey(w, r) {
 		return
 	}
+	middleware.SetAuditAction(r.Context(), "projects.members.add")
 	claims := middleware.GetUserClaims(r.Context())
 	if claims == nil {
 		common.WriteError(w, r, http.StatusUnauthorized, "unauthorized", "未登录", nil)
@@ -156,6 +160,7 @@ func (h *Handler) UpdateMemberRole(w http.ResponseWriter, r *http.Request) {
 	if !requireIdempotencyKey(w, r) {
 		return
 	}
+	middleware.SetAuditAction(r.Context(), "projects.members.update")
 	var req UpdateMemberRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		common.WriteError(w, r, http.StatusBadRequest, "bad_request", "请求体解析失败", nil)
@@ -173,6 +178,7 @@ func (h *Handler) RemoveMember(w http.ResponseWriter, r *http.Request) {
 	if !requireIdempotencyKey(w, r) {
 		return
 	}
+	middleware.SetAuditAction(r.Context(), "projects.members.remove")
 	if err := h.svc.RemoveMember(chi.URLParam(r, "id"), chi.URLParam(r, "userID")); err != nil {
 		h.writeError(w, r, err, nil)
 		return
