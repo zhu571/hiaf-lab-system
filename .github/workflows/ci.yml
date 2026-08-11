@@ -132,6 +132,7 @@ jobs:
       - uses: actions/setup-go@v5
         with:
           go-version: "1.22"
+          cache: true
       - name: Apply migrations
         env:
           PGID: ${{ job.services.postgres.id }}
@@ -158,6 +159,17 @@ jobs:
           go test -race -p 1 -coverprofile=/tmp/hiaf-coverage.out ./... ./testdata/
           # testdata 同原因：`./...` 通配跳过，显式补路径才能 vet 到（go test 内嵌 vet 之外的全量检查）。
           go vet ./... ./testdata/
+      # 依赖安全扫描（Go，报告模式）：govulncheck 扫描 go.mod 依赖树中的已知 CVE，
+      # 失败仅输出 warning 不阻塞 job——门禁由人工看日志决策（10h 优化 B）。
+      - name: Go dependency security scan (report only)
+        run: |
+          if [ ! -f go-server/go.mod ]; then
+            echo "go-server/go.mod not found; Go backend not implemented yet, skipping."
+            exit 0
+          fi
+          go install golang.org/x/vuln/cmd/govulncheck@latest
+          cd go-server && govulncheck ./... \
+            || echo "::warning::govulncheck 发现漏洞（见日志）——报告模式不阻塞，请人工处理"
       - name: Coverage summary (non-blocking)
         run: |
           if [ -f /tmp/hiaf-coverage.out ]; then
@@ -177,6 +189,7 @@ jobs:
       - uses: actions/setup-go@v5
         with:
           go-version: "1.22"
+          cache: true
       - name: Cross-compile Go backend for Windows
         run: |
           if [ ! -f go-server/go.mod ]; then
@@ -212,6 +225,8 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: "22"
+          cache: npm
+          cache-dependency-path: web-ui/package-lock.json
       - name: Test and build frontend
         run: |
           if [ ! -f web-ui/package.json ]; then
@@ -235,6 +250,17 @@ jobs:
           cd web-ui
           # dist 由上一步 npm run build 产出（steps 共享工作区），此处只做一致性 diff
           diff -rq dist ../go-server/static || (echo "::error::web-ui/dist 与 go-server/static 不一致，请 rsync 同步" && exit 1)
+      # 依赖安全扫描（Node，报告模式）：npm audit 检查 package-lock.json 依赖树，
+      # 失败仅输出 warning 不阻塞 job——门禁由人工看日志决策（10h 优化 B）。
+      - name: Node dependency security scan (report only)
+        run: |
+          if [ ! -f web-ui/package.json ]; then
+            echo "web-ui/package.json not found; frontend not implemented yet, skipping."
+            exit 0
+          fi
+          cd web-ui
+          npm audit --audit-level=high \
+            || echo "::warning::npm audit 发现高危漏洞（见日志）——报告模式不阻塞，请人工处理"
       - name: Coverage report (non-blocking)
         run: |
           cd web-ui
@@ -270,6 +296,19 @@ jobs:
           cd py-agent
           coverage run -m unittest discover -s tests -q && coverage report -m || echo "::warning::python coverage report skipped"
 
+      # 依赖安全扫描（Python，报告模式）：pip-audit 解析 requirements.txt 的
+      # pin 版本依赖树检查已知 CVE，失败仅输出 warning 不阻塞 job——门禁由人工看日志决策（10h 优化 B）。
+      - name: Python dependency security scan (report only)
+        run: |
+          if [ ! -f py-agent/requirements.txt ]; then
+            echo "py-agent/requirements.txt not found; agent not implemented yet, skipping."
+            exit 0
+          fi
+          python -m pip install --upgrade pip
+          python -m pip install pip-audit
+          pip-audit -r py-agent/requirements.txt \
+            || echo "::warning::pip-audit 发现漏洞（见日志）——报告模式不阻塞，请人工处理"
+
   # Playwright E2E 冒烟（测试策略方案 §4.4 / P2）：手动 workflow_dispatch 触发，
   # 不纳入 PR/push 必检——起完整栈（postgres + go build + vite + playwright）成本高。
   # schedule 暂不加（纯手动，避免定时跑费资源）；scripts/test-e2e.sh 自包含编排
@@ -290,6 +329,8 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: "22"
+          cache: npm
+          cache-dependency-path: web-ui/package-lock.json
       # ubuntu-latest runner 未把 postgresql-client 装入 PATH（step shell 不读 profile，
       # 且镜像装完即删 PGDG 源），而 scripts/test-e2e.sh 依赖命令检查 psql/pg_isready，
       # 故在此显式安装（Ubuntu 官方源 postgresql-client-16）。
