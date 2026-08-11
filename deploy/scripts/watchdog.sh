@@ -3,8 +3,13 @@
 #
 # 每次执行做一轮探测，由宿主机 cron / systemd timer 每 60s 触发一次
 # （挂载方式见 deploy/scripts/README.md）。探测目标：
-#   lab-server  http://10.144.144.12:8000/health （go-server，main.go 的 /health）
-#   lab-ioc     http://10.144.144.12:5080/health  （EPICS 虚拟 IOC）
+#   1. HTTP 探测（进程活着 + 端口响应）：
+#      lab-server  http://10.144.144.12:8000/health （go-server，main.go 的 /health）
+#      lab-ioc     http://10.144.144.12:5080/health  （EPICS 虚拟 IOC）
+#   2. 全栈容器健康探测（10h 优化 L，docker inspect）：lab-postgres/lab-influxdb/
+#      lab-grafana/lab-ioc/lab-server/lab-py-agent/lab-py-agent-interpret/lab-ntfy/
+#      lab-prometheus 的 Up/healthy 状态；lab-migrate（one-shot，Exited 正常）不探测，
+#      lab-prometheus 未启用时（容器不存在或 Exited）视为正常排除
 #
 # 行为：
 #   - 单服务连续 3 次失败（≈3 分钟）→ 先上报告警中心（POST /api/v1/alerts/report，
@@ -25,8 +30,7 @@
 #        发 ntfy——ntfy 侧无该用户）。service_token.txt 缺失时告警中心不可用，
 #        但脚本 ntfy 直发兜底仍可用（回退双保险）。
 #
-# TODO（二期，未做）：docker inspect 探 postgres/influxdb/grafana/ntfy 容器健康态；
-# IOC 心跳 PV（EPICS）探测，覆盖"进程活着但数据流断"场景。
+# TODO（二期，未做）：IOC 心跳 PV（EPICS）探测，覆盖"进程活着但数据流断"场景。
 set -uo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -48,6 +52,24 @@ DRY_RUN=0
 SERVICES=(
   "server|lab-server|http://10.144.144.12:8000/health"
   "ioc|lab-ioc|http://10.144.144.12:5080/health"
+)
+
+# name|container（全栈容器健康探测，docker inspect）
+# 排除项：lab-migrate 是 one-shot 容器（Exited 正常）不探测；
+#         lab-prometheus 未启用时（容器不存在或 Exited）视为正常，不告警。
+# 注：py-agent-interpret 未设 container_name（deploy/docker-compose.yml），
+#     compose 自动命名为 <project>-py-agent-interpret-1（生产项目名=deploy），
+#     由 resolve_container() 在探测前回退解析，避免名称漂移持续误报。
+CONTAINERS=(
+  "container-postgres|lab-postgres"
+  "container-influxdb|lab-influxdb"
+  "container-grafana|lab-grafana"
+  "container-ioc|lab-ioc"
+  "container-server|lab-server"
+  "container-py-agent|lab-py-agent"
+  "container-py-agent-interpret|lab-py-agent-interpret"
+  "container-ntfy|lab-ntfy"
+  "container-prometheus|lab-prometheus"
 )
 
 if [ "$DRY_RUN" -eq 0 ]; then
@@ -173,6 +195,77 @@ check() {
 for entry in "${SERVICES[@]}"; do
   IFS='|' read -r name container url <<< "$entry"
   check "$name" "$container" "$url"
+done
+
+resolve_container() {
+  # 容器名解析：lab-* 服务均有 container_name，直接命中；对未设 container_name 的服务
+  # （py-agent-interpret），按 compose 自动命名规则 <project>-<service>-N 回退，
+  # 找不到时保持原名（由调用方按 missing 处理，不会静默跳过一个真故障）。
+  # $1 配置的容器名
+  local want="$1" found
+  if docker inspect -f '{{.Name}}' "$want" >/dev/null 2>&1; then
+    echo "$want"
+    return 0
+  fi
+  found="$(docker ps -a --format '{{.Names}}' | grep -E "^[A-Za-z0-9_.-]+-${want#lab-}-[0-9]+$" | head -1)"
+  if [ -n "$found" ]; then
+    echo "$found"
+    return 0
+  fi
+  echo "$want"
+}
+
+check_container() {
+  # 全栈容器健康探测（10h 优化 L）：docker inspect 探 Up/healthy 状态。
+  # 状态机与 check() 一致：连续 $FAIL_THRESHOLD 次异常 → 上报告警中心，恢复后 resolve。
+  # $1 逻辑名 $2 容器名
+  local name="$1" container="$2"
+  container="$(resolve_container "$container")"
+  local fail_file="$STATE_DIR/$name.fail"
+  local alert_file="$STATE_DIR/$name.alerted"
+  local fails status health
+  fails="$(read_fails "$fail_file")"
+
+  status="$(docker inspect -f '{{.State.Status}}' "$container" 2>/dev/null | tr -d '[:space:]' || true)"
+  [ -n "$status" ] || status="missing"
+  health="$(docker inspect -f '{{if .State.Health}}{{.State.Health.Status}}{{else}}none{{end}}' "$container" 2>/dev/null | tr -d '[:space:]' || true)"
+  [ -n "$health" ] || health="none"
+
+  # 排除项：prometheus 未启用（容器不存在或 Exited）视为正常，不告警不计数；
+  # 若此前曾告警（如运行中变 unhealthy 后停用），此处同步幂等解除，避免告警中心残留
+  if [ "$container" = "lab-prometheus" ] && { [ "$status" = "missing" ] || [ "$status" = "exited" ]; }; then
+    echo "$container: 已排除（状态 $status，未启用不告警）"
+    if [ -f "$alert_file" ]; then
+      resolve_alert watchdog "$container 容器状态异常"
+      [ "$DRY_RUN" -eq 0 ] && rm -f "$alert_file"
+    fi
+    [ "$DRY_RUN" -eq 0 ] && echo 0 > "$fail_file"
+    return 0
+  fi
+
+  if [ "$status" = "running" ] && { [ "$health" = "none" ] || [ "$health" = "healthy" ]; }; then
+    if [ -f "$alert_file" ]; then
+      resolve_alert watchdog "$container 容器状态异常"
+      [ "$DRY_RUN" -eq 0 ] && rm -f "$alert_file"
+    fi
+    [ "$DRY_RUN" -eq 0 ] && echo 0 > "$fail_file"
+    echo "$container: 容器正常（状态 $status，健康 $health，连续失败计数 $fails → 0）"
+  else
+    fails=$((fails + 1))
+    [ "$DRY_RUN" -eq 0 ] && echo "$fails" > "$fail_file"
+    if [ "$fails" -ge "$FAIL_THRESHOLD" ] && [ ! -f "$alert_file" ]; then
+      report_alert watchdog "$container 容器状态异常" \
+        "$container 状态=$status，健康=$health，已连续 $fails 次探测异常（约 ${fails} 分钟）。容器 restart 策略已覆盖崩溃场景，本告警仅通知人工介入，不会自动重启。" \
+        "warning"
+      [ "$DRY_RUN" -eq 0 ] && : > "$alert_file"
+    fi
+    echo "$container: 容器异常（状态 $status，健康 $health，连续 $fails/$FAIL_THRESHOLD）"
+  fi
+}
+
+for entry in "${CONTAINERS[@]}"; do
+  IFS='|' read -r name container <<< "$entry"
+  check_container "$name" "$container"
 done
 
 exit 0
