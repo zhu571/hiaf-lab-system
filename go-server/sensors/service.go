@@ -3,6 +3,7 @@ package sensors
 import (
 	"fmt"
 	"io"
+	"math"
 	"net/http"
 	"net/url"
 	"os"
@@ -33,7 +34,7 @@ func safeFluxValue(s string) error {
 
 // safeTag validates a tag string for Flux injection safety.
 func safeTag(s string) error {
-	if strings.Contains(s, `"`) || strings.Contains(s, `\`) || strings.Contains(s, `\n`) || strings.Contains(s, `\r`) {
+	if strings.Contains(s, `"`) || strings.Contains(s, `\`) || strings.Contains(s, "\n") || strings.Contains(s, "\r") {
 		return fmt.Errorf("invalid tag: %s", s)
 	}
 	return nil
@@ -259,7 +260,9 @@ func parseCSV(body []byte) []SensorPoint {
 			continue
 		}
 		v, err := strconv.ParseFloat(strings.TrimSpace(cols[valueIdx]), 64)
-		if err != nil {
+		if err != nil || math.IsNaN(v) || math.IsInf(v, 0) {
+			// NaN/Inf（如 mean 空窗或 0/0）：JSON 无法序列化，直接跳过，
+			// 否则 WriteSuccess 在已写 200 头后 Encode 失败 → 200 + 空体。
 			continue
 		}
 		tag := ""
