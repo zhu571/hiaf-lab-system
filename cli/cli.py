@@ -29,8 +29,9 @@ _AUTH_CODES = ("not_logged_in", "auth_expired", "invalid_credentials", "csrf_fai
 
 
 @click.group(context_settings={"help_option_names": ["-h", "--help"]})
-@click.option("--base-url", default=DEFAULT_BASE_URL, show_default=True,
-              help="服务端基础地址（也可用环境变量 LABCTL_BASE_URL）")
+@click.option("--base-url", default=None,
+              help="服务端基础地址（默认 LABCTL_BASE_URL 或 http://127.0.0.1:8000；"
+                   "已登录时未显式传入则沿用上次登录的服务器）")
 @click.option("--human", is_flag=True, help="人类可读输出（默认 JSON，便于 Agent 解析）")
 @click.pass_context
 def cli(ctx, base_url, human):
@@ -43,11 +44,11 @@ def build_api(base_url):
     """构造客户端：LABCTL_SERVICE_TOKEN 优先（无人值守透传），否则读本地 token 文件。"""
     service_token = os.getenv("LABCTL_SERVICE_TOKEN", "")
     if service_token:
-        return LabctlAPI(base_url, access_token=service_token)
+        return LabctlAPI(base_url or DEFAULT_BASE_URL, access_token=service_token)
     stored = load_token()
     if stored:
         return LabctlAPI.from_stored(stored, base_url=base_url)
-    return LabctlAPI(base_url)
+    return LabctlAPI(base_url or DEFAULT_BASE_URL)
 
 
 def emit_result(result, human):
@@ -121,6 +122,7 @@ def login(ctx, token_stdin, logout, whoami, username):
     """登录 / 注销 / 查看当前用户。登录后凭证存 ~/.labctl/token（0600）。"""
     base_url = ctx.obj["base_url"]
     if logout:
+        # 未显式传 --base-url 时沿用 token 文件记录的服务器，确保在正确端撤销。
         _do_logout(ctx, base_url)
         return
     if whoami:
@@ -128,6 +130,8 @@ def login(ctx, token_stdin, logout, whoami, username):
         return
     if not username and not token_stdin:
         raise click.UsageError("交互登录需要用户名（labctl login <用户名>）或 --token-stdin")
+    if token_stdin and username:
+        raise click.UsageError("--token-stdin 与用户名参数互斥（stdin 第一行已含用户名）")
     password = ""
     if token_stdin:
         lines = [line.strip() for line in sys.stdin if line.strip()]
@@ -136,7 +140,7 @@ def login(ctx, token_stdin, logout, whoami, username):
         username, password = lines[0], lines[1]
     else:
         password = click.prompt("密码", hide_input=True)
-    api = LabctlAPI(base_url)
+    api = LabctlAPI(base_url or DEFAULT_BASE_URL)
     try:
         data = api.login(username, password)
     except LabctlError as exc:
@@ -149,7 +153,8 @@ def login(ctx, token_stdin, logout, whoami, username):
 
 def _do_logout(ctx, base_url):
     stored = load_token()
-    api = LabctlAPI.from_stored(stored, base_url=base_url) if stored else LabctlAPI(base_url)
+    api = LabctlAPI.from_stored(stored, base_url=base_url) if stored \
+        else LabctlAPI(base_url or DEFAULT_BASE_URL)
     try:
         result = commands.run_logout(api)
     except LabctlError as exc:

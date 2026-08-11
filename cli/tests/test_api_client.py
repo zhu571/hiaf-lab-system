@@ -149,6 +149,17 @@ class TestRefresh(unittest.TestCase):
         finally:
             del os.environ["LABCTL_SERVICE_TOKEN"]
 
+    def test_from_stored_explicit_base_url_wins(self):
+        api = LabctlAPI.from_stored({"base_url": "http://stored.example:9000",
+                                     "access_token": "at_1"},
+                                    base_url="http://explicit.example")
+        self.assertEqual(api.base_url, "http://explicit.example")
+
+    def test_from_stored_falls_back_to_stored_base_url(self):
+        api = LabctlAPI.from_stored({"base_url": "http://stored.example:9000",
+                                     "access_token": "at_1"})
+        self.assertEqual(api.base_url, "http://stored.example:9000")
+
 
 class TestRetry(unittest.TestCase):
     def test_429_backoff_then_success(self):

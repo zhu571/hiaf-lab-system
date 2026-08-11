@@ -131,6 +131,13 @@ class TestMCP(unittest.TestCase):
         finally:
             mod.LabctlAPI = original
 
+    def test_logout_clears_session(self):
+        _session["api"] = FakeAPI()
+        content, _ = asyncio.run(mcp.call_tool("labctl_logout", {}))
+        payload = json.loads(content[0].text)
+        self.assertTrue(payload["success"])
+        self.assertIsNone(_session["api"])
+
     def test_mcp_tools_reuse_commands(self):
         with mock.patch.object(commands, "run_alerts_list") as spy:
             spy.return_value = {"items": [], "total": 0}

@@ -44,7 +44,7 @@ class LabctlAPI:
 
     def __init__(self, base_url=DEFAULT_BASE_URL, access_token="", refresh_token="",
                  csrf_token="", username="", timeout=20.0, client=None):
-        self.base_url = base_url.rstrip("/")
+        self.base_url = (base_url or DEFAULT_BASE_URL).rstrip("/")
         self.username = username
         self.client = client or httpx.Client(timeout=timeout)
         self.access_token = access_token
@@ -62,8 +62,9 @@ class LabctlAPI:
 
     @classmethod
     def from_stored(cls, data, base_url=None):
+        # 显式 --base-url / LABCTL_BASE_URL 优先；未显式指定时才回退存储值。
         return cls(
-            base_url=data.get("base_url") or base_url or DEFAULT_BASE_URL,
+            base_url=base_url or data.get("base_url") or DEFAULT_BASE_URL,
             access_token=data.get("access_token", ""),
             refresh_token=data.get("refresh_token", ""),
             csrf_token=data.get("csrf_token", ""),

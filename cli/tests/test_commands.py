@@ -193,12 +193,16 @@ class TestCommands(unittest.TestCase):
         captured = {}
 
         def handler(request):
-            captured["body"] = json_roundtrip(request.read().decode())
+            captured["cookie"] = request.headers.get("cookie", "")
+            captured["body"] = request.read().decode()
             return ok({"success": True})
 
         api = _login_then(handler)
         result = commands.run_logout(api)
-        self.assertEqual(captured["body"], {"refresh_token": "rt_1"})
+        # 服务端 Logout 只读 refresh_token Cookie（忽略请求体）：
+        # 必须回填 cookie 才能真正撤销服务端 refresh token。
+        self.assertIn("refresh_token=rt_1", captured["cookie"])
+        self.assertNotIn("refresh_token", captured["body"])
         self.assertTrue(result["success"])
 
     def test_logout_ignores_server_failure(self):

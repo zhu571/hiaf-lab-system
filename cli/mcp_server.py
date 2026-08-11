@@ -63,7 +63,10 @@ def labctl_login(username: str, password: str, base_url: str = DEFAULT_BASE_URL)
 @mcp.tool()
 def labctl_logout() -> str:
     """注销当前会话（撤销 refresh token）。"""
-    return _call(commands.run_logout)
+    try:
+        return _call(commands.run_logout)
+    finally:
+        _session["api"] = None
 
 
 @mcp.tool()

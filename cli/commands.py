@@ -1,8 +1,10 @@
-"""8 子命令 20 个动作的命令实现。
+"""8 子命令 21 个动作的命令实现。
 
 全部经 REST API 调用服务端（不直连数据库），被 cli.py 与 mcp_server.py 共用；
 参数校验尽量薄（服务端为准），写操作由 api_client 自动附加 Idempotency-Key/CSRF。
 """
+
+from urllib.parse import urlsplit
 
 from cli.api_client import LabctlError
 
@@ -28,8 +30,14 @@ def run_login(api, username, password):
 def run_logout(api):
     if api.refresh_token:
         try:
-            return api.request("POST", "/api/v1/auth/logout",
-                               json={"refresh_token": api.refresh_token})
+            # 服务端 Logout 只读 refresh_token Cookie（忽略请求体），
+            # 必须先回填 cookie 才能真正撤销服务端 refresh token。
+            if api.client is not None:
+                host = urlsplit(api.base_url).hostname
+                if host:
+                    api.client.cookies.set(
+                        "refresh_token", api.refresh_token, domain=host, path="/api")
+            return api.request("POST", "/api/v1/auth/logout")
         except LabctlError:
             return {"success": True, "warning": "服务端注销失败（可能已过期），本地凭证已清除"}
     return {"success": True}

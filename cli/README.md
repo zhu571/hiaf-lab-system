@@ -29,6 +29,8 @@ labctl alerts list --status active
 
 `request_id` 为服务端透传，可用于追审计日志。退出码：`0` 成功、`1` 一般错误、`2` 认证类错误（401 / 未登录 / 已过期）。
 
+`--base-url` 优先级：显式参数 > 已登录 token 文件中的服务器地址 > `LABCTL_BASE_URL` 环境变量 > `http://127.0.0.1:8000`（未传参且未登录时）。
+
 ## 认证双通道
 
 | 通道 | 方式 | 凭证 | 说明 |
@@ -42,7 +44,7 @@ CI/Agent 场景免交互登录：`echo -e "username\npassword" | labctl login --
 > 该 token 只能由登录响应获得——服务账号 JWT 透传通道没有 csrf token，**写操作会返回
 > 403 `csrf_failed`（原样透传 + request_id）**，只读操作为主；需要写操作请用交互登录通道。
 
-## 子命令覆盖表（8 子命令 / 20 动作）
+## 子命令覆盖表（8 子命令 / 21 动作）
 
 | 子命令 | 动作 | 端点（main.go 已核实） | 角色要求（服务端强校验） |
 |--------|------|------------------------|--------------------------|
@@ -59,6 +61,7 @@ CI/Agent 场景免交互登录：`echo -e "username\npassword" | labctl login --
 
 - token 文件 `~/.labctl/token` 0600、目录 0700，密码不落盘；
 - 写操作自动带 `Idempotency-Key`（uuid4）+ `X-CSRF-Token`（登录/refresh 响应下发，跨进程从 token 文件恢复）；409 幂等键重复错误原样透传；
+- `logout` 会把 refresh token 以 Cookie（Path=/api）回填后再调 `POST /auth/logout`，**服务端真正撤销 refresh token**（服务端 Logout 只读 Cookie、忽略请求体），随后清除本地凭证；
 - 401 → 自动 refresh 一次；refresh 失败 → 提示重新 `labctl login`（退出码 2）；
 - 429 / 5xx → 指数退避重试（2^attempt，共 3 次），耗尽后按场景提示（429 限流 / 502 上游降级）；
 - 403 / 404 等错误原样透传，含 request_id；
@@ -77,6 +80,7 @@ LABCTL_SERVICE_TOKEN=<jwt> py-agent/.venv/bin/python -m cli.mcp_server
 ```
 
 工具前缀 `labctl_*`（21 个），全部复用 `cli/commands.py` 命令执行函数，全部经 REST 调用服务端。
+`labctl_logout` 后进程内会话清空（重新调用工具前需再次 `labctl_login` 或设 `LABCTL_SERVICE_TOKEN`）。
 MCP 自身无独立鉴权——**安全边界 = 启动进程所持 token 的权限**：仅限内网/受信主机启动，
 不在公网暴露 MCP stdio 桥；工具调用由服务端权限/审计/限流兜底。
 
