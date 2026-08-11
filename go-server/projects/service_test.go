@@ -64,3 +64,75 @@ func TestCreateProjectRoleRestriction(t *testing.T) {
 		}
 	}
 }
+
+func TestValidateDate(t *testing.T) {
+	for name, tc := range map[string]struct {
+		in      *string
+		wantErr error
+	}{
+		"nil ok":     {nil, nil},
+		"empty ok":   {strPtr(""), nil},
+		"valid ok":   {strPtr("2026-08-01"), nil},
+		"bad format": {strPtr("2026/08/01"), ErrInvalidInput},
+		"not a date": {strPtr("2026-13-01"), ErrInvalidInput},
+		"partial":    {strPtr("2026-08"), ErrInvalidInput},
+	} {
+		t.Run(name, func(t *testing.T) {
+			if err := validateDate(tc.in); !errors.Is(err, tc.wantErr) {
+				t.Fatalf("validateDate(%v) = %v, want %v", tc.in, err, tc.wantErr)
+			}
+		})
+	}
+}
+
+func TestDefaultString(t *testing.T) {
+	tests := []struct {
+		in, def, want string
+	}{
+		{"", "fallback", "fallback"},
+		{"   ", "fallback", "fallback"},
+		{" value ", "fallback", "value"},
+	}
+	for _, tt := range tests {
+		if got := defaultString(tt.in, tt.def); got != tt.want {
+			t.Errorf("defaultString(%q, %q) = %q, want %q", tt.in, tt.def, got, tt.want)
+		}
+	}
+}
+
+func TestValidEnums(t *testing.T) {
+	for status, want := range map[string]bool{
+		StatusDraft: true, StatusActive: true, StatusCompleted: true, StatusArchived: true,
+		"bogus": false, "": false,
+	} {
+		if got := validStatus(status); got != want {
+			t.Errorf("validStatus(%q) = %v, want %v", status, got, want)
+		}
+	}
+	for vis, want := range map[string]bool{
+		VisibilityRestricted: true, VisibilityWorkspace: true,
+		"public": false, "": false,
+	} {
+		if got := validVisibility(vis); got != want {
+			t.Errorf("validVisibility(%q) = %v, want %v", vis, got, want)
+		}
+	}
+	for policy, want := range map[string]bool{
+		CommentPolicyEveryone: true, CommentPolicyMembers: true, CommentPolicyDisabled: true,
+		"none": false, "": false,
+	} {
+		if got := validCommentPolicy(policy); got != want {
+			t.Errorf("validCommentPolicy(%q) = %v, want %v", policy, got, want)
+		}
+	}
+	for role, want := range map[string]bool{
+		RoleOwner: true, RoleMaintainer: true, RoleMember: true, RoleViewer: true,
+		"admin": false, "": false,
+	} {
+		if got := validProjectRole(role); got != want {
+			t.Errorf("validProjectRole(%q) = %v, want %v", role, got, want)
+		}
+	}
+}
+
+func strPtr(value string) *string { return &value }
