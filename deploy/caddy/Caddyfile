@@ -13,7 +13,7 @@
 
 # lab 主站
 https://lab.域名 {
-    encode gzip zstd
+    encode brotli gzip zstd
     @metrics path /metrics
     respond @metrics 404                          # D14：公网不暴露 /metrics
     request_body max_size 32MB
