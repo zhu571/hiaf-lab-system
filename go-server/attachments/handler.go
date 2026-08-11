@@ -141,6 +141,9 @@ func (h *Handler) AddLink(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handler) RemoveLink(w http.ResponseWriter, r *http.Request) {
+	// 派生 action `attachments.{id}.links.{link_id}` 长度 91 字符，超出
+	// audit_log.action varchar(64)（22001），必须 SetAuditAction 覆盖。
+	middleware.SetAuditAction(r.Context(), "attachments.remove_link")
 	if !requireIdempotencyKey(w, r) {
 		return
 	}

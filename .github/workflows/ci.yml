@@ -153,8 +153,11 @@ jobs:
           # -p 1：db 测试共用同一 TEST_DATABASE_URL，跨包固定 UUID 种子并行会撞主键 flaky
           #（如 agent 与 issues 的 b140 用户），按测试策略方案 §4.3.1 串行化包级测试。
           # -coverprofile：覆盖率透明化（P3，方案 §5），只报告不设硬阈值、不阻塞。
-          go test -race -p 1 -coverprofile=/tmp/hiaf-coverage.out ./...
-          go vet ./...
+          # ./testdata/ 精确路径：testdata 是 Go 保留目录名，`./...` 通配会跳过它，
+          # 但 testdata 模块（测试数据业务）的测试必须执行（本地 76.7% 覆盖）。
+          go test -race -p 1 -coverprofile=/tmp/hiaf-coverage.out ./... ./testdata/
+          # testdata 同原因：`./...` 通配跳过，显式补路径才能 vet 到（go test 内嵌 vet 之外的全量检查）。
+          go vet ./... ./testdata/
       - name: Coverage summary (non-blocking)
         run: |
           if [ -f /tmp/hiaf-coverage.out ]; then
@@ -184,7 +187,8 @@ jobs:
           CGO_ENABLED=0 GOOS=windows GOARCH=amd64 go build ./...
           CGO_ENABLED=0 GOOS=windows GOARCH=amd64 go vet ./...
           # Compile-only test check: -exec=true skips running the Windows test binaries on Linux.
-          CGO_ENABLED=0 GOOS=windows GOARCH=amd64 go test -exec=true ./...
+          # ./testdata/ 与 go-test job 同步：testdata 模块测试也纳入编译检查。
+          CGO_ENABLED=0 GOOS=windows GOARCH=amd64 go test -exec=true ./... ./testdata/
 
   migration-test:
     name: Database migrations up/down check
