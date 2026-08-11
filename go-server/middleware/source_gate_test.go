@@ -49,14 +49,18 @@ func TestSourceGateCaddyPeerSecretMatchTrustsXFF(t *testing.T) {
 	}
 }
 
-// 三场景之二：Caddy peer + 秘密头不匹配 = 可疑入口，一律 403 source_gate_rejected。
+// 三场景之二：Caddy peer + 秘密头不匹配 = 可疑入口，一律 403 source_gate_rejected；
+// 且 next 不被调用（来源门在最外层，请求在到达 RequestLogger 前即终止，无日志条目不落）。
 func TestSourceGateCaddyPeerSecretMismatchRejected(t *testing.T) {
-	rr, _, _, _ := gateTest(t, "s3cret-value", "true", "10.144.144.100:50000", "wrong", "203.0.113.7", http.MethodGet, "/api/v1/logs")
+	rr, _, gotKind, _ := gateTest(t, "s3cret-value", "true", "10.144.144.100:50000", "wrong", "203.0.113.7", http.MethodGet, "/api/v1/logs")
 	if rr.Code != http.StatusForbidden {
 		t.Fatalf("mismatched secret: got %d, want 403", rr.Code)
 	}
 	if !strings.Contains(rr.Body.String(), "source_gate_rejected") {
 		t.Errorf("expected source_gate_rejected, body: %s", rr.Body.String())
+	}
+	if gotKind != "" {
+		t.Errorf("rejected request must not reach inner handler (source_kind not propagated), got %q", gotKind)
 	}
 }
 
@@ -134,6 +138,24 @@ func TestSourceGateMissingSecretRejectsNonInternal(t *testing.T) {
 func TestGetSourceKindMissing(t *testing.T) {
 	if kind := GetSourceKind(context.Background()); kind != "" {
 		t.Errorf("GetSourceKind without gate = %q, want empty", kind)
+	}
+}
+
+// sourceKind.String 覆盖全部枚举并兜底 unknown（日志字段值稳定）。
+func TestSourceKindString(t *testing.T) {
+	cases := map[sourceKind]string{
+		sourceKindProxy:      "proxy",
+		sourceKindSuspicious: "suspicious",
+		sourceKindInternal:   "internal",
+		sourceKindPublic:     "public",
+	}
+	for k, want := range cases {
+		if got := k.String(); got != want {
+			t.Errorf("String(%d) = %q, want %q", k, got, want)
+		}
+	}
+	if got := (sourceKind)(99).String(); got != "unknown" {
+		t.Errorf("String(unknown) = %q, want unknown", got)
 	}
 }
 

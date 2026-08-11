@@ -63,7 +63,7 @@ func SourceGate() func(http.Handler) http.Handler {
 				r.Header.Del("X-Forwarded-For")
 			}
 			ctx := context.WithValue(r.Context(), sourceIPKey, srcIP)
-	ctx = context.WithValue(ctx, sourceKindKey, kind.String())
+			ctx = context.WithValue(ctx, sourceKindKey, kind.String())
 			if !enabled {
 				next.ServeHTTP(w, r.WithContext(ctx))
 				return
