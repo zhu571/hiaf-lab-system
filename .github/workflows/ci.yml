@@ -3,6 +3,7 @@ name: CI
 on:
   push:
   pull_request:
+  workflow_dispatch:
 
 permissions:
   contents: read
@@ -115,6 +116,7 @@ jobs:
 
   go-test:
     runs-on: ubuntu-latest
+    if: github.event_name != 'workflow_dispatch'
     services:
       postgres:
         image: postgres:16-alpine
@@ -166,6 +168,7 @@ jobs:
   windows-cross-compile:
     name: Windows cross-compile check
     runs-on: ubuntu-latest
+    if: github.event_name != 'workflow_dispatch'
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
@@ -186,6 +189,7 @@ jobs:
   migration-test:
     name: Database migrations up/down check
     runs-on: ubuntu-latest
+    if: github.event_name != 'workflow_dispatch'
     steps:
       - uses: actions/checkout@v4
       - name: Test all migrations up and down
@@ -198,6 +202,7 @@ jobs:
 
   frontend-test:
     runs-on: ubuntu-latest
+    if: github.event_name != 'workflow_dispatch'
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -229,6 +234,7 @@ jobs:
 
   python-check:
     runs-on: ubuntu-latest
+    if: github.event_name != 'workflow_dispatch'
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -248,3 +254,53 @@ jobs:
       - name: Run unit tests
         run: |
           python -m unittest discover -s py-agent/tests -v
+
+  # Playwright E2E 冒烟（测试策略方案 §4.4 / P2）：手动 workflow_dispatch 触发，
+  # 不纳入 PR/push 必检——起完整栈（postgres + go build + vite + playwright）成本高。
+  # schedule 暂不加（纯手动，避免定时跑费资源）；scripts/test-e2e.sh 自包含编排
+  # （起 postgres 容器 → 全量迁移 → server(8000) → vite(5173) → playwright → trap 清理）。
+  e2e-smoke:
+    name: Playwright E2E smoke (manual only)
+    runs-on: ubuntu-latest
+    if: github.event_name == 'workflow_dispatch'
+    timeout-minutes: 30
+    concurrency:
+      group: e2e-smoke
+      cancel-in-progress: true
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.22"
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      # ubuntu-latest runner 未把 postgresql-client 装入 PATH（step shell 不读 profile，
+      # 且镜像装完即删 PGDG 源），而 scripts/test-e2e.sh 依赖命令检查 psql/pg_isready，
+      # 故在此显式安装（Ubuntu 官方源 postgresql-client-16）。
+      - name: Install PostgreSQL client tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends postgresql-client
+      - name: Install frontend dependencies
+        run: |
+          cd web-ui
+          npm ci
+      - name: Install Playwright chromium
+        run: |
+          cd web-ui
+          npx playwright install chromium --with-deps
+      - name: Run E2E smoke tests
+        run: |
+          bash scripts/test-e2e.sh
+      # 失败时保留 playwright HTML 报告与 trace（VM 随 job 销毁，不传则无从排查）。
+      - name: Upload Playwright artifacts (on failure)
+        if: always() && failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-report
+          path: |
+            web-ui/playwright-report/
+            web-ui/test-results/
+          retention-days: 7
+          if-no-files-found: ignore
