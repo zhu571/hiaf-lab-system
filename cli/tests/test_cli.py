@@ -176,6 +176,18 @@ class TestCliSubcommands(BaseCliTest):
         self.assertEqual(result.exit_code, 0, result.output)
         self.assertIn("completed", result.output)
 
+    def test_projects_transition_happy(self):
+        api = self._api(lambda request: ok({"id": "prj_1", "status": "active"}))
+        result = self.invoke(["projects", "transition", "prj_1", "--action", "activate"], api=api)
+        self.assertEqual(result.exit_code, 0, result.output)
+        self.assertIn("active", result.output)
+
+    def test_projects_transition_invalid_action_rejected(self):
+        api = self._api(lambda request: ok({}))
+        result = self.invoke(["projects", "transition", "prj_1", "--action", "explode"], api=api)
+        self.assertEqual(result.exit_code, 2)  # click 参数校验失败
+        self.assertIn("explode", result.output)
+
     def test_alerts_list_and_resolve(self):
         api = self._api(lambda request: ok({"items": [{"id": "a_1", "level": "warning",
                                                        "title": "lab-server 探测失败"}],
@@ -195,6 +207,25 @@ class TestCliSubcommands(BaseCliTest):
         self.assertEqual(result.exit_code, 2)
         self.assertIn("auth_expired", result.output)
         self.assertIn("请重新执行 labctl login", result.output)
+
+    def test_logs_list_status_draft(self):
+        captured = {}
+
+        def handler(request):
+            captured["params"] = dict(request.url.params)
+            return ok({"items": [{"id": "log_1", "status": "draft"}], "total": 1})
+
+        api = self._api(handler)
+        result = self.invoke(["logs", "list", "prj_1", "--status", "draft"], api=api)
+        self.assertEqual(result.exit_code, 0, result.output)
+        self.assertEqual(captured["params"].get("status"), "draft")
+        self.assertIn("log_1", result.output)
+
+    def test_logs_list_invalid_status_rejected(self):
+        api = self._api(lambda request: ok({}))
+        result = self.invoke(["logs", "list", "prj_1", "--status", "bogus"], api=api)
+        self.assertEqual(result.exit_code, 2)  # click 参数校验失败
+        self.assertIn("bogus", result.output)
 
 
 class TestCliServiceToken(BaseCliTest):

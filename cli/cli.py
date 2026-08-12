@@ -205,7 +205,7 @@ def daily_report_entry(ctx, report_id, raw_text):
 # ---------------------------------------------------------------- projects
 @cli.group("projects")
 def projects():
-    """项目：list / get / create"""
+    """项目：list / get / create / transition"""
 
 
 @projects.command("list")
@@ -242,6 +242,17 @@ def projects_create(ctx, code, name, short_name, description, visibility,
                 code=code, name=name, short_name=short_name, description=description,
                 visibility=visibility, start_date=start_date, target_end_date=target_end_date,
                 default_category=default_category, tags=tags)
+
+
+@projects.command("transition")
+@click.argument("project_id")
+@click.option("--action", required=True, type=click.Choice(list(commands.PROJECT_TRANSITIONS)),
+              help="流转动作：activate/complete/archive/reactivate/deactivate/reopen"
+                   "（由服务端按当前状态校验）")
+@click.pass_context
+def projects_transition(ctx, project_id, action):
+    """流转项目状态（draft→active→completed→archived 生命周期）"""
+    run_command(ctx, commands.run_projects_transition, project_id=project_id, action=action)
 
 
 # ---------------------------------------------------------------- issues
@@ -405,7 +416,8 @@ def logs():
                                  "beam", "data_analysis"]))
 @click.option("--date-from")
 @click.option("--date-to")
-@click.option("--status")
+@click.option("--status", type=click.Choice(list(commands.LOG_STATUSES)),
+              help="内容状态过滤：draft/confirmed/locked/voided（默认不传，服务端默认只返回 confirmed）")
 @click.option("--page", type=int, default=1, show_default=True)
 @click.option("--per-page", type=int, default=20, show_default=True)
 @click.pass_context

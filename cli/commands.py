@@ -11,6 +11,8 @@ from cli.api_client import LabctlError
 ISSUE_SEVERITIES = ("low", "medium", "high", "critical")
 TEST_DATA_TYPES = ("cryo", "pressure", "voltage", "rf_voltage", "efficiency")
 RUN_TRANSITIONS = ("start", "abort", "pause", "complete", "resume")
+PROJECT_TRANSITIONS = ("activate", "complete", "archive", "reactivate", "deactivate", "reopen")
+LOG_STATUSES = ("draft", "confirmed", "locked", "voided")
 
 
 def _clean(data):
@@ -83,6 +85,16 @@ def run_projects_create(api, code, name, short_name=None, description=None, visi
         "default_category": default_category, "tags": tags,
     })
     return api.request("POST", "/api/v1/projects", json=body)
+
+
+def run_projects_transition(api, project_id, action):
+    _require(project_id, "project_id")
+    _require(action, "action")
+    if action not in PROJECT_TRANSITIONS:
+        raise LabctlError(
+            f"无效的流转动作 {action}（可选：{'/'.join(PROJECT_TRANSITIONS)}）", code="bad_request")
+    return api.request("POST", f"/api/v1/projects/{project_id}/transition",
+                       json={"action": action})
 
 
 def run_issues_list(api, project_id, status="", severity="", search="", assignee="",
@@ -164,6 +176,9 @@ def run_alerts_resolve(api, alert_id):
 def run_logs_list(api, project_id, category=None, date_from=None, date_to=None, status=None,
                   page=1, per_page=20):
     _require(project_id, "project_id")
+    if status and status not in LOG_STATUSES:
+        raise LabctlError(
+            f"无效的状态 {status}（可选：{'/'.join(LOG_STATUSES)}）", code="bad_request")
     return api.request("GET", f"/api/v1/projects/{project_id}/logs",
                        params=_clean({"category": category, "date_from": date_from,
                                       "date_to": date_to, "status": status,
