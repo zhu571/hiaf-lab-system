@@ -1,8 +1,10 @@
 package experiences
 
 import (
+	"context"
 	"errors"
 	"strings"
+	"time"
 
 	"github.com/zhu571/hiaf-lab-system/go-server/auth"
 	"github.com/zhu571/hiaf-lab-system/go-server/projects"
@@ -17,6 +19,9 @@ var (
 	ErrInvalidInput              = errors.New("请求参数无效")
 	ErrProjectNotFound           = errors.New("项目不存在")
 	ErrForbidden                 = errors.New("当前用户无权访问该项目")
+	ErrExtractNotConfigured      = errors.New("AI 经验提取服务未配置")
+	ErrExtractUpstream           = errors.New("py-agent 上游服务错误")
+	ErrInvalidLLMOutput          = errors.New("经验提取模型输出无效")
 )
 
 type ProjectAccessChecker interface {
@@ -27,6 +32,17 @@ type ProjectAccessChecker interface {
 
 type AgentTaskValidator interface {
 	ValidateAgentTask(taskID, actingUserID string) (bool, error)
+}
+
+// issueSource 由 main.go 以 issues 模块仓储装配注入：经验提取（AI-2）的 issue 数据源，
+// experiences 不 SELECT issues 表（模块单向依赖，见 AGENTS.md §5）。
+type issueSource interface {
+	ResolvedIssuesSince(ctx context.Context, since time.Time, limit int) ([]ResolvedIssue, error)
+}
+
+// extractLLM 由 main.go 以 HTTP client 装配注入：调 py-agent /v1/experience-extract。
+type extractLLM interface {
+	Extract(ctx context.Context, req ExtractLLMRequest) (*ExtractLLMResponse, error)
 }
 
 type experienceRepository interface {
@@ -42,15 +58,24 @@ type Service struct {
 	repo      experienceRepository
 	access    ProjectAccessChecker
 	validator AgentTaskValidator
+	source    issueSource
+	extractor extractLLM
+	now       func() time.Time
 }
 
 func NewService(repo experienceRepository, access ProjectAccessChecker, validators ...AgentTaskValidator) *Service {
-	s := &Service{repo: repo, access: access}
+	s := &Service{repo: repo, access: access, now: time.Now}
 	if len(validators) > 0 {
 		s.validator = validators[0]
 	}
 	return s
 }
+
+// SetIssueSource / SetExtractor 由 main.go 构造期注入（AI-2 经验提取依赖；
+// 对齐 agent 模块 SetExecutor 注入化先例，见 AGENTS.md §5）。
+func (s *Service) SetIssueSource(source issueSource) { s.source = source }
+
+func (s *Service) SetExtractor(extractor extractLLM) { s.extractor = extractor }
 
 func (s *Service) Create(userID, userRole string, req CreateExperienceRequest) (*Experience, error) {
 	if err := s.validateAgentFields(userID, userRole, req.AiGenerated, req.AgentTaskID, req.CandidateID); err != nil {
@@ -271,6 +296,105 @@ func (s *Service) Archive(id, userID, userRole string) (*Experience, error) {
 		return nil, ErrForbidden
 	}
 	return s.repo.Archive(id)
+}
+
+// ExtractCandidates 经验候选提取（AI-2）：maintainer+ 手动触发，取最近 days 天
+// （默认 7，限 1-30）resolved/closed 的 issue → LLM 提炼 0-N 条经验条目 →
+// 校验后落库为 ai_generated=true + candidate 草稿（tags 追加 ai_extracted 标记），
+// 由现有 experiences 审核流程（Update/Publish）人工审核发布。
+func (s *Service) ExtractCandidates(ctx context.Context, userID, userRole string, days int) (*ExtractCandidatesResult, error) {
+	if userRole != auth.RoleAdmin && userRole != auth.RoleMaintainer {
+		return nil, ErrForbidden
+	}
+	if s.source == nil || s.extractor == nil {
+		return nil, ErrExtractNotConfigured
+	}
+	if days <= 0 {
+		days = 7
+	}
+	if days > 30 {
+		days = 30
+	}
+	since := s.now().AddDate(0, 0, -days)
+	issues, err := s.source.ResolvedIssuesSince(ctx, since, 50)
+	if err != nil {
+		return nil, err
+	}
+	if len(issues) == 0 {
+		return &ExtractCandidatesResult{Items: []ExtractedItem{}, Total: 0}, nil
+	}
+
+	input := make([]ExtractIssueInput, 0, len(issues))
+	issueProjects := make(map[string]string, len(issues))
+	for _, issue := range issues {
+		input = append(input, ExtractIssueInput{
+			ID:          issue.ID,
+			ProjectID:   issue.ProjectID,
+			Title:       issue.Title,
+			Description: issue.Description,
+			Comments:    issue.Comments,
+			RunID:       stringPtrValue(issue.RunID),
+		})
+		issueProjects[issue.ID] = issue.ProjectID
+	}
+	resp, err := s.extractor.Extract(ctx, ExtractLLMRequest{Issues: input})
+	if err != nil {
+		return nil, err
+	}
+	if err := validateExtractResponse(resp, issueProjects); err != nil {
+		return nil, err
+	}
+
+	items := make([]ExtractedItem, 0, len(resp.Entries))
+	for _, entry := range resp.Entries {
+		projectID := issueProjects[entry.IssueID]
+		tags := normalizeTags(append(entry.Tags, aiExtractedTag))
+		exp, err := s.repo.Create(userID, CreateExperienceRequest{
+			ProjectID:   &projectID,
+			Title:       entry.Title,
+			Content:     entry.Content,
+			Tags:        tags,
+			AiGenerated: true,
+		})
+		if err != nil {
+			return nil, err
+		}
+		items = append(items, ExtractedItem{Experience: *exp, IssueID: entry.IssueID, Confidence: entry.Confidence})
+	}
+	return &ExtractCandidatesResult{Items: items, Total: len(items)}, nil
+}
+
+// validateExtractResponse 纵深校验 LLM 提取输出（对齐 py-agent validate_experience_candidates，
+// 防越界内容落库）：status=ok、0-10 条、issue_id 必须在输入集内、字段长度/置信度边界。
+func validateExtractResponse(resp *ExtractLLMResponse, issueProjects map[string]string) error {
+	if resp == nil || resp.Status != "ok" {
+		return ErrInvalidLLMOutput
+	}
+	if len(resp.Entries) > 10 {
+		return ErrInvalidLLMOutput
+	}
+	for _, entry := range resp.Entries {
+		title := strings.TrimSpace(entry.Title)
+		content := strings.TrimSpace(entry.Content)
+		if _, ok := issueProjects[entry.IssueID]; !ok {
+			return ErrInvalidLLMOutput
+		}
+		if title == "" || len([]rune(title)) > 256 || content == "" || len([]rune(content)) > 2000 {
+			return ErrInvalidLLMOutput
+		}
+		if entry.Confidence < 0 || entry.Confidence > 1 {
+			return ErrInvalidLLMOutput
+		}
+		if len(entry.Tags) > 10 {
+			return ErrInvalidLLMOutput
+		}
+		for _, tag := range entry.Tags {
+			if tag = strings.TrimSpace(tag); tag == "" || len([]rune(tag)) > 32 {
+				return ErrInvalidLLMOutput
+			}
+		}
+	}
+	return nil
 }
 
 func (s *Service) canRead(exp Experience, userID, userRole string) bool {

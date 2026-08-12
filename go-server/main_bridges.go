@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"time"
 
 	"github.com/zhu571/hiaf-lab-system/go-server/agent"
 	"github.com/zhu571/hiaf-lab-system/go-server/alert"
@@ -284,4 +285,29 @@ type weeklyNotifier struct{}
 
 func (weeklyNotifier) Send(topic, title, msg, clickURL, priority string, tags []string) error {
 	return notify.Send("lab-weekly", title, msg, notify.WebURL+"/experiences", priority, tags)
+}
+
+// experienceIssueBridge 经 issues 模块仓储读最近 resolved/closed 的 issue（AI-2
+// 经验提取数据源；SQL 在 issues 包内只访问本模块表，见 AGENTS.md §5）。
+type experienceIssueBridge struct {
+	repo *issues.Repository
+}
+
+func (b experienceIssueBridge) ResolvedIssuesSince(ctx context.Context, since time.Time, limit int) ([]experiences.ResolvedIssue, error) {
+	items, err := b.repo.ResolvedIssuesSince(ctx, since, limit)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]experiences.ResolvedIssue, len(items))
+	for i, item := range items {
+		out[i] = experiences.ResolvedIssue{
+			ID:          item.ID,
+			ProjectID:   item.ProjectID,
+			Title:       item.Title,
+			Description: item.Description,
+			Comments:    item.Comments,
+			RunID:       item.RunID,
+		}
+	}
+	return out, nil
 }

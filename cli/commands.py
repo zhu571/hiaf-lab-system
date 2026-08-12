@@ -199,3 +199,23 @@ def run_weekly_recent(api, limit=5):
     return api.request("GET", "/api/v1/experiences",
                        params={"tags": "weekly_summary", "status": "published",
                                "per_page": limit})
+
+
+def run_experiences_extract(api, days=None):
+    """触发 AI 经验候选提取（maintainer+）：最近 days 天（默认 7）resolved/closed 的
+    issue 提炼经验候选，落库为 candidate 草稿供审核。days=None 走服务端默认。"""
+    if days is not None and (days < 1 or days > 30):
+        raise LabctlError("无效的回溯天数 days（可选 1-30）", code="bad_request")
+    return api.request("POST", "/api/v1/experiences/extract-candidates",
+                       json=_clean({"days": days}))
+
+
+def run_experiences_list(api, status="", project_id="", page=1, per_page=20):
+    return api.request("GET", "/api/v1/experiences",
+                       params=_clean({"status": status, "project_id": project_id,
+                                      "page": page, "per_page": per_page}))
+
+
+def run_experiences_publish(api, experience_id):
+    _require(experience_id, "experience_id")
+    return api.request("POST", f"/api/v1/experiences/{experience_id}/publish")

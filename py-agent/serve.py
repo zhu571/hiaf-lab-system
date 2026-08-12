@@ -12,6 +12,7 @@ from starlette.responses import JSONResponse
 from starlette.routing import Route
 
 from tools.ask import AskEngine
+from tools.experience import ExperienceExtractor
 from tools.parse import InstrumentInterpreter, ParseError, Parser
 from tools.stepplan import StepPlanner
 from tools.todoplan import TodoPlanner
@@ -158,7 +159,34 @@ def validate_weekly_request(data):
     return week_start, week_end, reports, issue_stats
 
 
-def create_app(interpreter, planner, parser, todo_planner, token, ask_engine=None, weekly=None):
+def validate_experience_extract(data):
+    """经验候选提取：issues 1-50 条，字段长度收紧（与 Go 侧 limitIssues 上限对齐）。
+
+    载荷可能较大（含描述/评论），预算放宽到 512KB；超限即 400 是契约边界。
+    """
+    check(_size_ok(data, budget=512_000), "request too large")
+    issues = data.get("issues")
+    check(isinstance(issues, list) and 1 <= len(issues) <= 50, "issues is invalid")
+    for issue in issues:
+        check(isinstance(issue, dict), "issue is invalid")
+        check(isinstance(issue.get("id"), str) and issue.get("id") and len(issue.get("id", "")) <= 128,
+              "issue id is invalid")
+        check(isinstance(issue.get("project_id"), str) and len(issue.get("project_id", "")) <= 128,
+              "issue project_id is invalid")
+        check(isinstance(issue.get("title"), str) and issue.get("title") and len(issue.get("title", "")) <= 256,
+              "issue title is invalid")
+        check(isinstance(issue.get("description"), str) and len(issue.get("description", "")) <= 4000,
+              "issue description is invalid")
+        check(isinstance(issue.get("run_id"), str) and len(issue.get("run_id", "")) <= 128,
+              "issue run_id is invalid")
+        comments = issue.get("comments", [])
+        check(isinstance(comments, list) and len(comments) <= 20, "issue comments are invalid")
+        for comment in comments:
+            check(isinstance(comment, str) and len(comment) <= 1000, "issue comment is invalid")
+    return issues
+
+
+def create_app(interpreter, planner, parser, todo_planner, token, ask_engine=None, weekly=None, extractor=None):
     def make_endpoint(validate, handler, parse_error_code):
         """端点工厂：统一 Bearer 鉴权、JSON 解析（64KB 上限）、三态异常映射（400/422/502）。
 
@@ -233,6 +261,16 @@ def create_app(interpreter, planner, parser, todo_planner, token, ask_engine=Non
             timeout=WeeklySummarizer.TOTAL_TIMEOUT,
         )
 
+    async def do_experience_extract(validated, _data):
+        if extractor is None:
+            raise RuntimeError("experience extractor is not configured")
+        issues = validated
+        # 单步 LLM 整体超时 240s（≤180s 预算，重试共享），超时 → 502。
+        return await asyncio.wait_for(
+            asyncio.to_thread(extractor.extract, issues),
+            timeout=ExperienceExtractor.TOTAL_TIMEOUT,
+        )
+
     return Starlette(routes=[
         Route("/health", health),
         Route("/v1/interpret", make_endpoint(validate_request, do_interpret, "interpretation_failed"), methods=["POST"]),
@@ -242,6 +280,7 @@ def create_app(interpreter, planner, parser, todo_planner, token, ask_engine=Non
         Route("/v1/todo-daily", make_endpoint(validate_todo_daily, do_todo_daily, "todo_daily_failed"), methods=["POST"]),
         Route("/v1/ask", make_endpoint(validate_ask, do_ask, "ask_failed"), methods=["POST"]),
         Route("/v1/weekly-summary", make_endpoint(validate_weekly_request, do_weekly, "weekly_summary_failed"), methods=["POST"]),
+        Route("/v1/experience-extract", make_endpoint(validate_experience_extract, do_experience_extract, "experience_extract_failed"), methods=["POST"]),
     ])
 
 
@@ -255,5 +294,6 @@ if __name__ == "__main__":
         Parser(api_key, prompt_path=daily_prompt), TodoPlanner(api_key), read_token(),
         ask_engine=AskEngine(api_key),
         weekly=WeeklySummarizer(api_key),
+        extractor=ExperienceExtractor(api_key),
     )
     uvicorn.run(app, host="0.0.0.0", port=8001)

@@ -522,6 +522,7 @@ func newExperiencesTestRouter(t *testing.T, db *sql.DB) http.Handler {
 		r.Get("/", h.List)
 		r.Post("/", h.Create)
 		r.Post("/candidates", h.Create)
+		r.Post("/extract-candidates", h.ExtractCandidates)
 		r.Route("/{id}", func(r chi.Router) {
 			r.Get("/", h.GetByID)
 			r.Patch("/", h.Update)
@@ -737,4 +738,32 @@ func TestHandlerExperiences(t *testing.T) {
 	if rec.Code != http.StatusCreated {
 		t.Fatalf("candidates alias = %d, body=%s", rec.Code, rec.Body.String())
 	}
+}
+
+func TestHandlerExtractCandidatesPermissionAndUpstream(t *testing.T) {
+	db := openExperiencesTestDB(t)
+	router := newExperiencesTestRouter(t, db)
+	member := expToken(t, expMemberID, "member", auth.RoleMember)
+	admin := expToken(t, expAdminID, "admin", auth.RoleAdmin)
+
+	// 未注入 issueSource/extractor → 502 upstream_error（not_configured 归入上游类）
+	rec := expRequest(t, router, http.MethodPost, "/api/v1/experiences/extract-candidates", admin,
+		expUniqueKey(t), `{"days":7}`)
+	if rec.Code != http.StatusBadGateway || expErrorCode(t, rec) != "upstream_error" {
+		t.Fatalf("unconfigured = %d, body=%s", rec.Code, rec.Body.String())
+	}
+
+	// 缺 Idempotency-Key → 400
+	rec = expRequest(t, router, http.MethodPost, "/api/v1/experiences/extract-candidates", admin, "", `{}`)
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("no idempotency key = %d", rec.Code)
+	}
+
+	// 无 token → 401
+	rec = expRequest(t, router, http.MethodPost, "/api/v1/experiences/extract-candidates", "",
+		expUniqueKey(t), `{}`)
+	if rec.Code != http.StatusUnauthorized {
+		t.Fatalf("no token = %d", rec.Code)
+	}
+	_ = member
 }

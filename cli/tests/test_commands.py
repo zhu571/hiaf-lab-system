@@ -227,6 +227,44 @@ class TestCommands(unittest.TestCase):
             "GET", "/api/v1/experiences",
             params={"tags": "weekly_summary", "status": "published", "per_page": "3"})
 
+    def test_experiences_extract_candidates_default(self):
+        self._assert_happy(
+            lambda api: commands.run_experiences_extract(api),
+            "POST", "/api/v1/experiences/extract-candidates",
+            body={})
+
+    def test_experiences_extract_candidates_days(self):
+        self._assert_happy(
+            lambda api: commands.run_experiences_extract(api, days=14),
+            "POST", "/api/v1/experiences/extract-candidates",
+            body={"days": 14})
+
+    def test_experiences_extract_candidates_invalid_days(self):
+        api = _login_then(lambda request: ok({}))
+        with self.assertRaises(LabctlError) as cm:
+            commands.run_experiences_extract(api, days=0)
+        self.assertEqual(cm.exception.code, "bad_request")
+        with self.assertRaises(LabctlError) as cm:
+            commands.run_experiences_extract(api, days=31)
+        self.assertEqual(cm.exception.code, "bad_request")
+
+    def test_experiences_list_candidates(self):
+        self._assert_happy(
+            lambda api: commands.run_experiences_list(api, status="candidate"),
+            "GET", "/api/v1/experiences",
+            params={"status": "candidate", "page": "1", "per_page": "20"})
+
+    def test_experiences_publish(self):
+        self._assert_happy(
+            lambda api: commands.run_experiences_publish(api, "exp_1"),
+            "POST", "/api/v1/experiences/exp_1/publish")
+
+    def test_experiences_publish_requires_id(self):
+        api = _login_then(lambda request: ok({}))
+        with self.assertRaises(LabctlError) as cm:
+            commands.run_experiences_publish(api, "")
+        self.assertEqual(cm.exception.code, "bad_request")
+
     def test_login_and_whoami(self):
         captured = {}
 

@@ -239,6 +239,57 @@ class TestCliSubcommands(BaseCliTest):
         self.assertEqual(result.exit_code, 0, result.output)
         self.assertIn("共 1 条", result.output)
 
+    def test_experiences_extract_candidates(self):
+        captured = {}
+
+        def handler(request):
+            captured["path"] = request.url.path
+            captured["body"] = request.read().decode()
+            return ok({"items": [{"experience": {"id": "exp_1", "status": "candidate"},
+                                  "issue_id": "iss_1", "confidence": 0.88}], "total": 1})
+
+        api = self._api(handler)
+        result = self.invoke(["experiences", "extract-candidates"], api=api)
+        self.assertEqual(result.exit_code, 0, result.output)
+        self.assertEqual(captured["path"], "/api/v1/experiences/extract-candidates")
+        self.assertIn("exp_1", result.output)
+
+        result2 = self.invoke(["experiences", "extract-candidates", "--days", "14"], api=api)
+        self.assertEqual(result2.exit_code, 0, result2.output)
+        self.assertIn('"days":14', captured["body"])
+
+    def test_experiences_extract_candidates_invalid_days(self):
+        api = self._api(lambda request: ok({}))
+        result = self.invoke(["experiences", "extract-candidates", "--days", "0"], api=api)
+        self.assertEqual(result.exit_code, 1, result.output)
+        self.assertIn("bad_request", result.output)
+
+    def test_experiences_list_candidates(self):
+        captured = {}
+
+        def handler(request):
+            captured["params"] = dict(request.url.params)
+            return ok({"items": [{"id": "exp_1", "title": "候选经验", "status": "candidate"}],
+                       "total": 1, "page": 1, "per_page": 20})
+
+        api = self._api(handler)
+        result = self.invoke(["experiences", "list", "--status", "candidate"], api=api)
+        self.assertEqual(result.exit_code, 0, result.output)
+        self.assertEqual(captured["params"]["status"], "candidate")
+
+    def test_experiences_publish(self):
+        captured = {}
+
+        def handler(request):
+            captured["path"] = request.url.path
+            return ok({"id": "exp_1", "status": "published"})
+
+        api = self._api(handler)
+        result = self.invoke(["experiences", "publish", "exp_1"], api=api)
+        self.assertEqual(result.exit_code, 0, result.output)
+        self.assertEqual(captured["path"], "/api/v1/experiences/exp_1/publish")
+        self.assertIn("published", result.output)
+
     def test_logs_list_status_draft(self):
         captured = {}
 

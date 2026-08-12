@@ -435,11 +435,49 @@ def logs_get(ctx, log_id):
     run_command(ctx, commands.run_logs_get, log_id=log_id)
 
 
+# ---------------------------------------------------------------- experiences
+@cli.group("experiences")
+def experiences():
+    """经验库（AI 提取）：extract-candidates / list / publish"""
+
+
+@experiences.command("extract-candidates")
+@click.option("--days", type=int, default=None,
+              help="回溯天数（默认 7，限 1-30）")
+@click.pass_context
+def experiences_extract_candidates(ctx, days):
+    """触发 AI 经验候选提取（需 maintainer/admin）：最近 days 天 resolved/closed 的
+    issue 提炼经验候选，落库为 candidate 草稿，随后在经验库审核发布"""
+    run_command(ctx, commands.run_experiences_extract, days=days)
+
+
+@experiences.command("list")
+@click.option("--status", type=click.Choice(["candidate", "published", "archived"]),
+              help="缺省 published")
+@click.option("--project-id")
+@click.option("--page", type=int, default=1, show_default=True)
+@click.option("--per-page", type=int, default=20, show_default=True)
+@click.pass_context
+def experiences_list(ctx, status, project_id, page, per_page):
+    """经验列表（审核候选用 status=candidate）"""
+    run_command(ctx, commands.run_experiences_list, status=status or "",
+                project_id=project_id or "", page=page, per_page=per_page)
+
+
+@experiences.command("publish")
+@click.argument("experience_id")
+@click.pass_context
+def experiences_publish(ctx, experience_id):
+    """审核通过并发布候选经验（需项目 maintainer+；全局经验仅 admin）"""
+    run_command(ctx, commands.run_experiences_publish, experience_id=experience_id)
+
+
 # ---------------------------------------------------------------- weekly
 @cli.group("weekly")
+
+
 def weekly():
     """周报（AI 生成）：generate / recent"""
-
 
 @weekly.command("generate")
 @click.option("--week-start", help="周开始日期（周一，YYYY-MM-DD；默认本周一）")

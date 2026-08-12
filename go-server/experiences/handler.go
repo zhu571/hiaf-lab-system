@@ -156,6 +156,30 @@ func (h *Handler) Archive(w http.ResponseWriter, r *http.Request) {
 	common.WriteSuccess(w, r, exp)
 }
 
+// ExtractCandidates 经验候选提取（AI-2）：maintainer+ 手动触发，取最近 days 天
+// （默认 7）resolved/closed 的 issue 提炼经验候选并落库为 candidate 草稿。
+func (h *Handler) ExtractCandidates(w http.ResponseWriter, r *http.Request) {
+	if !requireIdempotencyKey(w, r) {
+		return
+	}
+	claims := middleware.GetUserClaims(r.Context())
+	if claims == nil {
+		common.WriteError(w, r, http.StatusUnauthorized, "unauthorized", "未登录", nil)
+		return
+	}
+	var req ExtractCandidatesRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		common.WriteError(w, r, http.StatusBadRequest, "bad_request", "请求体解析失败", nil)
+		return
+	}
+	result, err := h.svc.ExtractCandidates(r.Context(), middleware.EffectiveUserID(r.Context()), claims.Role, req.Days)
+	if err != nil {
+		h.writeError(w, r, err, nil)
+		return
+	}
+	common.WriteSuccess(w, r, result)
+}
+
 func queryInt(r *http.Request, key string, def int) int {
 	raw := r.URL.Query().Get(key)
 	if raw == "" {
@@ -197,6 +221,8 @@ func (h *Handler) writeError(w http.ResponseWriter, r *http.Request, err error, 
 		common.WriteError(w, r, http.StatusBadRequest, "not_published", err.Error(), details)
 	case errors.Is(err, ErrForbidden), errors.Is(err, ErrPublishForbidden), errors.Is(err, ErrGlobalExperienceAdminOnly):
 		common.WriteError(w, r, http.StatusForbidden, "permission_denied", err.Error(), details)
+	case errors.Is(err, ErrExtractNotConfigured), errors.Is(err, ErrExtractUpstream), errors.Is(err, ErrInvalidLLMOutput):
+		common.WriteError(w, r, http.StatusBadGateway, "upstream_error", err.Error(), details)
 	default:
 		slog.Error("experiences request failed", "error", err, "request_id", common.GetRequestID(r.Context()))
 		common.WriteError(w, r, http.StatusInternalServerError, "internal_error", "服务器内部错误", nil)

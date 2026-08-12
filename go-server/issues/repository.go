@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"strings"
 	"time"
+
+	"github.com/lib/pq"
 )
 
 type Repository struct {
@@ -302,6 +304,89 @@ func (r *Repository) TerminalIssueIDs(ctx context.Context) ([]string, error) {
 		return nil, fmt.Errorf("iterate terminal issue ids: %w", err)
 	}
 	return ids, nil
+}
+
+// ResolvedIssuesSince 取 since 以来已解决/关闭的 issue（含评论、run_id），
+// 按 resolved_at（缺失时近似 updated_at）降序、limit 封顶。经验提取（AI-2）数据源，
+// 经 main.go 注入 experiences 模块窄接口；SQL 只访问本模块表（issues/issue_comments）。
+func (r *Repository) ResolvedIssuesSince(ctx context.Context, since time.Time, limit int) ([]ResolvedIssue, error) {
+	if limit < 1 {
+		limit = 50
+	}
+	if limit > 200 {
+		limit = 200
+	}
+	rows, err := r.db.QueryContext(ctx, `
+		SELECT id, project_id, title, description, run_id
+		FROM issues
+		WHERE status IN ('resolved','closed')
+		  AND COALESCE(resolved_at, updated_at) >= $1
+		ORDER BY COALESCE(resolved_at, updated_at) DESC
+		LIMIT $2`, since, limit)
+	if err != nil {
+		return nil, fmt.Errorf("list resolved issues: %w", err)
+	}
+	defer rows.Close()
+
+	items := []ResolvedIssue{}
+	issueIDs := make([]string, 0, limit)
+	for rows.Next() {
+		var item ResolvedIssue
+		var runID sql.NullString
+		if err := rows.Scan(&item.ID, &item.ProjectID, &item.Title, &item.Description, &runID); err != nil {
+			return nil, fmt.Errorf("scan resolved issue: %w", err)
+		}
+		if runID.Valid {
+			item.RunID = &runID.String
+		}
+		items = append(items, item)
+		issueIDs = append(issueIDs, item.ID)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate resolved issues: %w", err)
+	}
+	if len(items) == 0 {
+		return items, nil
+	}
+
+	comments, err := r.commentsForIssues(ctx, issueIDs)
+	if err != nil {
+		return nil, err
+	}
+	for i := range items {
+		items[i].Comments = comments[items[i].ID]
+	}
+	return items, nil
+}
+
+// commentsForIssues 批量取多条 issue 的评论（每 issue 最多 20 条，经验提取素材预算），
+// 按 created_at 升序；只访问本模块表 issue_comments。
+func (r *Repository) commentsForIssues(ctx context.Context, issueIDs []string) (map[string][]string, error) {
+	rows, err := r.db.QueryContext(ctx, `
+		SELECT issue_id, content
+		FROM issue_comments
+		WHERE issue_id = ANY($1)
+		ORDER BY created_at`, pq.Array(issueIDs))
+	if err != nil {
+		return nil, fmt.Errorf("list issue comments: %w", err)
+	}
+	defer rows.Close()
+
+	out := make(map[string][]string, len(issueIDs))
+	for rows.Next() {
+		var issueID, content string
+		if err := rows.Scan(&issueID, &content); err != nil {
+			return nil, fmt.Errorf("scan issue comment: %w", err)
+		}
+		comments := out[issueID]
+		if len(comments) < 20 {
+			out[issueID] = append(comments, content)
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate issue comments: %w", err)
+	}
+	return out, nil
 }
 
 // WeeklyIssueStats 统计 [from, to] 周内 created / resolved 数与全局未解决
