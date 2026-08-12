@@ -77,6 +77,23 @@ class TestCommands(unittest.TestCase):
             commands.run_projects_create(api, code="", name="x")
         self.assertEqual(cm.exception.code, "bad_request")
 
+    def test_projects_transition(self):
+        self._assert_happy(lambda api: commands.run_projects_transition(api, "prj_1", "activate"),
+                           "POST", "/api/v1/projects/prj_1/transition",
+                           body={"action": "activate"})
+
+    def test_projects_transition_invalid_action(self):
+        api = _login_then(lambda request: ok({}))
+        with self.assertRaises(LabctlError) as cm:
+            commands.run_projects_transition(api, "prj_1", "explode")
+        self.assertEqual(cm.exception.code, "bad_request")
+
+    def test_projects_transition_required(self):
+        api = _login_then(lambda request: ok({}))
+        with self.assertRaises(LabctlError) as cm:
+            commands.run_projects_transition(api, "prj_1", "")
+        self.assertEqual(cm.exception.code, "bad_request")
+
     def test_issues_list(self):
         self._assert_happy(
             lambda api: commands.run_issues_list(api, "prj_1", status="open", severity="high"),
@@ -169,6 +186,24 @@ class TestCommands(unittest.TestCase):
             lambda api: commands.run_logs_list(api, "prj_1", category="rf", status="confirmed"),
             "GET", "/api/v1/projects/prj_1/logs",
             params={"category": "rf", "status": "confirmed", "page": "1", "per_page": "20"})
+
+    def test_logs_list_status_draft(self):
+        self._assert_happy(
+            lambda api: commands.run_logs_list(api, "prj_1", status="draft"),
+            "GET", "/api/v1/projects/prj_1/logs",
+            params={"status": "draft", "page": "1", "per_page": "20"})
+
+    def test_logs_list_status_omitted_keeps_default(self):
+        self._assert_happy(
+            lambda api: commands.run_logs_list(api, "prj_1"),
+            "GET", "/api/v1/projects/prj_1/logs",
+            params={"page": "1", "per_page": "20"})
+
+    def test_logs_list_invalid_status(self):
+        api = _login_then(lambda request: ok({}))
+        with self.assertRaises(LabctlError) as cm:
+            commands.run_logs_list(api, "prj_1", status="bogus")
+        self.assertEqual(cm.exception.code, "bad_request")
 
     def test_logs_get(self):
         self._assert_happy(lambda api: commands.run_logs_get(api, "log_1"),
