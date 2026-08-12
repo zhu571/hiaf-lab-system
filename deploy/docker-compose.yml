@@ -276,6 +276,7 @@ services:
     build:
       context: ../py-agent
       dockerfile: Dockerfile
+    container_name: lab-py-agent-interpret
     logging: *default-logging
     command: ["python", "serve.py"]
     environment:

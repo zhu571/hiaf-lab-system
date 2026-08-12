@@ -21,12 +21,12 @@ import (
 )
 
 var (
-	ErrTemplateNotFound = errors.New("模板不存在")
-	ErrInvalidInput     = errors.New("请求参数无效")
-	ErrForbidden        = errors.New("当前用户无权执行此操作")
-	ErrAgentRejected    = errors.New("agent 角色不允许执行此操作")
-	ErrUpstream         = errors.New("py-agent 上游服务错误")
-	ErrDuplicateItems   = errors.New("步骤序号重复")
+	ErrTemplateNotFound  = errors.New("模板不存在")
+	ErrInvalidInput      = errors.New("请求参数无效")
+	ErrForbidden         = errors.New("当前用户无权执行此操作")
+	ErrAgentRejected     = errors.New("agent 角色不允许执行此操作")
+	ErrUpstream          = errors.New("py-agent 上游服务错误")
+	ErrDuplicateItems    = errors.New("步骤序号重复")
 	ErrDependencyInvalid = errors.New("依赖步骤序号无效")
 )
 
@@ -41,13 +41,13 @@ type stepRepo interface {
 }
 
 type Service struct {
-	repo            stepRepo
-	db              *sql.DB
-	client          *http.Client
-	plannerURL      string
-	plannerToken    string
-	rlMu            sync.Mutex
-	rlCalls         map[string][]time.Time
+	repo         stepRepo
+	db           *sql.DB
+	client       *http.Client
+	plannerURL   string
+	plannerToken string
+	rlMu         sync.Mutex
+	rlCalls      map[string][]time.Time
 }
 
 func NewService(repo stepRepo, db *sql.DB) *Service {

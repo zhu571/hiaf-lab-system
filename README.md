@@ -111,6 +111,27 @@ docker compose -f deploy/docker-compose.yml up -d
 | `lab-grafana` | 监控仪表盘 |
 | `lab-ntfy` | 消息通知 |
 
+## CLI / MCP（labctl）
+
+`cli/` 是给 AI Agent（Hermes/Codex/Goose 等）或运维人员的命令行操作系统：通过 REST API 直接操作日报、项目、Issue、测试数据、实验批次、告警与日志，不手拼 HTTP 请求，服务端权限/审计/限流不变。
+
+```bash
+# 运行（复用 py-agent 虚拟环境；依赖见 cli/requirements.txt：click/httpx/mcp）
+py-agent/.venv/bin/python -m cli.cli --help
+```
+
+8 个子命令：`login`（登录/注销/whoami）、`daily-report`（today/history/entry）、`projects`（list/get/create）、`issues`（list/create/transition）、`test-data`（list/entry）、`runs`（list/get/status）、`alerts`（list/resolve）、`logs`（list/get）。输出默认 JSON（Agent 易解析），`--human` 人类可读，错误透传服务端 `request_id`。
+
+认证双通道：交互登录 `login <用户名>`（或 CI 场景 `login --token-stdin`，凭证存 `~/.labctl/token` 0600、密码不落盘）；无人值守 `LABCTL_SERVICE_TOKEN` 服务账号（纯透传，只读为主——写操作缺 CSRF token 会 403 `csrf_failed` 原样透传）。环境变量 `LABCTL_BASE_URL` 默认 `http://localhost:8000`。
+
+MCP Server（stdio，21 个 `labctl_*` 工具）：
+
+```bash
+py-agent/.venv/bin/python -m cli.mcp_server
+```
+
+MCP 自身无独立鉴权——安全边界 = 启动进程所持 token 的权限，仅限内网/受信主机启动。详见 `cli/README.md`。
+
 ## 入口文档
 
 | 文档 | 说明 |
