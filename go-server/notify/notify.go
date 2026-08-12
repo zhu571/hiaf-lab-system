@@ -3,7 +3,7 @@ package notify
 
 import (
 	"fmt"
-	"log"
+	"log/slog"
 	"net/http"
 	"net/url"
 	"os"
@@ -83,7 +83,7 @@ func meowSend(title, body string) error {
 func SendBoth(topic, title, message, clickURL, priority string, tags []string) error {
 	ntfyErr := Send(topic, title, message, clickURL, priority, tags)
 	if err := meowSend(title, message); err != nil {
-		log.Printf("MeoW notification failed: %v", err)
+		slog.Warn("MeoW notification failed", "error", err)
 	}
 	return ntfyErr
 }

@@ -266,6 +266,17 @@ pip install -r requirements.txt
 python worker.py
 ```
 
+### 运维 / 测试脚本（仓库根视角）
+
+| 脚本 | 用途 |
+|------|------|
+| `scripts/test-all.sh` | 本地一键全量测试（迁移 up/down → Go race+覆盖率 → py unittest → 前端 vitest → 构建产物与 static 一致性），任一步失败即退出 |
+| `scripts/test-e2e.sh` | 本地一键 Playwright E2E 冒烟（起 postgres → 迁移 → Go server → vite dev → playwright，trap 自动清理） |
+| `deploy/scripts/backup.sh` | 数据库定时备份（容器内 pg_dump `-Fc` → `/opt/lab-backups/`，flock 防重入，失败上报告警中心；gascell systemd timer 每日 03:00 + 保留 14 天） |
+| `deploy/scripts/restore-check.sh` | 恢复演练：`pg_restore -Fc` 到临时库校验表数与关键行后 drop，验证备份可用 |
+| `deploy/scripts/watchdog.sh` | 宿主机 watchdog：每 60s 探测全部容器健康态（HTTP + docker inspect），3 次失败告警只告警不自动重启 |
+| `cli/`（labctl） | AI Agent/运维命令行客户端 + MCP Server（见 `cli/README.md`；测试：`py-agent/.venv/bin/python -m unittest discover -s cli/tests`） |
+
 ## 8. PR 前检查清单
 
 - [ ] 已阅读本次任务对应的设计文档。

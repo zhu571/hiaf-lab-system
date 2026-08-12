@@ -3,37 +3,37 @@ package steptemplates
 import "time"
 
 type StepTemplate struct {
-	ID           string     `json:"id"`
-	Name         string     `json:"name"`
-	Kind         string     `json:"kind"`
-	Description  string     `json:"description,omitempty"`
-	SourcePrompt string     `json:"source_prompt,omitempty"`
-	AIGenerated  bool       `json:"ai_generated"`
-	CreatedBy    *string    `json:"created_by,omitempty"`
-	CreatedAt    time.Time  `json:"created_at"`
-	UpdatedAt    time.Time  `json:"updated_at"`
-	DeletedAt    *time.Time `json:"-"`
+	ID           string             `json:"id"`
+	Name         string             `json:"name"`
+	Kind         string             `json:"kind"`
+	Description  string             `json:"description,omitempty"`
+	SourcePrompt string             `json:"source_prompt,omitempty"`
+	AIGenerated  bool               `json:"ai_generated"`
+	CreatedBy    *string            `json:"created_by,omitempty"`
+	CreatedAt    time.Time          `json:"created_at"`
+	UpdatedAt    time.Time          `json:"updated_at"`
+	DeletedAt    *time.Time         `json:"-"`
 	Items        []StepTemplateItem `json:"items,omitempty"`
 }
 
 type StepTemplateItem struct {
-	ID             string    `json:"id"`
-	TemplateID     string    `json:"template_id"`
-	Name           string    `json:"name"`
-	Description    string    `json:"description,omitempty"`
-	StepOrder      int       `json:"step_order"`
-	DependsOnOrder *int      `json:"depends_on_order,omitempty"`
-	Meta           []byte    `json:"meta"`
-	CreatedAt      time.Time `json:"created_at"`
-	UpdatedAt      time.Time `json:"updated_at"`
+	ID             string     `json:"id"`
+	TemplateID     string     `json:"template_id"`
+	Name           string     `json:"name"`
+	Description    string     `json:"description,omitempty"`
+	StepOrder      int        `json:"step_order"`
+	DependsOnOrder *int       `json:"depends_on_order,omitempty"`
+	Meta           []byte     `json:"meta"`
+	CreatedAt      time.Time  `json:"created_at"`
+	UpdatedAt      time.Time  `json:"updated_at"`
 	DeletedAt      *time.Time `json:"-"`
 }
 
 const (
-	MaxItems       = 30
-	MinItems       = 1
-	MaxNameLen     = 256
-	MaxDescLen     = 2000
+	MaxItems   = 30
+	MinItems   = 1
+	MaxNameLen = 256
+	MaxDescLen = 2000
 )
 
 type ItemDef struct {
@@ -67,13 +67,13 @@ type GenerateResponseData struct {
 }
 
 type CreateTemplateRequest struct {
-	Name           string    `json:"name"`
-	Kind           string    `json:"kind"`
-	Description    string    `json:"description,omitempty"`
-	SourcePrompt   string    `json:"source_prompt,omitempty"`
-	AIGenerated    bool      `json:"ai_generated,omitempty"`
-	Items          []ItemDef `json:"items"`
-	ApplyToProjectID *string `json:"apply_to_project_id,omitempty"`
+	Name             string    `json:"name"`
+	Kind             string    `json:"kind"`
+	Description      string    `json:"description,omitempty"`
+	SourcePrompt     string    `json:"source_prompt,omitempty"`
+	AIGenerated      bool      `json:"ai_generated,omitempty"`
+	Items            []ItemDef `json:"items"`
+	ApplyToProjectID *string   `json:"apply_to_project_id,omitempty"`
 }
 
 type UpdateTemplateRequest struct {

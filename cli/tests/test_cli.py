@@ -92,8 +92,13 @@ class TestCliLogin(BaseCliTest):
     def test_logout_clears_token(self):
         auth.save_token({"access_token": "at", "refresh_token": "rt", "csrf_token": "cs",
                          "username": "zhangsan", "base_url": "http://lab.test"})
-        api = make_api(lambda request: ok({"success": True}))
-        result = self.invoke(["login", "--logout"], api=api)
+        # _do_logout 直接走 LabctlAPI.from_stored（不经 build_api），
+        # 必须在这里注入 MockTransport 桩，否则会真实 DNS 解析 lab.test（~3s）
+        api = make_api(lambda request: ok({"success": True}),
+                       access_token="at", refresh_token="rt", csrf_token="cs")
+        with mock.patch.object(cli_module, "LabctlAPI") as mock_cls:
+            mock_cls.from_stored.return_value = api
+            result = self.runner.invoke(cli, ["login", "--logout"])
         self.assertEqual(result.exit_code, 0, result.output)
         self.assertIsNone(auth.load_token())
 
