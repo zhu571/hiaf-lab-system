@@ -167,9 +167,12 @@ services:
       DB_USER: lab
       DB_NAME: lab
       PORT: 8000
-      # SourceGate 回滚开关（2026-08-10 生产事故）：docker 健康检查(127.0.0.1)/容器互调(172.x)
-      # 不在 10.144.144.0/24 白名单 → 全被 403，server unhealthy + worker 全断。禁用待完整测试。
-      SOURCE_GATE_ENABLED: "false"
+      # SourceGate 回滚开关（2026-08-10 生产事故曾硬编码 false）：docker 健康检查(127.0.0.1)/容器互调(172.x)
+      # 不在 10.144.144.0/24 白名单 → 写操作被拒；GET 读请求白名单放行故健康检查不受影响。
+      # 现允许 .env 覆盖（SOURCE_GATE_ENABLED=true 启用公网来源门；默认 false 保持回滚安全）。
+      SOURCE_GATE_ENABLED: "${SOURCE_GATE_ENABLED:-false}"
+      # 公网来源门共享秘密（group-access 2026-08-12）：Caddy 与 server 两端一致，≥32 字符
+      LAB_PROXY_SHARED_SECRET: ${LAB_PROXY_SHARED_SECRET:-}
       EPICS_GATEWAY_ADDR: epics-gateway:5070
       INFLUXDB_ADDR: ${INFLUXDB_ADDR:-http://influxdb:8086}
       INFLUXDB_ORG: ${INFLUXDB_ORG:-lab-org}
