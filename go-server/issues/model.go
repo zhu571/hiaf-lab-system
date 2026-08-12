@@ -102,3 +102,15 @@ type WeeklyIssueStats struct {
 	// OpenHighCritical 是全局当前态未解决且 severity=high/critical 的 issue 数。
 	OpenHighCritical int
 }
+
+// ResolvedIssue 是经验提取（AI-2）的 issue 数据源：最近 resolved/closed 的 issue
+// 连同其评论与关联 run。供 main.go 注入 experiences 模块窄接口读取，
+// SQL 在 issues 包内只访问本模块表（issues/issue_comments，见 AGENTS.md §5）。
+type ResolvedIssue struct {
+	ID          string
+	ProjectID   string
+	Title       string
+	Description string
+	Comments    []string
+	RunID       *string
+}

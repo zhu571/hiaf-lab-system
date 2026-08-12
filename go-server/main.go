@@ -129,6 +129,9 @@ func main() {
 	issuesHandler := issues.NewHandler(issuesSvc)
 	experiencesRepo := experiences.NewRepository(db)
 	experiencesSvc := experiences.NewService(experiencesRepo, experiences.ProjectAccessAdapter{Repo: projectsRepo}, agentSvc)
+	// AI-2 经验候选提取：issue 数据源（issues 仓储）与 LLM client（py-agent）构造期注入。
+	experiencesSvc.SetIssueSource(experienceIssueBridge{repo: issuesRepo})
+	experiencesSvc.SetExtractor(experiences.NewHTTPExtractClient())
 	experiencesHandler := experiences.NewHandler(experiencesSvc)
 	runsRepo := runs.NewRepository(db)
 	runsSvc := runs.NewService(runsRepo, runs.ProjectAccessAdapter{Repo: projectsRepo})
@@ -493,6 +496,9 @@ func main() {
 		r.Get("/", experiencesHandler.List)
 		r.Post("/", experiencesHandler.Create)
 		r.Post("/candidates", experiencesHandler.Create)
+		// AI-2 经验候选提取：maintainer+ 手动触发（对齐 /api/v1/weekly/summary 角色门槛）。
+		r.With(mw.RequireRole(auth.RoleAdmin, auth.RoleMaintainer)).
+			Post("/extract-candidates", experiencesHandler.ExtractCandidates)
 		r.Route("/{id}", func(r chi.Router) {
 			r.Get("/", experiencesHandler.GetByID)
 			r.Patch("/", experiencesHandler.Update)
