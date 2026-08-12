@@ -197,6 +197,9 @@ services:
       SERVICE_TOKEN_FILE: /run/secrets/service_token
       NTFY_PUBLISH_TOKEN_FILE: /run/secrets/ntfy_publish_token
       TODOS_SCHEDULER_ENABLED: ${TODOS_SCHEDULER_ENABLED:-true}
+      # 周报（AI-1）：每周日 20:00 定时生成的作者用户 ID（WEEKLY_SUMMARY_AUTHOR_ID 为空则跳过）
+      WEEKLY_SCHEDULER_ENABLED: ${WEEKLY_SCHEDULER_ENABLED:-true}
+      WEEKLY_SUMMARY_AUTHOR_ID: ${WEEKLY_SUMMARY_AUTHOR_ID:-}
       NTFY_PUBLIC_URL: ${NTFY_PUBLIC_URL:-http://10.144.144.12:8087}
       # CORS 白名单（P1-4）：生产同源无需配置；独立域名/端口前端在 .env 追加
       CORS_ALLOWED_ORIGINS: ${CORS_ALLOWED_ORIGINS:-http://127.0.0.1:5173,http://localhost:5173}

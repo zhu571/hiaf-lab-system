@@ -209,6 +209,24 @@ class TestCommands(unittest.TestCase):
         self._assert_happy(lambda api: commands.run_logs_get(api, "log_1"),
                            "GET", "/api/v1/logs/log_1")
 
+    def test_weekly_generate_default(self):
+        self._assert_happy(
+            lambda api: commands.run_weekly_generate(api),
+            "POST", "/api/v1/weekly/summary",
+            body={"notify": True})
+
+    def test_weekly_generate_explicit(self):
+        self._assert_happy(
+            lambda api: commands.run_weekly_generate(api, week_start="2026-08-03", notify=False),
+            "POST", "/api/v1/weekly/summary",
+            body={"week_start": "2026-08-03", "notify": False})
+
+    def test_weekly_recent(self):
+        self._assert_happy(
+            lambda api: commands.run_weekly_recent(api, limit=3),
+            "GET", "/api/v1/experiences",
+            params={"tags": "weekly_summary", "status": "published", "per_page": "3"})
+
     def test_login_and_whoami(self):
         captured = {}
 

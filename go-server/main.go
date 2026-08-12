@@ -38,6 +38,7 @@ import (
 	"github.com/zhu571/hiaf-lab-system/go-server/system"
 	"github.com/zhu571/hiaf-lab-system/go-server/testdata"
 	"github.com/zhu571/hiaf-lab-system/go-server/todos"
+	"github.com/zhu571/hiaf-lab-system/go-server/weekly"
 )
 
 //go:embed static
@@ -225,6 +226,18 @@ func main() {
 		loc, time.Now,
 	)
 	todosHandler := todos.NewHandler(todosSvc)
+
+	// 周报模块（AI-1）：跨模块只读（daily_reports/issues）与落库（experiences）
+	// 全部经 main_bridges.go 窄接口注入，weekly 不直读任何业务表。
+	weeklySvc := weekly.NewService(
+		weeklyReportReaderBridge{repo: logsRepo},
+		weeklyIssueStatsBridge{repo: issuesRepo},
+		weeklyExperienceBridge{repo: experiencesRepo},
+		weekly.NewHTTPLLMClient(),
+		weeklyNotifier{},
+		loc, time.Now,
+	)
+	weeklyHandler := weekly.NewHandler(weeklySvc)
 
 	r := chi.NewRouter()
 	// 来源门必须先于 chi RealIP：RealIP 会改写 r.RemoteAddr，先取数才能拿到真实 TCP 对端。
@@ -487,6 +500,14 @@ func main() {
 			r.Post("/archive", experiencesHandler.Archive)
 		})
 	})
+	// 周报（AI-1）：手动触发生成，maintainer+ 权限；写接口：审计 + Idempotency-Key。
+	// 定时调度独立于 HTTP（weeklyScheduler goroutine，每周日 20:00）。
+	r.Route("/api/v1/weekly", func(r chi.Router) {
+		r.Use(mw.AuthRequired)
+		r.Use(mw.Audit(db))
+		r.With(mw.RequireRole(auth.RoleAdmin, auth.RoleMaintainer),
+			mw.RequireIdempotencyKey(db)).Post("/summary", weeklyHandler.Summary)
+	})
 	r.Route("/api/v1/attachments", func(r chi.Router) {
 		r.Use(mw.AuthRequired)
 		r.Use(mw.AgentContext(db))
@@ -643,6 +664,16 @@ func main() {
 		})
 		go sched.Run(ctx)
 		slog.Info("todos scheduler enabled")
+	}
+	// 周报定时调度（AI-1）：每周日 20:00；WEEKLY_SUMMARY_AUTHOR_ID 未配置时跳过。
+	if os.Getenv("WEEKLY_SCHEDULER_ENABLED") != "false" {
+		weeklySched := weekly.NewScheduler(weeklySvc, os.Getenv("WEEKLY_SUMMARY_AUTHOR_ID"), loc, time.Now)
+		weeklySched.SetAlertReporter(func(title, msg string) error {
+			_, err := alertSvc.Report(context.Background(), "warning", "weekly", title, msg)
+			return err
+		})
+		go weeklySched.Run(ctx)
+		slog.Info("weekly scheduler enabled")
 	}
 	// ask_history 快照保留任务（P2-3）：立即执行一次 + 每 24h，90 天前快照置 NULL。
 	go askSvc.StartRetentionTask(ctx)

@@ -208,6 +208,37 @@ class TestCliSubcommands(BaseCliTest):
         self.assertIn("auth_expired", result.output)
         self.assertIn("请重新执行 labctl login", result.output)
 
+    def test_weekly_generate_and_recent(self):
+        captured = {}
+
+        def handler(request):
+            captured["path"] = request.url.path
+            if request.url.path == "/api/v1/weekly/summary":
+                return ok({"id": "exp_1", "title": "周报 2026-08-03 ~ 2026-08-09",
+                           "summary": "本周完成匹配电路装配。", "week_start": "2026-08-03",
+                           "week_end": "2026-08-09", "reused": False})
+            return ok({"items": [{"id": "exp_1", "title": "周报 2026-08-03 ~ 2026-08-09",
+                                  "status": "published", "tags": ["weekly_summary"]}],
+                       "total": 1, "page": 1, "per_page": 5})
+
+        api = self._api(handler)
+        result = self.invoke(["weekly", "generate"], api=api)
+        self.assertEqual(result.exit_code, 0, result.output)
+        self.assertIn("周报 2026-08-03 ~ 2026-08-09", result.output)
+
+        result2 = self.invoke(["weekly", "recent", "--limit", "5"], api=api)
+        self.assertEqual(result2.exit_code, 0, result2.output)
+        self.assertEqual(captured["path"], "/api/v1/experiences")
+
+    def test_weekly_recent_human(self):
+        api = self._api(lambda request: ok({
+            "items": [{"id": "exp_1", "title": "周报 2026-08-03 ~ 2026-08-09",
+                       "status": "published"}],
+            "total": 1, "page": 1, "per_page": 5}))
+        result = self.invoke(["--human", "weekly", "recent"], api=api)
+        self.assertEqual(result.exit_code, 0, result.output)
+        self.assertIn("共 1 条", result.output)
+
     def test_logs_list_status_draft(self):
         captured = {}
 

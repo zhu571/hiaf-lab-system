@@ -188,3 +188,14 @@ def run_logs_list(api, project_id, category=None, date_from=None, date_to=None, 
 def run_logs_get(api, log_id):
     _require(log_id, "log_id")
     return api.request("GET", f"/api/v1/logs/{log_id}")
+
+
+def run_weekly_generate(api, week_start="", notify=True):
+    return api.request("POST", "/api/v1/weekly/summary",
+                       json=_clean({"week_start": week_start, "notify": notify}))
+
+
+def run_weekly_recent(api, limit=5):
+    return api.request("GET", "/api/v1/experiences",
+                       params={"tags": "weekly_summary", "status": "published",
+                               "per_page": limit})

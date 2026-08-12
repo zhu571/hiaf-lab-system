@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -16,6 +17,7 @@ import (
 	"github.com/zhu571/hiaf-lab-system/go-server/notify"
 	"github.com/zhu571/hiaf-lab-system/go-server/runs"
 	"github.com/zhu571/hiaf-lab-system/go-server/steptemplates"
+	"github.com/zhu571/hiaf-lab-system/go-server/weekly"
 )
 
 // main_bridges.go：main.go 装配用的桥接适配器（纯组织性拆分，P2-5）。
@@ -221,4 +223,65 @@ func (b runTemplateReaderBridge) GetTemplateWithItems(id string) (*runs.Steptemp
 		}
 	}
 	return t, runItems, nil
+}
+
+// ---- weekly 模块桥接（AI-1）：窄接口注入，weekly 不直读 daily_reports/issues/experiences ----
+
+// weeklyReportReaderBridge 经 logs 模块仓储读本周日报（SQL 在 logs 包内，自有表）。
+type weeklyReportReaderBridge struct {
+	repo *logs.Repository
+}
+
+func (b weeklyReportReaderBridge) WeeklyReports(ctx context.Context, from, to string) ([]weekly.ReportEntry, error) {
+	entries, err := b.repo.WeeklyReports(ctx, from, to)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]weekly.ReportEntry, len(entries))
+	for i, e := range entries {
+		out[i] = weekly.ReportEntry{ReportDate: e.ReportDate, AuthorName: e.AuthorName, RawText: e.RawText, Summary: e.Summary}
+	}
+	return out, nil
+}
+
+// weeklyIssueStatsBridge 经 issues 模块仓储读本周 issue 统计（SQL 在 issues 包内，自有表）。
+type weeklyIssueStatsBridge struct {
+	repo *issues.Repository
+}
+
+func (b weeklyIssueStatsBridge) WeeklyIssueStats(ctx context.Context, from, to string) (weekly.IssueStats, error) {
+	stats, err := b.repo.WeeklyIssueStats(ctx, from, to)
+	if err != nil {
+		return weekly.IssueStats{}, err
+	}
+	return weekly.IssueStats{Created: stats.Created, Resolved: stats.Resolved, OpenHighCritical: stats.OpenHighCritical}, nil
+}
+
+// weeklyExperienceBridge 经 experiences 模块仓储落库/查重周报（SQL 在 experiences 包内，自有表）。
+type weeklyExperienceBridge struct {
+	repo *experiences.Repository
+}
+
+func (b weeklyExperienceBridge) FindWeeklySummary(title string) (*weekly.SavedSummary, error) {
+	exp, err := b.repo.FindWeeklySummary(title)
+	if err != nil || exp == nil {
+		return nil, err
+	}
+	return &weekly.SavedSummary{ID: exp.ID, Title: exp.Title, Markdown: exp.Content, CreatedAt: exp.CreatedAt}, nil
+}
+
+func (b weeklyExperienceBridge) SaveWeeklySummary(authorID, title, content string) (*weekly.SavedSummary, error) {
+	exp, err := b.repo.CreateWeeklySummary(authorID, title, content)
+	if err != nil {
+		return nil, err
+	}
+	return &weekly.SavedSummary{ID: exp.ID, Title: exp.Title, Markdown: exp.Content, CreatedAt: exp.CreatedAt}, nil
+}
+
+// weeklyNotifier 是 weekly 模块 notifier 窄接口的 notify 适配器：
+// 主题固定 lab-weekly（周报频道），点击落地经验库页 /experiences；复用 notify.Send。
+type weeklyNotifier struct{}
+
+func (weeklyNotifier) Send(topic, title, msg, clickURL, priority string, tags []string) error {
+	return notify.Send("lab-weekly", title, msg, notify.WebURL+"/experiences", priority, tags)
 }

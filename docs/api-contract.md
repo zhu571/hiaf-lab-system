@@ -1245,6 +1245,31 @@ LLM 自然语言 → 结构化 SQL 查询（不落库的直接问答）。Body�
 错误：400（SQL 非法）、422 `sql_execution_failed`、403（非服务调用）、401（SERVICE_TOKEN 无效）。
 审计 `actor_type='system'`。
 
+## 3.21.1 周报模块（AI-1，已实现）
+
+路由：main.go（`/api/v1/weekly`）。写接口：AuthRequired + Audit + RequireIdempotencyKey +
+RequireRole(admin, maintainer)。定时调度独立于 HTTP：weekly Scheduler 每周日 20:00
+（Asia/Shanghai）触发，作者取 `WEEKLY_SUMMARY_AUTHOR_ID`（未配置则跳过并告警；
+`WEEKLY_SCHEDULER_ENABLED=false` 可关闭）。生成结果**复用 experiences 表落库**
+（global / published / tags=`["weekly_summary"]`，无新表新迁移）；ntfy 推送复用 notify 模块
+（主题 `lab-weekly`）。
+
+### `POST /api/v1/weekly/summary`
+
+AI 两步（digest 提炼 → write 成稿）生成周报。Body（均可缺省）：
+`{week_start?: "YYYY-MM-DD", notify?: bool}`——`week_start` 必须为周一，缺省取本周一；
+`notify` 缺省 true。
+流程：幂等查重（同周已存在 → 直接返回复用，不重复调 LLM/落库）→ 取本周
+daily_reports（经 logs 模块注入窄接口）与 issue 统计（经 issues 模块注入窄接口，
+created/resolved/open_high_critical）→ 调 py-agent `/v1/weekly-summary`（360s 超时）→
+落库 experiences（author=当前用户）→ 推 ntfy。
+载荷保护：reports 超 100 条或单条超 8000/3000/128 字符时 Go 侧截断
+（丢最旧、日志告警），整批请求 ≤480KB，与 py-agent 校验预算 512KB 对齐。
+响应：`{id, title, summary, markdown, highlights, problems, data_points, week_start, week_end, reused}`。
+错误：400 `invalid_input`（week_start 非周一 / 本周无日报）；502 `upstream_error`
+（py-agent 未就绪或 LLM 输出非法）；500 `internal_error`。
+历史查询复用 `GET /api/v1/experiences?tags=weekly_summary&status=published`（CLI `weekly recent`）。
+
 ## 3.22 通知模块（未实现，预告）
 
 ### `POST /api/v1/notifications/events`

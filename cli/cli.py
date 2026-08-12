@@ -435,6 +435,30 @@ def logs_get(ctx, log_id):
     run_command(ctx, commands.run_logs_get, log_id=log_id)
 
 
+# ---------------------------------------------------------------- weekly
+@cli.group("weekly")
+def weekly():
+    """周报（AI 生成）：generate / recent"""
+
+
+@weekly.command("generate")
+@click.option("--week-start", help="周开始日期（周一，YYYY-MM-DD；默认本周一）")
+@click.option("--no-notify", is_flag=True, help="不推送 ntfy 通知")
+@click.pass_context
+def weekly_generate(ctx, week_start, no_notify):
+    """生成/复用本周周报（需 maintainer/admin；同一周只生成一次，重复调用返回已存周报）"""
+    run_command(ctx, commands.run_weekly_generate,
+                week_start=week_start or "", notify=not no_notify)
+
+
+@weekly.command("recent")
+@click.option("--limit", type=int, default=5, show_default=True)
+@click.pass_context
+def weekly_recent(ctx, limit):
+    """查看最近周报（复用 experiences 查询，tags=weekly_summary）"""
+    run_command(ctx, commands.run_weekly_recent, limit=limit)
+
+
 def main():
     cli(prog_name="labctl")
 
