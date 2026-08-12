@@ -508,7 +508,6 @@ func stepTransitionTimes(step *RunStep, transition string, now time.Time) (*time
 	return startedAt, completedAt
 }
 
-
 func (s *Service) getAccessible(id, userID, userRole, minRole string, creatorAllowed bool) (*ExperimentRun, error) {
 	run, err := s.repo.GetByID(strings.TrimSpace(id))
 	if err != nil {

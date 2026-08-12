@@ -54,16 +54,16 @@ func newFakeRepo() *fakeRepo {
 	}
 }
 
-func (f *fakeRepo) Create(*ExperimentRun) error                        { return nil }
-func (f *fakeRepo) List(RunListParams) ([]ExperimentRun, int, error)   { return nil, 0, nil }
-func (f *fakeRepo) Update(string, UpdateRunRequest) error              { return nil }
-func (f *fakeRepo) SoftDelete(string) error                            { return nil }
-func (f *fakeRepo) AddReportLink(string, string) error                 { return nil }
-func (f *fakeRepo) RemoveReportLink(string, string) error              { return nil }
-func (f *fakeRepo) GetReportLinks(string) ([]string, error)            { return nil, nil }
+func (f *fakeRepo) Create(*ExperimentRun) error                           { return nil }
+func (f *fakeRepo) List(RunListParams) ([]ExperimentRun, int, error)      { return nil, 0, nil }
+func (f *fakeRepo) Update(string, UpdateRunRequest) error                 { return nil }
+func (f *fakeRepo) SoftDelete(string) error                               { return nil }
+func (f *fakeRepo) AddReportLink(string, string) error                    { return nil }
+func (f *fakeRepo) RemoveReportLink(string, string) error                 { return nil }
+func (f *fakeRepo) GetReportLinks(string) ([]string, error)               { return nil, nil }
 func (f *fakeRepo) UpdateStatus(string, string, string, bool, bool) error { return nil }
-func (f *fakeRepo) Reorder(string, []ReorderItem) error                { return nil }
-func (f *fakeRepo) MaxStepOrder(string) (int, error)                   { return f.maxOrder, nil }
+func (f *fakeRepo) Reorder(string, []ReorderItem) error                   { return nil }
+func (f *fakeRepo) MaxStepOrder(string) (int, error)                      { return f.maxOrder, nil }
 func (f *fakeRepo) GetByID(id string) (*ExperimentRun, error) {
 	if f.run != nil && f.run.ID == id {
 		return f.run, nil
@@ -92,7 +92,7 @@ func (f *fakeRepo) CreateStepsMany(runID, userID string, defs []StepDef, startOr
 	}
 	return steps, nil
 }
-func (f *fakeRepo) GetStepByID(id string) (*RunStep, error) { return f.steps[id], nil }
+func (f *fakeRepo) GetStepByID(id string) (*RunStep, error)    { return f.steps[id], nil }
 func (f *fakeRepo) UpdateStep(string, UpdateStepRequest) error { return nil }
 func (f *fakeRepo) UpdateStepStatus(id, from, to string, started, completed *time.Time) error {
 	step := f.steps[id]

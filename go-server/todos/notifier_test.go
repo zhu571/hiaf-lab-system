@@ -202,4 +202,3 @@ func TestPushDailyPartialFailureReturnsError(t *testing.T) {
 		t.Fatalf("unexpected push audit: %v", detail)
 	}
 }
-

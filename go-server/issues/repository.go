@@ -380,7 +380,7 @@ type rowScanner interface {
 
 func scanIssue(row rowScanner, item *Issue) error {
 	var reportDate time.Time
-		var assigneeID, agentTaskID, candidateID, runID sql.NullString
+	var assigneeID, agentTaskID, candidateID, runID sql.NullString
 	var resolvedAt sql.NullTime
 	if err := row.Scan(
 		&item.ID, &item.ProjectID, &item.Title, &item.Description, &item.Status, &item.Severity,
@@ -391,15 +391,15 @@ func scanIssue(row rowScanner, item *Issue) error {
 	if assigneeID.Valid {
 		item.AssigneeID = &assigneeID.String
 	}
-		if agentTaskID.Valid {
-			item.AgentTaskID = &agentTaskID.String
-		}
-		if candidateID.Valid {
-			item.CandidateID = &candidateID.String
-		}
-		if runID.Valid {
-			item.RunID = &runID.String
-		}
+	if agentTaskID.Valid {
+		item.AgentTaskID = &agentTaskID.String
+	}
+	if candidateID.Valid {
+		item.CandidateID = &candidateID.String
+	}
+	if runID.Valid {
+		item.RunID = &runID.String
+	}
 	item.ReportDate = reportDate.Format(time.DateOnly)
 	if resolvedAt.Valid {
 		item.ResolvedAt = &resolvedAt.Time

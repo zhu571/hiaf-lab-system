@@ -636,7 +636,6 @@ func TestRunnerFileHelpers(t *testing.T) {
 	}
 }
 
-
 // 集成（B1）：按 Trigger 侧命名（lab-update-<id>.log/.done）落盘后，
 // 全新 Service（模拟进程重启）能从磁盘恢复出正确的状态/exit code/SHA。
 func TestRecoverFromDiskUsesTriggerNaming(t *testing.T) {
