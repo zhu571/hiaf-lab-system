@@ -1,7 +1,7 @@
 # hiaf-lab-system 公网反代配置（2026-08-10 方案 v4，§4.1）
 # 部署前提：VPS 已装 Caddy 且已加入 EasyTier 虚拟网（10.144.144.100 → gascell 10.144.144.12）
 # 部署步骤（域名购买后）：
-#   1. 将下方两处 域名 替换为实际域名（默认 hiaf-lab.cn）
+#   1. 将下方两处 域名 替换为实际域名（实际：hiaf-gascell.site）
 #   2. DNS A 记录 → VPS 公网 IP 134.175.232.67
 #   3. 环境变量 LAB_PROXY_SHARED_SECRET（≥32 字符随机）在 Caddy systemd/容器 与 gascell 两端一致
 #   4. caddy validate --config Caddyfile 验证后启动；旧配置保留 Caddyfile.bak
@@ -12,8 +12,8 @@
 #   - flush_interval -1 关缓冲（SSE 实时，后端已有 X-Accel-Buffering: no）
 
 # lab 主站
-https://lab.域名 {
-    encode brotli gzip zstd
+https://lab.hiaf-gascell.site {
+    encode gzip zstd
     @metrics path /metrics
     respond @metrics 404                          # D14：公网不暴露 /metrics
     request_body max_size 32MB
@@ -26,7 +26,7 @@ https://lab.域名 {
 }
 
 # ntfy 通知（D10）
-https://ntfy.域名 {
+https://ntfy.hiaf-gascell.site {
     reverse_proxy 10.144.144.12:8087 {
         flush_interval -1
     }
