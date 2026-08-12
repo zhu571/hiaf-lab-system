@@ -21,15 +21,17 @@ VALID_SCHEMA = "issues: id(uuid) project_id(uuid) title(text) status(text)"
 
 
 class FakeAgent:
-    """替代 LightAgent：按序弹出预设结果或抛预设错误，记录调用次数。"""
+    """替代 LightAgent：按序弹出预设结果或抛预设错误，记录调用次数与每次 query。"""
 
     def __init__(self, results=None, errors=None):
         self.results = list(results or [])
         self.errors = list(errors or [])
         self.calls = 0
+        self.queries = []
 
     def run(self, query, **kwargs):
         self.calls += 1
+        self.queries.append(query)
         if self.errors:
             raise self.errors.pop(0)
         if not self.results:
@@ -191,6 +193,30 @@ class AskEngineTests(unittest.TestCase):
         self.assertNotIn("run_steps", prompt)
         self.assertIn("project_id", prompt)
 
+    def test_context_prepended_first_in_plan_and_integrate_prompts(self):
+        # AI-3：非空 context 置于规划/整合 prompt 的 trusted_context 最前，带固定前缀
+        engine = self.make_engine(plan_results=[plan_json()], integrate_results=["共 1 条。"])
+        context = "最近 7 天日报摘要：\n- 2026-08-11: 完成预冷"
+        engine.ask(VALID_QUESTION, VALID_SCHEMA, context=context)
+        plan = json.loads(engine.plan_agent.queries[0])
+        trusted = plan["trusted_context"]
+        self.assertIn("context", trusted)
+        self.assertTrue(trusted["context"].startswith("以下为实验室最近上下文："))
+        self.assertIn("完成预冷", trusted["context"])
+        self.assertLess(list(trusted).index("context"), list(trusted).index("schema"))
+        integrate = json.loads(engine.integrate_agent.queries[0])
+        self.assertTrue(integrate["trusted_context"]["context"].startswith("以下为实验室最近上下文："))
+        self.assertIn("完成预冷", integrate["trusted_context"]["context"])
+
+    def test_empty_context_zero_behavior_change(self):
+        # AI-3：context 为空 → 规划/整合 prompt 均不出现 context 键（零行为变化）
+        engine = self.make_engine(plan_results=[plan_json()], integrate_results=["共 1 条。"])
+        engine.ask(VALID_QUESTION, VALID_SCHEMA)
+        plan = json.loads(engine.plan_agent.queries[0])
+        self.assertNotIn("context", plan["trusted_context"])
+        integrate = json.loads(engine.integrate_agent.queries[0])
+        self.assertNotIn("context", integrate["trusted_context"])
+
 
 class ValidateAskTests(unittest.TestCase):
     def base(self, **overrides):
@@ -199,10 +225,11 @@ class ValidateAskTests(unittest.TestCase):
         return body
 
     def test_valid(self):
-        question, schema, history = validate_ask(self.base())
+        question, schema, history, context = validate_ask(self.base())
         self.assertEqual(question, VALID_QUESTION)
         self.assertEqual(schema, VALID_SCHEMA)
         self.assertEqual(history, [])
+        self.assertEqual(context, "")
 
     def test_empty_question_rejected(self):
         with self.assertRaises(ValueError):
@@ -230,6 +257,19 @@ class ValidateAskTests(unittest.TestCase):
             validate_ask(self.base(history=[{"role": "user", "content": "x" * 1001}]))
         validate_ask(self.base(history=[item] * 10))
 
+    def test_context_optional_passthrough(self):
+        # AI-3：context 可选，合法字符串原样透传（strip）
+        context = "最近 7 天日报摘要：\n- 2026-08-11: 完成预冷"
+        _, _, _, got = validate_ask(self.base(context=context))
+        self.assertEqual(got, context)
+
+    def test_context_invalid_rejected(self):
+        with self.assertRaises(ValueError):
+            validate_ask(self.base(context=123))
+        with self.assertRaises(ValueError):
+            validate_ask(self.base(context="x" * 8001))
+        validate_ask(self.base(context="x" * 8000))
+
 
 class FakeAskEngine:
     result = {
@@ -238,7 +278,7 @@ class FakeAskEngine:
     }
     error = None
 
-    def ask(self, question, schema, history=None):
+    def ask(self, question, schema, history=None, context=""):
         if self.error:
             raise self.error
         return self.result

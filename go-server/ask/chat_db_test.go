@@ -1,9 +1,11 @@
 package ask
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -42,9 +44,13 @@ func newAskSvc(t *testing.T, agentURL string) *Service {
 // TestChat_FullFlow Chat 全链路：校验 → 限流 → 调 py-agent → 落库（含 rows 快照）→ 返回。
 func TestChat_FullFlow(t *testing.T) {
 	var gotAuth string
+	var gotPayload map[string]any
 	server := mockAgent(t, 200, `{"answer":"共 2 条","sql":"SELECT id FROM logs LIMIT 2",
 		"table":"logs","columns":["id"],"rows":[{"id":"r1"},{"id":"r2"}],"row_count":2,"model":"deepseek-chat"}`, func(r *http.Request) {
 		gotAuth = r.Header.Get("Authorization")
+		body, _ := io.ReadAll(r.Body)
+		r.Body = io.NopCloser(bytes.NewReader(body))
+		_ = json.Unmarshal(body, &gotPayload)
 	})
 	defer server.Close()
 	svc := newAskSvc(t, server.URL)
@@ -72,6 +78,14 @@ func TestChat_FullFlow(t *testing.T) {
 	}
 	if gotAuth != "Bearer agent-tok" {
 		t.Fatalf("auth header = %q", gotAuth)
+	}
+	// AI-3：payload 必须带 context（库内存在项目保证非空）；未配置时省略该键（见 TestChatPayload）。
+	// 只断言项目节存在——Top-3 项目名单随其他包测试夹具（created_at=now()）变化，不断言具体项目。
+	if _, ok := gotPayload["context"]; !ok {
+		t.Fatalf("payload must include context, got: %v", gotPayload)
+	}
+	if !strings.Contains(fmt.Sprint(gotPayload["context"]), "实验室项目：\n- ") {
+		t.Fatalf("context missing project section: %v", gotPayload["context"])
 	}
 
 	// 落库可查：本人可见，question 被 TrimSpace。

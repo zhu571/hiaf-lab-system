@@ -48,6 +48,13 @@ const (
 	statementTimeout = 5000 // ms
 	retentionDays    = 90   // 快照保留天数默认值（ASK_HISTORY_RETENTION_DAYS 可调）
 	retentionTick    = 24 * time.Hour
+	// AI-3 上下文注入：最近 7 天日报（≤5 条，每条 ≤200 字）+ 最近项目（≤3 个），
+	// 总量 <4K 字符防 token 浪费；获取失败静默降级（不影响问答）。
+	contextReportDays   = 7
+	contextReportLimit  = 5
+	contextProjectLimit = 3
+	contextReportRunes  = 200
+	contextBudgetRunes  = 4096
 )
 
 // 防线 2+3 正则（见方案 §5）。
@@ -220,6 +227,67 @@ func (s *Service) BuildSchema(ctx context.Context) (string, error) {
 	return s.schemaText, nil
 }
 
+// buildContext 组装 AI-3 上下文（最近 7 天日报摘要 + 最近项目）：
+// 日报取 summary（为空回退 raw_text），每条截断到 200 字；总量截断到 <4K 字符。
+// 数据为空返回空串；错误上抛由调用方静默降级。
+func (s *Service) buildContext(ctx context.Context) (string, error) {
+	reports, err := s.repo.RecentDailyReports(ctx, contextReportDays, contextReportLimit)
+	if err != nil {
+		return "", err
+	}
+	projects, err := s.repo.RecentProjects(ctx, contextProjectLimit)
+	if err != nil {
+		return "", err
+	}
+	var b strings.Builder
+	if len(reports) > 0 {
+		b.WriteString("最近 7 天日报摘要：\n")
+		for _, r := range reports {
+			text := strings.TrimSpace(r.Summary)
+			if text == "" {
+				text = strings.TrimSpace(r.RawText)
+			}
+			if text == "" {
+				continue
+			}
+			if n := utf8.RuneCountInString(text); n > contextReportRunes {
+				text = string([]rune(text)[:contextReportRunes])
+			}
+			b.WriteString("- ")
+			b.WriteString(r.ReportDate)
+			b.WriteString(": ")
+			b.WriteString(text)
+			b.WriteString("\n")
+		}
+	}
+	if len(projects) > 0 {
+		b.WriteString("实验室项目：\n")
+		for _, p := range projects {
+			b.WriteString("- ")
+			b.WriteString(p.Code)
+			b.WriteString(" ")
+			b.WriteString(p.Name)
+			b.WriteString(" (")
+			b.WriteString(p.Status)
+			b.WriteString(")\n")
+		}
+	}
+	out := strings.TrimRight(b.String(), "\n")
+	if n := utf8.RuneCountInString(out); n > contextBudgetRunes {
+		out = string([]rune(out)[:contextBudgetRunes])
+	}
+	return out, nil
+}
+
+// chatPayload 组装发给 py-agent /v1/ask 的载荷；context 为空时省略该键（零行为变化）。
+func chatPayload(question, schema, contextText string) map[string]any {
+	payload := map[string]any{"question": question, "schema": schema}
+	if contextText != "" {
+		payload["context"] = contextText
+	}
+	return payload
+}
+
 // Chat 编排：组装 schema → 调 py-agent /v1/ask → 存 ask_history（含 rows 快照）→ 返回。
 func (s *Service) Chat(ctx context.Context, userID, question string) (*ChatResponse, error) {
 	question = strings.TrimSpace(question)
@@ -236,8 +304,15 @@ func (s *Service) Chat(ctx context.Context, userID, question string) (*ChatRespo
 	if err != nil {
 		return nil, err
 	}
+	// AI-3 上下文：最近 7 天日报摘要 + 最近项目。失败静默降级（只警告，不影响问答）。
+	ctxText := ""
+	if c, err := s.buildContext(ctx); err != nil {
+		slog.Warn("ask context build failed, degraded to no-context", "error", err)
+	} else {
+		ctxText = c
+	}
 	started := time.Now()
-	payload, err := json.Marshal(map[string]any{"question": question, "schema": schema})
+	payload, err := json.Marshal(chatPayload(question, schema, ctxText))
 	if err != nil {
 		return nil, err
 	}
