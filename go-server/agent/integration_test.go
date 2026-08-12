@@ -202,8 +202,10 @@ func (f fakeTraceAuditReader) ListByAgentTaskID(string) ([]AuditEvent, error) { 
 
 type fakeTraceResolver struct{ result *TraceResult }
 
-func (f fakeTraceResolver) IssueByCandidateID(string) (*TraceResult, error)      { return f.result, nil }
-func (f fakeTraceResolver) ExperienceByCandidateID(string) (*TraceResult, error) { return f.result, nil }
+func (f fakeTraceResolver) IssueByCandidateID(string) (*TraceResult, error) { return f.result, nil }
+func (f fakeTraceResolver) ExperienceByCandidateID(string) (*TraceResult, error) {
+	return f.result, nil
+}
 
 func TestCandidateTracePostgres(t *testing.T) {
 	dsn := os.Getenv("TEST_DATABASE_URL")

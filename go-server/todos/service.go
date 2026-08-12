@@ -123,15 +123,15 @@ func NewAuditWriter(db *sql.DB) auditWriter {
 }
 
 type Service struct {
-	repo     todoRepository
-	resolver issueStatusResolver
-	snap     snapshotReader
-	perm     permChecker
-	audit    auditWriter
-	llm      llmPlanner
-	reports  reportFetcher
-	ntfy     ntfyClient
-	publisher publishClient
+	repo       todoRepository
+	resolver   issueStatusResolver
+	snap       snapshotReader
+	perm       permChecker
+	audit      auditWriter
+	llm        llmPlanner
+	reports    reportFetcher
+	ntfy       ntfyClient
+	publisher  publishClient
 	loc        *time.Location
 	now        func() time.Time
 	provisions *provisionStore

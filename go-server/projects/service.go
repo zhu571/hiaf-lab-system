@@ -28,7 +28,7 @@ type LogCounter interface {
 }
 
 type Service struct {
-	repo        *Repository
+	repo         *Repository
 	issueCounter IssueCounter
 	logCounter   LogCounter
 }

@@ -25,7 +25,7 @@ func (f *fakeRepo) CreateMany(string, string, []StepDef, int) ([]AssemblyStep, e
 	return nil, nil
 }
 func (f *fakeRepo) SetSourceTemplateID(string, string) error { return nil }
-func (f *fakeRepo) GetByID(id string) (*AssemblyStep, error)    { return f.steps[id], nil }
+func (f *fakeRepo) GetByID(id string) (*AssemblyStep, error) { return f.steps[id], nil }
 func (f *fakeRepo) UpdateStatus(id, from, to string, started, completed *time.Time) error {
 	step := f.steps[id]
 	if step == nil || step.Status != from {

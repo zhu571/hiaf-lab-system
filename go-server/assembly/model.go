@@ -82,9 +82,9 @@ type ListResult struct {
 }
 
 type ApplyTemplateRequest struct {
-	TemplateID   *string    `json:"template_id,omitempty"`
-	Steps        []StepDef  `json:"steps,omitempty"`
-	SourcePrompt string     `json:"source_prompt,omitempty"`
+	TemplateID   *string   `json:"template_id,omitempty"`
+	Steps        []StepDef `json:"steps,omitempty"`
+	SourcePrompt string    `json:"source_prompt,omitempty"`
 }
 
 type StepDef struct {
