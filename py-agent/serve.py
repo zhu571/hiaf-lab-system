@@ -15,6 +15,7 @@ from tools.ask import AskEngine
 from tools.parse import InstrumentInterpreter, ParseError, Parser
 from tools.stepplan import StepPlanner
 from tools.todoplan import TodoPlanner
+from tools.weekly import WeeklySummarizer
 
 
 def read_token():
@@ -34,8 +35,8 @@ def check(cond, msg):
         raise ValueError(msg)
 
 
-def _size_ok(data):
-    return isinstance(data, dict) and len(json.dumps(data, ensure_ascii=False)) <= 64_000
+def _size_ok(data, budget=64_000):
+    return isinstance(data, dict) and len(json.dumps(data, ensure_ascii=False)) <= budget
 
 
 def validate_request(data):
@@ -125,7 +126,39 @@ def validate_ask(data):
     return question.strip(), schema, history
 
 
-def create_app(interpreter, planner, parser, todo_planner, token, ask_engine=None):
+def validate_weekly_request(data):
+    """周报生成：week_start/week_end 为 YYYY-MM-DD，reports 1-100 条，issue_stats 计数非负。
+
+    周报载荷远大于其他端点（整周日报），预算单独放宽到 512KB——与 Go 侧
+    weekly.limitReports 的 480KB 上限对齐（含 JSON 转义余量），超限即 400 是契约边界。
+    """
+    check(_size_ok(data, budget=512_000), "request too large")
+    week_start = data.get("week_start")
+    week_end = data.get("week_end")
+    reports = data.get("reports")
+    issue_stats = data.get("issue_stats", {})
+    check(isinstance(week_start, str) and REPORT_DATE.match(week_start), "week_start is invalid")
+    check(isinstance(week_end, str) and REPORT_DATE.match(week_end), "week_end is invalid")
+    check(week_end >= week_start, "week_end must be >= week_start")
+    check(isinstance(reports, list) and 1 <= len(reports) <= 100, "reports is invalid")
+    for report in reports:
+        check(isinstance(report, dict), "report is invalid")
+        check(isinstance(report.get("report_date"), str) and REPORT_DATE.match(report.get("report_date")),
+              "report date is invalid")
+        check(isinstance(report.get("author_name"), str) and len(report.get("author_name", "")) <= 128,
+              "report author is invalid")
+        check(isinstance(report.get("raw_text"), str) and len(report.get("raw_text", "")) <= 8000,
+              "report raw_text is invalid")
+        check(isinstance(report.get("summary"), str) and len(report.get("summary", "")) <= 3000,
+              "report summary is invalid")
+    check(isinstance(issue_stats, dict), "issue_stats is invalid")
+    for key, value in issue_stats.items():
+        check(key in {"created", "resolved", "open_high_critical"}, "issue_stats key is invalid")
+        check(isinstance(value, int) and not isinstance(value, bool) and value >= 0, "issue_stats value is invalid")
+    return week_start, week_end, reports, issue_stats
+
+
+def create_app(interpreter, planner, parser, todo_planner, token, ask_engine=None, weekly=None):
     def make_endpoint(validate, handler, parse_error_code):
         """端点工厂：统一 Bearer 鉴权、JSON 解析（64KB 上限）、三态异常映射（400/422/502）。
 
@@ -190,6 +223,16 @@ def create_app(interpreter, planner, parser, todo_planner, token, ask_engine=Non
             timeout=AskEngine.TOTAL_TIMEOUT,
         )
 
+    async def do_weekly(validated, _data):
+        if weekly is None:
+            raise RuntimeError("weekly summarizer is not configured")
+        week_start, week_end, reports, issue_stats = validated
+        # 两步 LLM（digest + write）整体超时 300s（每步 ≤180s 预算，重试共享），超时 → 502。
+        return await asyncio.wait_for(
+            asyncio.to_thread(weekly.summarize, week_start, week_end, reports, issue_stats),
+            timeout=WeeklySummarizer.TOTAL_TIMEOUT,
+        )
+
     return Starlette(routes=[
         Route("/health", health),
         Route("/v1/interpret", make_endpoint(validate_request, do_interpret, "interpretation_failed"), methods=["POST"]),
@@ -198,6 +241,7 @@ def create_app(interpreter, planner, parser, todo_planner, token, ask_engine=Non
         Route("/v1/todo-add", make_endpoint(validate_todo_add, do_todo_add, "todo_add_failed"), methods=["POST"]),
         Route("/v1/todo-daily", make_endpoint(validate_todo_daily, do_todo_daily, "todo_daily_failed"), methods=["POST"]),
         Route("/v1/ask", make_endpoint(validate_ask, do_ask, "ask_failed"), methods=["POST"]),
+        Route("/v1/weekly-summary", make_endpoint(validate_weekly_request, do_weekly, "weekly_summary_failed"), methods=["POST"]),
     ])
 
 
@@ -210,5 +254,6 @@ if __name__ == "__main__":
         InstrumentInterpreter(api_key), StepPlanner(api_key),
         Parser(api_key, prompt_path=daily_prompt), TodoPlanner(api_key), read_token(),
         ask_engine=AskEngine(api_key),
+        weekly=WeeklySummarizer(api_key),
     )
     uvicorn.run(app, host="0.0.0.0", port=8001)
