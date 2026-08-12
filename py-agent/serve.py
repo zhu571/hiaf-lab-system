@@ -113,18 +113,21 @@ def validate_todo_daily(data):
 
 
 def validate_ask(data):
-    """AI 智能查询：question ≤ 1000 字符（strip 非空）、schema ≤ 64KB、history 可选（≤10 条）。"""
+    """AI 智能查询：question ≤ 1000 字符（strip 非空）、schema ≤ 64KB、history 可选（≤10 条）、
+    context 可选（AI-3 实验室最近上下文，≤8000 字符，为空等效零行为变化）。"""
     check(_size_ok(data), "request too large")
     question = data.get("question")
     schema = data.get("schema")
     history = data.get("history", [])
+    context = data.get("context", "")
     check(isinstance(question, str) and question.strip() and len(question) <= 1000, "question is invalid")
     check(isinstance(schema, str) and len(schema) <= 64_000, "schema is invalid")
     check(isinstance(history, list) and len(history) <= 10, "history is invalid")
     for item in history:
         check(isinstance(item, dict) and item.get("role") in {"user", "assistant"}
               and isinstance(item.get("content"), str) and len(item["content"]) <= 1000, "history item is invalid")
-    return question.strip(), schema, history
+    check(isinstance(context, str) and len(context) <= 8000, "context is invalid")
+    return question.strip(), schema, history, context.strip()
 
 
 def validate_weekly_request(data):
@@ -243,11 +246,11 @@ def create_app(interpreter, planner, parser, todo_planner, token, ask_engine=Non
     async def do_ask(validated, _data):
         if ask_engine is None:
             raise RuntimeError("ask engine is not configured")
-        question, schema, history = validated
+        question, schema, history, context = validated
         # 总超时 60s 预算（规划 25s + 执行 5s + 整合 25s + 余量；重试共享同一预算）：
         # 两步 LLM 规划 + 一次执行 + 一次整合整体 wait_for，超时 → 502 provider_unavailable。
         return await asyncio.wait_for(
-            asyncio.to_thread(ask_engine.ask, question, schema, history),
+            asyncio.to_thread(ask_engine.ask, question, schema, history, context),
             timeout=AskEngine.TOTAL_TIMEOUT,
         )
 

@@ -92,8 +92,11 @@ class AskEngine:
         agent.loaded_tools = {}
         return agent
 
-    def ask(self, question, schema, history=None):
+    def ask(self, question, schema, history=None, context=""):
         """规划→执行→整合。同步方法（serve 层 asyncio.to_thread + wait_for 总 60s 预算）。
+
+        context 为 Go 注入的实验室最近上下文（AI-3，trusted）：非空时置于规划/整合
+        prompt 最前（"以下为实验室最近上下文：..."），为空时零行为变化（不加块）。
 
         返回 {answer, sql, rows, columns, table, row_count, truncated}（对齐 Go 侧
         agentAskResponse，见 go-server/ask/model.go）。
@@ -103,10 +106,11 @@ class AskEngine:
         history = list(history or [])
         for item in history:
             ensure_safe(str(item.get("content", "")))
-        plan = self._plan(question, schema, history)
-        result = self._execute_with_retry(plan, question, schema, history)
+        context = str(context or "")
+        plan = self._plan(question, schema, history, context=context)
+        result = self._execute_with_retry(plan, question, schema, history, context=context)
         answer = self._integrate(question, result["sql"], result["table_name"],
-                                 result["columns"], result["rows"], history)
+                                 result["columns"], result["rows"], history, context=context)
         return {
             "answer": answer,
             "sql": result["sql"],
@@ -117,17 +121,28 @@ class AskEngine:
             "truncated": bool(result.get("truncated", False)),
         }
 
-    def _plan(self, question, schema, history, error=None):
+    @staticmethod
+    def _context_block(context):
+        """把 Go 注入的最近上下文组装成 prompt 前缀块；空上下文返回空串（零行为变化）。"""
+        context = str(context or "").strip()
+        if not context:
+            return ""
+        return "以下为实验室最近上下文：\n" + context
+
+    def _plan(self, question, schema, history, error=None, context=""):
         """规划：系统说明（instructions）+ 注入 schema + 用户问题 → JSON {"sql", "reason"}。
 
-        schema 属 trusted_context（Go 注入）；question/history 属 untrusted_inputs（不可信）。
+        schema/context 属 trusted_context（Go 注入）；question/history 属 untrusted_inputs（不可信）。
         JSON 解析失败 / 缺少 sql → ParseError（422 ask_failed）。
         """
+        trusted = {}
+        context_block = self._context_block(context)
+        if context_block:
+            trusted["context"] = context_block
+        trusted["schema"] = schema
+        trusted["project_tables_with_project_id"] = sorted(self.PROJECT_TABLES)
         payload = {
-            "trusted_context": {
-                "schema": schema,
-                "project_tables_with_project_id": sorted(self.PROJECT_TABLES),
-            },
+            "trusted_context": trusted,
             "untrusted_inputs": {"question": question, "history": history},
         }
         if error:
@@ -139,7 +154,7 @@ class AskEngine:
             raise ParseError("plan output is missing sql")
         return {"sql": sql, "reason": str(item.get("reason", "")).strip()}
 
-    def _execute_with_retry(self, plan, question, schema, history):
+    def _execute_with_retry(self, plan, question, schema, history, context=""):
         """执行 + SQL 被拒（4xx）重试一次：失败信息回填 prompt 让 LLM 改 SQL，再执行一次，仍失败 → ParseError。
 
         Go 不可达 / 5xx / 401 / 403 → APIError（502 provider_unavailable，不重试）。
@@ -152,18 +167,24 @@ class AskEngine:
                 error = str(exc)
                 if attempt == 1:
                     break  # 已重试一次，不再触发第三次规划
-                plan = self._plan(question, schema, history, error=error)
+                plan = self._plan(question, schema, history, error=error, context=context)
         raise ParseError(f"SQL 执行被拒绝（重试后仍失败）: {error}")
 
-    def _integrate(self, question, sql, table, columns, rows, history):
+    def _integrate(self, question, sql, table, columns, rows, history, context=""):
         """整合：问题 + SQL + 行集（截断 ~20KB）→ 最终回答（markdown，含关键数字和结论）。"""
         rows_text = json.dumps(rows, ensure_ascii=False)
         if len(rows_text) > self.ROWS_TEXT_BUDGET:
             rows_text = rows_text[:self.ROWS_TEXT_BUDGET] + "\n...(rows truncated)"
+        trusted = {}
+        context_block = self._context_block(context)
+        if context_block:
+            trusted["context"] = context_block
+        trusted["sql"] = sql
+        trusted["table"] = table
+        trusted["columns"] = columns
+        trusted["rows"] = rows_text
         payload = {
-            "trusted_context": {
-                "sql": sql, "table": table, "columns": columns, "rows": rows_text,
-            },
+            "trusted_context": trusted,
             "untrusted_inputs": {"question": question, "history": history},
         }
         result = self._call_llm(self.integrate_agent, "integrate", json.dumps(payload, ensure_ascii=False))

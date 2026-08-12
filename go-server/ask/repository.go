@@ -1,6 +1,7 @@
 package ask
 
 import (
+	"context"
 	"database/sql"
 	"encoding/json"
 	"errors"
@@ -94,6 +95,70 @@ func (r *Repository) getHistoryWhere(where string, args ...any) (*AskHistory, er
 		}
 	}
 	return h, nil
+}
+
+// contextDailyReport 是 AI-3 上下文用的日报摘要行（只读单表 SELECT，ask 全库只读例外）。
+type contextDailyReport struct {
+	ReportDate string
+	Summary    string
+	RawText    string
+}
+
+// RecentDailyReports 最近 days 天的日报（AI-3 上下文数据源，只读单表 SELECT，
+// LIMIT 封顶防 token 浪费；日报内容可能为空串，由 service 层回退/裁剪）。
+func (r *Repository) RecentDailyReports(ctx context.Context, days, limit int) ([]contextDailyReport, error) {
+	rows, err := r.db.QueryContext(ctx,
+		`SELECT report_date, summary, raw_text FROM daily_reports
+		 WHERE report_date >= CURRENT_DATE - $1::int
+		 ORDER BY report_date DESC, created_at DESC
+		 LIMIT $2`, days, limit)
+	if err != nil {
+		return nil, fmt.Errorf("query recent daily_reports: %w", err)
+	}
+	defer rows.Close()
+	var items []contextDailyReport
+	for rows.Next() {
+		var it contextDailyReport
+		if err := rows.Scan(&it.ReportDate, &it.Summary, &it.RawText); err != nil {
+			return nil, fmt.Errorf("scan daily_report: %w", err)
+		}
+		items = append(items, it)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate daily_reports: %w", err)
+	}
+	return items, nil
+}
+
+// contextProject 是 AI-3 上下文用的项目行（只读单表 SELECT）。
+type contextProject struct {
+	Code   string
+	Name   string
+	Status string
+}
+
+// RecentProjects 最近创建的项目（AI-3 上下文数据源，前 limit 个，只读单表 SELECT）。
+func (r *Repository) RecentProjects(ctx context.Context, limit int) ([]contextProject, error) {
+	rows, err := r.db.QueryContext(ctx,
+		`SELECT code, name, status FROM projects
+		 ORDER BY created_at DESC
+		 LIMIT $1`, limit)
+	if err != nil {
+		return nil, fmt.Errorf("query recent projects: %w", err)
+	}
+	defer rows.Close()
+	var items []contextProject
+	for rows.Next() {
+		var it contextProject
+		if err := rows.Scan(&it.Code, &it.Name, &it.Status); err != nil {
+			return nil, fmt.Errorf("scan project: %w", err)
+		}
+		items = append(items, it)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate projects: %w", err)
+	}
+	return items, nil
 }
 
 // NullifyOldSnapshots 将 cutoff 之前且快照非空的行置 NULL（保留策略，P2-3）。
