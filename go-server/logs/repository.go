@@ -1,6 +1,7 @@
 package logs
 
 import (
+	"context"
 	"database/sql"
 	"fmt"
 	"strings"
@@ -122,6 +123,36 @@ func (r *Repository) ListReports(params ReportListParams) ([]DailyReport, int, e
 		return nil, 0, fmt.Errorf("iterate daily reports: %w", err)
 	}
 	return items, total, nil
+}
+
+// WeeklyReports 按日期升序返回 [from, to] 周范围内的日报条目（AI-1 周报取数，
+// 经 main.go 注入 weekly 模块窄接口；users JOIN 仅为展示字段，见 AGENTS.md §5）。
+func (r *Repository) WeeklyReports(ctx context.Context, from, to string) ([]WeeklyReportEntry, error) {
+	rows, err := r.db.QueryContext(ctx,
+		`SELECT dr.report_date, u.display_name, dr.raw_text, dr.summary
+		 FROM daily_reports dr
+		 JOIN users u ON u.id = dr.author_id
+		 WHERE dr.report_date >= $1::date AND dr.report_date <= $2::date
+		 ORDER BY dr.report_date ASC`,
+		from, to)
+	if err != nil {
+		return nil, fmt.Errorf("list weekly reports: %w", err)
+	}
+	defer rows.Close()
+	entries := []WeeklyReportEntry{}
+	for rows.Next() {
+		var entry WeeklyReportEntry
+		var reportDate time.Time
+		if err := rows.Scan(&reportDate, &entry.AuthorName, &entry.RawText, &entry.Summary); err != nil {
+			return nil, fmt.Errorf("scan weekly report: %w", err)
+		}
+		entry.ReportDate = reportDate.Format(time.DateOnly)
+		entries = append(entries, entry)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate weekly reports: %w", err)
+	}
+	return entries, nil
 }
 
 func buildReportWhere(params ReportListParams) (string, []any) {

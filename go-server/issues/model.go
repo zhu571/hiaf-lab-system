@@ -90,3 +90,15 @@ type IssueListResult struct {
 	Total int     `json:"total"`
 	Page  int     `json:"page"`
 }
+
+// WeeklyIssueStats 是周报取数的 issue 统计（AI-1）：供 main.go 注入的 weekly 窄接口
+// 读取，字段对齐 weekly.IssueStats；SQL 在 issues 包内只访问本表（见 AGENTS.md §5）。
+type WeeklyIssueStats struct {
+	// Created 是 [from, to] 周内 created_at 落在此区间的 issue 数。
+	Created int
+	// Resolved 是 [from, to] 周内解决的 issue 数（status=resolved/closed，取
+	// resolved_at，缺失时近似 updated_at）。
+	Resolved int
+	// OpenHighCritical 是全局当前态未解决且 severity=high/critical 的 issue 数。
+	OpenHighCritical int
+}

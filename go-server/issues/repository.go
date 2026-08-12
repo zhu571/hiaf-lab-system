@@ -304,6 +304,25 @@ func (r *Repository) TerminalIssueIDs(ctx context.Context) ([]string, error) {
 	return ids, nil
 }
 
+// WeeklyIssueStats 统计 [from, to] 周内 created / resolved 数与全局未解决
+// high/critical 当前态计数（AI-1 周报取数，经 main.go 注入 weekly 模块窄接口；
+// 只访问 issues 本表，见 AGENTS.md §5）。created 按 created_at、resolved 按
+// status IN ('resolved','closed') 且 COALESCE(resolved_at, updated_at) 落在周内。
+func (r *Repository) WeeklyIssueStats(ctx context.Context, from, to string) (WeeklyIssueStats, error) {
+	var stats WeeklyIssueStats
+	err := r.db.QueryRowContext(ctx, `
+		SELECT
+			(SELECT COUNT(*) FROM issues WHERE created_at >= $1::date AND created_at < $2::date + interval '1 day'),
+			(SELECT COUNT(*) FROM issues WHERE status IN ('resolved','closed')
+			  AND COALESCE(resolved_at, updated_at) >= $1::date AND COALESCE(resolved_at, updated_at) < $2::date + interval '1 day'),
+			(SELECT COUNT(*) FROM issues WHERE status NOT IN ('resolved','closed') AND severity IN ('high','critical'))
+	`, from, to).Scan(&stats.Created, &stats.Resolved, &stats.OpenHighCritical)
+	if err != nil {
+		return WeeklyIssueStats{}, fmt.Errorf("weekly issue stats: %w", err)
+	}
+	return stats, nil
+}
+
 func (r *Repository) getComments(issueID string, page, perPage int) ([]Comment, error) {
 	page, perPage = normalizePage(page, perPage)
 	if perPage > 100 {

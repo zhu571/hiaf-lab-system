@@ -60,6 +60,16 @@ type Log struct {
 	RunID         *string   `json:"run_id,omitempty"`
 }
 
+// WeeklyReportEntry 是周报取数的日报条目（AI-1）：供 main.go 注入的 weekly 窄接口
+// 读取，字段对齐 weekly.ReportEntry；SQL 在 logs 包内只访问 daily_reports + users
+// 展示字段（见 AGENTS.md §5 轻量只读登记）。
+type WeeklyReportEntry struct {
+	ReportDate string
+	AuthorName string
+	RawText    string
+	Summary    string
+}
+
 type CreateDailyReportRequest struct {
 	ReportDate string `json:"report_date,omitempty"`
 	RawText    string `json:"raw_text,omitempty"`

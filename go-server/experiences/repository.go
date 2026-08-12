@@ -95,6 +95,49 @@ func (r *Repository) GetByCandidateID(candidateID string) (*Experience, error) {
 	return &out, nil
 }
 
+// weeklySummaryTag 标识 AI-1 周报落库的经验条目（experiences 无 kind/scope 列，
+// 语义由 tags_json 承担：周报 = global（project_id NULL）+ published + 本 tag）。
+const weeklySummaryTag = "weekly_summary"
+
+// FindWeeklySummary 按 title 精确查周报经验（tags 含 weekly_summary 过滤；
+// AI-1 每周幂等复用，经 main.go 注入 weekly 模块窄接口，只访问本表）。
+func (r *Repository) FindWeeklySummary(title string) (*Experience, error) {
+	var out Experience
+	err := scanExperience(r.db.QueryRow(
+		`SELECT id, project_id, title, content, tags_json, status, author_id, reviewer_id,
+		        ai_generated, agent_task_id, candidate_id, published_at, created_at, updated_at
+		 FROM experiences
+		 WHERE title = $1 AND tags_json @> $2::jsonb
+		 ORDER BY created_at DESC
+		 LIMIT 1`,
+		title, `["`+weeklySummaryTag+`"]`,
+	), &out)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("find weekly summary: %w", err)
+	}
+	return &out, nil
+}
+
+// CreateWeeklySummary 落库周报经验：global（project_id NULL）+ published +
+// ai_generated + tags 含 weekly_summary（AI-1，经 main.go 注入 weekly 模块窄接口）。
+func (r *Repository) CreateWeeklySummary(authorID, title, content string) (*Experience, error) {
+	var out Experience
+	err := scanExperience(r.db.QueryRow(
+		`INSERT INTO experiences (title, content, tags_json, status, author_id, ai_generated, published_at)
+		 VALUES ($1, $2, $3::jsonb, 'published', $4, true, now())
+		 RETURNING id, project_id, title, content, tags_json, status, author_id, reviewer_id,
+		           ai_generated, agent_task_id, candidate_id, published_at, created_at, updated_at`,
+		title, content, `["`+weeklySummaryTag+`"]`, authorID,
+	), &out)
+	if err != nil {
+		return nil, fmt.Errorf("create weekly summary: %w", err)
+	}
+	return &out, nil
+}
+
 func (r *Repository) List(params ExperienceListParams) ([]Experience, int, error) {
 	params.Page, params.PerPage = normalizePage(params.Page, params.PerPage)
 	if params.PerPage > 100 {
