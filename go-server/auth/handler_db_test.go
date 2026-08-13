@@ -89,6 +89,10 @@ func openAuthHandlerDB(t *testing.T) *sql.DB {
 			authHandlerAdminID, authHandlerUserID, authHandlerUser2ID); err != nil {
 			t.Logf("cleanup: delete refresh_tokens failed: %v", err)
 		}
+		if _, err := db.Exec(`DELETE FROM revoked_tokens WHERE user_id IN ($1,$2,$3)`,
+			authHandlerAdminID, authHandlerUserID, authHandlerUser2ID); err != nil {
+			t.Logf("cleanup: delete revoked_tokens failed: %v", err)
+		}
 		if _, err := db.Exec(`DELETE FROM users WHERE id IN ($1,$2,$3)`,
 			authHandlerAdminID, authHandlerUserID, authHandlerUser2ID); err != nil {
 			t.Logf("cleanup: delete users failed: %v", err)

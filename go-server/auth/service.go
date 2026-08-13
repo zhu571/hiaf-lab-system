@@ -310,7 +310,7 @@ func (s *Service) RefreshAccessToken(rawToken string) (*LoginResponse, error) {
 		return nil, ErrInvalidCredentials
 	}
 
-	if err := s.repo.RevokeRefreshToken(rec.ID); err != nil {
+	if err := s.repo.RevokeRefreshToken(rec.ID, rawToken, rec.UserID, rec.ExpiresAt); err != nil {
 		return nil, err
 	}
 
@@ -353,7 +353,7 @@ func (s *Service) Logout(rawToken string) error {
 	if rec == nil {
 		return nil
 	}
-	return s.repo.RevokeRefreshToken(rec.ID)
+	return s.repo.RevokeRefreshToken(rec.ID, rawToken, rec.UserID, rec.ExpiresAt)
 }
 
 // IsRefreshTokenReuse 判定 rawToken 是否为已撤销且未过期的 refresh token（真复用重放）。

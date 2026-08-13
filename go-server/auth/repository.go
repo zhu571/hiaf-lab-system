@@ -236,10 +236,13 @@ func (r *Repository) UpdatePassword(userID, passwordHash string) error {
 	return nil
 }
 
-// RevokeUserRefreshTokens marks all refresh tokens for a user as revoked.
+// RevokeUserRefreshTokens 批量撤销用户的全部 refresh token：直接物理删除主表行。
+// 不写黑名单：改密/停用等批量场景下旧 token 持有者即账号本人（或被停用的账号），
+// 且 token_version 提升/账号停用已使其失效，不属于复用重放攻击面；
+// 重放检测（FindRevokedRefreshToken）聚焦单 token 轮换/登出撤销路径。
 func (r *Repository) RevokeUserRefreshTokens(userID string) error {
 	_, err := r.db.Exec(
-		`UPDATE refresh_tokens SET revoked = TRUE WHERE user_id = $1`,
+		`DELETE FROM refresh_tokens WHERE user_id = $1`,
 		userID,
 	)
 	if err != nil {
@@ -347,29 +350,46 @@ func (r *Repository) FindRefreshToken(rawToken string) (*RefreshTokenRecord, err
 	return &rec, nil
 }
 
-// RevokeRefreshToken marks a refresh token as revoked.
-func (r *Repository) RevokeRefreshToken(id string) error {
-	_, err := r.db.Exec(
-		`UPDATE refresh_tokens SET revoked = TRUE WHERE id = $1`,
-		id,
-	)
+// RevokeRefreshToken 撤销一个 refresh token：事务内物理删除主表行，并把
+// token_lookup（sha256 摘要）写入 revoked_tokens 黑名单（唯一索引，O(1) 命中）。
+// 替代原 UPDATE revoked=TRUE 的 bcrypt 全表扫描方案，根治 revoked 行堆积导致的
+// refresh 401 慢查询；黑名单行保留到 token 原过期时间 expiresAt。
+func (r *Repository) RevokeRefreshToken(id, rawToken, userID string, expiresAt time.Time) error {
+	tx, err := r.db.Begin()
 	if err != nil {
-		return fmt.Errorf("revoke refresh token: %w", err)
+		return fmt.Errorf("revoke refresh token: begin tx: %w", err)
+	}
+	defer tx.Rollback()
+
+	if _, err := tx.Exec(`DELETE FROM refresh_tokens WHERE id = $1`, id); err != nil {
+		return fmt.Errorf("revoke refresh token: delete: %w", err)
+	}
+	if _, err := tx.Exec(
+		`INSERT INTO revoked_tokens (token_lookup, user_id, expires_at)
+		 VALUES (encode(digest($1, 'sha256'), 'hex'), $2, $3)
+		 ON CONFLICT (token_lookup) DO NOTHING`,
+		rawToken, userID, expiresAt,
+	); err != nil {
+		return fmt.Errorf("revoke refresh token: blacklist: %w", err)
+	}
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("revoke refresh token: commit: %w", err)
 	}
 	return nil
 }
 
-// FindRevokedRefreshToken 只匹配已撤销且未过期的 token：用于检测真复用重放
-// （已撤销 token 被再次使用；FindRefreshToken 只查未撤销行，检测不到）。
+// FindRevokedRefreshToken 查 revoked_tokens 黑名单：token_lookup 为 sha256(rawToken)
+// 摘要，唯一索引 O(1) 命中（不再 bcrypt 全表扫描），只匹配未过期行：用于检测真复用
+// 重放（已撤销 token 被再次使用；FindRefreshToken 只查未撤销行，检测不到）。
 func (r *Repository) FindRevokedRefreshToken(rawToken string) (*RefreshTokenRecord, error) {
 	var rec RefreshTokenRecord
 	err := r.db.QueryRow(
-		`SELECT id, user_id, family, expires_at, revoked
-		 FROM refresh_tokens
-		 WHERE revoked = TRUE AND expires_at > now()
-		   AND crypt($1, token_hash) = token_hash`,
+		`SELECT user_id, expires_at
+		 FROM revoked_tokens
+		 WHERE token_lookup = encode(digest($1, 'sha256'), 'hex')
+		   AND expires_at > now()`,
 		rawToken,
-	).Scan(&rec.ID, &rec.UserID, &rec.Family, &rec.ExpiresAt, &rec.Revoked)
+	).Scan(&rec.UserID, &rec.ExpiresAt)
 	if err != nil {
 		if err == sql.ErrNoRows {
 			return nil, nil
