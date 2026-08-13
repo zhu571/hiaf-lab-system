@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # scripts/test-migrations.sh —— 迁移 up/down 回滚验证（按迁移粒度）
 #
-# 用途：验证 migrations/ 下全部迁移（当前 001-036）可以「全量 up → 反序 down」完整回滚，
+# 用途：验证 migrations/ 下全部迁移（当前 001-038）可以「全量 up → 反序 down」完整回滚，
 #      任何一步失败即退出非零并打印失败迁移号。从 P2 提前到 P1（测试策略方案 §4.3.2）。
 #
 # 流程：

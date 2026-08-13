@@ -5,7 +5,7 @@
 # 让 14 个 *_db_test.go 真正跑起来；本脚本在本地复刻同一套环境，消除「本地绿、CI 红」差异。
 #
 # 流程：确定数据库 → 等待 pg_isready → 重建目标库 schema → 按序应用 migrations/*.up.sql
-#       （001-036 全量）→ cd go-server && TEST_DATABASE_URL=... go test -race -count=1 ./...
+#       （001-038 全量）→ cd go-server && TEST_DATABASE_URL=... go test -race -count=1 ./...
 #
 # 数据库来源（脚本自动决策，无二选一）：
 #   1. 已显式设置环境变量 TEST_DATABASE_URL → 直接使用该库（脚本仍会重建其 schema 并应用全量迁移，仅限测试库）；
@@ -89,7 +89,7 @@ psql "$DB_DSN" -v ON_ERROR_STOP=1 -q \
     -c "GRANT USAGE, CREATE ON SCHEMA public TO PUBLIC;" \
     -c "DROP ROLE IF EXISTS ask_reader;"
 
-echo "== 应用全量迁移（migrations/*.up.sql，按序号 001-036）"
+echo "== 应用全量迁移（migrations/*.up.sql，按序号 001-038）"
 for f in "$REPO_ROOT"/migrations/*.up.sql; do
     echo "   applying $(basename "$f")"
     psql "$DB_DSN" -v ON_ERROR_STOP=1 -q -f "$f"

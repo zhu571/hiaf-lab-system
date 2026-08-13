@@ -2,7 +2,7 @@
 # scripts/test-e2e.sh —— 本地一键跑 Playwright E2E 冒烟（测试策略方案 §4.4 / P2）
 #
 # 流程：起/复用 postgres（数据库名固定 lab_e2e，每次运行重建 schema）→ 应用全量迁移
-#       001-036 → 构建并启动 Go server（8000）→ 启动前端 vite dev（5173，代理 /api → 8000）
+#       001-038 → 构建并启动 Go server（8000）→ 启动前端 vite dev（5173，代理 /api → 8000）
 #       → 等待 /health 与前端可达 → npx playwright test → trap 清理所有进程/容器/临时库。
 #
 # 数据库来源（脚本自动决策，无二选一，镜像 test-go.sh 的模式）：
@@ -116,7 +116,7 @@ psql "$DB_DSN" -v ON_ERROR_STOP=1 -q \
     -c "GRANT USAGE, CREATE ON SCHEMA public TO PUBLIC;" \
     -c "DROP ROLE IF EXISTS ask_reader;"
 
-echo "== 应用全量迁移（migrations/*.up.sql，001-036）"
+echo "== 应用全量迁移（migrations/*.up.sql，001-038）"
 for f in "$REPO_ROOT"/migrations/*.up.sql; do
     echo "   applying $(basename "$f")"
     psql "$DB_DSN" -v ON_ERROR_STOP=1 -q -f "$f"

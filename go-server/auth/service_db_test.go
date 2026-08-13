@@ -65,6 +65,8 @@ func openAuthSvcDB(t *testing.T) *sql.DB {
 	t.Cleanup(func() {
 		db.Exec(`DELETE FROM refresh_tokens WHERE user_id IN ($1,$2,$3,$4)`,
 			authDBAdmin1ID, authDBAdmin2ID, authDBUserID, authDBUser2ID)
+		db.Exec(`DELETE FROM revoked_tokens WHERE user_id IN ($1,$2,$3,$4)`,
+			authDBAdmin1ID, authDBAdmin2ID, authDBUserID, authDBUser2ID)
 		db.Exec(`DELETE FROM users WHERE id IN ($1,$2,$3,$4)`,
 			authDBAdmin1ID, authDBAdmin2ID, authDBUserID, authDBUser2ID)
 	})
@@ -344,9 +346,12 @@ func TestDBSvcLogout(t *testing.T) {
 	if err := svc.Logout(resp.RefreshToken); err != nil {
 		t.Fatal(err)
 	}
-	// 退出后 token 已撤销 → refresh 拒绝
+	// 退出后 token 已撤销 → refresh 拒绝，且命中真复用重放检测（Logout 写黑名单）
 	if _, err := svc.RefreshAccessToken(resp.RefreshToken); !errors.Is(err, ErrInvalidCredentials) {
 		t.Fatalf("refresh after logout: got %v, want ErrInvalidCredentials", err)
+	}
+	if reuse, err := svc.IsRefreshTokenReuse(resp.RefreshToken); err != nil || !reuse {
+		t.Fatalf("IsRefreshTokenReuse after logout = %v, %v, want true", reuse, err)
 	}
 }
 

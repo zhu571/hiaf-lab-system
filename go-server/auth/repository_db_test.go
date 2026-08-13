@@ -10,9 +10,9 @@ import (
 	_ "github.com/lib/pq"
 )
 
-// 集成测试：需要 TEST_DATABASE_URL（CI/本地按 scripts/test-go.sh 应用全量迁移 001-036）。
+// 集成测试：需要 TEST_DATABASE_URL（CI/本地按 scripts/test-go.sh 应用全量迁移 001-038）。
 // 覆盖 P2-4：FindRevokedRefreshToken / IsRefreshTokenReuse（真复用重放检测）。
-// 本测试写真实 refresh_tokens 表，结束后清理所有本用例创建的行。
+// 本测试写真实 refresh_tokens / revoked_tokens 表，结束后清理所有本用例创建的行。
 
 const authDBTestUserID = "00000000-0000-0000-0000-00000000c001"
 
@@ -36,18 +36,33 @@ func openAuthTestDB(t *testing.T) *sql.DB {
 	}
 	t.Cleanup(func() {
 		db.Exec(`DELETE FROM refresh_tokens WHERE user_id = $1`, authDBTestUserID)
+		db.Exec(`DELETE FROM revoked_tokens WHERE user_id = $1`, authDBTestUserID)
 		db.Exec(`DELETE FROM users WHERE id = $1`, authDBTestUserID)
 	})
 	return db
 }
 
 // insertRefreshToken 插入一条 refresh token（crypt 同生产 StoreRefreshToken）。
-func insertRefreshToken(t *testing.T, db *sql.DB, raw string, revoked bool, expiresIn time.Duration) {
+func insertRefreshToken(t *testing.T, db *sql.DB, raw string, expiresIn time.Duration) {
 	t.Helper()
 	_, err := db.Exec(
-		`INSERT INTO refresh_tokens (user_id, token_hash, family, expires_at, revoked)
-		 VALUES ($1, crypt($2, gen_salt('bf')), gen_random_uuid(), now() + $3, $4)`,
-		authDBTestUserID, raw, expiresIn.String(), revoked,
+		`INSERT INTO refresh_tokens (user_id, token_hash, family, expires_at)
+		 VALUES ($1, crypt($2, gen_salt('bf')), gen_random_uuid(), now() + $3)`,
+		authDBTestUserID, raw, expiresIn.String(),
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+}
+
+// insertBlacklistRow 直接向 revoked_tokens 插入一条黑名单行（构造过期/边界场景，
+// token_lookup 计算与生产 RevokeRefreshToken 一致）。
+func insertBlacklistRow(t *testing.T, db *sql.DB, raw string, expiresIn time.Duration) {
+	t.Helper()
+	_, err := db.Exec(
+		`INSERT INTO revoked_tokens (token_lookup, user_id, expires_at)
+		 VALUES (encode(digest($1, 'sha256'), 'hex'), $2, now() + $3)`,
+		raw, authDBTestUserID, expiresIn.String(),
 	)
 	if err != nil {
 		t.Fatal(err)
@@ -60,7 +75,7 @@ func TestFindRevokedRefreshToken(t *testing.T) {
 
 	// 未撤销 → FindRefreshToken 命中、FindRevokedRefreshToken 不命中
 	raw := fmt.Sprintf("rt-live-%d", time.Now().UnixNano())
-	insertRefreshToken(t, db, raw, false, 30*24*time.Hour)
+	insertRefreshToken(t, db, raw, 30*24*time.Hour)
 	rec, err := r.FindRefreshToken(raw)
 	if err != nil || rec == nil {
 		t.Fatalf("live token should be found: rec=%v err=%v", rec, err)
@@ -70,22 +85,45 @@ func TestFindRevokedRefreshToken(t *testing.T) {
 		t.Fatalf("live token must not match revoked lookup: rev=%v err=%v", rev, err)
 	}
 
-	// 撤销后 → FindRefreshToken 不再命中、FindRevokedRefreshToken 命中（真复用）
-	if err := r.RevokeRefreshToken(rec.ID); err != nil {
+	// 撤销后 → 主表行物理删除、黑名单写入一行、FindRefreshToken 不再命中、
+	// FindRevokedRefreshToken 命中（真复用）
+	if err := r.RevokeRefreshToken(rec.ID, raw, rec.UserID, rec.ExpiresAt); err != nil {
 		t.Fatal(err)
+	}
+	var mainRows int
+	if err := db.QueryRow(`SELECT COUNT(*) FROM refresh_tokens WHERE id = $1`, rec.ID).Scan(&mainRows); err != nil {
+		t.Fatal(err)
+	}
+	if mainRows != 0 {
+		t.Fatalf("refresh_tokens row must be physically deleted, got %d rows", mainRows)
+	}
+	var blackRows int
+	if err := db.QueryRow(
+		`SELECT COUNT(*) FROM revoked_tokens WHERE token_lookup = encode(digest($1, 'sha256'), 'hex')`,
+		raw,
+	).Scan(&blackRows); err != nil {
+		t.Fatal(err)
+	}
+	if blackRows != 1 {
+		t.Fatalf("revoked_tokens must contain exactly one blacklist row, got %d", blackRows)
 	}
 	live, err := r.FindRefreshToken(raw)
 	if err != nil || live != nil {
 		t.Fatalf("revoked token must not be found by FindRefreshToken: rec=%v err=%v", live, err)
 	}
 	rev, err = r.FindRevokedRefreshToken(raw)
-	if err != nil || rev == nil || rev.ID != rec.ID {
+	if err != nil || rev == nil {
 		t.Fatalf("revoked token should be found by FindRevokedRefreshToken: rev=%v err=%v", rev, err)
 	}
 
-	// 过期撤销 token → 查不到
+	// 同一 token 重复撤销 → 幂等不报错（主表行已删、黑名单唯一索引 ON CONFLICT DO NOTHING）
+	if err := r.RevokeRefreshToken(rec.ID, raw, rec.UserID, rec.ExpiresAt); err != nil {
+		t.Fatalf("revoke twice should be idempotent: %v", err)
+	}
+
+	// 过期黑名单行 → 查不到
 	expired := fmt.Sprintf("rt-expired-%d", time.Now().UnixNano())
-	insertRefreshToken(t, db, expired, true, -24*time.Hour)
+	insertBlacklistRow(t, db, expired, -24*time.Hour)
 	rev, err = r.FindRevokedRefreshToken(expired)
 	if err != nil || rev != nil {
 		t.Fatalf("expired revoked token must not be found: rev=%v err=%v", rev, err)
@@ -105,7 +143,7 @@ func TestIsRefreshTokenReuse(t *testing.T) {
 
 	// 未撤销 → false
 	raw := fmt.Sprintf("rt-reuse-%d", time.Now().UnixNano())
-	insertRefreshToken(t, db, raw, false, 30*24*time.Hour)
+	insertRefreshToken(t, db, raw, 30*24*time.Hour)
 	reuse, err := svc.IsRefreshTokenReuse(raw)
 	if err != nil || reuse {
 		t.Fatalf("live token must not be reuse: reuse=%v err=%v", reuse, err)
@@ -116,7 +154,7 @@ func TestIsRefreshTokenReuse(t *testing.T) {
 	if err != nil || rec == nil {
 		t.Fatal(err)
 	}
-	if err := r.RevokeRefreshToken(rec.ID); err != nil {
+	if err := r.RevokeRefreshToken(rec.ID, raw, rec.UserID, rec.ExpiresAt); err != nil {
 		t.Fatal(err)
 	}
 	reuse, err = svc.IsRefreshTokenReuse(raw)
@@ -124,9 +162,9 @@ func TestIsRefreshTokenReuse(t *testing.T) {
 		t.Fatalf("revoked token must be reuse: reuse=%v err=%v", reuse, err)
 	}
 
-	// 过期撤销 → false
+	// 过期黑名单行 → false
 	expired := fmt.Sprintf("rt-reuse-expired-%d", time.Now().UnixNano())
-	insertRefreshToken(t, db, expired, true, -24*time.Hour)
+	insertBlacklistRow(t, db, expired, -24*time.Hour)
 	reuse, err = svc.IsRefreshTokenReuse(expired)
 	if err != nil || reuse {
 		t.Fatalf("expired revoked token must not be reuse: reuse=%v err=%v", reuse, err)
