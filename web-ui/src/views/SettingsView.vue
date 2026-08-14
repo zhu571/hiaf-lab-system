@@ -29,6 +29,14 @@
           <el-option label="English" value="en" />
         </el-select>
       </div>
+      <div class="theme-row">
+        <span class="language-label">{{ t('settings.theme') }}</span>
+        <el-select :model-value="themeMode" style="width: 160px" @change="onThemeChange">
+          <el-option :label="t('settings.themeAuto')" value="auto" />
+          <el-option :label="t('settings.themeLight')" value="light" />
+          <el-option :label="t('settings.themeDark')" value="dark" />
+        </el-select>
+      </div>
       <el-form label-position="top" @submit.prevent="submit">
         <el-form-item :label="t('settings.oldPassword')"><el-input v-model="form.oldPassword" type="password" show-password /></el-form-item>
         <el-form-item :label="t('settings.newPassword')"><el-input v-model="form.newPassword" type="password" show-password /></el-form-item>
@@ -134,12 +142,15 @@ import * as systemApi from '../api/system'
 import type { SSEEvent, VersionInfo } from '../api/system'
 import { useAuthStore } from '../stores/auth'
 import { useMobile } from '../composables/useMobile'
+import { useTheme, type ThemeMode } from '../composables/useTheme'
 import { setLocale, type AppLocale } from '../i18n'
 
 const router = useRouter()
 const auth = useAuthStore()
 const { t, locale } = useI18n()
 const isMobile = useMobile()
+// 主题三态（美术 §3.6）：绑定单例 store，本地持久化，不入后端（§3.6 持久化定稿）
+const { store: themeMode, setTheme } = useTheme()
 const form = reactive({ oldPassword: '', newPassword: '', confirm: '' })
 
 // ---- 版本状态 ----
@@ -374,6 +385,11 @@ async function onLanguageChange(value: string | number | boolean) {
   }
 }
 
+// 主题切换纯本地（localStorage 'theme' 白名单键），无后端交互，即选即生效
+function onThemeChange(value: string | number | boolean) {
+  setTheme(value as ThemeMode)
+}
+
 async function submit() {
   if (form.newPassword !== form.confirm) {
     ElMessage.error(t('settings.passwordMismatch'))
@@ -438,7 +454,8 @@ async function doLogout() {
   gap: 2px;
 }
 
-.language-row {
+.language-row,
+.theme-row {
   align-items: center;
   display: flex;
   gap: var(--space-3);

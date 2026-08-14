@@ -1,7 +1,7 @@
 /* ============================================================
    HIAF Lab System — dark 令牌覆写
-   仅落值：切换入口（useColorMode / html.dark 触发）由美术方案 S5 批实施，
-   本文件被 index.css 引入但无触发路径，亮色渲染零影响。
+   触发路径（美术方案 S5）：composables/useTheme.ts 单例驱动 html.dark class，
+   index.html 防闪烁脚本首帧预置；无 html.dark 时本文件全部规则不生效，亮色零影响。
    首行 @import EP dark css-vars（其全部定义均在 html.dark 选择器下，
    无 :root 泄漏；自有覆写随其后，html.dark 下优先级更高）。
    ============================================================ */
@@ -89,4 +89,103 @@ html.dark {
     0 1px 2px rgba(0, 0, 0, 0.4),
     0 10px 28px -12px rgba(0, 0, 0, 0.5);
   --shadow-lg: 0 28px 64px -24px rgba(0, 0, 0, 0.6);
+}
+
+/* ---------- Element Plus dark 变量族对接（美术 §3.2） ----------
+   @import 的 EP dark css-vars 为默认蓝黑系；此处把 primary/功能色/中性色
+   全部映射到上方 dark 令牌，组件与页面同族（var() 引用，无新字面量）。 */
+html.dark {
+  /* primary 九档 → dark 品牌阶梯（dark 语境 light-N 越大越贴近底色；dark-2 取浅档作 hover 亮色） */
+  --el-color-primary: var(--brand-600);
+  --el-color-primary-light-3: var(--brand-500);
+  --el-color-primary-light-5: var(--brand-300);
+  --el-color-primary-light-7: var(--brand-200);
+  --el-color-primary-light-8: var(--brand-100);
+  --el-color-primary-light-9: var(--brand-050);
+  --el-color-primary-dark-2: var(--brand-800);
+
+  /* 功能色四族 → dark 三级令牌（base=图形级、dark-2=文本级、light-7/8/9=浅底级、light-3/5 复用图形级） */
+  --el-color-success: var(--ok);
+  --el-color-success-light-3: var(--ok);
+  --el-color-success-light-5: var(--ok);
+  --el-color-success-light-7: var(--ok-soft);
+  --el-color-success-light-8: var(--ok-soft);
+  --el-color-success-light-9: var(--ok-soft);
+  --el-color-success-dark-2: var(--ok-text);
+  --el-color-warning: var(--warn);
+  --el-color-warning-light-3: var(--warn);
+  --el-color-warning-light-5: var(--warn);
+  --el-color-warning-light-7: var(--warn-soft);
+  --el-color-warning-light-8: var(--warn-soft);
+  --el-color-warning-light-9: var(--warn-soft);
+  --el-color-warning-dark-2: var(--warn-text);
+  --el-color-danger: var(--danger);
+  --el-color-danger-light-3: var(--danger);
+  --el-color-danger-light-5: var(--danger);
+  --el-color-danger-light-7: var(--danger-soft);
+  --el-color-danger-light-8: var(--danger-soft);
+  --el-color-danger-light-9: var(--danger-soft);
+  --el-color-danger-dark-2: var(--danger-text);
+  --el-color-error: var(--danger);
+  --el-color-error-light-3: var(--danger);
+  --el-color-error-light-5: var(--danger);
+  --el-color-error-light-7: var(--danger-soft);
+  --el-color-error-light-8: var(--danger-soft);
+  --el-color-error-light-9: var(--danger-soft);
+  --el-color-error-dark-2: var(--danger-text);
+  --el-color-info: var(--info);
+  --el-color-info-light-3: var(--info);
+  --el-color-info-light-5: var(--info);
+  --el-color-info-light-7: var(--info-soft);
+  --el-color-info-light-8: var(--info-soft);
+  --el-color-info-light-9: var(--info-soft);
+  --el-color-info-dark-2: var(--info-text);
+
+  /* 中性对接：底色/填充/文字/边框/遮罩/阴影 → dark 令牌族 */
+  --el-bg-color: var(--surface);
+  --el-bg-color-page: var(--bg);
+  --el-bg-color-overlay: var(--surface-2);
+  --el-fill-color: var(--surface-3);
+  --el-fill-color-light: var(--surface-2);
+  --el-fill-color-lighter: var(--surface-2);
+  --el-fill-color-extra-light: var(--surface-2);
+  --el-fill-color-dark: var(--surface-3);
+  --el-fill-color-darker: var(--surface-3);
+  --el-fill-color-blank: var(--surface);
+  --el-text-color-primary: var(--text-1);
+  --el-text-color-regular: var(--text-2);
+  --el-text-color-secondary: var(--text-3);
+  --el-text-color-placeholder: var(--text-3);
+  --el-text-color-disabled: var(--text-3);
+  --el-border-color: var(--border-strong);
+  --el-border-color-light: var(--border);
+  --el-border-color-lighter: var(--border);
+  --el-border-color-extra-light: var(--border);
+  --el-border-color-dark: var(--border-strong);
+  --el-border-color-darker: var(--border-strong);
+  /* 遮罩 = dark navy-900 (#091624) alpha 合成（令牌族字面值，与 --nav-bottom-bg 同手法） */
+  --el-mask-color: rgba(9, 22, 36, 0.7);
+  --el-mask-color-extra-light: rgba(9, 22, 36, 0.35);
+  --el-box-shadow: var(--shadow-md);
+  --el-box-shadow-light: var(--shadow-sm);
+  --el-box-shadow-dark: var(--shadow-lg);
+  --el-box-shadow-lighter: var(--shadow-sm);
+}
+
+/* ---------- base.css 浅色字面量的 dark 对应（走令牌，亮色零影响） ---------- */
+
+/* body 顶部渐变浅色的深色对应（base.css #f3f7fb 仅 light 生效） */
+html.dark body {
+  background: linear-gradient(180deg, var(--surface) 0%, var(--bg) 280px) fixed;
+  background-color: var(--bg);
+}
+
+/* webkit 滚动条浅色的深色对应（base.css #c3d0dd/#a7b8c8 仅 light 生效） */
+html.dark ::-webkit-scrollbar-thumb {
+  background: var(--border-strong);
+  background-clip: content-box;
+}
+
+html.dark ::-webkit-scrollbar-thumb:hover {
+  background-color: var(--text-3);
 }

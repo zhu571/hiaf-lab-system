@@ -98,6 +98,7 @@ import { getHistory, getLatest, type SensorPoint } from '@/api/sensors'
 import { showApiError } from '@/composables/useNotify'
 import { useAsyncData } from '@/composables/useAsyncData'
 import { usePolling } from '@/composables/usePolling'
+import { useTheme } from '@/composables/useTheme'
 import SensorTrendChart from '@/components/business/SensorTrendChart.vue'
 import { buildChartGroups, chartPalette, type ChartGroup } from '@/utils/chartTheme'
 import { formatDateTime } from '@/utils/datetime'
@@ -197,14 +198,17 @@ const latestPolling = usePolling(() => loadLatest({ silent: true }), REFRESH_MS)
 const historyPolling = usePolling(() => loadHistory({ silent: true }), HISTORY_REFRESH_MS, { resumeImmediate: false })
 
 // 趋势图分组（P15：调色板与分组逻辑收敛到 utils/chartTheme.ts，chartPalette 实时读 --chart-1..8 计算色）
-const chartGroups = computed<ChartGroup[]>(() =>
-  buildChartGroups(
+// themeState 仅作依赖登记（美术 §3.6 SVG/分组色联动）：主题切换 → computed 重算 → 系列色取新主题计算色
+const { state: themeState } = useTheme()
+const chartGroups = computed<ChartGroup[]>(() => {
+  void themeState.value
+  return buildChartGroups(
     historyPoints.value
       .map((p) => ({ key: p.tag || historyMeasurement.value, time: new Date(p.time).getTime(), value: p.value }))
       .filter((r) => !Number.isNaN(r.time)),
     chartPalette()
   )
-)
+})
 
 // windowKey 变化 → SensorTrendChart 复位 xWindow（§4.5）。
 // rangeNonce 保证缩放态下重新点击当前已选档也触发复位（§4.2.2「点击任一档」语义）。
