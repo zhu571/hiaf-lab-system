@@ -7,6 +7,10 @@
  * - --shadow-avatar / --pulse-ring（S5 批新增）：SettingsView 头像阴影、
  *   InstrumentMeasureView running 态呼吸光圈 rgba 值上提为令牌，
  *   原「美术附录 B 白名单」alpha 值入令牌文件合法，视图侧不再保留白名单豁免。
+ * - --nav-mark-shadow / --nav-active-shadow / --nav-card-bg / --nav-card-hover-bg /
+ *   --nav-bottom-shadow（S6 批新增，美术 S2 走查遗留补做）：AppLayout 侧栏品牌标阴影、
+ *   激活项投影、用户卡片常态/hover 底、底栏上投阴影的原值整体上提为令牌，
+ *   视图侧不再保留 hex/rgba 字面量（附录 B 防线 grep 归零）。
  */
 :root {
   /* ========== 色彩：底色 ========== */
@@ -82,6 +86,12 @@
   --nav-active-bg: linear-gradient(135deg, var(--brand-600), var(--brand-500));
   --nav-border: rgba(255, 255, 255, 0.06);
   --nav-bottom-bg: rgba(255, 255, 255, 0.88);
+  /* S6 新增（S2 走查遗留）：AppLayout 原字面量原值入令牌，视觉零变化 */
+  --nav-mark-shadow: 0 4px 12px rgba(20, 112, 138, 0.45);
+  --nav-active-shadow: 0 6px 16px -6px rgba(20, 112, 138, 0.55);
+  --nav-card-bg: rgba(255, 255, 255, 0.04);
+  --nav-card-hover-bg: rgba(255, 255, 255, 0.08);
+  --nav-bottom-shadow: 0 -8px 24px -12px rgba(18, 38, 58, 0.18);
 
   /* ========== 字体 ========== */
   --font-family-base:

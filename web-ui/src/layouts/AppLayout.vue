@@ -201,17 +201,23 @@ async function onUserCommand(command: string | number | object) {
 
 .nav {
   background: linear-gradient(180deg, var(--navy-800) 0%, var(--navy-900) 100%);
-  box-shadow: inset -1px 0 0 rgba(255, 255, 255, 0.04);
-  color: #f8fbff;
+  box-shadow: inset -1px 0 0 var(--nav-border);
+  color: var(--nav-text-title);
   display: flex;
   flex-direction: column;
   gap: 4px;
   height: 100vh;
   left: 0;
+  overflow-y: auto;
   padding: 20px 12px;
   position: fixed;
   top: 0;
   width: 216px;
+}
+
+/* 200% 缩放/矮屏下侧栏内容超高时滚动触达（flex 子项 shrink 会先压缩而非溢出，须置 0） */
+.nav > * {
+  flex-shrink: 0;
 }
 
 .brand {
@@ -224,8 +230,8 @@ async function onUserCommand(command: string | number | object) {
 .brand-mark {
   background: linear-gradient(135deg, var(--brand-500), var(--brand-700));
   border-radius: 9px;
-  box-shadow: 0 4px 12px rgba(20, 112, 138, 0.45);
-  color: #fff;
+  box-shadow: var(--nav-mark-shadow);
+  color: var(--text-inverse);
   display: grid;
   font-size: 15px;
   font-weight: 800;
@@ -241,7 +247,7 @@ async function onUserCommand(command: string | number | object) {
 }
 
 .nav-group {
-  color: #64798e;
+  color: var(--nav-text-group);
   font-size: 12px;
   letter-spacing: 0.08em;
   margin: 14px 10px 2px;
@@ -256,7 +262,7 @@ async function onUserCommand(command: string | number | object) {
 
 .nav-link {
   border-radius: 10px;
-  color: #9db1c4;
+  color: var(--nav-text);
   font-weight: 500;
   padding: 10px 12px;
   transition:
@@ -279,8 +285,8 @@ async function onUserCommand(command: string | number | object) {
 }
 
 .nav-link:hover {
-  background: rgba(255, 255, 255, 0.06);
-  color: #e6eef6;
+  background: var(--nav-hover-bg);
+  color: var(--nav-text-strong);
 }
 
 .nav-ask {
@@ -294,13 +300,13 @@ async function onUserCommand(command: string | number | object) {
 }
 
 .nav-link.router-link-active {
-  background: linear-gradient(135deg, var(--brand-600), var(--brand-500));
-  box-shadow: 0 6px 16px -6px rgba(20, 112, 138, 0.55);
-  color: #fff;
+  background: var(--nav-active-bg);
+  box-shadow: var(--nav-active-shadow);
+  color: var(--text-inverse);
 }
 
 .user-card {
-  border-top: 1px solid rgba(255, 255, 255, 0.06);
+  border-top: 1px solid var(--nav-border);
   display: flex;
   margin-top: auto;
   padding-top: 12px;
@@ -308,10 +314,10 @@ async function onUserCommand(command: string | number | object) {
 
 .user-card-btn {
   align-items: center;
-  background: rgba(255, 255, 255, 0.04);
-  border: 1px solid rgba(255, 255, 255, 0.06);
+  background: var(--nav-card-bg);
+  border: 1px solid var(--nav-border);
   border-radius: 10px;
-  color: #e6eef6;
+  color: var(--nav-text-strong);
   cursor: pointer;
   display: flex;
   gap: 10px;
@@ -321,14 +327,14 @@ async function onUserCommand(command: string | number | object) {
 }
 
 .user-card-btn:hover {
-  background: rgba(255, 255, 255, 0.08);
+  background: var(--nav-card-hover-bg);
 }
 
 .user-avatar {
   align-items: center;
   background: linear-gradient(135deg, var(--brand-500), var(--brand-700));
   border-radius: 8px;
-  color: #fff;
+  color: var(--text-inverse);
   display: inline-flex;
   flex-shrink: 0;
   font-size: 13px;
@@ -346,7 +352,7 @@ async function onUserCommand(command: string | number | object) {
 }
 
 .user-meta strong {
-  color: #f8fbff;
+  color: var(--text-inverse);
   font-size: 13px;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -354,12 +360,12 @@ async function onUserCommand(command: string | number | object) {
 }
 
 .user-meta small {
-  color: #9db1c4;
+  color: var(--nav-text);
   font-size: 11px;
 }
 
 .user-caret {
-  color: #9db1c4;
+  color: var(--nav-text);
   margin-left: auto;
 }
 
@@ -370,10 +376,10 @@ async function onUserCommand(command: string | number | object) {
 
 .bottom-nav {
   backdrop-filter: blur(14px);
-  background: rgba(255, 255, 255, 0.88);
+  background: var(--nav-bottom-bg);
   border-top: 1px solid var(--border);
   bottom: 0;
-  box-shadow: 0 -8px 24px -12px rgba(18, 38, 58, 0.18);
+  box-shadow: var(--nav-bottom-shadow);
   display: grid;
   grid-template-columns: repeat(5, 1fr);
   left: 0;

@@ -49,6 +49,8 @@
 .panel-head {
   align-items: center;
   display: flex;
+  /* 窄有效宽度（200% 缩放等）下标题与 meta 换行而非挤压；空间充足时零变化 */
+  flex-wrap: wrap;
   gap: 10px;
   margin-bottom: 14px;
 }
