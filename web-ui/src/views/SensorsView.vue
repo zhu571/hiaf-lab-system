@@ -92,11 +92,12 @@
 </template>
 
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { computed, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { Odometer, Refresh, TrendCharts } from '@element-plus/icons-vue'
 import { getHistory, getLatest, type SensorPoint } from '../api/sensors'
 import { showApiError } from '../composables/useNotify'
+import { usePolling } from '../composables/usePolling'
 import SensorTrendChart, { type ChartGroup, type ChartPoint } from '@/components/business/SensorTrendChart.vue'
 
 const { t, locale } = useI18n()
@@ -152,10 +153,12 @@ const rangeZoomed = ref(false)
 const autoRefresh = ref(true)
 const refreshing = ref(false)
 const lastUpdatedAt = ref<Date | null>(null)
-let latestTimer: number | undefined
-let historyTimer: number | undefined
-let hiddenPaused = false
 let historySeq = 0
+
+// 轮询（重构方案 §3.5）：latest 5s + history 30s 两个独立轮询，由 autoRefresh 开关统一启停；
+// 页面隐藏自动暂停、恢复可见立即刷 latest（history 不立即刷，保持现状语义）
+const latestPolling = usePolling(() => loadLatest({ silent: true }), REFRESH_MS)
+const historyPolling = usePolling(() => loadHistory({ silent: true }), HISTORY_REFRESH_MS, { resumeImmediate: false })
 
 // 趋势图调色板
 const palette = ['var(--brand-500)', 'var(--ok)', 'var(--warn)', 'var(--danger)', '#7a5af8', '#0d5a70', '#c2477e', '#5a8a3c']
@@ -188,61 +191,22 @@ const windowSizeMs = computed(() => {
 
 /* ---------- 刷新机制（§3.2 P0-2） ---------- */
 
-onMounted(() => {
-  document.addEventListener('visibilitychange', onVisibilityChange)
-})
-
-onBeforeUnmount(() => {
-  document.removeEventListener('visibilitychange', onVisibilityChange)
-  stopTimers()
-})
-
-// autoRefresh 开关同时管辖 latest 5s + history 30s 两个定时器（§3.2 定稿）
+// autoRefresh 开关同时管辖 latest 5s + history 30s 两个轮询（§3.2 定稿）；
+// unmount 清理由 usePolling 内部 onBeforeUnmount 完成
 watch(
   autoRefresh,
   (on) => {
     if (on) {
-      startTimers()
+      latestPolling.start()
+      historyPolling.start()
       loadAll()
     } else {
-      stopTimers()
+      latestPolling.stop()
+      historyPolling.stop()
     }
   },
   { immediate: true }
 )
-
-function startTimers() {
-  stopTimers()
-  latestTimer = window.setInterval(() => {
-    if (!document.hidden) loadLatest({ silent: true })
-  }, REFRESH_MS)
-  historyTimer = window.setInterval(() => {
-    if (!document.hidden) loadHistory({ silent: true })
-  }, HISTORY_REFRESH_MS)
-}
-
-function stopTimers() {
-  window.clearInterval(latestTimer)
-  window.clearInterval(historyTimer)
-  latestTimer = undefined
-  historyTimer = undefined
-}
-
-// 页面隐藏暂停、恢复可见重启（§3.2 定稿，AppLayout visibilitychange 先例）
-function onVisibilityChange() {
-  if (document.hidden) {
-    if (!hiddenPaused) {
-      hiddenPaused = true
-      stopTimers()
-    }
-  } else if (hiddenPaused) {
-    hiddenPaused = false
-    if (autoRefresh.value) {
-      startTimers()
-      loadLatest({ silent: true })
-    }
-  }
-}
 
 async function loadAll(opts: { silent?: boolean } = {}) {
   await Promise.all([loadLatest(opts), loadHistory(opts)])

@@ -5,6 +5,53 @@ type Envelope<T> = {
   request_id: string
 }
 
+// 错误分类（重构方案 §3.5 定稿）：调用方按 kind 给出差异化提示（useNotify.showApiError）。
+export type ApiErrorKind =
+  | 'network' // 无 response（网络断/超时 ECONNABORTED）
+  | 'auth' // 401
+  | 'permission' // 403
+  | 'not_found' // 404
+  | 'conflict' // 409
+  | 'validation' // 422
+  | 'server' // 5xx
+  | 'unknown' // 其余状态码
+
+export class ApiError extends Error {
+  kind: ApiErrorKind
+  status?: number
+  requestId?: string
+  details?: unknown
+
+  constructor(message: string, kind: ApiErrorKind, init: { status?: number; requestId?: string; details?: unknown } = {}) {
+    super(message)
+    this.name = 'ApiError'
+    this.kind = kind
+    this.status = init.status
+    this.requestId = init.requestId
+    this.details = init.details
+  }
+}
+
+// kind 映射表：无 response → network；401 → auth；403 → permission；404 → not_found；
+// 409 → conflict；422 → validation；5xx → server；其余 → unknown。
+export function classifyApiError(status: number | undefined): ApiErrorKind {
+  if (status === undefined) return 'network'
+  if (status === 401) return 'auth'
+  if (status === 403) return 'permission'
+  if (status === 404) return 'not_found'
+  if (status === 409) return 'conflict'
+  if (status === 422) return 'validation'
+  if (status >= 500) return 'server'
+  return 'unknown'
+}
+
+export function isApiError(err: unknown): err is ApiError {
+  return err instanceof ApiError
+}
+
+// GET 网络错误自动重试 1 次的退避延迟（固定 300ms）
+export const NETWORK_RETRY_DELAY_MS = 300
+
 let csrfToken = ''
 
 export function setCSRFToken(token: string) {
@@ -112,7 +159,9 @@ api.interceptors.response.use(
     return response
   },
   async (error) => {
-    const config = error.config as (AxiosRequestConfig & { _retriedAfterRefresh?: boolean }) | undefined
+    const config = error.config as
+      | (AxiosRequestConfig & { _retriedAfterRefresh?: boolean; _retriedNetwork?: boolean })
+      | undefined
     const url = config?.url ?? ''
     // 仅 /auth/login、/auth/refresh 的 401 是预期业务响应（密码错误/刷新失效），不参与刷新重试；
     // 其它 /auth/*（me/change-password/profile 等受保护端点）token 过期时同样参与单飞 refresh 后原样重试。
@@ -124,13 +173,23 @@ api.interceptors.response.use(
       }
       redirectToLogin()
     }
+    // S2 定稿（§3.5）：仅 GET 且无 response（网络断/超时）自动重试 1 次、固定 300ms 退避；
+    // 写请求不自动重试（幂等性由 Idempotency-Key + 后端回滚兜底）。
+    // _retriedNetwork 防循环（与 _retriedAfterRefresh 先例同构）；401 有 response，与网络重试互斥。
+    if (!error.response && config && (config.method || 'get').toUpperCase() === 'GET' && !config._retriedNetwork) {
+      config._retriedNetwork = true
+      await new Promise((resolve) => setTimeout(resolve, NETWORK_RETRY_DELAY_MS))
+      return api.request(config)
+    }
     const message = error.response?.data?.error?.message || error.message || '请求失败'
-    const err = new Error(message) as Error & { requestId?: string; status?: number; details?: unknown }
-    err.requestId = error.response?.data?.request_id
-    err.status = error.response?.status
-    // 最小加法透传后端 error.details（批量录入 422 的逐行错误依赖；其它页面无视该字段）
-    err.details = error.response?.data?.error?.details
-    return Promise.reject(err)
+    return Promise.reject(
+      new ApiError(message, classifyApiError(error.response?.status), {
+        status: error.response?.status,
+        requestId: error.response?.data?.request_id,
+        // 最小加法透传后端 error.details（批量录入 422 的逐行错误依赖；其它页面无视该字段）
+        details: error.response?.data?.error?.details
+      })
+    )
   }
 )
 

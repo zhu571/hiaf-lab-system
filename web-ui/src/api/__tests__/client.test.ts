@@ -1,12 +1,12 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest'
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { AxiosError, AxiosHeaders, type InternalAxiosRequestConfig, type AxiosResponse } from 'axios'
 
 // client.ts 拦截器深测（方案 §3.4）：mock 方式定稿为自定义 axios adapter（api.defaults.adapter 注入
 // vi.fn，axios 官方测试接口，零新依赖，不引入 msw）。
 // 可执行性前提（方案 §3.4 两条）：
-// ① client.ts 模块级状态 csrfToken(:8) 与 refreshPromise(:53) 跨用例泄漏 ——
+// ① client.ts 模块级状态 csrfToken(:55) 与 refreshPromise(:100) 跨用例泄漏 ——
 //    每用例 vi.resetModules() + 动态 import('../client') 取干净模块；
-// ② redirectToLogin 的 window.location.assign(:77-79) 在 jsdom 触发 navigation 未实现异常 ——
+// ② redirectToLogin 的 window.location.assign(:123-127) 在 jsdom 触发 navigation 未实现异常 ——
 //    用例内把 window.location 替换为 assign 打桩的对象。
 
 type ClientModule = typeof import('../client')
@@ -17,7 +17,7 @@ async function loadClient(): Promise<ClientModule> {
 }
 
 /** adapter 收到的 config 已过请求拦截器（InternalAxiosRequestConfig），附重试标记 */
-type AdapterConfig = InternalAxiosRequestConfig & { _retriedAfterRefresh?: boolean }
+type AdapterConfig = InternalAxiosRequestConfig & { _retriedAfterRefresh?: boolean; _retriedNetwork?: boolean }
 
 function jsonResponse(config: AdapterConfig, data: unknown, status = 200): AxiosResponse {
   return {
@@ -32,6 +32,11 @@ function jsonResponse(config: AdapterConfig, data: unknown, status = 200): Axios
 /** 以带 response 的 AxiosError 拒绝（走 error 拦截器分支），等价于后端返回指定状态码 */
 function rejectWithStatus(config: AdapterConfig, status: number, data: unknown): never {
   throw new AxiosError('Request failed with status code ' + status, 'ERR_BAD_REQUEST', config, undefined, jsonResponse(config, data, status))
+}
+
+/** 以无 response 的 AxiosError 拒绝（带 config），等价于真实网络断/超时（xhr adapter 行为） */
+function rejectNetwork(config: AdapterConfig, message = 'Network Error'): never {
+  throw new AxiosError(message, AxiosError.ERR_NETWORK, config, config)
 }
 
 function headerOf(config: AdapterConfig, name: string): string | undefined {
@@ -191,7 +196,7 @@ describe('401 单飞刷新与重试（:53-80, 114-126）', () => {
     })
     client.api.defaults.adapter = adapter as unknown as typeof client.api.defaults.adapter
 
-    await expect(client.request({ url: '/todos' })).rejects.toMatchObject({ message: 'still-unauthorized' })
+    await expect(client.request({ url: '/todos' })).rejects.toMatchObject({ message: 'still-unauthorized', kind: 'auth' })
     const refreshCalls = adapter.mock.calls.filter(([c]) => c.url === '/auth/refresh')
     expect(refreshCalls).toHaveLength(1)
   })
@@ -211,7 +216,7 @@ describe('401 单飞刷新与重试（:53-80, 114-126）', () => {
 })
 
 describe('error 归一化（:127-133）', () => {
-  it('422 details 透传：message/requestId/status/details 全部保留（批量录入逐行错误依赖）', async () => {
+  it('422 details 透传：ApiError.message/requestId/status/kind/details 全部保留（批量录入逐行错误依赖）', async () => {
     const client = await loadClient()
     const details = [{ row: 2, error: 'value 必须为数字' }]
     const adapter = vi.fn(async (config: AdapterConfig) =>
@@ -219,31 +224,97 @@ describe('error 归一化（:127-133）', () => {
     )
     client.api.defaults.adapter = adapter as unknown as typeof client.api.defaults.adapter
 
-    const err = (await client.request({ url: '/test-data/batch', method: 'POST' }).catch((e: unknown) => e)) as Error & {
-      requestId?: string
-      status?: number
-      details?: unknown
-    }
-    expect(err.message).toBe('validation_failed')
-    expect(err.requestId).toBe('req-422')
-    expect(err.status).toBe(422)
-    expect(err.details).toEqual(details)
+    const err = (await client.request({ url: '/test-data/batch', method: 'POST' }).catch((e: unknown) => e)) as unknown
+    // 动态 import + resetModules 会产生新模块实例，instanceof 断言用模块自己的 ApiError 类
+    expect(err).toBeInstanceOf(client.ApiError)
+    const apiErr = err as InstanceType<typeof client.ApiError>
+    expect(apiErr.message).toBe('validation_failed')
+    expect(apiErr.kind).toBe('validation')
+    expect(apiErr.requestId).toBe('req-422')
+    expect(apiErr.status).toBe(422)
+    expect(apiErr.details).toEqual(details)
   })
 
-  it('网络错误（无 response）：message 取 error.message，空 message 兜底「请求失败」', async () => {
+  it('kind 映射表：401→auth / 403→permission / 404→not_found / 409→conflict / 500→server / 400→unknown', async () => {
     const client = await loadClient()
-    const adapter = vi.fn(async () => {
-      throw new Error('Network Error')
+    const cases: Array<[number, string]> = [
+      [401, 'auth'],
+      [403, 'permission'],
+      [404, 'not_found'],
+      [409, 'conflict'],
+      [500, 'server'],
+      [400, 'unknown']
+    ]
+    for (const [status, kind] of cases) {
+      const adapter = vi.fn(async (config: AdapterConfig) =>
+        rejectWithStatus(config, status, { error: { message: `msg-${status}` }, request_id: `r-${status}` })
+      )
+      client.api.defaults.adapter = adapter as unknown as typeof client.api.defaults.adapter
+      const err = (await client.request({ url: '/projects' }).catch((e: unknown) => e)) as InstanceType<typeof client.ApiError>
+      expect(err.kind, `status ${status} 应映射为 ${kind}`).toBe(kind)
+      expect(err.status).toBe(status)
+      expect(err.requestId).toBe(`r-${status}`)
+    }
+  })
+})
+
+describe('GET 网络错误自动重试（S2，§3.5：仅 GET 且无 response，固定 300ms 退避）', () => {
+  afterEach(() => {
+    vi.useRealTimers()
+  })
+
+  it('GET 网络错误重试 1 次后放弃：adapter 调用 2 次，ApiError kind=network、message 透传', async () => {
+    const client = await loadClient()
+    vi.useFakeTimers()
+    const adapter = vi.fn((config: AdapterConfig) => rejectNetwork(config))
+    client.api.defaults.adapter = adapter as unknown as typeof client.api.defaults.adapter
+
+    const settled = client.request({ url: '/todos' }).catch((e: unknown) => e)
+    await vi.advanceTimersByTimeAsync(300)
+
+    const err = await settled
+    expect(err).toBeInstanceOf(client.ApiError)
+    expect((err as InstanceType<typeof client.ApiError>).message).toBe('Network Error')
+    expect((err as InstanceType<typeof client.ApiError>).kind).toBe('network')
+    expect(adapter).toHaveBeenCalledTimes(2)
+
+    // 空 message 的异常走兜底文案
+    const adapter2 = vi.fn((config: AdapterConfig) => rejectNetwork(config, ''))
+    client.api.defaults.adapter = adapter2 as unknown as typeof client.api.defaults.adapter
+    const settled2 = client.request({ url: '/todos' }).catch((e: unknown) => e)
+    await vi.advanceTimersByTimeAsync(300)
+    await expect(settled2).resolves.toMatchObject({ kind: 'network', message: '请求失败' })
+    expect(adapter2).toHaveBeenCalledTimes(2)
+  })
+
+  it('GET 网络抖动：首次失败后重试成功即正常返回（adapter 2 次，结果正确）', async () => {
+    const client = await loadClient()
+    vi.useFakeTimers()
+    const adapter = vi.fn(async (config: AdapterConfig) => {
+      if (config._retriedNetwork) return jsonResponse(config, { data: ['ok'], request_id: 'r-retry' })
+      return rejectNetwork(config)
     })
     client.api.defaults.adapter = adapter as unknown as typeof client.api.defaults.adapter
 
-    await expect(client.request({ url: '/todos' })).rejects.toThrow('Network Error')
+    const settled = client.request({ url: '/todos' })
+    await vi.advanceTimersByTimeAsync(300)
 
-    // 空 message 的异常走兜底文案
-    const adapter2 = vi.fn(async () => {
-      throw new Error()
-    })
-    client.api.defaults.adapter = adapter2 as unknown as typeof client.api.defaults.adapter
-    await expect(client.request({ url: '/todos' })).rejects.toThrow('请求失败')
+    await expect(settled).resolves.toEqual(['ok'])
+    expect(adapter).toHaveBeenCalledTimes(2)
+  })
+
+  it('POST 网络错误不自动重试（幂等性），kind=network', async () => {
+    const client = await loadClient()
+    vi.useFakeTimers()
+    const adapter = vi.fn((config: AdapterConfig) => rejectNetwork(config))
+    client.api.defaults.adapter = adapter as unknown as typeof client.api.defaults.adapter
+
+    const settled = client.request({ url: '/todos', method: 'POST' }).catch((e: unknown) => e)
+    // 退避窗口远大于 300ms 也不重试
+    await vi.advanceTimersByTimeAsync(5000)
+
+    const err = (await settled) as { kind: string }
+    expect(err.kind).toBe('network')
+    expect(adapter).toHaveBeenCalledTimes(1)
   })
 })

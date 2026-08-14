@@ -82,11 +82,12 @@
 </template>
 
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, ref, watch, type Component } from 'vue'
+import { computed, onMounted, ref, watch, type Component } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import { ArrowUp, ChatDotRound } from '@element-plus/icons-vue'
 import { useMobile } from '@/composables/useMobile'
+import { usePolling } from '@/composables/usePolling'
 import { useAuthStore } from '@/stores/auth'
 import { useProjectStore } from '@/stores/project'
 import { useAskDialog } from '@/composables/useAskDialog'
@@ -107,20 +108,14 @@ const { openAskDialog } = useAskDialog()
 
 onMounted(() => {
   projects.load().catch(() => undefined)
-  agentTimer = window.setInterval(refreshAgentPending, 30000)
-  document.addEventListener('visibilitychange', onVisibilityChange)
-})
-
-onBeforeUnmount(() => {
-  window.clearInterval(agentTimer)
-  document.removeEventListener('visibilitychange', onVisibilityChange)
+  badgePolling.start()
 })
 
 // C11 未读徽章：30s 轮询待审核候选数（复用现有分页接口的 total，零新 API）。
-// 仅 admin/maintainer（与 ListCandidates 后端权限一致）拉取；页面隐藏时暂停，
-// 恢复可见、角色资料到位、进入候选页（审核后计数变化）时立即刷新。
+// 仅 admin/maintainer（与 ListCandidates 后端权限一致）拉取；页面隐藏时暂停（usePolling
+// pauseOnHidden），恢复可见、角色资料到位、进入候选页（审核后计数变化）时立即刷新。
 const agentPending = ref(0)
-let agentTimer: number | undefined
+const badgePolling = usePolling(refreshAgentPending, 30000)
 
 async function refreshAgentPending() {
   if (!auth.canReviewAgent || document.hidden) return
@@ -130,10 +125,6 @@ async function refreshAgentPending() {
   } catch {
     // 徽章拉取失败静默降级，下一轮轮询再试，不打断导航
   }
-}
-
-function onVisibilityChange() {
-  if (!document.hidden) refreshAgentPending()
 }
 
 watch(
