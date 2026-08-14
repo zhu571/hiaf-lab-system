@@ -330,28 +330,6 @@ function formatTime(v?: string) {
   stroke-width: 1;
 }
 
-.legend {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px 16px;
-  margin-top: 10px;
-}
-
-.legend-item {
-  align-items: center;
-  color: var(--text-2);
-  display: inline-flex;
-  font-size: 12px;
-  gap: 6px;
-}
-
-.legend-dot {
-  border-radius: 50%;
-  display: inline-block;
-  height: 8px;
-  width: 8px;
-}
-
 @media (max-width: 768px) {
   .filters .el-select {
     width: 100%;
