@@ -1,0 +1,92 @@
+/* ============================================================
+   HIAF Lab System — dark 令牌覆写
+   仅落值：切换入口（useColorMode / html.dark 触发）由美术方案 S5 批实施，
+   本文件被 index.css 引入但无触发路径，亮色渲染零影响。
+   首行 @import EP dark css-vars（其全部定义均在 html.dark 选择器下，
+   无 :root 泄漏；自有覆写随其后，html.dark 下优先级更高）。
+   ============================================================ */
+
+@import 'element-plus/theme-chalk/dark/css-vars.css';
+
+html.dark {
+  /* 底色（与 navy 同族，避免纯黑） */
+  --bg: #0e1822;
+  --surface: #152230;
+  --surface-2: #1b2b3b;
+  --surface-3: #22364a;
+
+  /* 边框 */
+  --border: #2a3d4f;
+  --border-strong: #3a5064;
+
+  /* 文字 */
+  --text-1: #e8eef4;
+  --text-2: #b8c6d2;
+  --text-3: #8496a6;
+  --text-inverse: #f8fbff;
+
+  /* 品牌阶梯 */
+  --brand-050: #12303c;
+  --brand-100: #173c4a;
+  --brand-200: #1d4a5a;
+  --brand-300: #2d6d84;
+  --brand-400: #3398b8;
+  --brand-500: #3398b8;
+  --brand-600: #257793;
+  --brand-700: #1d5f78;
+  --brand-800: #8fc6d8;
+  --brand-900: #c2e0ea;
+
+  /* 侧栏 navy（dark 微压暗） */
+  --navy-800: #0d1f30;
+  --navy-900: #091624;
+
+  /* 功能色三级族 */
+  --ok: #67c08a;
+  --ok-text: #8ed2ab;
+  --ok-soft: #16301f;
+  --warn: #e0a94f;
+  --warn-text: #eec27e;
+  --warn-soft: #33260f;
+  --danger: #e0706b;
+  --danger-text: #eb9a96;
+  --danger-soft: #3a1d1b;
+  --info: #7d9ab3;
+  --info-text: #a3b9cc;
+  --info-soft: #1d2937;
+
+  /* 图表系列色（深底下提亮） */
+  --chart-1: #4ab3cc;
+  --chart-2: #67c08a;
+  --chart-3: #e0a94f;
+  --chart-4: #e0706b;
+  --chart-5: #9a86fa;
+  --chart-6: #5b9db8;
+  --chart-7: #d97ba6;
+  --chart-8: #8fb36a;
+
+  /* 代码块 */
+  --code-bg: #0a1420;
+  --code-text: #d4d4d4;
+  --code-red: #f44747;
+  --code-yellow: #e5c07b;
+
+  /* 侧栏令牌族（light=dark 同值；navy 覆写经 var() 引用自动跟随） */
+  --nav-bg-start: var(--navy-800);
+  --nav-bg-end: var(--navy-900);
+  --nav-text: #9db1c4;
+  --nav-text-strong: #e6eef6;
+  --nav-text-title: var(--text-inverse);
+  --nav-text-group: #7e93a8;
+  --nav-hover-bg: rgba(255, 255, 255, 0.06);
+  --nav-active-bg: linear-gradient(135deg, var(--brand-600), var(--brand-500));
+  --nav-border: rgba(255, 255, 255, 0.06);
+  --nav-bottom-bg: rgba(21, 34, 48, 0.88);
+
+  /* 阴影（dark 以边框为主、阴影为辅） */
+  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.45);
+  --shadow-md:
+    0 1px 2px rgba(0, 0, 0, 0.4),
+    0 10px 28px -12px rgba(0, 0, 0, 0.5);
+  --shadow-lg: 0 28px 64px -24px rgba(0, 0, 0, 0.6);
+}

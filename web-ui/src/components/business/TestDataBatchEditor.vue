@@ -369,7 +369,7 @@ async function submit() {
 <style scoped>
 .batch-editor {
   display: grid;
-  gap: 12px;
+  gap: var(--space-3);
 }
 
 .err-summary :deep(.el-alert__content) {

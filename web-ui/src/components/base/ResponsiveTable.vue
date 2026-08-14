@@ -50,7 +50,7 @@ function rowKey(row: T, i: number) {
 <style scoped>
 .rt-card-list {
   display: grid;
-  gap: 12px;
+  gap: var(--space-3);
 }
 
 .rt-card {

@@ -355,7 +355,7 @@ async function copyPassword() {
 .user-cell {
   align-items: center;
   display: flex;
-  gap: 12px;
+  gap: var(--space-3);
 }
 
 .user-meta {

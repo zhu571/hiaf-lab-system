@@ -248,7 +248,7 @@ async function onResolve(row: AlertRecord) {
   display: flex;
   flex-wrap: wrap;
   font-size: 12px;
-  gap: 12px;
+  gap: var(--space-3);
 }
 
 .title-cell {

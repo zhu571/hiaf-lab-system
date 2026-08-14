@@ -3,19 +3,19 @@
 .page {
   align-content: start;
   display: grid;
-  gap: 20px;
+  gap: var(--space-5);
 }
 
 .toolbar {
   align-items: center;
   display: flex;
   flex-wrap: wrap;
-  gap: 12px;
+  gap: var(--space-3);
   justify-content: space-between;
 }
 
 .toolbar h2 {
-  font-size: 20px;
+  font-size: var(--fs-title-lg);
 }
 
 .toolbar h3 {
@@ -27,7 +27,7 @@
   border: 1px solid var(--border);
   border-radius: var(--radius-md);
   box-shadow: var(--shadow-sm);
-  padding: 20px;
+  padding: var(--space-5);
 }
 
 .muted {
@@ -36,16 +36,16 @@
 
 .grid {
   display: grid;
-  gap: 16px;
+  gap: var(--space-4);
 }
 
 @media (max-width: 768px) {
   .panel {
-    border-radius: 10px;
-    padding: 14px;
+    border-radius: var(--radius-sm);
+    padding: var(--space-4);
   }
 
   .toolbar h2 {
-    font-size: 18px;
+    font-size: var(--fs-title);
   }
 }

@@ -271,13 +271,13 @@ async function clearA5() {
 .page-header, .section-title { align-items: center; display: flex; justify-content: space-between; }
 .page-header h1, .section-title h2 { margin: 0; }
 .eyebrow { color: var(--brand-600); font-size: 12px; font-weight: 700; letter-spacing: .12em; margin: 0 0 4px; text-transform: uppercase; }
-.subtitle, .section-title p { color: var(--text-secondary); margin: 5px 0 0; }
+.subtitle, .section-title p { color: var(--text-3); margin: 5px 0 0; }
 .status-grid { display: grid; gap: 14px; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); min-height: 130px; }
-.status-card, .chart-card { background: #fff; border: 1px solid var(--border-color); border-radius: 14px; box-shadow: var(--shadow-sm); }
+.status-card, .chart-card { background: #fff; border: 1px solid var(--border); border-radius: 14px; box-shadow: var(--shadow-sm); }
 .status-card { display: grid; gap: 8px; padding: 18px; }
-.status-card span, .status-card small { color: var(--text-secondary); }
+.status-card span, .status-card small { color: var(--text-3); }
 .status-card strong { color: var(--navy-800); font-size: 24px; }
-.status-card strong.invalid { color: var(--text-secondary); }
+.status-card strong.invalid { color: var(--text-3); }
 .status-card small { font-size: 11px; overflow: hidden; text-overflow: ellipsis; }
 .chart-card { height: 460px; padding: 20px; }
 .chart-card canvas { height: 385px !important; width: 100% !important; }

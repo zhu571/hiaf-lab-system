@@ -1,25 +1,126 @@
 :root {
-  /* 色板 */
+  /* ========== 色彩：底色 ========== */
   --bg: #edf1f6;
   --surface: #ffffff;
   --surface-2: #f5f8fb;
+  --surface-3: #eaf0f6;
+
+  /* 边框 */
   --border: #e3e9f1;
   --border-strong: #d2dce7;
 
+  /* 文字 */
   --text-1: #12263a;
   --text-2: #35485e;
-  --text-3: #6b7e92;
+  --text-3: #5c6f82;
+  --text-inverse: #f8fbff;
 
-  --brand-700: #0d5a70;
-  --brand-600: #12708a;
-  --brand-500: #1a86a2;
-  --brand-100: #d3e7ec;
+  /* 品牌阶梯（十档） */
   --brand-050: #edf6f8;
+  --brand-100: #d3e7ec;
+  --brand-200: #a9cfd9;
+  --brand-300: #7db6c4;
+  --brand-400: #4798ac;
+  --brand-500: #1a86a2;
+  --brand-600: #12708a;
+  --brand-700: #0d5a70;
+  --brand-800: #0a4556;
+  --brand-900: #073341;
 
-  --navy-900: #0b1e30;
+  /* 侧栏 navy */
   --navy-800: #10283e;
+  --navy-900: #0b1e30;
 
+  /* 功能色三级族（图形 / 文本 / 浅底） */
   --ok: #4d9e6b;
+  --ok-text: #35714f;
+  --ok-soft: #e3f0e8;
+  --warn: #d9932c;
+  --warn-text: #8a5a10;
+  --warn-soft: #faf0da;
+  --danger: #cd4a45;
+  --danger-text: #b03e3a;
+  --danger-soft: #f9e6e5;
+  --info: #5b7a94;
+  --info-text: #45596b;
+  --info-soft: #e8eef3;
+
+  /* 图表系列色 */
+  --chart-1: #1a86a2;
+  --chart-2: #4d9e6b;
+  --chart-3: #d9932c;
+  --chart-4: #cd4a45;
+  --chart-5: #7a5af8;
+  --chart-6: #0d5a70;
+  --chart-7: #c2477e;
+  --chart-8: #5a8a3c;
+
+  /* 代码块 */
+  --code-bg: #0b1e30;
+  --code-text: #d4d4d4;
+  --code-red: #f44747;
+  --code-yellow: #e5c07b;
+
+  /* 侧栏令牌族（light=dark 双套，dark 仅 navy 微压暗） */
+  --nav-bg-start: var(--navy-800);
+  --nav-bg-end: var(--navy-900);
+  --nav-text: #9db1c4;
+  --nav-text-strong: #e6eef6;
+  --nav-text-title: var(--text-inverse);
+  --nav-text-group: #7e93a8;
+  --nav-hover-bg: rgba(255, 255, 255, 0.06);
+  --nav-active-bg: linear-gradient(135deg, var(--brand-600), var(--brand-500));
+  --nav-border: rgba(255, 255, 255, 0.06);
+  --nav-bottom-bg: rgba(255, 255, 255, 0.88);
+
+  /* ========== 字体 ========== */
+  --font-family-base:
+    "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei",
+    "Noto Sans CJK SC", ui-sans-serif, system-ui, -apple-system,
+    "Segoe UI", sans-serif;
+  --fs-display: 24px;
+  --fs-title-lg: 20px;
+  --fs-title: 18px;
+  --fs-title-sm: 15px;
+  --fs-body: 14px;
+  --fs-body-sm: 13px;
+  --fs-caption: 12px;
+  --fw-regular: 400;
+  --fw-medium: 500;
+  --fw-semibold: 600;
+  --fw-bold: 700;
+
+  /* ========== 间距（4px 基准） ========== */
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 20px;
+  --space-6: 24px;
+  --space-8: 32px;
+
+  /* ========== 形状与阴影 ========== */
+  --radius-sm: 8px;
+  --radius-md: 12px;
+  --radius-lg: 16px;
+  --radius-xl: 20px;
+  --radius-full: 999px;
+  --shadow-sm: 0 1px 2px rgba(18, 38, 58, 0.05);
+  --shadow-md:
+    0 1px 2px rgba(18, 38, 58, 0.05),
+    0 10px 28px -12px rgba(18, 38, 58, 0.16);
+  --shadow-lg: 0 28px 64px -24px rgba(11, 30, 48, 0.35);
+
+  /* ========== 动效 ========== */
+  --dur-fast: 120ms;
+  --dur-base: 180ms;
+  --dur-slow: 300ms;
+  --ease-standard: cubic-bezier(0.2, 0.6, 0.35, 1);
+  --ease-out: cubic-bezier(0.16, 1, 0.3, 1);
+
+  /* ========== z-index ========== */
+  --z-topbar: 10;
+  --z-bottomnav: 10;
 
   /* 移动端布局变量（桌面端规则不引用，零影响；媒体查询内不可用 var()，断点写死字面量） */
   --bottom-nav-height: 58px;
@@ -27,16 +128,4 @@
   --safe-area-bottom: env(safe-area-inset-bottom, 0px);
   --safe-area-top: env(safe-area-inset-top, 0px);
   --touch-target: 40px;
-  --warn: #d9932c;
-  --danger: #cd4a45;
-
-  /* 形状与阴影 */
-  --radius-sm: 8px;
-  --radius-md: 12px;
-  --radius-lg: 16px;
-  --shadow-sm: 0 1px 2px rgba(18, 38, 58, 0.05);
-  --shadow-md:
-    0 1px 2px rgba(18, 38, 58, 0.05),
-    0 10px 28px -12px rgba(18, 38, 58, 0.16);
-  --shadow-lg: 0 28px 64px -24px rgba(11, 30, 48, 0.35);
 }

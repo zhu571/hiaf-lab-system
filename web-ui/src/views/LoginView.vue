@@ -111,7 +111,7 @@ async function submitRegister() {
   display: grid;
   min-height: 100dvh;
   overflow: auto;
-  padding: 24px;
+  padding: var(--space-6);
   place-items: center;
   position: relative;
 }
@@ -131,10 +131,10 @@ async function submitRegister() {
   animation: rise 0.35s ease;
   background: rgba(255, 255, 255, 0.97);
   border: 1px solid rgba(255, 255, 255, 0.6);
-  border-radius: 18px;
+  border-radius: var(--radius-xl);
   box-shadow: 0 32px 80px -24px rgba(4, 18, 30, 0.55);
   display: grid;
-  gap: 24px;
+  gap: var(--space-6);
   max-width: 400px;
   padding: 36px 32px;
   position: relative;

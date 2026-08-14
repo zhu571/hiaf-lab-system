@@ -444,7 +444,7 @@ function stagger(i: number) {
   align-items: center;
   background: var(--surface);
   border: 1px solid var(--border);
-  border-radius: 999px;
+  border-radius: var(--radius-full);
   box-shadow: var(--shadow-sm);
   color: var(--text-2);
   display: inline-flex;
@@ -490,13 +490,13 @@ function stagger(i: number) {
 }
 
 .panel-head h3 {
-  font-size: 15px;
+  font-size: var(--fs-title-sm);
 }
 
 .panel-meta {
   background: var(--surface-2);
   border: 1px solid var(--border);
-  border-radius: 999px;
+  border-radius: var(--radius-full);
   color: var(--text-3);
   font-size: 12px;
   font-variant-numeric: tabular-nums;
@@ -508,7 +508,7 @@ function stagger(i: number) {
 .card-list {
   align-content: start;
   display: grid;
-  gap: 12px;
+  gap: var(--space-3);
   min-height: 80px;
 }
 
@@ -753,7 +753,7 @@ function stagger(i: number) {
 
 .brief-strip {
   display: flex;
-  gap: 12px;
+  gap: var(--space-3);
   margin: -4px -4px -12px;
   overflow-x: auto;
   padding: 4px 4px 16px;
@@ -787,7 +787,7 @@ function stagger(i: number) {
 .brief-count {
   background: var(--surface-2);
   border: 1px solid var(--border);
-  border-radius: 999px;
+  border-radius: var(--radius-full);
   color: var(--text-3);
   font-size: 11px;
   padding: 1px 8px;

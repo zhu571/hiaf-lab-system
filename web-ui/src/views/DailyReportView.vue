@@ -128,7 +128,7 @@
           <el-icon><Paperclip /></el-icon>
           <span>{{ f.name }}</span>
           <span class="muted">({{ formatSize(f.size) }})</span>
-          <span v-if="f.uploaded" style="color:var(--success,#67c23a)">✓</span>
+          <span v-if="f.uploaded" style="color:var(--ok)">✓</span>
           <el-button v-else size="small" @click="uploadPendingFile(f)">{{ t('dailyReport.upload') }}</el-button>
         </div>
       </div>
@@ -379,7 +379,7 @@ async function submit(force: boolean) {
 
 .file-item {
   align-items: center;
-  border: 1px solid var(--border-light, #e5e7eb);
+  border: 1px solid var(--border);
   border-radius: 6px;
   display: flex;
   gap: 8px;
@@ -388,7 +388,7 @@ async function submit(force: boolean) {
 
 .log-card-list {
   display: grid;
-  gap: 12px;
+  gap: var(--space-3);
 }
 
 .log-card {
@@ -433,6 +433,6 @@ async function submit(force: boolean) {
 }
 
 .muted {
-  color: var(--text-secondary, #9ca3af);
+  color: var(--text-3);
 }
 </style>

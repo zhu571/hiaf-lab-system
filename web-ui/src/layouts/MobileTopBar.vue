@@ -61,7 +61,7 @@ function goBack() {
   position: fixed;
   right: 0;
   top: 0;
-  z-index: 10;
+  z-index: var(--z-topbar);
 }
 
 .back-btn {

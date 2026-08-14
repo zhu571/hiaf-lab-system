@@ -441,7 +441,7 @@ async function doLogout() {
 .language-row {
   align-items: center;
   display: flex;
-  gap: 12px;
+  gap: var(--space-3);
 }
 
 .language-label {
@@ -451,7 +451,7 @@ async function doLogout() {
 
 .form-actions {
   display: flex;
-  gap: 12px;
+  gap: var(--space-3);
 }
 
 .quick-links {
@@ -463,7 +463,7 @@ async function doLogout() {
 
 .mobile-quick-links {
   display: grid;
-  gap: 12px;
+  gap: var(--space-3);
 }
 
 .quick-card-row {
@@ -499,7 +499,7 @@ async function doLogout() {
 }
 
 .section-title {
-  color: var(--text-secondary, #6b7280);
+  color: var(--text-3);
   font-size: 13px;
   font-weight: 600;
   letter-spacing: 0.5px;
@@ -510,8 +510,8 @@ async function doLogout() {
 
 .quick-links .el-link {
   align-items: center;
-  background: var(--bg-panel, #fff);
-  border: 1px solid var(--border-light, #e5e7eb);
+  background: var(--surface);
+  border: 1px solid var(--border);
   border-radius: 8px;
   display: flex;
   padding: 10px 16px;
@@ -520,7 +520,7 @@ async function doLogout() {
 /* ---- 系统更新卡片 ---- */
 .update-card {
   display: grid;
-  gap: 12px;
+  gap: var(--space-3);
   margin-top: 20px;
 }
 
@@ -528,7 +528,7 @@ async function doLogout() {
   align-items: center;
   display: flex;
   flex-wrap: wrap;
-  gap: 12px;
+  gap: var(--space-3);
 }
 
 .version-item {

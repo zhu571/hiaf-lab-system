@@ -286,7 +286,7 @@ function formatTime(v?: string) {
 }
 
 .panel-title {
-  font-size: 15px;
+  font-size: var(--fs-title-sm);
   margin-bottom: 14px;
 }
 

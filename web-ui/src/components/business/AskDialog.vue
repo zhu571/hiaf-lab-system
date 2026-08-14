@@ -361,7 +361,7 @@ function openRoute(route: string) {
   border-radius: var(--radius-sm);
   cursor: pointer;
   display: flex;
-  gap: 12px;
+  gap: var(--space-3);
   margin-bottom: 10px;
   padding: 12px 14px;
   text-align: left;

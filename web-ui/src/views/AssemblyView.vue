@@ -533,7 +533,7 @@ async function saveAndApply() {
   border: 1px solid var(--border);
   border-radius: 10px;
   display: flex;
-  gap: 12px;
+  gap: var(--space-3);
   padding: 12px 14px;
   transition:
     border-color 0.15s ease,
