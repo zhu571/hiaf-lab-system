@@ -142,9 +142,26 @@ describe('experiences.ts', () => {
 })
 
 describe('instruments.ts', () => {
+  it('listInstruments：GET 集合无参数', async () => {
+    await instrumentsApi.listInstruments()
+    expect(lastRequestConfig()).toEqual({ url: '/instruments' })
+  })
+
   it('executeCommand：POST /instruments/{id}/commands 携带 {command, params}', async () => {
     await instrumentsApi.executeCommand('ins-1', 'SET:FREQ', { freq: 100 })
     expect(lastRequestConfig()).toMatchObject({ url: '/instruments/ins-1/commands', method: 'POST', data: { command: 'SET:FREQ', params: { freq: 100 } } })
+  })
+
+  it('emergencyStop：POST /instruments/{id}/emergency-stop（急停写路径）', async () => {
+    await instrumentsApi.emergencyStop('ins-1')
+    expect(lastRequestConfig()).toMatchObject({ url: '/instruments/ins-1/emergency-stop', method: 'POST' })
+  })
+
+  it('piezoStart/piezoStop：POST 控制端点无 data', async () => {
+    await instrumentsApi.piezoStart()
+    expect(lastRequestConfig()).toMatchObject({ url: '/instruments/piezo/start', method: 'POST' })
+    await instrumentsApi.piezoStop()
+    expect(lastRequestConfig()).toMatchObject({ url: '/instruments/piezo/stop', method: 'POST' })
   })
 
   it('interpretCommand：history 截断为最近 10 条（requestWithMeta）', async () => {
@@ -171,6 +188,18 @@ describe('issues.ts', () => {
 })
 
 describe('logs.ts', () => {
+  it('todayReport：POST /daily-reports/today 携带空对象', async () => {
+    await logsApi.todayReport()
+    expect(lastRequestConfig()).toEqual({ url: '/daily-reports/today', method: 'POST', data: {} })
+  })
+
+  it('submitReport：POST 携带 force，缺省 false、传 true 透传', async () => {
+    await logsApi.submitReport('r-1')
+    expect(lastRequestConfig()).toMatchObject({ url: '/daily-reports/r-1/submit', method: 'POST', data: { force: false } })
+    await logsApi.submitReport('r-1', true)
+    expect(lastRequestConfig()).toMatchObject({ url: '/daily-reports/r-1/submit', method: 'POST', data: { force: true } })
+  })
+
   it('reportByDate：GET /daily-reports/by-date 携带 date param', async () => {
     await logsApi.reportByDate('2026-08-01')
     expect(lastRequestConfig()).toEqual({ url: '/daily-reports/by-date', params: { date: '2026-08-01' } })
@@ -195,9 +224,31 @@ describe('rfmatch.ts', () => {
 })
 
 describe('runs.ts', () => {
+  it('createRun：POST /projects/{pid}/experiment-runs 携带 data', async () => {
+    await runsApi.createRun('p-1', { name: '批次A' } as never)
+    expect(lastRequestConfig()).toMatchObject({ url: '/projects/p-1/experiment-runs', method: 'POST', data: { name: '批次A' } })
+  })
+
   it('transitionRun：PATCH /experiment-runs/{id} 携带 {transition}', async () => {
     await runsApi.transitionRun('run-1', 'start')
     expect(lastRequestConfig()).toMatchObject({ url: '/experiment-runs/run-1', method: 'PATCH', data: { transition: 'start' } })
+  })
+
+  it('deleteRun：DELETE /experiment-runs/{id}', async () => {
+    await runsApi.deleteRun('run-1')
+    expect(lastRequestConfig()).toMatchObject({ url: '/experiment-runs/run-1', method: 'DELETE' })
+  })
+
+  it('addReportLink：POST 嵌套 URL 关联日报', async () => {
+    await runsApi.addReportLink('run-1', 'rep-1')
+    expect(lastRequestConfig()).toMatchObject({ url: '/experiment-runs/run-1/daily-reports/rep-1', method: 'POST' })
+  })
+
+  it('reorderRunSteps：POST /run-steps/reorder 携带 {run_id, steps}（requestWithMeta）', async () => {
+    await runsApi.reorderRunSteps('run-1', [{ id: 's-1', step_order: 2 }, { id: 's-2', step_order: 1 }])
+    expect(mocks.requestWithMeta).toHaveBeenCalled()
+    const cfg = mocks.requestWithMeta.mock.calls[mocks.requestWithMeta.mock.calls.length - 1][0]
+    expect(cfg).toMatchObject({ url: '/run-steps/reorder', method: 'POST', data: { run_id: 'run-1', steps: [{ id: 's-1', step_order: 2 }, { id: 's-2', step_order: 1 }] } })
   })
 })
 
@@ -254,5 +305,15 @@ describe('todos.ts', () => {
     expect(cfg.url).toBe('/todos')
     expect(cfg.params).toMatchObject({ scope: 'mine', status: 'all', limit: 100 })
     expect(cfg.params.date).toBeUndefined()
+  })
+
+  it('createTodo：POST /todos 携带 data（project_id 可空）', async () => {
+    await todosApi.createTodo({ title: '记录真空度', priority: 'high', project_id: null })
+    expect(lastRequestConfig()).toMatchObject({ url: '/todos', method: 'POST', data: { title: '记录真空度', priority: 'high', project_id: null } })
+  })
+
+  it('doneTodo：PATCH /todos/{id}/done 携带空对象', async () => {
+    await todosApi.doneTodo('t-1')
+    expect(lastRequestConfig()).toMatchObject({ url: '/todos/t-1/done', method: 'PATCH', data: {} })
   })
 })
