@@ -60,7 +60,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import {
   Chart,
@@ -80,7 +80,8 @@ import {
   type PVWriteResult
 } from '../api/instruments'
 import { useAuthStore } from '../stores/auth'
-import { chartPalette } from '../utils/chartTheme'
+import { useTheme } from '../composables/useTheme'
+import { chartPalette, refreshDefaults } from '../utils/chartTheme'
 
 // Chart.register 已收口到 utils/chartTheme.ts setupChartDefaults()（美术方案 §3.7，main.ts 调用一次）
 
@@ -124,6 +125,7 @@ const isRunning = computed(() => Number(point(RUNNING).v || 0) !== 0)
 onMounted(async () => {
   await refreshSnapshot()
   await nextTick()
+  refreshDefaults() // 兜底：主题在组件未挂载期间切换时，Chart.defaults 可能是旧主题色
   createChart()
   connect()
 })
@@ -131,6 +133,24 @@ onMounted(async () => {
 onBeforeUnmount(() => {
   source?.close()
   chart?.destroy()
+})
+
+// 主题联动（美术 §3.6：refreshDefaults + destroy/重建，不依赖 Chart.instances 全局注册表）：
+// 流式历史点仅存于图表实例数据（非组件 state），重建前先快照、建后回放，切换不丢曲线窗口
+const { state: themeState } = useTheme()
+watch(themeState, () => {
+  refreshDefaults()
+  if (!chart) return
+  const labels = chart.data.labels?.slice() ?? []
+  const series = chart.data.datasets.map((ds) => ds.data.slice())
+  chart.destroy()
+  createChart()
+  if (!chart) return
+  chart.data.labels = labels
+  chart.data.datasets.forEach((ds, i) => {
+    ds.data = series[i] ?? []
+  })
+  chart.update('none')
 })
 
 function point(pv: string): GasCellPoint {

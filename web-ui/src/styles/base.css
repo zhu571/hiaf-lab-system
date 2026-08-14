@@ -3,7 +3,13 @@
 }
 
 html {
+  color-scheme: light;
   -webkit-text-size-adjust: 100%;
+}
+
+/* 滚动条/原生表单件跟随主题（美术 §3.6）；EP dark css-vars 亦自带此声明，双写不冲突 */
+html.dark {
+  color-scheme: dark;
 }
 
 body {

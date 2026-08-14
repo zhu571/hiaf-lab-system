@@ -134,6 +134,7 @@ import { useAuthStore } from '@/stores/auth'
 import { showApiError } from '@/composables/useNotify'
 import { useAsyncData } from '@/composables/useAsyncData'
 import { usePagination } from '@/composables/usePagination'
+import { useTheme } from '@/composables/useTheme'
 import ResponsiveTable from '@/components/base/ResponsiveTable.vue'
 import StateBlock from '@/components/base/StateBlock.vue'
 import StatusBadge from '@/components/base/StatusBadge.vue'
@@ -166,15 +167,19 @@ const CHART_H = 240
 const PAD_X = 28
 const PAD_Y = 20
 
-const chartGroups = computed<ChartGroup[]>(() =>
-  buildChartGroups(
+// themeState 仅作依赖登记（美术 §3.6 SVG 联动）：主题切换 → computed 重算 → chartPalette 取新主题计算色，
+// 系列色经 :stroke/:fill/legend-dot 内联样式自动更新，无需重建 SVG
+const { state: themeState } = useTheme()
+const chartGroups = computed<ChartGroup[]>(() => {
+  void themeState.value
+  return buildChartGroups(
     (items.value ?? []).map((item) => {
       const time = new Date(item.measured_at || item.created_at).getTime()
       return { key: item.measurement, time: Number.isNaN(time) ? 0 : time, value: item.value }
     }),
     chartPalette()
   )
-)
+})
 
 function chartCoords(group: ChartGroup) {
   const n = group.points.length

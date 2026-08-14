@@ -1,1 +1,0 @@
-import{m as a}from"./vendor-CT_qbQL5.js";function g(u={}){const n=a(1),o=a(u.perPage??10),t=a(0),r=a(!1);function i(e){n.value=e}function l(e){o.value=e,n.value=1}function s(e){t.value=e}function c(){n.value=1,t.value=0}return{page:n,perPage:o,total:t,loading:r,setTotal:s,reset:c,onSizeChange:l,onCurrentChange:i}}export{g as u};

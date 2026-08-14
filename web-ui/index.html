@@ -3,8 +3,31 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
-    <meta name="theme-color" content="#1f6f8b" />
+    <!-- theme-color 双 meta 带 media（美术 §3.6 三处职责之一）：auto 态系统级跟随；
+         手动指定 light/dark 时由防闪烁脚本初始化和 useTheme watch 改写 content（JS 兜底） -->
+    <meta name="theme-color" media="(prefers-color-scheme: light)" content="#edf1f6" />
+    <meta name="theme-color" media="(prefers-color-scheme: dark)" content="#0e1822" />
     <title>HIAF Lab System</title>
+    <script>
+      // 防首帧闪烁（美术 §3.6）：首屏 CSS 前读 localStorage 'theme' 预置 html.dark class。
+      // 常量逻辑（一次 localStorage 读 + 一次 matchMedia 读 + classList/meta 写），
+      // 存储值只做等值比较，不拼接不执行，无注入路径（§6.1）；解析公式与 useColorMode 严格对齐：
+      // dark = 存 'dark'，或（非 'light' 且系统深色）——非法值/缺省均回落 auto 语义。
+      ;(function () {
+        var v = null
+        try {
+          v = localStorage.getItem('theme')
+        } catch (e) {}
+        var dark = v === 'dark' || (v !== 'light' && window.matchMedia('(prefers-color-scheme: dark)').matches)
+        if (dark) document.documentElement.classList.add('dark')
+        // theme-color 初始化：仅手动指定（'light'|'dark'）时改写 content；auto/缺省保留 canonical 双值走 media
+        if (v === 'light' || v === 'dark') {
+          var color = dark ? '#0e1822' : '#edf1f6'
+          var metas = document.querySelectorAll('meta[name="theme-color"]')
+          for (var i = 0; i < metas.length; i++) metas[i].setAttribute('content', color)
+        }
+      })()
+    </script>
   </head>
   <body>
     <div id="app"></div>

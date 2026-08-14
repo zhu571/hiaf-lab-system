@@ -197,7 +197,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { useI18n } from 'vue-i18n'
 import { Refresh } from '@element-plus/icons-vue'
@@ -229,8 +229,9 @@ import { showApiError } from '../composables/useNotify'
 import { useMobile } from '../composables/useMobile'
 import ResponsiveTable from '@/components/base/ResponsiveTable.vue'
 import InstrumentAiChat, { riskTag, type ExecRecord } from '@/components/business/InstrumentAiChat.vue'
-import { chartPalette } from '../utils/chartTheme'
+import { chartPalette, refreshDefaults } from '../utils/chartTheme'
 import { statusMetaFor } from '@/utils/statusMeta'
+import { useTheme } from '@/composables/useTheme'
 
 // Chart.register 已收口到 utils/chartTheme.ts setupChartDefaults()（美术方案 §3.7，main.ts 调用一次）
 
@@ -458,7 +459,19 @@ function destroyChart() {
   chart = undefined
 }
 
+// 主题联动（美术 §3.6：refreshDefaults + destroy/重建，不依赖 Chart.instances 全局注册表）：
+// 扫频图数据在组件 state（cmdResult/parsedResult），重建零丢失；无图时仅刷新 defaults
+const { state: themeState } = useTheme()
+watch(themeState, () => {
+  if (chart && parsedResult.value?.type === 'sweep_xy' && cmdResult.value) {
+    renderChart(cmdResult.value.command, parsedResult.value)
+  } else {
+    refreshDefaults()
+  }
+})
+
 function renderChart(command: string, parsed: ParsedResult) {
+  refreshDefaults() // 主题可能在本页外切换过，建图前保证 defaults 为当前主题色
   destroyChart()
   if (!chartCanvas.value || !parsed.points?.length) return
   // 系列语义色（美术方案 §3.7）：测量曲线 --chart-1、极值点 --chart-3

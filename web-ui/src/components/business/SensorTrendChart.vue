@@ -107,6 +107,8 @@ import {
 } from 'chart.js'
 import { RefreshLeft } from '@element-plus/icons-vue'
 import { useMobile } from '@/composables/useMobile'
+import { useTheme } from '@/composables/useTheme'
+import { refreshDefaults } from '@/utils/chartTheme'
 
 // Chart.register 已收口到 utils/chartTheme.ts setupChartDefaults()（美术方案 §3.7，main.ts 调用一次）
 
@@ -475,9 +477,24 @@ watch(
   }
 )
 
+/* ---------- 主题联动（美术 §3.6：refreshDefaults + destroy/重建，不依赖 Chart.instances 全局注册表） ---------- */
+
+const { state: themeState } = useTheme()
+
+// 主题切换：先重读计算色写入 Chart.defaults，再销毁重建——刻度/网格/tooltip 色随主题更新；
+// xWindow/yManual/visibleTags 均在组件 ref，重建后 applyView 沿用，交互状态不丢（S5 验证项）
+watch(themeState, () => {
+  refreshDefaults()
+  if (!chart) return
+  chart.destroy()
+  createChart()
+  applyView()
+})
+
 /* ---------- 生命周期（§4.2.2 手势生命周期定稿） ---------- */
 
 onMounted(() => {
+  refreshDefaults() // 兜底：主题在组件未挂载期间切换时，Chart.defaults 可能是旧主题色
   createChart()
   applyView()
   const canvas = chartCanvas.value

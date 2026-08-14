@@ -22,11 +22,13 @@ test.describe('日报', () => {
     await page.getByRole('button', { name: '保存原文' }).click()
     await expect(page.locator('.el-message--success')).toContainText('已保存')
 
-    // 切到「历史查询」tab：出现今天的日报行（report_date 按 Asia/Shanghai 计算）
-    await page.getByRole('tab', { name: '历史查询' }).click()
+    // 切到「历史查询」tab（S5 i18n 清偿后 label = dailyHistory.title「日报历史」）→ 出现今天的日报行
+    await page.getByRole('tab', { name: /历史查询|日报历史/ }).click()
     await expect(page).toHaveURL(/\/daily-report\/history/)
-    const today = todayInShanghai()
-    const row = page.locator('.el-table__row').filter({ hasText: today })
+    const today = todayInShanghai() // en-CA: '2026-08-14'
+    // S4 后日期经 formatDate(zh-CN) 渲染为 '2026/08/14'（斜杠），断言兼容两种格式
+    const todayRe = new RegExp(today.replace(/-/g, '[-/]'))
+    const row = page.locator('.el-table__row').filter({ hasText: todayRe })
     await expect(row.first()).toBeVisible()
 
     // 点击进入详情：原文内容可回看
