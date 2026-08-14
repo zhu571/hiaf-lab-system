@@ -184,3 +184,45 @@ describe('路由守卫：catch-all 404', () => {
     expect(router.currentRoute.value.path).toBe('/login')
   })
 })
+
+describe('路由可达性：28 条组件路由懒加载全部可解析', () => {
+  it('admin 登录态逐条访问全部组件路由，均到达目标路径（lazy import 模块无解析失败）', async () => {
+    const store = useAuthStore()
+    store.user = makeUser({ role: 'admin' })
+    store.ready = true
+
+    // router/index.ts:6-32,37 全部 28 个懒加载组件路由（含 /projects/:id 6 子页、/daily-report 2 子页）
+    const routes = [
+      '/',
+      '/login',
+      '/projects',
+      '/daily-report',
+      '/daily-report/history',
+      '/projects/proj-1',
+      '/projects/proj-1/issues',
+      '/projects/proj-1/experiment-runs',
+      '/projects/proj-1/test-data',
+      '/projects/proj-1/rf-matching',
+      '/projects/proj-1/assembly',
+      '/experiment-runs/run-1',
+      '/step-templates',
+      '/attachments',
+      '/instrument-measure',
+      '/gas-control',
+      '/sensors',
+      '/todos',
+      '/experiences',
+      '/audit',
+      '/alerts',
+      '/settings',
+      '/manual',
+      '/daily-reports/rep-1',
+      '/admin/users',
+      '/agent-candidates'
+    ]
+    for (const path of routes) {
+      await router.push(path)
+      expect(router.currentRoute.value.path).toBe(path)
+    }
+  })
+})

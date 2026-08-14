@@ -795,12 +795,19 @@ except ApiPermissionError:
 
 ```text
 web-ui/src/
-├── api/
+├── api/          # API 客户端（client.ts 统一封装）
 ├── components/
-├── views/
-├── composables/
-├── stores/
-└── router/
+│   ├── base/     # 通用基础件（无业务语义、props/slots 驱动）
+│   └── business/ # 业务复合件（可直读 store/API）
+├── composables/  # 组合式函数
+├── config/       # navigation.ts 导航单一数据源
+├── i18n/         # 中英双语
+├── layouts/      # 布局壳
+├── router/       # 路由表 + guard.ts 守卫纯函数
+├── stores/       # 仅 auth/project
+├── styles/       # 设计令牌/全局类/暗色主题
+├── utils/        # datetime/statusMeta/chartTheme 等
+└── views/        # 业务视图
 ```
 
 权限与交互：

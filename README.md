@@ -65,10 +65,19 @@ hiaf-lab-system/
 │   ├── ioc/            # EPICS 虚拟 IOC (pyEpics 模拟硬件 PV)
 │   └── tests/          # 测试
 ├── web-ui/             # Vue 3 前端
-│   ├── src/api/        # API 客户端
-│   ├── src/views/      # 24 个业务页面
-│   └── src/components/ # 通用组件
-├── migrations/         # PostgreSQL 迁移 (32 个版本，64 个文件)
+│   ├── src/api/        # API 客户端（client.ts 统一封装 + 19 个业务模块）
+│   ├── src/components/ # base 通用基础件 + business 业务复合件
+│   ├── src/composables/ # 组合式函数（useAsyncData/usePolling/useTheme 等）
+│   ├── src/config/     # 导航单一数据源 navigation.ts
+│   ├── src/i18n/       # 中英双语（zh/en key 一致性防线）
+│   ├── src/layouts/    # 布局壳（AppLayout/ProjectLayout 等）
+│   ├── src/router/     # 路由表 + guard.ts 守卫纯函数
+│   ├── src/stores/     # auth/project 两个全局 store
+│   ├── src/styles/     # 设计令牌/全局类/EP 覆写/暗色主题
+│   ├── src/utils/      # datetime/statusMeta/chartTheme 等
+│   ├── src/views/      # 25 个业务页面
+│   └── e2e/            # Playwright 冒烟
+├── migrations/         # PostgreSQL 迁移 (38 个版本，76 个文件)
 ├── deploy/             # Docker Compose、Dockerfile、frp、Nginx 配置
 └── images/             # 运行时图片附件目录
 ```

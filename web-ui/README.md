@@ -13,15 +13,16 @@ web-ui/
 ├── package-lock.json             # npm 锁文件，保证依赖安装可复现。
 ├── tsconfig.json                 # TypeScript 严格模式和 Vue 文件检查范围。
 ├── vite.config.ts                # Vue 插件、Element Plus 按需注册、vendor 分包、开发服务器及 API 代理。
+├── vitest.config.ts              # 前端单测配置（jsdom + vue 插件 + coverage 窄口径门禁）。
 ├── public/
 │   └── sw.js                     # 历史 PWA Service Worker 的“自杀式”清理脚本（复制进 dist，不做 PWA）。
+├── e2e/                          # Playwright 冒烟（11 spec 13 用例）。
 └── src/
-    ├── main.ts                   # 创建 Vue 应用并注册 Pinia、Router、i18n；手动引入 ElMessage/ElMessageBox 样式。
+    ├── main.ts                   # 创建 Vue 应用：注册 Pinia、Router、i18n；setupChartDefaults + useTheme 激活。
     ├── App.vue                   # 根组件；公开页直接渲染，业务页进入 AppLayout。
-    ├── style.css                 # 页面、工具栏、面板、CSS 变量（--safe-area-* 等）等全局基础样式。
     ├── env.d.ts                  # 声明 *.vue 模块，使 TypeScript 能识别 SFC。
     ├── api/
-    │   ├── client.ts             # axios 实例、CSRF/幂等键请求拦截器、运行时校验/401 单飞刷新的响应拦截器。
+    │   ├── client.ts             # axios 实例、CSRF/幂等键请求拦截器、运行时校验/401 单飞刷新/错误分类/网络重试。
     │   ├── auth.ts               # 登录、刷新、用户管理、改密、语言偏好 API。
     │   ├── projects.ts           # 项目及项目成员 API 和类型。
     │   ├── logs.ts               # 日报、项目日志、AI 解析（aiParseReport）API。
@@ -40,30 +41,63 @@ web-ui/
     │   ├── attachments.ts        # 附件上传（uploadAttachment）、列表、blob 下载、实体关联。
     │   └── system.ts             # 版本查询、触发系统更新、更新日志 SSE 流（connectUpdateStream）。
     ├── components/
-    │   ├── AppLayout.vue         # 登录后外壳：桌面侧栏、移动端顶栏/底栏、RouterView 容器、Agent 待审徽章。
-    │   ├── MobileTopBar.vue      # 移动端顶部栏：返回键 + 基于 meta.titleKey 的标题。
-    │   ├── ProjectSidebar.vue    # 可搜索的项目列表，点击后切换 store 并跳转项目工作区。
-    │   ├── ProjectLayout.vue     # 项目工作区壳：项目头、Tab 切换（仪表盘/Issue/实验运行/测试数据/RF匹配/装配）。
-    │   ├── ProjectDashboard.vue  # 项目阶段流程图和推进/回退操作（阶段机由后端驱动）。
-    │   ├── DailyReportShell.vue  # 日报壳：今日录入/历史查询两个子路由的 Tab 容器。
-    │   ├── CommentSection.vue    # 评论列表与输入框，通过 submit 事件把内容交给父页面。
-    │   ├── StatusBadge.vue       # 将业务状态映射为 Element Plus 标签颜色。
-    │   ├── MarkdownView.vue      # markdown-it 只读渲染（html:false 防注入，链接新窗口打开）。
-    │   ├── ResponsiveTable.vue   # 响应式表格：桌面 el-table，移动端有 card 插槽时渲染卡片列表。
-    │   └── StepItemsEditor.vue   # 步骤列表编辑器（名称/描述/依赖顺序），供模板和运行步骤编辑复用。
+    │   ├── base/                 # 通用基础件（无业务语义、props/slots 驱动）：
+    │   │   ├── StatusBadge.vue   # 状态→UI 映射（tone/labelKey 查 utils/statusMeta.ts 注册表）。
+    │   │   ├── StateBlock.vue    # 加载骨架/错误重试/空态三态收口。
+    │   │   ├── FormDialog.vue    # 表单弹窗（label-position=top + 取消/确定）。
+    │   │   └── ResponsiveTable.vue  # 响应式表格：桌面 el-table，移动端 card 插槽卡片列表。
+    │   └── business/             # 业务复合件（可直读 store/API）：
+    │       ├── SensorTrendChart.vue  # 传感器趋势图（独立 script 导出窗口数学纯函数，可单测）。
+    │       ├── AskDialog.vue     # AI 问答抽屉（模块级单例开关）。
+    │       ├── AskResultPanel.vue   # 问答结果表格与来源跳转。
+    │       ├── ProjectDashboard.vue # 项目阶段流程图。
+    │       ├── ProjectSidebar.vue   # 可搜索项目列表（仅 ProjectsView 使用）。
+    │       ├── CommentSection.vue   # 评论列表与输入框（submit 事件交给父页）。
+    │       ├── MarkdownView.vue  # markdown-it 只读渲染（html:false 防注入）。
+    │       ├── StepItemsEditor.vue  # 步骤列表编辑器。
+    │       ├── TestDataBatchEditor.vue  # 批量录入编辑器。
+    │       └── InstrumentAiChat.vue   # 仪器 AI 对话区。
     ├── composables/
     │   ├── useMobile.ts          # 统一提供 768px 移动端媒体查询（VueUse useMediaQuery）。
-    │   └── useNotify.ts          # showApiError：展示后端错误信息并附带 request_id 便于追审计。
+    │   ├── useNotify.ts          # showApiError：按错误分类展示后端错误并附带 request_id。
+    │   ├── useAskDialog.ts       # AskDialog 全局开关（模块级单例）。
+    │   ├── askRoutes.ts          # AI 问答结果→路由映射纯函数（hasRowRoute/canOpenRow/tableToRoute）。
+    │   ├── useAsyncData.ts       # 异步加载封装（seq 竞态丢弃 + unmount 后忽略回写）。
+    │   ├── usePolling.ts         # 轮询封装（visibilitychange 暂停 + unmount 清理）。
+    │   ├── usePagination.ts      # 分页状态封装。
+    │   ├── useRunSteps.ts        # RunDetailView 步骤状态机与模板应用逻辑。
+    │   ├── useRunReports.ts      # RunDetailView 日报关联逻辑。
+    │   └── useTheme.ts           # 主题单例（light/dark/auto，@vueuse useColorMode）。
+    ├── config/
+    │   └── navigation.ts         # 导航单一数据源：NAV_ITEMS + filterNavByRole 角色过滤。
     ├── i18n/
     │   ├── index.ts              # createI18n：locale 优先级为 后端 user.language > localStorage > 中文。
     │   ├── zh.ts                 # 中文文案基准。
-    │   └── en.ts                 # 英文文案，与 zh.ts 保持同一 key 结构。
+    │   └── en.ts                 # 英文文案，与 zh.ts 保持同一 key 结构（keys.test.ts 双向比对）。
+    ├── layouts/
+    │   ├── AppLayout.vue         # 登录后外壳：桌面侧栏、移动端顶栏/底栏、RouterView 容器、Agent 待审徽章。
+    │   ├── MobileTopBar.vue      # 移动端顶部栏：返回键 + 基于 meta.titleKey 的标题。
+    │   ├── ProjectLayout.vue     # 项目工作区壳：项目头、Tab 切换（仪表盘/Issue/实验运行/测试数据/RF匹配/装配）。
+    │   └── DailyReportShell.vue  # 日报壳：今日录入/历史查询两个子路由的 Tab 容器。
     ├── router/
-    │   └── index.ts              # 路由表（全部懒加载）、登录恢复、管理员/审核员/首次改密守卫。
+    │   ├── index.ts              # 路由表（全部懒加载 + 兼容重定向 + catch-all）。
+    │   └── guard.ts              # 守卫纯函数 resolveRouteGuard（四规则：未登录/admin/reviewer/must_change_password）。
     ├── stores/
     │   ├── auth.ts               # 当前用户、认证初始化状态、isAdmin/canReviewAgent、登录/登出/语言动作。
     │   └── project.ts            # 项目列表、当前项目和项目切换动作。
-    └── views/                    # 24 个页面（详情见第 2 节路由表）。
+    ├── styles/
+    │   ├── index.css             # 汇总入口（main.ts 唯一样式 import）。
+    │   ├── tokens.css            # 全部设计令牌（色彩/字体/间距/圆角/阴影/z-index）。
+    │   ├── base.css              # reset/排版/选区/滚动条/过渡/focus-visible/reduced-motion。
+    │   ├── utilities.css         # .page/.toolbar/.panel/.panel-head 等全局类。
+    │   ├── element-overrides.css # Element Plus 变量覆写与细节打磨。
+    │   └── themes/dark.css       # 暗色令牌覆写（html.dark，切换入口见 SettingsView）。
+    ├── utils/
+    │   ├── datetime.ts           # formatDateTime/formatDate/formatTime/formatRelative（locale 跟随 i18n）。
+    │   ├── statusMeta.ts         # 状态→UI 注册表（domain 键控 + labelKey + 三级色，枚举以后端为准）。
+    │   ├── chartTheme.ts         # 图表配置收口（setupChartDefaults/refreshDefaults/chartPalette/buildChartGroups）。
+    │   └── testDataPaste.ts      # 测试数据粘贴解析。
+    └── views/                    # 25 个页面（详情见第 2 节路由表）。
 ```
 
 应用启动代码很短，所有全局能力都在这里注册：
@@ -72,7 +106,10 @@ web-ui/
 // src/main.ts
 import 'element-plus/es/components/message/style/css'
 import 'element-plus/es/components/message-box/style/css'
-import './style.css'
+import './styles/index.css'
+
+setupChartDefaults() // 图表配置收口：唯一 Chart.register 点
+useTheme()           // 主题单例激活（light/dark/auto）
 
 createApp(App).use(createPinia()).use(router).use(i18n).mount('#app')
 ```
@@ -143,7 +180,7 @@ Element Plus 的组件和指令（含 `v-loading`）由 `unplugin-vue-components
 
 ### 2.3 导航守卫和登录保护
 
-全局 `beforeEach` 依次完成五件事：
+守卫逻辑收敛为 `src/router/guard.ts` 的纯函数 `resolveRouteGuard(to, { ready, user })`，`index.ts` 的 `beforeEach` 只做「需要时 loadMe + 调纯函数 + 应用结果」：
 
 1. 首次进入受保护页面时调用 `auth.loadMe()` 恢复 Cookie 会话。
 2. 恢复失败或没有用户时跳转登录页。
@@ -162,12 +199,11 @@ router.beforeEach(async (to) => {
       return '/login'
     }
   }
-  if (!to.meta.public && !auth.user) return '/login'
-  if (to.meta.admin && !auth.isAdmin) return '/projects'
-  if (to.meta.reviewer && !auth.canReviewAgent) return '/projects'
-  if (to.path !== '/settings' && auth.user?.must_change_password) return '/settings'
+  return resolveRouteGuard(to, { ready: auth.ready, user: auth.user })
 })
 ```
+
+meta 收敛为四键：`public?` / `admin?` / `reviewer?` / `titleKey`，**没有 `requiresAuth`**——语义统一为「非 public 即需登录」；未匹配路径由 catch-all（`/:pathMatch(.*)*` → `/`）重定向首页，不再渲染空白。
 
 前端守卫只改善用户体验，不是安全边界；API 权限仍由 Go 后端强校验。
 
@@ -370,25 +406,24 @@ actions: {
 
 ### AppLayout
 
-[`src/components/AppLayout.vue`](src/components/AppLayout.vue) 是所有受保护页面的外壳。它加载项目列表，在桌面显示固定侧栏（分组为“主导航 + 系统”），在移动端显示 `MobileTopBar` 和五项底部导航，并加载 Agent 待审候选数徽章：
+[`src/layouts/AppLayout.vue`](src/layouts/AppLayout.vue) 是所有受保护页面的外壳。它加载项目列表，在桌面显示固定侧栏（分组为“主导航 + 系统”），在移动端显示 `MobileTopBar` 和五项底部导航，并加载 Agent 待审候选数徽章。
 
-- `navItems`：首页、项目、待办、日报、经验、附件；`auth.canReviewAgent` 时追加“AI 审核”。
-- `systemItems`：气体控制、仪器、传感器；`auth.isAdmin` 时追加“用户”；再加审计、手册。
-- `mobileItems`：首页、项目、待办、日报、我的（设置）——固定 5 项。
-- Agent 徽章（C11）：仅 `canReviewAgent` 时每 30s 轮询 `listAgentCandidates({ status: 'pending_review', page: 1, per_page: 1 })` 的 `total` 显示未读数；页面隐藏时暂停，进入候选页或角色到位时立即刷新。
+导航数据来自 `src/config/navigation.ts` 单一数据源（`NAV_ITEMS`，每项含 `path/icon/titleKey/minRole/mobile`），角色过滤由纯函数 `filterNavByRole(items, role)` 完成——新增页面只改该文件与路由表，不再手改 AppLayout：
 
 ```ts
-// src/components/AppLayout.vue
-const navItems = computed<NavItem[]>(() => {
-  const items: NavItem[] = [
-    { label: t('nav.home'), path: '/', icon: HomeFilled },
-    { label: t('nav.projects'), path: '/projects', icon: FolderOpened },
-    // ...
-  ]
-  if (auth.canReviewAgent) items.push({ label: t('nav.aiReview'), path: '/agent-candidates', icon: MagicStick })
-  return items
-})
+// src/config/navigation.ts
+export const NAV_ITEMS: NavEntry[] = [
+  { path: '/', icon: HomeFilled, titleKey: 'nav.home' },
+  { path: '/projects', icon: FolderOpened, titleKey: 'nav.projects' },
+  // ...
+  { path: '/agent-candidates', icon: MagicStick, titleKey: 'nav.aiReview', minRole: 'maintainer' },
+  // systemItems 用 group: 'system' 区分
+]
 ```
+
+桌面侧栏三个 computed 都由「按 group 过滤 + `filterNavByRole`」派生：`navItems`（首页、项目、待办、日报、经验、附件 + AI 审核）、`systemItems`（气体控制、仪器、传感器、用户、审计、手册）、`mobileItems`（`mobile: true` 的 5 项：首页、项目、待办、日报、我的）。
+
+Agent 徽章（C11）：仅 `canReviewAgent` 时每 30s 轮询 `listAgentCandidates({ status: 'pending_review', page: 1, per_page: 1 })` 的 `total` 显示未读数；页面隐藏时暂停，进入候选页或角色到位时立即刷新（轮询由 `usePolling` 承载）。
 
 侧栏高亮使用前缀匹配（`/projects/:id/*` 与 `/projects` 是兄弟路由记录，`RouterLink` 的自动高亮只匹配同一条记录）：
 
@@ -405,13 +440,13 @@ function navActive(path: string) {
 
 ### ProjectLayout / ProjectDashboard / DailyReportShell
 
-- [`ProjectLayout.vue`](src/components/ProjectLayout.vue)：项目工作区壳。加载项目详情（含失败回退页），显示项目头（返回、名称/阶段标签、切换项目）和 6 个 Tab（仪表盘/问题/实验运行/测试数据/RF 匹配/装配），Tab 内容由子路由渲染。
-- [`ProjectDashboard.vue`](src/components/ProjectDashboard.vue)：项目阶段流程图，展示阶段节点状态并触发推进/回退确认（阶段机由后端决定，前端只发 `transitionProject`）。
-- [`DailyReportShell.vue`](src/components/DailyReportShell.vue)：日报“今日录入/历史查询”两个子路由的 Tab 容器。
+- [`src/layouts/ProjectLayout.vue`](src/layouts/ProjectLayout.vue)：项目工作区壳。加载项目详情（含失败回退页），显示项目头（返回、名称/阶段标签、切换项目）和 6 个 Tab（仪表盘/问题/实验运行/测试数据/RF 匹配/装配），Tab 内容由子路由渲染；项目上下文的唯一事实来源是路由参数。
+- [`src/components/business/ProjectDashboard.vue`](src/components/business/ProjectDashboard.vue)：项目阶段流程图，展示阶段节点状态并触发推进/回退确认（阶段机由后端决定，前端只发 `transitionProject`）。
+- [`src/layouts/DailyReportShell.vue`](src/layouts/DailyReportShell.vue)：日报“今日录入/历史查询”两个子路由的 Tab 容器。
 
 ### ProjectSidebar
 
-[`src/components/ProjectSidebar.vue`](src/components/ProjectSidebar.vue) 展示可搜索的项目列表（按名称/编码过滤），点击后先 `store.select()` 再跳转项目工作区：
+[`src/components/business/ProjectSidebar.vue`](src/components/business/ProjectSidebar.vue) 展示可搜索的项目列表（按名称/编码过滤），点击后先 `store.select()` 再跳转项目工作区：
 
 ```ts
 function open(id: string) {
@@ -422,7 +457,7 @@ function open(id: string) {
 
 ### CommentSection
 
-[`src/components/CommentSection.vue`](src/components/CommentSection.vue) 负责评论列表、输入框和空状态。它不直接调用 API，而是通过 `submit` 事件把内容交给父页面，保持组件可复用：
+[`src/components/business/CommentSection.vue`](src/components/business/CommentSection.vue) 负责评论列表、输入框和空状态。它不直接调用 API，而是通过 `submit` 事件把内容交给父页面，保持组件可复用：
 
 ```ts
 defineProps<{ comments: Comment[] }>()
@@ -436,24 +471,26 @@ function submit() {
 
 ### StatusBadge
 
-[`src/components/StatusBadge.vue`](src/components/StatusBadge.vue) 把多个模块共享的状态映射为统一颜色；未知状态使用 `primary`，下划线显示为空格：
+[`src/components/base/StatusBadge.vue`](src/components/base/StatusBadge.vue) 通过 `props { domain, value }` 查 `src/utils/statusMeta.ts` 注册表渲染统一颜色与 i18n label；枚举值集以后端（`docs/api-contract.md`）为唯一事实源，未注册的 value 降级显示原文并 `console.warn`、tone 落 `info`：
 
 ```ts
-const type = computed(() => {
-  if (['active', 'published', 'confirmed', 'resolved'].includes(props.value)) return 'success'
-  if (['draft', 'candidate', 'open'].includes(props.value)) return 'warning'
-  if (['archived', 'closed', 'locked'].includes(props.value)) return 'info'
-  return 'primary'
-})
+// src/utils/statusMeta.ts（节选）
+export const STATUS_META: Record<StatusDomain, Record<string, StatusMeta>> = {
+  runStatus: {
+    running: { tone: 'success', labelKey: 'runList.status.running', graphic: '--ok', text: '--ok-text', soft: '--ok-soft' },
+    // ...
+  },
+  // 域：runStatus / stepStatus / issueStatus / issueSeverity / alertLevel / instrumentState / testQuality / todoPriority / userRole / projectStage
+}
 ```
 
 ### MarkdownView
 
-[`src/components/MarkdownView.vue`](src/components/MarkdownView.vue) 用 markdown-it 做只读渲染：`html: false` 转义原始 HTML 防注入、`linkify` 自动识别 URL、`breaks` 保留换行；链接统一新窗口打开并带 `noopener`。日报原文、经验、手册等展示侧文本都用它。
+[`src/components/business/MarkdownView.vue`](src/components/business/MarkdownView.vue) 用 markdown-it 做只读渲染：`html: false` 转义原始 HTML 防注入、`linkify` 自动识别 URL、`breaks` 保留换行；链接统一新窗口打开并带 `noopener`。日报原文、经验、手册等展示侧文本都用它。
 
 ### ResponsiveTable
 
-[`src/components/ResponsiveTable.vue`](src/components/ResponsiveTable.vue) 是列表页的响应式底座：桌面端渲染 `el-table`；移动端且有 `card` 插槽时渲染卡片列表（无 card 插槽仍回退表格）。`v-bind="$attrs"` 透传 loading 等属性：
+[`src/components/base/ResponsiveTable.vue`](src/components/base/ResponsiveTable.vue) 是列表页的响应式底座：桌面端渲染 `el-table`；移动端且有 `card` 插槽时渲染卡片列表（无 card 插槽仍回退表格）。`v-bind="$attrs"` 透传 loading 等属性：
 
 ```vue
 <ResponsiveTable :rows="events" :loading="eventsLoading">
@@ -467,7 +504,7 @@ const type = computed(() => {
 
 ### StepItemsEditor
 
-[`src/components/StepItemsEditor.vue`](src/components/StepItemsEditor.vue) 步骤列表编辑器：名称/描述/依赖顺序三列，供步骤模板和实验运行步骤的编辑弹窗复用，通过 `emitChange` 通知父组件收集变更。
+[`src/components/business/StepItemsEditor.vue`](src/components/business/StepItemsEditor.vue) 步骤列表编辑器：名称/描述/依赖顺序三列，供步骤模板和实验运行步骤的编辑弹窗复用，通过 `emitChange` 通知父组件收集变更。
 
 ## 6. 页面开发模式
 
@@ -580,7 +617,7 @@ onMounted(async () => {
 
 ### 6.3 style：局部样式
 
-`scoped` 限制样式只作用于当前组件；跨页面复用的 `.page`、`.panel`、`.toolbar` 等放在 `src/style.css`，CSS 变量（`--surface`、`--border`、`--safe-area-top` 等）也在这里定义。
+`scoped` 限制样式只作用于当前组件；全局样式拆在 `src/styles/`：`tokens.css`（设计令牌：色彩/字体/间距/圆角/阴影/z-index）、`base.css`（reset/排版/focus-visible/动效）、`utilities.css`（跨页面复用的 `.page`、`.panel`、`.toolbar` 等全局类）、`element-overrides.css`（Element Plus 变量覆写）、`themes/dark.css`（暗色令牌覆写）。新样式优先复用现有令牌与全局类，不重复定义色值。
 
 ### 对应后端模块
 
@@ -639,7 +676,7 @@ onMounted(async () => { items.value = await listInstruments() })
 
 ### 第 2 步：注册路由
 
-在 `src/router/index.ts` 用懒加载导入并添加路由。普通登录页不需要额外 meta；管理员页用现有的 `meta.admin`，Agent 审核页用 `meta.reviewer`：
+在 `src/router/index.ts` 用懒加载导入并添加路由。普通登录页不需要额外 meta；管理员页用 `meta.admin`，Agent 审核页用 `meta.reviewer`；所有路由必须带 `meta.titleKey`（MobileTopBar 标题）：
 
 ```ts
 const InstrumentsView = () => import('../views/InstrumentsView.vue')
@@ -668,11 +705,11 @@ export function listInstruments() {
 
 ### 第 4 步：添加导航入口
 
-在 `src/components/AppLayout.vue` 的 `navItems`（或系统类入口放 `systemItems`）添加桌面入口；需要出现在移动端时，把标签加入 `mobileItems`（当前固定 5 项，且底栏 CSS 是 `grid-template-columns: repeat(5, 1fr)`，增删需同步调整）。
+在 `src/config/navigation.ts` 的 `NAV_ITEMS` 添加一项（系统类入口给 `group: 'system'`，需要角色门槛给 `minRole`，需要出现在移动端底栏给 `mobile: true`），角色过滤由 `filterNavByRole` 统一处理——桌面侧栏与移动端底栏自动跟随，**不需要**再改 `AppLayout.vue`（底栏当前固定 5 项且 CSS 是 `grid-template-columns: repeat(5, 1fr)`，增删底栏项需同步调整样式）。
 
 ### 第 5 步：验证
 
-最后运行 `npm run build`（先过 `vue-tsc --noEmit` 类型检查），并手工检查登录保护、直接输入 URL、桌面侧栏、移动端底栏和 768px 以下布局。
+最后运行 `npm run build`（先过 `vue-tsc --noEmit` 类型检查）、`npm test`（vitest 全绿）与 `npm run test:coverage`（窄口径阈值门禁），并手工检查登录保护、直接输入 URL、桌面侧栏、移动端底栏和 768px 以下布局。
 
 ## 8. 构建与部署
 
@@ -738,7 +775,7 @@ export function useMobile() {
 `AppLayout` 的结构切换：
 
 ```vue
-<!-- src/components/AppLayout.vue -->
+<!-- src/layouts/AppLayout.vue -->
 <MobileTopBar v-if="isMobile" />
 <aside v-if="!isMobile" class="nav">...</aside>
 <main class="content"><RouterView /></main>
@@ -748,7 +785,7 @@ export function useMobile() {
 纯布局变化则留在 CSS，例如移动端底栏：
 
 ```css
-/* src/components/AppLayout.vue */
+/* src/layouts/AppLayout.vue */
 @media (max-width: 768px) {
   .content {
     margin-left: 0;
@@ -776,6 +813,12 @@ npm run dev
 
 # 先执行 vue-tsc --noEmit，再生成生产构建到 dist/
 npm run build
+
+# 单元/组件测试（vitest，测试与被测源码同目录 __tests__/）
+npm test
+
+# 覆盖率（窄口径门禁：lines/statements ≥70%、branches ≥65%、functions ≥60%）
+npm run test:coverage
 ```
 
 对应的真实脚本定义：
@@ -786,7 +829,9 @@ npm run build
   "scripts": {
     "dev": "vite --host 0.0.0.0",
     "build": "vue-tsc --noEmit && vite build",
-    "preview": "vite preview --host 0.0.0.0"
+    "preview": "vite preview --host 0.0.0.0",
+    "test": "vitest run",
+    "test:coverage": "vitest run --coverage"
   }
 }
 ```

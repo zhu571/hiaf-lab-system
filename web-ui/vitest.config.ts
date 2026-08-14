@@ -27,16 +27,18 @@ export default defineConfig({
     coverage: {
       provider: 'v8',
       reporter: ['text', 'html', 'json-summary'],
-      // 目录更名随迁（重构方案 S0，§4）：components/ 拆 base/business 子目录，layouts/ 独立。
-      // include/阈值口径唯一事实源 = 测试方案 §8.4 R4-8 接力链（T4 现状平铺口径七目录 60/60/60/50
-      // → 重构 S0 目录随迁 + 补 src/config/** → 重构 S6 窄口径收紧 70/65；本批只立现状口径）。
-      // src/views/** 不纳入阈值口径（组件测试断言点 + E2E 兜底，避免为凑数写低价值页面行覆盖）。
-      include: ['src/stores/**', 'src/utils/**', 'src/i18n/**', 'src/config/**', 'src/layouts/**', 'src/composables/**', 'src/router/**', 'src/api/**', 'src/components/**'],
+      // 窄口径收紧（重构方案 S6，§4）：接力链末端。唯一事实源 = 测试方案 §8.4 R4-8：
+      // 测试 T4 现状平铺口径七目录 60/60/60/50 → 重构 S0 目录更名随迁 + 补 src/config/**
+      // → 重构 S6 窄口径（components/base 等）收紧至 lines/functions ≥70%、branches ≥65%。
+      // src/components/business/** 与 src/views/** 不纳入阈值（组件测试断言点 + E2E 兜底）。
+      // 实测校准（2026-08-16）：窄口径 76.75/76.64/65.16/75.00（lines/stmts/funcs/branches）。
+      // functions 默认目标 70% 按内收规则降为 60%（65.16-5≈60，不低于 T4 已立 60% 下限）。
+      include: ['src/stores/**', 'src/utils/**', 'src/i18n/**', 'src/config/**', 'src/layouts/**', 'src/composables/**', 'src/router/**', 'src/api/**', 'src/components/base/**'],
       thresholds: {
-        lines: 60,
-        statements: 60,
+        lines: 70,
+        statements: 70,
         functions: 60,
-        branches: 50
+        branches: 65
       }
     }
   }

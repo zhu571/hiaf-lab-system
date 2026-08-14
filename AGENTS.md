@@ -32,7 +32,7 @@ HIAF 低温气体靶实验室的多人协作日志管理平台。系统已完成
 
 - `docs/`：API、权限审计、仪器安全、项目设计、Agent 策略、维护策略等设计文档。
 - `go-server/`：Go 后端，20+ 个模块包（含 automation、steptemplates、todos、testdata 等）。
-- `web-ui/`：Vue 3 + Element Plus 前端，25 个页面。
+- `web-ui/`：Vue 3 + Element Plus 前端，25 个业务视图 + 4 个布局壳 + base/business 分层组件，目录结构与约定见 §5/§6。
 - `py-agent/`：Python LightAgent 服务 + EPICS 虚拟 IOC。
 - `migrations/`：PostgreSQL 迁移脚本（38 个版本）。
 - `deploy/`：Docker Compose（10 个服务）、Dockerfile、secrets。
@@ -111,6 +111,20 @@ hiaf-lab-system/
 │   ├── ioc/                # EPICS 虚拟 IOC (pyEpics 模拟硬件 PV)
 │   └── tests/              # 测试
 ├── web-ui/                 # Vue 3 前端
+│   ├── src/api/            # API 层：client.ts 统一封装（幂等键/CSRF/401 单飞刷新/错误分类）+ 19 个业务模块
+│   ├── src/components/
+│   │   ├── base/           # 通用基础件（无业务语义、props/slots 驱动）：StatusBadge/StateBlock/FormDialog/ResponsiveTable
+│   │   └── business/       # 业务复合件（可直读 store/API）：SensorTrendChart/AskDialog/ProjectDashboard 等
+│   ├── src/composables/    # 组合式函数：useAsyncData/usePolling/usePagination/useTheme 等
+│   ├── src/config/         # navigation.ts 导航单一数据源（NAV_ITEMS + filterNavByRole）
+│   ├── src/i18n/           # 中英双语（zh.ts 完整基准/en.ts 对齐同一 key 结构，keys.test.ts 双向比对防线）
+│   ├── src/layouts/        # 布局壳：AppLayout/ProjectLayout/MobileTopBar/DailyReportShell
+│   ├── src/router/         # 路由表（全懒加载 + 兼容重定向 + catch-all）+ guard.ts 守卫纯函数
+│   ├── src/stores/         # 仅 auth/project 两个全局 store（业务数据保持页面本地态）
+│   ├── src/styles/         # tokens/base/utilities/element-overrides/themes/dark.css
+│   ├── src/utils/          # datetime.ts/statusMeta.ts/chartTheme.ts/testDataPaste.ts
+│   ├── src/views/          # 25 个业务视图
+│   └── e2e/                # Playwright 冒烟（11 spec 13 用例）
 ├── migrations/             # PostgreSQL 迁移脚本
 ├── deploy/                 # Docker Compose、frp、Nginx 配置
 ├── images/                 # 运行时图片附件目录
@@ -194,6 +208,12 @@ weekly 自身不 SELECT 任何业务表；新查询方法（`logs.WeeklyReports`
 - 表单提交要显示后端返回的 `request_id`，便于追审计日志。
 - 不把 access token 放入 `localStorage`（使用 HttpOnly Cookie）。
 - UI 文案走 vue-i18n：`src/i18n/zh.ts` 是完整基准，`src/i18n/en.ts` 对齐同一 key 结构；新页面不要写死中文。语言偏好存后端 `users.language`（`PATCH /api/v1/auth/profile`），`localStorage` 兜底。
+- 路由 meta 收敛为四键：`public?`（裸渲染无布局）/ `admin?`（仅 admin）/ `reviewer?`（admin 或 maintainer）/ `titleKey`。**无 `requiresAuth`**——语义统一为「非 public 即需登录」，守卫逻辑在 `src/router/guard.ts` 纯函数 `resolveRouteGuard`；未匹配路径由 catch-all 重定向 `/`。
+- 导航以 `src/config/navigation.ts` 为单一数据源（`NAV_ITEMS` + `filterNavByRole` 角色过滤，`minRole` 缺省 = 全部登录角色可见）；新增页面只改导航配置与路由表。
+- 状态→UI 映射统一走 `src/utils/statusMeta.ts` 注册表（domain 键控 + 显式 labelKey + 三级色）+ base/StatusBadge；枚举值集以后端（`docs/api-contract.md`）为唯一事实源，新增枚举值同 PR 登记；label 一律显式 i18n key，禁模板字符串拼装动态 key。
+- 时间格式化统一走 `src/utils/datetime.ts`（locale 取 i18n 当前语言），禁止视图内手写 `formatTime` 类函数。
+- 图表配置统一走 `src/utils/chartTheme.ts`（`setupChartDefaults`/`refreshDefaults`/`chartPalette`/`buildChartGroups`），组件内不再各自 `Chart.register`。
+- 前端测试（vitest，与被测源码同目录 `__tests__/`）：coverage 窄口径门禁 = `stores/utils/i18n/config/layouts/composables/router/api/components/base`，阈值 lines/statements ≥70%、branches ≥65%、functions ≥60%（`components/business` 与 `views` 不纳入，由组件测试断言 + E2E 兜底）；改前端代码后 `npm test` 与 `npm run test:coverage` 必须全绿。
 
 ### Python / Agent
 
@@ -291,6 +311,7 @@ python worker.py
 - [ ] `go test ./...` 通过。
 - [ ] `go vet ./...` 无警告。
 - [ ] 前端构建/检查通过。
+- [ ] 前端 `npm test` 全绿且 `npm run test:coverage` 通过窄口径阈值（lines/statements ≥70%、branches ≥65%、functions ≥60%）。
 - [ ] 前端产物已全量同步到 `go-server/static/` 并随提交更新（embed 只打包仓库内文件，缺 assets 会导致白屏）。
 - [ ] 新 API 与 `api-contract.md` 一致。
 - [ ] 写接口要求 `Idempotency-Key`。
