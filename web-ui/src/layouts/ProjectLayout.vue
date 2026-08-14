@@ -34,6 +34,7 @@ import { useRoute, useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import { ArrowLeft } from '@element-plus/icons-vue'
 import { useProjectStore } from '@/stores/project'
+import { statusMetaFor } from '@/utils/statusMeta'
 
 const route = useRoute()
 const router = useRouter()
@@ -72,17 +73,14 @@ watch(
   { immediate: true }
 )
 
-const STAGE_TYPES: Record<string, 'primary' | 'success' | 'info' | 'warning'> = {
-  draft: 'info',
-  active: 'success',
-  completed: 'primary',
-  archived: 'info'
-}
+// 阶段标签走 statusMeta projectStage 注册表（美术 §3.8 域覆盖登记点，原本地 STAGE_TYPES 双轨映射已并入；
+// 语义族对齐 §3.8 总表：draft=warning、active/completed=success、archived=info）
 const stage = computed(() => {
   const status = project.value?.status || ''
+  const meta = statusMetaFor('projectStage', status)
   return {
-    label: STAGE_TYPES[status] ? t(`project.stages.${status}`) : project.value?.status || t('project.stages.unknown'),
-    type: STAGE_TYPES[status] || ('info' as const)
+    label: meta ? t(meta.labelKey) : project.value?.status || t('project.stages.unknown'),
+    type: meta?.tone || ('info' as const)
   }
 })
 

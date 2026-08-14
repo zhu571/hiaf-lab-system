@@ -350,10 +350,6 @@ function staleLevel(time?: string): 'warning' | 'danger' | null {
   margin-top: 2px;
 }
 
-.panel-head {
-  flex-wrap: wrap;
-}
-
 .hint-meta {
   font-weight: 400;
 }

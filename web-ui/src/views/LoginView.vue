@@ -123,7 +123,7 @@ async function submitRegister() {
 }
 
 .login-panel {
-  animation: rise 0.35s ease;
+  animation: rise var(--dur-slow) var(--ease-out);
   background: var(--login-panel-bg);
   border: 1px solid var(--login-panel-border);
   border-radius: var(--radius-xl);
@@ -158,7 +158,7 @@ async function submitRegister() {
   color: var(--text-inverse);
   display: grid;
   font-size: 22px;
-  font-weight: 800;
+  font-weight: var(--fw-bold);
   height: 46px;
   margin-bottom: 4px;
   place-items: center;
@@ -166,7 +166,7 @@ async function submitRegister() {
 }
 
 h1 {
-  font-size: 22px;
+  font-size: var(--fs-display);
   margin: 0;
 }
 

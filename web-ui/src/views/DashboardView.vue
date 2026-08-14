@@ -565,7 +565,7 @@ function stagger(i: number) {
 .device-card,
 .brief-card,
 .member-card {
-  animation: card-in 0.4s cubic-bezier(0.21, 0.61, 0.35, 1) both;
+  animation: card-in var(--dur-slow) var(--ease-standard) both;
   background: var(--surface);
   border: 1px solid var(--border);
   border-radius: var(--radius-md);
@@ -715,7 +715,7 @@ function stagger(i: number) {
 .gas-value {
   color: var(--text-1);
   font-size: 14px;
-  font-weight: 650;
+  font-weight: var(--fw-semibold);
 }
 
 .gas-stats.offline .gas-value {
@@ -761,7 +761,7 @@ function stagger(i: number) {
 .brief-date {
   color: var(--text-1);
   font-size: 15px;
-  font-weight: 650;
+  font-weight: var(--fw-semibold);
 }
 
 .brief-count {
