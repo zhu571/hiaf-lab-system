@@ -17,6 +17,8 @@ export default defineConfig({
   test: {
     environment: 'jsdom',
     globals: true,
+    // 固定实验室时区（UTC+8）：datetime 测试断言依赖本地时区渲染，CI 默认 UTC 会红
+    env: { TZ: 'Asia/Shanghai' },
     setupFiles: ['src/test-utils/setup.ts'],
     include: ['src/**/__tests__/**/*.test.ts'],
     exclude: ['node_modules/**', 'dist/**'],
