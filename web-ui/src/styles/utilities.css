@@ -1,0 +1,51 @@
+/* ---------- 通用布局工具类 ---------- */
+
+.page {
+  align-content: start;
+  display: grid;
+  gap: 20px;
+}
+
+.toolbar {
+  align-items: center;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  justify-content: space-between;
+}
+
+.toolbar h2 {
+  font-size: 20px;
+}
+
+.toolbar h3 {
+  font-size: 16px;
+}
+
+.panel {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-sm);
+  padding: 20px;
+}
+
+.muted {
+  color: var(--text-3);
+}
+
+.grid {
+  display: grid;
+  gap: 16px;
+}
+
+@media (max-width: 768px) {
+  .panel {
+    border-radius: 10px;
+    padding: 14px;
+  }
+
+  .toolbar h2 {
+    font-size: 18px;
+  }
+}

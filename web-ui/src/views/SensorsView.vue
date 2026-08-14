@@ -97,7 +97,7 @@ import { useI18n } from 'vue-i18n'
 import { Odometer, Refresh, TrendCharts } from '@element-plus/icons-vue'
 import { getHistory, getLatest, type SensorPoint } from '../api/sensors'
 import { showApiError } from '../composables/useNotify'
-import SensorTrendChart, { type ChartGroup, type ChartPoint } from '../components/SensorTrendChart.vue'
+import SensorTrendChart, { type ChartGroup, type ChartPoint } from '@/components/business/SensorTrendChart.vue'
 
 const { t, locale } = useI18n()
 

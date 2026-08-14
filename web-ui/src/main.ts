@@ -4,7 +4,7 @@ import { createPinia } from 'pinia'
 // ElMessage / ElMessageBox 在代码里显式 import，样式需手动引入一次
 import 'element-plus/es/components/message/style/css'
 import 'element-plus/es/components/message-box/style/css'
-import './style.css'
+import './styles/index.css'
 import App from './App.vue'
 import router from './router'
 import { i18n } from './i18n'

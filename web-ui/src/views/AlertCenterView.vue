@@ -121,7 +121,7 @@ import { computed, onMounted, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { showApiError } from '../composables/useNotify'
-import ResponsiveTable from '../components/ResponsiveTable.vue'
+import ResponsiveTable from '@/components/base/ResponsiveTable.vue'
 import { listAlerts, resolveAlert, type AlertLevel, type AlertRecord } from '../api/alerts'
 import { useAuthStore } from '../stores/auth'
 

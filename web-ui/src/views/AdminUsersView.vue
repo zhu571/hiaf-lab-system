@@ -162,7 +162,7 @@ import { showApiError } from '../composables/useNotify'
 import { Search } from '@element-plus/icons-vue'
 import { createUser, listUsers, resetPassword, updateUser, type UserInfo } from '../api/auth'
 import { useAuthStore } from '../stores/auth'
-import ResponsiveTable from '../components/ResponsiveTable.vue'
+import ResponsiveTable from '@/components/base/ResponsiveTable.vue'
 
 const { t } = useI18n()
 const auth = useAuthStore()

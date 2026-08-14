@@ -272,9 +272,9 @@ import { computed, onMounted, reactive, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import StatusBadge from '../components/StatusBadge.vue'
-import StepItemsEditor from '../components/StepItemsEditor.vue'
-import ResponsiveTable from '../components/ResponsiveTable.vue'
+import StatusBadge from '@/components/base/StatusBadge.vue'
+import StepItemsEditor from '@/components/business/StepItemsEditor.vue'
+import ResponsiveTable from '@/components/base/ResponsiveTable.vue'
 import {
   addReportLink,
   applyRunTemplate,

@@ -1,5 +1,6 @@
 import { createRouter, createWebHistory } from 'vue-router'
-import { useAuthStore } from '../stores/auth'
+import { useAuthStore } from '@/stores/auth'
+import { resolveRouteGuard } from './guard'
 
 // 路由级代码分割：所有页面组件懒加载，首屏只下载当前路由需要的 chunk
 const LoginView = () => import('../views/LoginView.vue')
@@ -24,16 +25,16 @@ const GasControlView = () => import('../views/GasControlView.vue')
 const SensorsView = () => import('../views/SensorsView.vue')
 const TodoView = () => import('../views/TodoView.vue')
 const DailyReportDetailView = () => import('../views/DailyReportDetailView.vue')
-const DailyReportShell = () => import('../components/DailyReportShell.vue')
-const ProjectLayout = () => import('../components/ProjectLayout.vue')
-const ProjectDashboard = () => import('../components/ProjectDashboard.vue')
+const DailyReportShell = () => import('@/layouts/DailyReportShell.vue')
+const ProjectLayout = () => import('@/layouts/ProjectLayout.vue')
+const ProjectDashboard = () => import('@/components/business/ProjectDashboard.vue')
 const ManualView = () => import('../views/ManualView.vue')
 const AlertCenterView = () => import('../views/AlertCenterView.vue')
 
 const router = createRouter({
   history: createWebHistory(),
   routes: [
-    { path: '/', component: () => import('../views/DashboardView.vue'), meta: { requiresAuth: true, titleKey: 'nav.home' } },
+    { path: '/', component: () => import('@/views/DashboardView.vue'), meta: { titleKey: 'nav.home' } },
     { path: '/login', component: LoginView, meta: { public: true } },
     { path: '/projects', component: ProjectsView, meta: { titleKey: 'nav.projects' } },
     {
@@ -59,17 +60,17 @@ const router = createRouter({
       ]
     },
     { path: '/experiment-runs/:id', component: RunDetailView, meta: { titleKey: 'mobile.title.runDetail' } },
-    { path: '/step-templates', component: StepTemplatesView, meta: { requiresAuth: true, titleKey: 'mobile.title.stepTemplates' } },
+    { path: '/step-templates', component: StepTemplatesView, meta: { titleKey: 'mobile.title.stepTemplates' } },
     { path: '/attachments', component: AttachmentView, meta: { titleKey: 'nav.attachments' } },
     { path: '/instrument-measure', component: InstrumentMeasureView, meta: { titleKey: 'nav.instruments' } },
     { path: '/gas-control', component: GasControlView, meta: { titleKey: 'nav.gasControl' } },
     { path: '/sensors', component: SensorsView, meta: { titleKey: 'nav.sensors' } },
-    { path: '/todos', component: TodoView, meta: { requiresAuth: true, titleKey: 'nav.todos' } },
+    { path: '/todos', component: TodoView, meta: { titleKey: 'nav.todos' } },
     { path: '/experiences', component: ExperiencesView, meta: { titleKey: 'nav.experiences' } },
     { path: '/audit', component: AuditView, meta: { titleKey: 'nav.audit' } },
-    { path: '/alerts', component: AlertCenterView, meta: { requiresAuth: true, titleKey: 'nav.alert' } },
+    { path: '/alerts', component: AlertCenterView, meta: { titleKey: 'nav.alert' } },
     { path: '/settings', component: SettingsView, meta: { titleKey: 'nav.settings' } },
-    { path: '/manual', component: ManualView, meta: { requiresAuth: true, titleKey: 'nav.manual' } },
+    { path: '/manual', component: ManualView, meta: { titleKey: 'nav.manual' } },
     { path: '/daily-reports/:id', component: DailyReportDetailView, meta: { titleKey: 'mobile.title.dailyReportDetail' } },
     { path: '/admin/users', component: AdminUsersView, meta: { admin: true, titleKey: 'nav.adminUsers' } },
     { path: '/agent-candidates', component: AgentCandidatesView, meta: { reviewer: true, titleKey: 'nav.aiReview' } },
@@ -78,10 +79,14 @@ const router = createRouter({
     { path: '/daily-reports', redirect: '/daily-report/history' },
     { path: '/runs/:id', redirect: (to) => ({ path: '/experiment-runs/' + to.params.id, query: to.query, hash: to.hash }) },
     { path: '/projects/:id/runs', redirect: '/projects/:id/experiment-runs' },
-    { path: '/instruments', redirect: '/instrument-measure' }
+    { path: '/instruments', redirect: '/instrument-measure' },
+    // catch-all 404：未匹配路径回首页（未登录时仍被守卫送去 /login）
+    { path: '/:pathMatch(.*)*', redirect: '/' }
   ]
 })
 
+// 守卫（重构方案 §3.6）：loadMe + 纯函数 resolveRouteGuard + 应用结果。
+// 四规则语义（非 public 即需登录 / admin 越权 / reviewer 越权 / must_change_password）见 guard.ts。
 router.beforeEach(async (to) => {
   const auth = useAuthStore()
   if (!to.meta.public && !auth.ready) {
@@ -91,10 +96,7 @@ router.beforeEach(async (to) => {
       return '/login'
     }
   }
-  if (!to.meta.public && !auth.user) return '/login'
-  if (to.meta.admin && !auth.isAdmin) return '/projects'
-  if (to.meta.reviewer && !auth.canReviewAgent) return '/projects'
-  if (to.path !== '/settings' && auth.user?.must_change_password) return '/settings'
+  return resolveRouteGuard(to, { ready: auth.ready, user: auth.user })
 })
 
 export default router

@@ -112,7 +112,7 @@ import { computed, onMounted, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { showApiError } from '../composables/useNotify'
 import { useMobile } from '../composables/useMobile'
-import ResponsiveTable from '../components/ResponsiveTable.vue'
+import ResponsiveTable from '@/components/base/ResponsiveTable.vue'
 import { getAudit, listAuditEvents, type AuditRecord } from '../api/audit'
 
 const { t } = useI18n()

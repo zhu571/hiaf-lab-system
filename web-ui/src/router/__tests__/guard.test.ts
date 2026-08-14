@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { setActivePinia, createPinia } from 'pinia'
 import router from '../index'
+import { resolveRouteGuard } from '../guard'
 import { useAuthStore } from '../../stores/auth'
 import { makeUser } from '../../test-utils/factories'
 
@@ -127,5 +128,59 @@ describe('路由守卫：public 与兼容重定向', () => {
     // 函数化 redirect：:id 参数插值进目标 path，旧链接不再以字面 :id 请求后端 404。
     expect(router.currentRoute.value.path).toBe('/experiment-runs/run-123')
     expect(router.currentRoute.value.params.id).toBe('run-123')
+  })
+})
+
+// S0 抽出的守卫纯函数（重构方案 §3.6）：四规则逐条断言返回值，意图与原 beforeEach 内联逻辑一致。
+describe('resolveRouteGuard 纯函数：四规则', () => {
+  // 最小 RouteLocation 形态：纯函数只消费 path 与 meta
+  const to = (path: string, meta: Record<string, unknown> = {}) => ({ path, meta }) as never
+
+  it('规则1 未登录：非 public 且 user=null → /login', () => {
+    expect(resolveRouteGuard(to('/todos'), { ready: true, user: null })).toBe('/login')
+  })
+
+  it('规则1 未登录且未 ready（loadMe 未完成）同样 → /login', () => {
+    expect(resolveRouteGuard(to('/todos'), { ready: false, user: null })).toBe('/login')
+  })
+
+  it('规则1 public 路由（/login）无 user 放行', () => {
+    expect(resolveRouteGuard(to('/login', { public: true }), { ready: true, user: null })).toBeUndefined()
+  })
+
+  it('规则2 admin 越权：viewer/maintainer 访问 meta.admin → /projects，admin 放行', () => {
+    const adminRoute = to('/admin/users', { admin: true })
+    expect(resolveRouteGuard(adminRoute, { ready: true, user: makeUser({ role: 'viewer' }) })).toBe('/projects')
+    expect(resolveRouteGuard(adminRoute, { ready: true, user: makeUser({ role: 'maintainer' }) })).toBe('/projects')
+    expect(resolveRouteGuard(adminRoute, { ready: true, user: makeUser({ role: 'admin' }) })).toBeUndefined()
+  })
+
+  it('规则3 reviewer 越权：viewer → /projects，maintainer/admin 放行', () => {
+    const reviewRoute = to('/agent-candidates', { reviewer: true })
+    expect(resolveRouteGuard(reviewRoute, { ready: true, user: makeUser({ role: 'viewer' }) })).toBe('/projects')
+    expect(resolveRouteGuard(reviewRoute, { ready: true, user: makeUser({ role: 'maintainer' }) })).toBeUndefined()
+    expect(resolveRouteGuard(reviewRoute, { ready: true, user: makeUser({ role: 'admin' }) })).toBeUndefined()
+  })
+
+  it('规则4 must_change_password：非 /settings 强制 /settings，/settings 本身放行', () => {
+    const pendingUser = makeUser({ role: 'viewer', must_change_password: true })
+    expect(resolveRouteGuard(to('/todos'), { ready: true, user: pendingUser })).toBe('/settings')
+    expect(resolveRouteGuard(to('/settings'), { ready: true, user: pendingUser })).toBeUndefined()
+  })
+})
+
+describe('路由守卫：catch-all 404', () => {
+  it('未匹配路径（登录态）→ 重定向 /', async () => {
+    const store = useAuthStore()
+    store.user = makeUser({ role: 'admin' })
+    store.ready = true
+
+    await router.push('/no-such-page')
+    expect(router.currentRoute.value.path).toBe('/')
+  })
+
+  it('未匹配路径（未登录）→ catch-all 回 / 后由守卫送去 /login', async () => {
+    await router.push('/no-such-page')
+    expect(router.currentRoute.value.path).toBe('/login')
   })
 })

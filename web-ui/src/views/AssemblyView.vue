@@ -151,8 +151,8 @@ import { useI18n } from 'vue-i18n'
 import { useRoute } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { Rank } from '@element-plus/icons-vue'
-import StatusBadge from '../components/StatusBadge.vue'
-import StepItemsEditor from '../components/StepItemsEditor.vue'
+import StatusBadge from '@/components/base/StatusBadge.vue'
+import StepItemsEditor from '@/components/business/StepItemsEditor.vue'
 import { useMobile } from '../composables/useMobile'
 import {
   applyAssemblyTemplate,
