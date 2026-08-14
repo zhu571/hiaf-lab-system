@@ -27,6 +27,8 @@
 //   experienceStatus     go-server/experiences/model.go:6-8  candidate/published/archived
 //   reportStatus         go-server/logs/model.go:6-9         draft/submitted/confirmed/locked
 //   agentCandidateStatus go-server/agent/model.go:15-19      pending_review/approved/rejected/executed/execution_failed
+// 美术 S4 补登（前端派生态，非后端枚举——DashboardView isOnline/gasOnline 由设备 state/snapshot 计算）：
+//   onlineStatus         web-ui/src/views/DashboardView.vue  online/offline
 //
 // 未命中行为（M4 定稿）：label 降级显示原文（现 value.replace(/_/g,' ') 行为）+ console.warn，
 // tone 落 info（R9 登记的有意视觉变更，原默认 primary）。后续后端新增枚举值时同 PR 补映射与 labelKey。
@@ -55,6 +57,7 @@ export type StatusDomain =
   | 'experienceStatus'
   | 'reportStatus'
   | 'agentCandidateStatus'
+  | 'onlineStatus'
 
 const FAMILY: Record<StatusTone, { graphic: string; text: string; soft: string }> = {
   success: { graphic: '--ok', text: '--ok-text', soft: '--ok-soft' },
@@ -149,6 +152,10 @@ export const STATUS_META: Record<StatusDomain, Record<string, StatusMeta>> = {
     rejected: meta('danger', 'agentCandidates.statusRejected'),
     executed: meta('success', 'agentCandidates.statusExecuted'),
     execution_failed: meta('danger', 'agentCandidates.statusExecutionFailed')
+  },
+  onlineStatus: {
+    online: meta('success', 'common.online'),
+    offline: meta('info', 'common.offline')
   }
 }
 

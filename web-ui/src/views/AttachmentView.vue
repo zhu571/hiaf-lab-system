@@ -28,41 +28,47 @@
       <p class="muted filter-hint">{{ t('attachment.filterHint') }}</p>
     </section>
     <section class="panel">
-      <el-alert v-if="loadError" class="load-error" type="error" :title="loadError" show-icon :closable="false">
-        <el-button size="small" @click="load">{{ t('attachment.retry') }}</el-button>
-      </el-alert>
-      <div v-loading="loading" class="list-area">
-        <div v-if="items.length" class="card-grid">
-          <div v-for="att in items" :key="att.id" class="att-card">
-            <div class="thumb">
-              <img v-if="thumbUrls[att.id]" :src="thumbUrls[att.id]" :alt="att.original_name" />
-              <el-icon v-else :size="40"><Document /></el-icon>
-            </div>
-            <el-tooltip :content="att.original_name" placement="top" :show-after="300">
-              <p class="att-name">{{ att.original_name }}</p>
-            </el-tooltip>
-            <p class="att-meta">{{ fmtSize(att.file_size) }} · {{ fmtTime(att.created_at) }}</p>
-            <p v-if="att.description" class="att-desc">{{ att.description }}</p>
-            <div class="att-actions">
-              <el-button size="small" @click="download(att)">{{ t('attachment.download') }}</el-button>
-              <template v-if="canOperate">
-                <el-button size="small" type="primary" plain @click="openBind(att)">{{ t('attachment.bind') }}</el-button>
-                <el-button size="small" type="danger" plain @click="remove(att)">{{ t('attachment.delete') }}</el-button>
-              </template>
+      <!-- 列表三态收敛 StateBlock：首屏骨架（翻页有数据时不闪骨架）> 错误 > 空态 > 卡片网格 -->
+      <StateBlock
+        :loading="loading && !data"
+        :error="error"
+        :error-text="t('attachment.loadFailed')"
+        :empty="items.length === 0"
+        :empty-text="t('attachment.empty')"
+        @retry="run"
+      >
+        <div v-loading="loading" class="list-area">
+          <div v-if="items.length" class="card-grid">
+            <div v-for="att in items" :key="att.id" class="att-card">
+              <div class="thumb">
+                <img v-if="thumbUrls[att.id]" :src="thumbUrls[att.id]" :alt="att.original_name" />
+                <el-icon v-else :size="40"><Document /></el-icon>
+              </div>
+              <el-tooltip :content="att.original_name" placement="top" :show-after="300">
+                <p class="att-name">{{ att.original_name }}</p>
+              </el-tooltip>
+              <p class="att-meta">{{ fmtSize(att.file_size) }} · {{ formatDateTime(att.created_at) }}</p>
+              <p v-if="att.description" class="att-desc">{{ att.description }}</p>
+              <div class="att-actions">
+                <el-button size="small" @click="download(att)">{{ t('attachment.download') }}</el-button>
+                <template v-if="canOperate">
+                  <el-button size="small" type="primary" plain @click="openBind(att)">{{ t('attachment.bind') }}</el-button>
+                  <el-button size="small" type="danger" plain @click="remove(att)">{{ t('attachment.delete') }}</el-button>
+                </template>
+              </div>
             </div>
           </div>
+          <el-pagination
+            v-if="total > 0"
+            v-model:current-page="page"
+            class="pager"
+            layout="total, prev, pager, next"
+            :page-size="perPage"
+            :total="total"
+            @current-change="run"
+          />
         </div>
-        <el-empty v-if="!loading && !loadError && items.length === 0" :description="t('attachment.empty')" />
-        <el-pagination
-          v-if="total > 0"
-          v-model:current-page="page"
-          class="pager"
-          layout="total, prev, pager, next"
-          :page-size="pageSize"
-          :total="total"
-          @current-change="load"
-        />
-      </div>
+      </StateBlock>
     </section>
     <el-dialog v-model="bindDialog" :title="t('attachment.bindTitle')" width="480">
       <el-form label-position="top">
@@ -87,7 +93,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, reactive, ref } from 'vue'
+import { computed, onBeforeUnmount, reactive, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { ElMessage, ElMessageBox, type UploadRequestOptions } from 'element-plus'
 import { Document, UploadFilled } from '@element-plus/icons-vue'
@@ -99,18 +105,18 @@ import {
   listAttachments,
   uploadAttachment,
   type Attachment
-} from '../api/attachments'
-import { useAuthStore } from '../stores/auth'
-import { showApiError } from '../composables/useNotify'
+} from '@/api/attachments'
+import { useAuthStore } from '@/stores/auth'
+import { showApiError } from '@/composables/useNotify'
+import { useAsyncData } from '@/composables/useAsyncData'
+import { usePagination } from '@/composables/usePagination'
+import StateBlock from '@/components/base/StateBlock.vue'
+import { formatDateTime } from '@/utils/datetime'
 
 const auth = useAuthStore()
-const { t, locale } = useI18n()
-const items = ref<Attachment[]>([])
-const total = ref(0)
-const page = ref(1)
-const pageSize = 24
-const loading = ref(false)
-const loadError = ref('')
+const { t } = useI18n()
+// 分页状态（S4 收敛 usePagination）：perPage 保持原值 24；翻页走 v-model:current-page + @current-change
+const { page, perPage, total, setTotal, reset } = usePagination({ perPage: 24 })
 const filterType = ref('')
 const filterEntityId = ref('')
 const bindDialog = ref(false)
@@ -122,39 +128,36 @@ const createdUrls: string[] = []
 
 const canOperate = computed(() => ['admin', 'maintainer', 'member'].includes(auth.user?.role || ''))
 
-onMounted(load)
+// 列表加载收敛 useAsyncData（内建竞态/卸载保护，替代手写 loading/loadError/onMounted 三件套）；
+// 三态展示由模板 StateBlock 接管，操作后刷新一律走 run()
+const { data, loading, error, run } = useAsyncData(loadList)
+const items = computed(() => data.value ?? [])
+
 onBeforeUnmount(() => {
   for (const url of createdUrls) URL.revokeObjectURL(url)
 })
 
-async function load() {
-  loading.value = true
-  loadError.value = ''
-  try {
-    // entity_type/entity_id 必须成对出现；都空 = 未绑定附件列表
-    const params: Record<string, string | number> = { page: page.value, per_page: pageSize }
-    if (filterType.value && filterEntityId.value.trim()) {
-      params.entity_type = filterType.value
-      params.entity_id = filterEntityId.value.trim()
-    }
-    const data = await listAttachments(params)
-    items.value = data.items ?? []
-    total.value = data.total
-    await loadThumbs()
-  } catch (err) {
-    loadError.value = err instanceof Error ? err.message : t('attachment.loadFailed')
-  } finally {
-    loading.value = false
+async function loadList(): Promise<Attachment[]> {
+  // entity_type/entity_id 必须成对出现；都空 = 未绑定附件列表
+  const params: Record<string, string | number> = { page: page.value, per_page: perPage.value }
+  if (filterType.value && filterEntityId.value.trim()) {
+    params.entity_type = filterType.value
+    params.entity_id = filterEntityId.value.trim()
   }
+  const res = await listAttachments(params)
+  setTotal(res.total)
+  const list = res.items ?? []
+  await loadThumbs(list)
+  return list
 }
 
 // 为图片附件加载缩略图，失败时回退到文件图标
-async function loadThumbs() {
+async function loadThumbs(list: Attachment[]) {
   for (const url of createdUrls) URL.revokeObjectURL(url)
   createdUrls.length = 0
   const map: Record<string, string> = {}
   await Promise.all(
-    items.value
+    list
       .filter((att) => att.mime_type?.startsWith('image/'))
       .map(async (att) => {
         try {
@@ -175,8 +178,8 @@ function search() {
     ElMessage.warning(t('attachment.pairRequired'))
     return
   }
-  page.value = 1
-  load()
+  reset()
+  run()
 }
 
 function pairInvalid(entityType: string, entityId: string) {
@@ -191,7 +194,7 @@ async function onUpload(options: UploadRequestOptions) {
   try {
     await uploadAttachment(options.file, bindForm.entity_type, bindForm.entity_id.trim(), bindForm.description.trim())
     ElMessage.success(t('attachment.uploadSuccess'))
-    await load()
+    await run()
   } catch (err) {
     showApiError(err, t('attachment.uploadFailed'))
   }
@@ -233,7 +236,7 @@ async function submitBind() {
     })
     bindDialog.value = false
     ElMessage.success(t('attachment.bindSuccess'))
-    await load()
+    await run()
   } catch (err) {
     showApiError(err, t('attachment.bindFailed'))
   }
@@ -248,7 +251,7 @@ async function remove(att: Attachment) {
   try {
     await deleteAttachment(att.id)
     ElMessage.success(t('attachment.deleted'))
-    await load()
+    await run()
   } catch (err) {
     showApiError(err, t('attachment.deleteFailed'))
   }
@@ -258,10 +261,6 @@ function fmtSize(size: number) {
   if (size < 1024) return `${size} B`
   if (size < 1024 * 1024) return `${(size / 1024).toFixed(1)} KB`
   return `${(size / 1024 / 1024).toFixed(1)} MB`
-}
-
-function fmtTime(t?: string) {
-  return t ? new Date(t).toLocaleString(locale.value === 'zh' ? 'zh-CN' : 'en-US', { hour12: false }) : '—'
 }
 </script>
 
@@ -304,10 +303,6 @@ function fmtTime(t?: string) {
   margin-top: 8px;
 }
 
-.load-error {
-  margin-bottom: 16px;
-}
-
 .list-area {
   min-height: 120px;
 }
@@ -340,7 +335,8 @@ function fmtTime(t?: string) {
 
 .thumb {
   align-items: center;
-  background: #fff;
+  /* 缩略图占位底对齐上传/拖拽区规范（美术 §4.5）：surface-2 浅灰底 */
+  background: var(--surface-2);
   border: 1px solid var(--border);
   border-radius: 8px;
   color: var(--text-3);

@@ -18,29 +18,35 @@
     </div>
 
     <section class="panel">
-      <el-alert v-if="loadError" class="load-error" type="error" :title="loadError" show-icon :closable="false">
-        <el-button size="small" @click="load">{{ t('todos.retry') }}</el-button>
-      </el-alert>
-      <div v-loading="loading" class="todo-list">
-        <el-empty v-if="!loading && !todos.length && !loadError" :description="t('todos.empty')" />
-        <div v-for="item in todos" :key="item.id" class="todo-row" :class="{ done: item.status === 'done' }">
-          <el-checkbox
-            :model-value="item.status === 'done'"
-            :disabled="item.status === 'cancelled' || !canComplete(item)"
-            @change="onToggleDone(item)"
-          />
-          <span class="todo-priority" :class="item.priority">{{ priorityLabel(item.priority) }}</span>
-          <span class="todo-title">{{ item.title }}</span>
-          <el-tag v-if="item.status === 'deferred'" size="small" type="warning">{{ t('todos.deferredTag') }}</el-tag>
-          <el-tag v-if="item.status === 'cancelled'" size="small" type="info">{{ t('todos.cancelledTag') }}</el-tag>
-          <span class="todo-source">{{ sourceLabel(item) }}</span>
-          <span class="todo-actions">
-            <el-button v-if="canDefer(item)" size="small" @click="onDefer(item)">{{ t('todos.defer') }}</el-button>
-            <el-button v-if="canEdit(item)" size="small" @click="openEdit(item)">{{ t('todos.edit') }}</el-button>
-            <el-button v-if="canEdit(item)" size="small" type="danger" plain @click="onDelete(item)">{{ t('todos.delete') }}</el-button>
-          </span>
+      <!-- 列表三态收敛 StateBlock（重构 S4）：首屏骨架 > 错误重试 > 空态 > 列表；操作级错误仍走 showApiError -->
+      <StateBlock
+        :loading="loading && !todos"
+        :error="loadError"
+        :empty="!loading && !todos?.length"
+        :error-text="t('todos.loadFailed')"
+        :empty-text="t('todos.empty')"
+        @retry="load"
+      >
+        <div class="todo-list">
+          <div v-for="item in todos ?? []" :key="item.id" class="todo-row" :class="{ done: item.status === 'done' }">
+            <el-checkbox
+              :model-value="item.status === 'done'"
+              :disabled="item.status === 'cancelled' || !canComplete(item)"
+              @change="onToggleDone(item)"
+            />
+            <span class="todo-priority" :class="item.priority">{{ priorityLabel(item.priority) }}</span>
+            <span class="todo-title">{{ item.title }}</span>
+            <el-tag v-if="item.status === 'deferred'" size="small" type="warning">{{ t('todos.deferredTag') }}</el-tag>
+            <el-tag v-if="item.status === 'cancelled'" size="small" type="info">{{ t('todos.cancelledTag') }}</el-tag>
+            <span class="todo-source">{{ sourceLabel(item) }}</span>
+            <span class="todo-actions">
+              <el-button v-if="canDefer(item)" size="small" @click="onDefer(item)">{{ t('todos.defer') }}</el-button>
+              <el-button v-if="canEdit(item)" size="small" @click="openEdit(item)">{{ t('todos.edit') }}</el-button>
+              <el-button v-if="canEdit(item)" size="small" type="danger" plain @click="onDelete(item)">{{ t('todos.delete') }}</el-button>
+            </span>
+          </div>
         </div>
-      </div>
+      </StateBlock>
     </section>
 
     <section class="panel subscribe-panel">
@@ -135,18 +141,22 @@ import {
   createTodo, deleteTodo, deferTodo, doneTodo, getNotificationTopic,
   listTodos, provisionTopic, redeemTopic, updateTodo,
   type Todo
-} from '../api/todos'
-import { listProjects, type Project } from '../api/projects'
-import { showApiError } from '../composables/useNotify'
-import { useAuthStore } from '../stores/auth'
+} from '@/api/todos'
+import { listProjects, type Project } from '@/api/projects'
+import StateBlock from '@/components/base/StateBlock.vue'
+import { useAsyncData } from '@/composables/useAsyncData'
+import { showApiError } from '@/composables/useNotify'
+import { statusMetaFor } from '@/utils/statusMeta'
+import { useAuthStore } from '@/stores/auth'
 
 const { t } = useI18n()
 const auth = useAuthStore()
 
 const filters = reactive({ date: todayStr(), scope: 'all', status: 'open' })
-const todos = ref<Todo[]>([])
-const loading = ref(false)
-const loadError = ref('')
+// 列表加载收敛 useAsyncData（重构 S4）：内建竞态 seq + 卸载丢弃；error 只写 ref 不 toast，三态走 StateBlock
+const { data: todos, loading, error: loadError, run: load } = useAsyncData<Todo[]>(() =>
+  listTodos({ date: filters.date, scope: filters.scope as never, status: filters.status as never })
+)
 const projects = ref<Project[]>([])
 
 const createDialog = ref(false)
@@ -173,7 +183,7 @@ function todayStr() {
 }
 
 onMounted(() => {
-  load()
+  // 列表首跑由 useAsyncData immediate 承担，此处仅加载辅助数据
   loadProjects()
   loadTopic()
 })
@@ -183,18 +193,6 @@ async function loadProjects() {
     projects.value = await listProjects()
   } catch (err) {
     showApiError(err, t('todos.loadProjectsFailed'))
-  }
-}
-
-async function load() {
-  loading.value = true
-  loadError.value = ''
-  try {
-    todos.value = await listTodos({ date: filters.date, scope: filters.scope as never, status: filters.status as never })
-  } catch (err) {
-    loadError.value = (err as Error).message || t('todos.loadFailed')
-  } finally {
-    loading.value = false
   }
 }
 
@@ -215,8 +213,10 @@ function canEdit(item: Todo) {
   return item.status !== 'cancelled' && isOwner(item)
 }
 
+// 优先级文案走 statusMeta 注册表 labelKey，未命中回退原文（对齐 IssuesView statusLabel 先例）
 function priorityLabel(p: string) {
-  return t(`todos.priority${p.charAt(0).toUpperCase()}${p.slice(1)}`)
+  const m = statusMetaFor('todoPriority', p)
+  return m ? t(m.labelKey) : p
 }
 
 function sourceLabel(item: Todo) {
@@ -396,15 +396,7 @@ async function copyText(text: string) {
   color: var(--text-3);
   text-decoration: line-through;
 }
-.todo-priority {
-  border-radius: 4px;
-  font-size: 12px;
-  padding: 1px 6px;
-  white-space: nowrap;
-}
-.todo-priority.high { background: #fde2e2; color: #c45656; }
-.todo-priority.medium { background: #fff3cd; color: #b58a1d; }
-.todo-priority.low { background: #e3f2fd; color: #3a7dc2; }
+/* 优先级 pill 样式已上提 utilities.css 公共类（S4，两处一致合并；statusMeta todoPriority 族） */
 .todo-title {
   flex: 1;
   min-width: 0;
@@ -455,9 +447,6 @@ async function copyText(text: string) {
 }
 .subscribe-error {
   margin-top: 8px;
-}
-.load-error {
-  margin-bottom: 8px;
 }
 
 @media (max-width: 768px) {

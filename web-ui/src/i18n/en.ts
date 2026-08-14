@@ -10,7 +10,9 @@ export default {
     // Generic confirm/retry/empty labels used by base components (FormDialog / StateBlock).
     confirm: 'Confirm',
     retry: 'Retry',
-    empty: 'No data'
+    empty: 'No data',
+    // Locale-aware list separator for joining summary strings (DashboardView brief cards).
+    listSeparator: '; '
   },
   login: {
     // Tagline under the "HIAF Lab System" brand on the login page.
@@ -632,6 +634,9 @@ export default {
     save: 'Save',
     statusUpdated: 'Status updated',
     statusUpdateFailed: 'Failed to update status',
+    loadFailed: 'Failed to load issues',
+    createFailed: 'Failed to create issue',
+    commentFailed: 'Failed to add comment',
     // Board column / status labels.
     status: {
       open: 'Open',

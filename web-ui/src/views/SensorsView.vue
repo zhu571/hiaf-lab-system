@@ -32,9 +32,8 @@
           <el-option v-for="m in MEASUREMENTS" :key="m.value" :label="m.label" :value="m.value" />
         </el-select>
       </div>
-      <el-alert v-if="latestError" :title="latestError" type="error" show-icon :closable="false">
-        <el-button size="small" @click="loadLatest()">{{ t('sensors.retry') }}</el-button>
-      </el-alert>
+      <!-- 错误态收敛 StateBlock（§3.8）：展示条件不变——仅错误时面板内警示 + 重试，旧读数网格保留在下方 -->
+      <StateBlock v-if="latestAsyncError" :error="latestAsyncError" @retry="loadLatest()" />
       <div v-loading="latestLoading" class="reading-grid">
         <div v-for="point in latestPoints" :key="point.tag || point.time" class="reading-card">
           <div class="reading-row">
@@ -45,7 +44,7 @@
             </el-tag>
           </div>
           <strong class="reading-value">{{ fmtValue(point.value) }}<span v-if="unitOf(point.tag)" class="reading-unit">{{ unitOf(point.tag) }}</span></strong>
-          <span class="muted reading-time">{{ formatTime(point.time) }}</span>
+          <span class="muted reading-time">{{ formatDateTime(point.time) }}</span>
         </div>
         <el-empty v-if="!latestLoading && !latestPoints.length" :description="t('sensors.noReadings')" class="grid-empty" />
       </div>
@@ -95,16 +94,15 @@
 import { computed, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { Odometer, Refresh, TrendCharts } from '@element-plus/icons-vue'
-import { getHistory, getLatest, type SensorPoint } from '../api/sensors'
-import { showApiError } from '../composables/useNotify'
-import { usePolling } from '../composables/usePolling'
+import { getHistory, getLatest, type SensorPoint } from '@/api/sensors'
+import { showApiError } from '@/composables/useNotify'
+import { useAsyncData } from '@/composables/useAsyncData'
+import { usePolling } from '@/composables/usePolling'
 import SensorTrendChart from '@/components/business/SensorTrendChart.vue'
 import { buildChartGroups, chartPalette, type ChartGroup } from '@/utils/chartTheme'
+import { formatDateTime } from '@/utils/datetime'
 
-const { t, locale } = useI18n()
-
-// 时间显示跟随界面语言（§3.9 P1-5，DashboardView dateLocale 模式）
-const dateLocale = computed(() => (locale.value === 'zh' ? 'zh-CN' : 'en-US'))
+const { t } = useI18n()
 
 // 与后端 INFLUXDB_MEASUREMENTS 默认值一致（go-server/sensors/service.go）
 const MEASUREMENTS = computed(() => [
@@ -137,24 +135,61 @@ const HISTORY_REFRESH_MS = 30000
 
 // P0-3：默认显式选中 5 个已知测量项，消除「空选择 = 后端整桶查询」歧义
 const selectedMeasurements = ref<string[]>(MEASUREMENTS.value.map((m) => m.value))
-const latestPoints = ref<SensorPoint[]>([])
-const latestLoading = ref(false)
-const latestError = ref('')
 
 const historyMeasurement = ref('pressure')
 const historyRange = ref('-1h')
-const historyPoints = ref<SensorPoint[]>([])
-const historyLoading = ref(false)
-const historyError = ref('')
 const historyErrorType = ref<'error' | 'warning'>('error')
-const historySyncing = ref(false)
 // 自定义态哨兵：唯一由组件 zoom-change 事件驱动（§4.2.2 定稿）
 const rangeZoomed = ref(false)
 
 const autoRefresh = ref(true)
 const refreshing = ref(false)
 const lastUpdatedAt = ref<Date | null>(null)
-let historySeq = 0
+// 本轮 run 是否静默（轮询/手动刷新按钮）：silent 时 latest 不闪遮罩、history 仅 syncing 半透明（§3.2 静默降级）
+const latestSilent = ref(false)
+const historySilent = ref(false)
+
+// useAsyncData 收敛（重构方案 §3.5）：竞态 seq + unmount 丢弃内建，替代原手写 historySeq；
+// error 只写 ref 不自动 toast，正好匹配轮询静默模式——toast/警示级别由 loadLatest/loadHistory 按 silent 自决
+const {
+  data: latestData,
+  loading: latestAsyncLoading,
+  error: latestAsyncError,
+  run: runLatest
+} = useAsyncData<SensorPoint[]>(
+  async () => {
+    const res = await getLatest(selectedMeasurements.value)
+    return res.points ? [...res.points].sort((a, b) => a.tag.localeCompare(b.tag)) : []
+  },
+  { immediate: false }
+)
+const {
+  data: historyData,
+  loading: historyAsyncLoading,
+  error: historyAsyncError,
+  run: runHistory
+} = useAsyncData<SensorPoint[]>(
+  async () => {
+    const range = RANGES.value.find((r) => r.from === historyRange.value) || RANGES.value[0]
+    const res = await getHistory(historyMeasurement.value, range.from, '', range.interval)
+    return res.points || []
+  },
+  { immediate: false }
+)
+
+const latestPoints = computed(() => latestData.value ?? [])
+const historyPoints = computed(() => historyData.value ?? [])
+
+// 非 silent 进行中才显遮罩，history silent 进行中走 syncing 半透明（§3.2 定稿逐字保留）
+const latestLoading = computed(() => latestAsyncLoading.value && !latestSilent.value)
+const historyLoading = computed(() => historyAsyncLoading.value && !historySilent.value)
+const historySyncing = computed(() => historyAsyncLoading.value && historySilent.value)
+const historyError = computed(() => historyAsyncError.value?.message ?? '')
+
+// 「最后更新」时间仅在 data 通过 seq 竞态检查真正回写时刷新（与回写严格同源）
+watch(latestData, (v) => {
+  if (v) lastUpdatedAt.value = new Date()
+})
 
 // 轮询（重构方案 §3.5）：latest 5s + history 30s 两个独立轮询，由 autoRefresh 开关统一启停；
 // 页面隐藏自动暂停、恢复可见立即刷 latest（history 不立即刷，保持现状语义）
@@ -214,42 +249,19 @@ async function manualRefresh() {
 }
 
 async function loadLatest(opts: { silent?: boolean } = {}) {
-  if (!opts.silent) latestLoading.value = true
-  latestError.value = ''
-  try {
-    const data = await getLatest(selectedMeasurements.value)
-    latestPoints.value = data.points ? [...data.points].sort((a, b) => a.tag.localeCompare(b.tag)) : []
-    lastUpdatedAt.value = new Date()
-  } catch (err) {
-    latestError.value = err instanceof Error ? err.message : t('sensors.latestFailed')
-    // 轮询期失败静默降级到面板内警示条，不打 toast 刷屏（§3.2）
-    if (!opts.silent) showApiError(err, t('sensors.latestFailed'))
-  } finally {
-    latestLoading.value = false
-  }
+  latestSilent.value = !!opts.silent
+  await runLatest()
+  // 轮询期失败静默降级到面板内警示条，不打 toast 刷屏（§3.2）
+  if (latestAsyncError.value && !opts.silent) showApiError(latestAsyncError.value, t('sensors.latestFailed'))
 }
 
 async function loadHistory(opts: { silent?: boolean } = {}) {
   if (!historyMeasurement.value) return
-  const seq = ++historySeq
-  if (!opts.silent) historyLoading.value = true
-  if (opts.silent) historySyncing.value = true
-  historyError.value = ''
-  const range = RANGES.value.find((r) => r.from === historyRange.value) || RANGES.value[0]
-  try {
-    const data = await getHistory(historyMeasurement.value, range.from, '', range.interval)
-    if (seq !== historySeq) return
-    historyPoints.value = data.points || []
-  } catch (err) {
-    if (seq !== historySeq) return
-    historyError.value = err instanceof Error ? err.message : t('sensors.historyFailed')
+  historySilent.value = !!opts.silent
+  await runHistory()
+  if (historyAsyncError.value) {
     historyErrorType.value = opts.silent ? 'warning' : 'error'
-    if (!opts.silent) showApiError(err, t('sensors.historyFailed'))
-  } finally {
-    if (seq === historySeq) {
-      historyLoading.value = false
-      historySyncing.value = false
-    }
+    if (!opts.silent) showApiError(historyAsyncError.value, t('sensors.historyFailed'))
   }
 }
 
@@ -281,11 +293,8 @@ function fmtValue(v: number) {
   return String(Number(v.toPrecision(4)))
 }
 
-function formatTime(v?: string) {
-  return v ? new Date(v).toLocaleString(dateLocale.value, { hour12: false }) : '—'
-}
-
-const lastUpdatedText = computed(() => (lastUpdatedAt.value ? formatTime(lastUpdatedAt.value.toISOString()) : '—'))
+// 时间格式化统一走 utils/datetime（§3.7）：locale 跟随 i18n，空值/非法 → '—'
+const lastUpdatedText = computed(() => formatDateTime(lastUpdatedAt.value))
 
 // 卡片归属：已知测量项前缀匹配（大小写不敏感）→ 未知徽标兜底（§3.3 定稿）
 function measurementOf(tag: string): string | null {

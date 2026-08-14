@@ -20,17 +20,25 @@
           {{ t('dashboard.todosMore') }}
         </el-button>
       </div>
-      <div v-loading="loadingTodos" class="todo-list">
-        <el-empty v-if="!loadingTodos && !todos.length" :description="t('dashboard.noTodos')" :image-size="60" />
-        <div v-for="item in todos" :key="item.id" class="todo-row" :class="{ done: item.status === 'done' }">
-          <el-checkbox :model-value="item.status === 'done'" @change="toggleTodo(item)" />
-          <span class="todo-priority" :class="item.priority">{{ todoPriorityLabel(item.priority) }}</span>
-          <span class="todo-title">{{ item.title }}</span>
-          <span class="todo-source">{{ todoSourceLabel(item) }}</span>
-          <el-button v-if="item.status === 'pending'" size="small" text type="warning" @click="deferTodoItem(item)">
-            {{ t('dashboard.defer') }}
-          </el-button>
-        </div>
+      <div class="todo-list">
+        <StateBlock
+          :loading="loadingTodos && !todosData"
+          :error="todosError"
+          :empty="!todos.length"
+          :error-text="t('dashboard.todosLoadFailed')"
+          :empty-text="t('dashboard.noTodos')"
+          @retry="loadTodos"
+        >
+          <div v-for="item in todos" :key="item.id" class="todo-row" :class="{ done: item.status === 'done' }">
+            <el-checkbox :model-value="item.status === 'done'" @change="toggleTodo(item)" />
+            <span class="todo-priority" :class="item.priority">{{ todoPriorityLabel(item.priority) }}</span>
+            <span class="todo-title">{{ item.title }}</span>
+            <span class="todo-source">{{ todoSourceLabel(item) }}</span>
+            <el-button v-if="item.status === 'pending'" size="small" text type="warning" @click="deferTodoItem(item)">
+              {{ t('dashboard.defer') }}
+            </el-button>
+          </div>
+        </StateBlock>
       </div>
       <div class="todo-add-row">
         <el-input v-model="manualTitle" :placeholder="t('dashboard.todoAddPlaceholder')" maxlength="256" clearable @keyup.enter="addManualTodo" />
@@ -50,22 +58,30 @@
           <h3>{{ t('dashboard.deviceStatus') }}</h3>
           <span class="panel-meta">{{ t('dashboard.onlineCount', { online: onlineCount, total: instruments.length + 1 }) }}</span>
         </div>
-        <div v-loading="loadingInstruments" class="card-list">
-          <el-empty v-if="!loadingInstruments && !instruments.length" :description="t('dashboard.noDevices')" />
-          <div
-            v-for="(inst, i) in instruments"
-            :key="inst.id"
-            class="device-card"
-            :style="stagger(i)"
-            @click="router.push('/instrument-measure')"
+        <div class="card-list">
+          <StateBlock
+            :loading="loadingInstruments && !instrumentsData"
+            :error="instrumentsError"
+            :empty="!instruments.length"
+            :error-text="t('dashboard.loadDevicesFailed')"
+            :empty-text="t('dashboard.noDevices')"
+            @retry="loadInstruments"
           >
-            <span class="status-dot" :class="{ online: isOnline(inst.state) }"></span>
-            <span class="device-name">{{ inst.name }}</span>
-            <span class="device-state" :class="{ online: isOnline(inst.state) }">
-              {{ isOnline(inst.state) ? t('common.online') : t('common.offline') }}
-            </span>
-            <el-icon class="card-chev"><ArrowRight /></el-icon>
-          </div>
+            <div
+              v-for="(inst, i) in instruments"
+              :key="inst.id"
+              class="device-card"
+              :style="stagger(i)"
+              @click="router.push('/instrument-measure')"
+            >
+              <span class="status-dot" :class="{ online: isOnline(inst.state) }"></span>
+              <span class="device-name">{{ inst.name }}</span>
+              <span class="device-state" :class="{ online: isOnline(inst.state) }">
+                {{ isOnline(inst.state) ? t('common.online') : t('common.offline') }}
+              </span>
+              <el-icon class="card-chev"><ArrowRight /></el-icon>
+            </div>
+          </StateBlock>
 
           <div class="device-card gas-card" :style="stagger(instruments.length)" @click="router.push('/gas-control')">
             <div class="device-row">
@@ -79,11 +95,11 @@
             <div class="gas-stats" :class="{ offline: !gasOnline }">
               <div class="gas-stat">
                 <span class="gas-label">{{ t('dashboard.runningState') }}</span>
-                <span class="gas-value">{{ gasRunningText }}</span>
+                <span class="gas-value num">{{ gasRunningText }}</span>
               </div>
               <div class="gas-stat">
                 <span class="gas-label">{{ t('dashboard.a1Pressure') }}</span>
-                <span class="gas-value">{{ gasA1Text }}</span>
+                <span class="gas-value num">{{ gasA1Text }}</span>
               </div>
             </div>
           </div>
@@ -97,22 +113,30 @@
           <h3>{{ t('dashboard.brief') }}</h3>
           <span class="panel-meta">{{ t('dashboard.last7Days') }}</span>
         </div>
-        <div v-loading="loadingReports" class="brief-strip">
-          <div
-            v-for="(day, i) in briefDays"
-            :key="day.date"
-            class="brief-card"
-            :class="{ active: day.date === selectedDate }"
-            :style="stagger(i)"
-            @click="selectDate(day.date)"
+        <div class="brief-strip">
+          <!-- 简报条恒渲染 7 天卡片，无空态，仅收敛 loading/error -->
+          <StateBlock
+            :loading="loadingReports && !reportsData"
+            :error="reportsError"
+            :error-text="t('dashboard.loadReportsFailed')"
+            @retry="loadReports"
           >
-            <div class="brief-top">
-              <span class="brief-date">{{ briefDayLabel(day.date) }}</span>
-              <span class="brief-count">{{ t('dashboard.peopleCount', { n: day.reports.length }) }}</span>
+            <div
+              v-for="(day, i) in briefDays"
+              :key="day.date"
+              class="brief-card"
+              :class="{ active: day.date === selectedDate }"
+              :style="stagger(i)"
+              @click="selectDate(day.date)"
+            >
+              <div class="brief-top">
+                <span class="brief-date">{{ briefDayLabel(day.date) }}</span>
+                <span class="brief-count">{{ t('dashboard.peopleCount', { n: day.reports.length }) }}</span>
+              </div>
+              <span class="brief-week">{{ weekdayLabel(day.date) }}</span>
+              <p class="brief-summary" :class="{ empty: !day.summary }">{{ day.summary || t('dashboard.noReport') }}</p>
             </div>
-            <span class="brief-week">{{ weekdayLabel(day.date) }}</span>
-            <p class="brief-summary" :class="{ empty: !day.summary }">{{ day.summary || t('dashboard.noReport') }}</p>
-          </div>
+          </StateBlock>
         </div>
       </section>
 
@@ -128,24 +152,32 @@
           <el-date-picker v-model="selectedDate" type="date" value-format="YYYY-MM-DD" :clearable="false" />
           <el-button :icon="ArrowRight" circle size="small" @click="shiftDate(1)" />
         </div>
-        <div v-loading="loadingReports" class="card-list">
-          <el-empty v-if="!loadingReports && !dayReports.length" :description="t('dashboard.noReportToday')" />
-          <div
-            v-for="(report, i) in dayReports"
-            :key="report.id"
-            class="member-card"
-            :style="stagger(i)"
-            @click="router.push('/daily-reports/' + report.id)"
+        <div class="card-list">
+          <StateBlock
+            :loading="loadingReports && !reportsData"
+            :error="reportsError"
+            :empty="!dayReports.length"
+            :error-text="t('dashboard.loadReportsFailed')"
+            :empty-text="t('dashboard.noReportToday')"
+            @retry="loadReports"
           >
-            <div class="member-row">
-              <span class="avatar">{{ initial(report) }}</span>
-              <span class="member-name">{{ report.author_name || report.author_id }}</span>
-              <el-icon class="card-chev"><ArrowRight /></el-icon>
+            <div
+              v-for="(report, i) in dayReports"
+              :key="report.id"
+              class="member-card"
+              :style="stagger(i)"
+              @click="router.push('/daily-reports/' + report.id)"
+            >
+              <div class="member-row">
+                <span class="avatar">{{ initial(report) }}</span>
+                <span class="member-name">{{ report.author_name || report.author_id }}</span>
+                <el-icon class="card-chev"><ArrowRight /></el-icon>
+              </div>
+              <p class="member-summary" :class="{ empty: !report.summary }">
+                {{ truncate(report.summary) || t('dashboard.noSummary') }}
+              </p>
             </div>
-            <p class="member-summary" :class="{ empty: !report.summary }">
-              {{ truncate(report.summary) || t('dashboard.noSummary') }}
-            </p>
-          </div>
+          </StateBlock>
         </div>
       </section>
     </div>
@@ -162,6 +194,9 @@ import { listInstruments, gasCellStatus, type InstrumentSummary, type GasCellPoi
 import { listReports, type DailyReport } from '../api/logs'
 import { listTodos, createTodo, doneTodo, deferTodo, llmParse, llmAdd, type Todo } from '../api/todos'
 import { showApiError } from '../composables/useNotify'
+import { useAsyncData } from '@/composables/useAsyncData'
+import { statusMetaFor } from '@/utils/statusMeta'
+import StateBlock from '@/components/base/StateBlock.vue'
 
 const router = useRouter()
 const { t, locale } = useI18n()
@@ -169,13 +204,30 @@ const { t, locale } = useI18n()
 const RUNNING = 'GasCell:Piezo:Running'
 const A1 = 'GasCell:Piezo:A1'
 
-const instruments = ref<InstrumentSummary[]>([])
+// 数据块统一走 useAsyncData（内建竞态 seq + unmount 丢弃，immediate 自动首载），三态由 StateBlock 呈现：
+// 加载错误落区块内联错误态（不再 toast）；操作级动作（添加/完成/推迟/AI 解析）仍 showApiError
+const {
+  data: instrumentsData,
+  loading: loadingInstruments,
+  error: instrumentsError,
+  run: loadInstruments
+} = useAsyncData(() => listInstruments())
+const instruments = computed(() => instrumentsData.value ?? [])
 const gasData = reactive<Record<string, GasCellPoint>>({})
-const reports = ref<DailyReport[]>([])
-const loadingInstruments = ref(false)
-const loadingReports = ref(false)
-const todos = ref<Todo[]>([])
-const loadingTodos = ref(false)
+const {
+  data: reportsData,
+  loading: loadingReports,
+  error: reportsError,
+  run: loadReports
+} = useAsyncData(async () => (await listReports({ per_page: 100 })).items ?? [])
+const reports = computed(() => reportsData.value ?? [])
+const {
+  data: todosData,
+  loading: loadingTodos,
+  error: todosError,
+  run: loadTodos
+} = useAsyncData(() => listTodos({ status: 'open' }))
+const todos = computed(() => todosData.value ?? [])
 const manualTitle = ref('')
 const llmText = ref('')
 const addingTodo = ref(false)
@@ -192,51 +244,16 @@ function localDate(d: Date): string {
   return `${y}-${m}-${day}`
 }
 
+// 仪器/日报/待办由 useAsyncData immediate 自动首载；气压块无独立 loading 态，保持原有触发 + toast
 onMounted(() => {
-  loadInstruments()
   loadGasCell()
-  loadReports()
-  loadTodos()
 })
-
-async function loadInstruments() {
-  loadingInstruments.value = true
-  try {
-    instruments.value = await listInstruments()
-  } catch (err) {
-    showApiError(err, t('dashboard.loadDevicesFailed'))
-  } finally {
-    loadingInstruments.value = false
-  }
-}
 
 async function loadGasCell() {
   try {
     Object.assign(gasData, (await gasCellStatus()).data)
   } catch (err) {
     showApiError(err, t('dashboard.loadGasFailed'))
-  }
-}
-
-async function loadReports() {
-  loadingReports.value = true
-  try {
-    reports.value = (await listReports({ per_page: 100 })).items ?? []
-  } catch (err) {
-    showApiError(err, t('dashboard.loadReportsFailed'))
-  } finally {
-    loadingReports.value = false
-  }
-}
-
-async function loadTodos() {
-  loadingTodos.value = true
-  try {
-    todos.value = await listTodos({ status: 'open' })
-  } catch (err) {
-    showApiError(err, t('dashboard.todosLoadFailed'))
-  } finally {
-    loadingTodos.value = false
   }
 }
 
@@ -307,8 +324,10 @@ async function parseLLMTodo() {
   }
 }
 
+// 优先级文案走 statusMeta 注册表 labelKey，未命中回退原文（对齐 IssuesView statusLabel 先例）
 function todoPriorityLabel(p: string) {
-  return t(`todos.priority${p.charAt(0).toUpperCase()}${p.slice(1)}`)
+  const m = statusMetaFor('todoPriority', p)
+  return m ? t(m.labelKey) : p
 }
 
 function todoSourceLabel(item: Todo) {
@@ -358,7 +377,7 @@ const briefDays = computed(() =>
     return {
       date,
       reports: dayReports,
-      summary: truncate(dayReports.map((r) => r.summary).filter(Boolean).join('；'), 200)
+      summary: truncate(dayReports.map((r) => r.summary).filter(Boolean).join(t('common.listSeparator')), 200)
     }
   })
 )
@@ -513,27 +532,7 @@ function stagger(i: number) {
   text-decoration: line-through;
 }
 
-.todo-priority {
-  border-radius: 4px;
-  font-size: 12px;
-  padding: 1px 6px;
-  white-space: nowrap;
-}
-
-.todo-priority.high {
-  background: #fde2e2;
-  color: #c45656;
-}
-
-.todo-priority.medium {
-  background: #fff3cd;
-  color: #b58a1d;
-}
-
-.todo-priority.low {
-  background: #e3f2fd;
-  color: #3a7dc2;
-}
+/* 优先级 pill 样式已上提 utilities.css 公共类（S4，两处一致合并） */
 
 .todo-title {
   flex: 1;
@@ -614,7 +613,8 @@ function stagger(i: number) {
 }
 
 .status-dot {
-  background: #b9c6d2;
+  /* statusMeta onlineStatus：offline=--info 族 */
+  background: var(--info);
   border-radius: 50%;
   flex-shrink: 0;
   height: 8px;
@@ -623,6 +623,7 @@ function stagger(i: number) {
 }
 
 .status-dot.online {
+  /* statusMeta onlineStatus：online=--ok 族 */
   background: var(--ok);
 }
 
@@ -712,7 +713,6 @@ function stagger(i: number) {
 .gas-value {
   color: var(--text-1);
   font-size: 14px;
-  font-variant-numeric: tabular-nums;
   font-weight: 650;
 }
 
@@ -730,6 +730,13 @@ function stagger(i: number) {
   padding: 4px 4px 16px;
 }
 
+/* StateBlock 骨架/错误态在横向滚动 flex 容器内撑满宽度 */
+
+.brief-strip :deep(.state-block-skeleton),
+.brief-strip :deep(.state-block-error) {
+  flex: 1;
+}
+
 .brief-card {
   display: flex;
   flex: 0 0 210px;
@@ -740,7 +747,7 @@ function stagger(i: number) {
 .brief-card.active {
   background: var(--brand-050);
   border-color: var(--brand-500);
-  box-shadow: 0 6px 16px -8px rgba(18, 112, 138, 0.35);
+  box-shadow: var(--shadow-brand-sm);
 }
 
 .brief-top {
@@ -771,7 +778,7 @@ function stagger(i: number) {
 .brief-card.active .brief-count {
   background: var(--brand-600);
   border-color: var(--brand-600);
-  color: #fff;
+  color: var(--text-inverse);
 }
 
 .brief-week {
@@ -818,8 +825,8 @@ function stagger(i: number) {
   align-items: center;
   background: linear-gradient(135deg, var(--brand-500), var(--brand-700));
   border-radius: 10px;
-  box-shadow: 0 2px 6px -2px rgba(18, 112, 138, 0.5);
-  color: #fff;
+  box-shadow: var(--shadow-brand-md);
+  color: var(--text-inverse);
   display: inline-flex;
   flex-shrink: 0;
   font-size: 14px;

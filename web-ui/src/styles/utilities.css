@@ -34,6 +34,11 @@
   color: var(--text-3);
 }
 
+/* 数字展示（读数/表格数字/时间/计数）：沉淀 DashboardView tabular-nums 先例（美术 §3.3） */
+.num {
+  font-variant-numeric: tabular-nums;
+}
+
 .grid {
   display: grid;
   gap: var(--space-4);
@@ -99,6 +104,33 @@
   display: inline-block;
   height: 8px;
   width: 8px;
+}
+
+/* ---------- 待办优先级 pill（S4 上提：DashboardView/TodoView 两处一致合并；底色/文字对齐 statusMeta todoPriority 注册表族） ---------- */
+
+.todo-priority {
+  border-radius: 4px;
+  font-size: 12px;
+  padding: 1px 6px;
+  white-space: nowrap;
+}
+
+/* statusMeta todoPriority：high=--danger 族 */
+.todo-priority.high {
+  background: var(--danger-soft);
+  color: var(--danger-text);
+}
+
+/* statusMeta todoPriority：medium=--warn 族 */
+.todo-priority.medium {
+  background: var(--warn-soft);
+  color: var(--warn-text);
+}
+
+/* statusMeta todoPriority：low=--info 族 */
+.todo-priority.low {
+  background: var(--info-soft);
+  color: var(--info-text);
 }
 
 @media (max-width: 768px) {
