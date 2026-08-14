@@ -64,13 +64,6 @@ import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref } from 'v
 import { useI18n } from 'vue-i18n'
 import {
   Chart,
-  LineController,
-  LineElement,
-  PointElement,
-  LinearScale,
-  CategoryScale,
-  Legend,
-  Tooltip,
   type ChartDataset
 } from 'chart.js'
 import { ElMessage, ElMessageBox } from 'element-plus'
@@ -87,8 +80,9 @@ import {
   type PVWriteResult
 } from '../api/instruments'
 import { useAuthStore } from '../stores/auth'
+import { chartPalette } from '../utils/chartTheme'
 
-Chart.register(LineController, LineElement, PointElement, LinearScale, CategoryScale, Legend, Tooltip)
+// Chart.register 已收口到 utils/chartTheme.ts setupChartDefaults()（美术方案 §3.7，main.ts 调用一次）
 
 const { t } = useI18n()
 
@@ -186,10 +180,12 @@ function applyFrame(frame: GasCellFrame) {
 
 function createChart() {
   if (!chartCanvas.value) return
+  // 系列语义色（美术方案 §3.7）：气压主系列 --chart-1、setpoint --chart-3（虚线 [6,4] 保留）、阀门 --chart-2
+  const p = chartPalette()
   const datasets: ChartDataset<'line'>[] = [
-    { label: 'A1 (Pa)', data: [], borderColor: '#167d9a', yAxisID: 'pressure', pointRadius: 0 },
-    { label: 'Setpoint (Pa)', data: [], borderColor: '#e6a23c', borderDash: [6, 4], yAxisID: 'pressure', pointRadius: 0 },
-    { label: t('gasControl.chartValve'), data: [], borderColor: '#67c23a', yAxisID: 'valve', pointRadius: 0 }
+    { label: 'A1 (Pa)', data: [], borderColor: p[0], yAxisID: 'pressure', pointRadius: 0 },
+    { label: 'Setpoint (Pa)', data: [], borderColor: p[2], borderDash: [6, 4], yAxisID: 'pressure', pointRadius: 0 },
+    { label: t('gasControl.chartValve'), data: [], borderColor: p[1], yAxisID: 'valve', pointRadius: 0 }
   ]
   chart = new Chart(chartCanvas.value, {
     type: 'line',

@@ -27,20 +27,21 @@ test.describe('批次状态流转', () => {
     // 列表出现批次卡片（初始 planned）→ 点进详情
     const card = page.locator('.run-card', { hasText: runName })
     await expect(card).toBeVisible()
-    await expect(card).toContainText('planned')
+    // StatusBadge 泛化后 label 走 i18n（重构 S3）：zh=计划中 / en=Planned
+    await expect(card).toContainText(/planned|计划中/)
     await card.click()
     await expect(page).toHaveURL(/\/experiment-runs\//)
 
     // planned → start → active
     const head = page.locator('.head-row')
-    await expect(head).toContainText('planned')
+    await expect(head).toContainText(/planned|计划中/)
     await head.getByRole('button', { name: '开始' }).click()
-    await expect(head).toContainText('active', { timeout: 15_000 })
+    await expect(head).toContainText(/active|进行中/, { timeout: 15_000 })
 
     // active → complete（确认框）→ completed
     await head.getByRole('button', { name: '完成' }).click()
     await page.getByRole('button', { name: '确认', exact: true }).click()
-    await expect(head).toContainText('completed', { timeout: 15_000 })
+    await expect(head).toContainText(/completed|已完成/, { timeout: 15_000 })
 
     // 清理：API 删除批次（真实后端，软删除）
     runId = page.url().split('/').pop() as string

@@ -102,19 +102,13 @@ import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import {
   Chart,
-  LineController,
-  LineElement,
-  PointElement,
-  LinearScale,
-  Legend,
-  Tooltip,
   type ChartEvent,
   type LegendItem
 } from 'chart.js'
 import { RefreshLeft } from '@element-plus/icons-vue'
 import { useMobile } from '@/composables/useMobile'
 
-Chart.register(LineController, LineElement, PointElement, LinearScale, Legend, Tooltip)
+// Chart.register 已收口到 utils/chartTheme.ts setupChartDefaults()（美术方案 §3.7，main.ts 调用一次）
 
 const props = withDefaults(
   defineProps<{

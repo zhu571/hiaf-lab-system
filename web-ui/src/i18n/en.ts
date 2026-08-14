@@ -6,7 +6,11 @@ export default {
     cancel: 'Cancel',
     // Device connection state badges on the dashboard.
     online: 'Online',
-    offline: 'Offline'
+    offline: 'Offline',
+    // Generic confirm/retry/empty labels used by base components (FormDialog / StateBlock).
+    confirm: 'Confirm',
+    retry: 'Retry',
+    empty: 'No data'
   },
   login: {
     // Tagline under the "HIAF Lab System" brand on the login page.
@@ -362,6 +366,7 @@ export default {
     roleMaintainer: 'Maintainer',
     roleMember: 'Member',
     roleViewer: 'Read-only',
+    roleAgent: 'Agent',
     loadFailed: 'Failed to load user list',
     roleUpdated: 'Role updated',
     roleUpdateFailed: 'Failed to update role',
@@ -482,6 +487,10 @@ export default {
     unit: 'Unit',
     unitPlaceholder: 'e.g. K / mbar / V',
     quality: 'Quality',
+    qualityNormal: 'Normal',
+    qualityOutlier: 'Outlier',
+    qualitySuspect: 'Suspect',
+    qualityInvalid: 'Invalid',
     measuredAt: 'Measured At',
     timePlaceholder: 'Select time (optional)',
     linkedRun: 'Linked Run',
