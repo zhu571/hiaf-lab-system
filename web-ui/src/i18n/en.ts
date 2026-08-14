@@ -352,7 +352,7 @@ export default {
     noMatch: 'No matching users',
     empty: 'No users yet',
     changeRoleTitle: 'Change Role',
-    changeRoleFrom: 'Change role of <strong>{username}</strong> from &ldquo;{role}&rdquo; to:',
+    changeRoleFrom: 'Change role of "{username}" from "{role}" to:',
     confirmChange: 'Confirm Change',
     tempPassword: 'Temporary Password',
     copy: 'Copy',
@@ -553,6 +553,7 @@ export default {
     title: 'Experiment Runs',
     status: 'Status',
     all: 'All',
+    campaign: 'Campaign',
     searchCampaign: 'Search campaign',
     create: 'New Run',
     retry: 'Retry',
@@ -643,6 +644,12 @@ export default {
       in_progress: 'In Progress',
       resolved: 'Resolved',
       closed: 'Closed'
+    },
+    comments: {
+      title: 'Comments',
+      empty: 'No comments yet',
+      placeholder: 'Add a comment',
+      send: 'Send'
     }
   },
   experiences: {
@@ -827,7 +834,22 @@ export default {
     projectsLoadFailed: 'Failed to load project list',
     runsLoadFailed: 'Failed to load experiment runs',
     applyTipAssembly: 'Append {count} steps from template "{name}" to the target project\'s assembly steps.',
-    applyTipExperiment: 'Append {count} steps from template "{name}" to the target experiment run\'s steps.'
+    applyTipExperiment: 'Append {count} steps from template "{name}" to the target experiment run\'s steps.',
+    editor: {
+      name: 'Name',
+      namePlaceholder: 'Step name',
+      description: 'Description',
+      descriptionPlaceholder: 'Optional',
+      dependsOn: 'Depends on',
+      dependsOnPlaceholder: 'None',
+      unnamed: '(unnamed)',
+      actions: 'Actions',
+      moveUp: 'Move up',
+      moveDown: 'Move down',
+      delete: 'Delete',
+      empty: 'No steps yet. Add one.',
+      add: 'Add step'
+    }
   },
   agentCandidates: {
     // AI agent candidate review page (AgentCandidatesView).
@@ -1209,6 +1231,7 @@ export default {
     createdAt: 'Created At',
     startedAt: 'Started At',
     endedAt: 'Ended At',
+    campaign: 'Campaign',
     created: 'Created',
     started: 'Started',
     ended: 'Ended',
@@ -1320,6 +1343,8 @@ export default {
     importFailed: 'Failed to import',
     confirmRunTransition: 'Confirm "{action}" for run "{name}"?',
     runTransitionTitle: 'Status Change',
+    runNameRequired: 'Please enter the run name',
+    runTransitionFailed: 'Status update failed',
     confirmButton: 'Confirm',
     cancelButton: 'Cancel',
     confirmDeleteRun: 'Delete run "{name}"? This action cannot be undone.',

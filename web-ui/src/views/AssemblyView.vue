@@ -37,8 +37,8 @@
             <p class="step-meta">
               <span>{{ t('assembly.metaAssignee') }}{{ memberName(step.assigned_to) }}</span>
               <span>{{ t('assembly.metaDependency') }}{{ depName(step.depends_on) }}</span>
-              <span>{{ t('assembly.metaStarted') }}{{ fmtTime(step.started_at) }}</span>
-              <span>{{ t('assembly.metaCompleted') }}{{ fmtTime(step.completed_at) }}</span>
+              <span>{{ t('assembly.metaStarted') }}{{ formatDateTime(step.started_at) }}</span>
+              <span>{{ t('assembly.metaCompleted') }}{{ formatDateTime(step.completed_at) }}</span>
             </p>
           </div>
           <div v-if="canOperate" class="step-actions">
@@ -152,6 +152,7 @@ import { useRoute } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { Rank } from '@element-plus/icons-vue'
 import StatusBadge from '@/components/base/StatusBadge.vue'
+import { formatDateTime } from '@/utils/datetime'
 import StepItemsEditor from '@/components/business/StepItemsEditor.vue'
 import { useMobile } from '../composables/useMobile'
 import {
@@ -273,9 +274,6 @@ function depName(id?: string) {
   return steps.value.find((s) => s.id === id)?.name || '—'
 }
 
-function fmtTime(time?: string) {
-  return time ? new Date(time).toLocaleString(undefined, { hour12: false }) : '—'
-}
 
 async function onTransition(step: AssemblyStep, action: TransitionAction) {
   // start/resume check dependency: show override dialog when prerequisite is not completed
@@ -559,7 +557,7 @@ async function saveAndApply() {
   align-items: center;
   background: var(--brand-500);
   border-radius: 50%;
-  color: #fff;
+  color: var(--text-inverse);
   display: inline-flex;
   flex-shrink: 0;
   font-size: 12px;

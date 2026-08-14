@@ -269,7 +269,7 @@ async function clearA5() {
 .eyebrow { color: var(--brand-600); font-size: 12px; font-weight: 700; letter-spacing: .12em; margin: 0 0 4px; text-transform: uppercase; }
 .subtitle, .section-title p { color: var(--text-3); margin: 5px 0 0; }
 .status-grid { display: grid; gap: 14px; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); min-height: 130px; }
-.status-card, .chart-card { background: #fff; border: 1px solid var(--border); border-radius: 14px; box-shadow: var(--shadow-sm); }
+.status-card, .chart-card { background: var(--surface); border: 1px solid var(--border); border-radius: 14px; box-shadow: var(--shadow-sm); }
 .status-card { display: grid; gap: 8px; padding: 18px; }
 .status-card span, .status-card small { color: var(--text-3); }
 .status-card strong { color: var(--navy-800); font-size: 24px; }
@@ -278,7 +278,7 @@ async function clearA5() {
 .chart-card { height: 460px; padding: 20px; }
 .chart-card canvas { height: 385px !important; width: 100% !important; }
 .state-panel { min-height: 340px; }
-.control-card { background: #fff; border: 1px solid var(--border); border-radius: 14px; padding: 20px; }
+.control-card { background: var(--surface); border: 1px solid var(--border); border-radius: 14px; padding: 20px; }
 .control-grid { align-items: end; display: grid; gap: 14px; grid-template-columns: repeat(4, minmax(130px, 1fr)); margin-top: 18px; }
 .control-grid :deep(.el-input-number) { width: 100%; }
 .control-actions :deep(.el-form-item__content) { align-items: flex-end; }

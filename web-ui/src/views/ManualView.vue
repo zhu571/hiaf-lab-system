@@ -836,7 +836,7 @@ const sections: ManualSection[] = [
   align-items: center;
   background: linear-gradient(135deg, var(--brand-500), var(--brand-700));
   border-radius: 8px;
-  color: #fff;
+  color: var(--text-inverse);
   display: inline-flex;
   flex-shrink: 0;
   font-size: 13px;

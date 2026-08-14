@@ -4,44 +4,47 @@
       <el-table-column label="#" width="46" align="center">
         <template #default="{ $index }">{{ $index + 1 }}</template>
       </el-table-column>
-      <el-table-column label="名称" min-width="160">
+      <el-table-column :label="t('stepTemplates.editor.name')" min-width="160">
         <template #default="{ row }">
-          <el-input v-model="row.name" placeholder="步骤名称" @input="emitChange" />
+          <el-input v-model="row.name" :placeholder="t('stepTemplates.editor.namePlaceholder')" @input="emitChange" />
         </template>
       </el-table-column>
-      <el-table-column label="描述" min-width="180">
+      <el-table-column :label="t('stepTemplates.editor.description')" min-width="180">
         <template #default="{ row }">
-          <el-input v-model="row.description" placeholder="可选" @input="emitChange" />
+          <el-input v-model="row.description" :placeholder="t('stepTemplates.editor.descriptionPlaceholder')" @input="emitChange" />
         </template>
       </el-table-column>
-      <el-table-column label="依赖" width="130">
+      <el-table-column :label="t('stepTemplates.editor.dependsOn')" width="130">
         <template #default="{ row, $index }">
-          <el-select v-model="row.depends_on_order" clearable placeholder="无" @change="emitChange">
-            <el-option v-for="j in $index" :key="j" :label="`${j}. ${rows[j - 1].name || '（未命名）'}`" :value="j" />
+          <el-select v-model="row.depends_on_order" clearable :placeholder="t('stepTemplates.editor.dependsOnPlaceholder')" @change="emitChange">
+            <el-option v-for="j in $index" :key="j" :label="`${j}. ${rows[j - 1].name || t('stepTemplates.editor.unnamed')}`" :value="j" />
           </el-select>
         </template>
       </el-table-column>
-      <el-table-column label="操作" width="168">
+      <el-table-column :label="t('stepTemplates.editor.actions')" width="168">
         <template #default="{ $index }">
-          <el-button size="small" text :disabled="$index === 0" @click="move($index, -1)">上移</el-button>
-          <el-button size="small" text :disabled="$index === rows.length - 1" @click="move($index, 1)">下移</el-button>
-          <el-button size="small" text type="danger" @click="removeRow($index)">删除</el-button>
+          <el-button size="small" text :disabled="$index === 0" @click="move($index, -1)">{{ t('stepTemplates.editor.moveUp') }}</el-button>
+          <el-button size="small" text :disabled="$index === rows.length - 1" @click="move($index, 1)">{{ t('stepTemplates.editor.moveDown') }}</el-button>
+          <el-button size="small" text type="danger" @click="removeRow($index)">{{ t('stepTemplates.editor.delete') }}</el-button>
         </template>
       </el-table-column>
       <template #empty>
-        <el-empty description="暂无步骤，请添加" :image-size="48" />
+        <el-empty :description="t('stepTemplates.editor.empty')" :image-size="48" />
       </template>
     </el-table>
-    <el-button class="add-btn" size="small" :disabled="rows.length >= MAX_ITEMS" @click="addRow">添加步骤</el-button>
+    <el-button class="add-btn" size="small" :disabled="rows.length >= MAX_ITEMS" @click="addRow">{{ t('stepTemplates.editor.add') }}</el-button>
   </div>
 </template>
 
 <script setup lang="ts">
 import { ref } from 'vue'
+import { useI18n } from 'vue-i18n'
 import type { StepTemplateItem } from '@/api/stepTemplates'
 
 // 与后端 steptemplates.MaxItems 保持一致
 const MAX_ITEMS = 30
+
+const { t } = useI18n()
 
 type EditableStep = {
   name: string

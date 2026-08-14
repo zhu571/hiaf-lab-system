@@ -37,7 +37,7 @@
             </template>
           </el-table-column>
           <el-table-column :label="t('rfMatching.measuredAt')" width="170">
-            <template #default="{ row }">{{ formatTime(row.measured_at) }}</template>
+            <template #default="{ row }">{{ formatDateTime(row.measured_at) }}</template>
           </el-table-column>
           <el-table-column :label="t('rfMatching.measuredBy')" width="110">
             <template #default="{ row }">{{ row.measured_by || '—' }}</template>
@@ -54,7 +54,7 @@
             <div class="rf-card" :class="{ void: row.is_void }">
               <span class="card-title">{{ row.device }} · {{ row.frequency_mhz }} MHz</span>
               <div class="card-fields">
-                <span>{{ formatTime(row.measured_at) }}</span>
+                <span>{{ formatDateTime(row.measured_at) }}</span>
                 <span>s11: {{ row.s11 == null ? '—' : row.s11 }}</span>
                 <span>{{ row.capacitance_text || '—' }}</span>
                 <el-tag v-if="row.status" :type="statusTag(row.status)" size="small" effect="light">{{ row.status }}</el-tag>
@@ -166,6 +166,7 @@ import { createRFMatching, deleteRFMatching, listRFMatching, type RFMatchingPayl
 import { useAuthStore } from '../stores/auth'
 import { showApiError } from '../composables/useNotify'
 import ResponsiveTable from '@/components/base/ResponsiveTable.vue'
+import { formatDateTime } from '@/utils/datetime'
 
 const route = useRoute()
 const auth = useAuthStore()
@@ -334,9 +335,6 @@ function statusTag(v: string): 'success' | 'warning' | 'danger' | 'info' {
   return 'info'
 }
 
-function formatTime(v?: string) {
-  return v ? new Date(v).toLocaleString('zh-CN', { hour12: false }) : '—'
-}
 </script>
 
 <style scoped>

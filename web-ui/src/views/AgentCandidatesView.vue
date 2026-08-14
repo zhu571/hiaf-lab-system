@@ -13,7 +13,7 @@
     <section class="panel">
       <ResponsiveTable :rows="candidates" :loading="loading">
         <el-table-column :label="t('agentCandidates.date')" width="170">
-          <template #default="{ row }">{{ formatTime(row.created_at) }}</template>
+          <template #default="{ row }">{{ formatDateTime(row.created_at) }}</template>
         </el-table-column>
         <el-table-column :label="t('agentCandidates.type')" width="120">
           <template #default="{ row }">
@@ -52,7 +52,7 @@
                 <el-tag :type="actionTag(row.action_type)" size="small" effect="light">{{ actionLabel(row.action_type) }}</el-tag>
               </span>
               <span>{{ t('agentCandidates.confidence') }}：{{ formatConfidence(row.agent_confidence) }}</span>
-              <span>{{ formatTime(row.created_at) }}</span>
+              <span>{{ formatDateTime(row.created_at) }}</span>
             </div>
             <div class="card-actions">
               <el-button size="small" @click="openDetail(row)">{{ t('agentCandidates.viewDetail') }}</el-button>
@@ -114,7 +114,7 @@
             </template>
             <p v-else class="meta">{{ t('agentCandidates.traceUnavailable') }}</p>
           </el-timeline-item>
-          <el-timeline-item type="primary" :timestamp="formatTime(selected.created_at)">
+          <el-timeline-item type="primary" :timestamp="formatDateTime(selected.created_at)">
             <h4>{{ t('agentCandidates.stageCandidate') }}</h4>
             <section v-if="diffLoading || diffSource != null || traceLoaded" class="diff-block">
               <div class="diff-head">
@@ -195,6 +195,7 @@ import { diffLines, diffWordsWithSpace, type Change } from 'diff'
 import { showApiError } from '../composables/useNotify'
 import StatusBadge from '@/components/base/StatusBadge.vue'
 import ResponsiveTable from '@/components/base/ResponsiveTable.vue'
+import { formatDateTime } from '@/utils/datetime'
 import { approveCandidate, getCandidateTrace, listAgentCandidates, rejectCandidate, type AgentCandidate, type CandidateTrace } from '../api/agent'
 
 const { t } = useI18n()
@@ -283,13 +284,9 @@ function formatConfidence(v?: number) {
   return v == null ? '-' : `${Math.round(v * 100)}%`
 }
 
-function formatTime(v?: string) {
-  return v ? v.slice(0, 16).replace('T', ' ') : '-'
-}
-
-// 时间线阶段时间戳：缺省给空串（el-timeline-item 不渲染），区别于列表的 '-' 兜底
+// 时间线阶段时间戳：缺省给空串（el-timeline-item 不渲染），区别于列表的 '—' 兜底
 function formatStageTime(v?: string) {
-  return v ? formatTime(v) : ''
+  return v ? formatDateTime(v) : ''
 }
 
 type TimelineType = 'primary' | 'success' | 'warning' | 'danger' | 'info'
@@ -510,13 +507,13 @@ async function reject() {
 }
 
 .diff-ins {
-  background: rgba(46, 160, 67, 0.2);
+  background: var(--ok-soft);
   border-radius: 2px;
   text-decoration: none;
 }
 
 .diff-del {
-  background: rgba(218, 54, 51, 0.18);
+  background: var(--danger-soft);
   border-radius: 2px;
   text-decoration: line-through;
 }

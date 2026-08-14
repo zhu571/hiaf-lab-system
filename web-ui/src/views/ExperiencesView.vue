@@ -1,22 +1,22 @@
 <template>
   <div class="page">
     <div class="toolbar">
-      <h2>{{ $t('experiences.pageTitle') }}</h2>
-      <el-select v-model="selectedProjectId" class="project-select" :placeholder="$t('experiences.selectProject')">
+      <h2>{{ t('experiences.pageTitle') }}</h2>
+      <el-select v-model="selectedProjectId" class="project-select" :placeholder="t('experiences.selectProject')">
         <el-option v-for="p in projects.projects" :key="p.id" :label="p.short_name || p.name" :value="p.id" />
       </el-select>
-      <el-button type="primary" @click="dialog = true">{{ $t('experiences.create') }}</el-button>
+      <el-button type="primary" @click="dialog = true">{{ t('experiences.create') }}</el-button>
     </div>
     <section class="panel filters-panel">
       <div class="filters">
-        <el-input v-model="keyword" :placeholder="$t('experiences.keyword')" clearable @change="onFilter" />
-        <el-input v-model="tagText" :placeholder="$t('experiences.tagPlaceholder')" clearable @change="onFilter" />
+        <el-input v-model="keyword" :placeholder="t('experiences.keyword')" clearable @change="onFilter" />
+        <el-input v-model="tagText" :placeholder="t('experiences.tagPlaceholder')" clearable @change="onFilter" />
       </div>
     </section>
     <div class="board">
       <section v-for="col in columns" :key="col.status" class="panel column" :data-status="col.status">
         <div class="column-head">
-          <h3><span class="dot" />{{ $t(col.labelKey) }}</h3>
+          <h3><span class="dot" />{{ t(col.labelKey) }}</h3>
           <span class="count">{{ grouped[col.status].length }}</span>
         </div>
         <article v-for="item in grouped[col.status]" :key="item.id" class="exp-card" @click="open(item)">
@@ -25,7 +25,7 @@
             <el-tag v-for="tag in item.tags" :key="tag" size="small" @click.stop="appendTag(tag)">{{ tag }}</el-tag>
           </span>
         </article>
-        <p v-if="grouped[col.status].length === 0" class="empty-hint">{{ $t('experiences.empty') }}</p>
+        <p v-if="grouped[col.status].length === 0" class="empty-hint">{{ t('experiences.empty') }}</p>
       </section>
     </div>
     <el-pagination
@@ -38,25 +38,25 @@
       @current-change="load"
       @size-change="onFilter"
     />
-    <el-drawer v-model="drawer" size="460" :title="$t('experiences.detail')">
+    <el-drawer v-model="drawer" size="460" :title="t('experiences.detail')">
       <div v-if="selected" class="grid">
         <StatusBadge :value="selected.status" />
         <h3>{{ selected.title }}</h3>
         <MarkdownView :source="selected.content" />
         <div class="tags"><el-tag v-for="tag in selected.tags" :key="tag">{{ tag }}</el-tag></div>
-        <el-button v-if="selected.status === 'candidate'" type="primary" @click="publish(selected.id)">{{ $t('experiences.publish') }}</el-button>
-        <el-button v-if="selected.status === 'published'" @click="archive(selected.id)">{{ $t('experiences.archive') }}</el-button>
+        <el-button v-if="selected.status === 'candidate'" type="primary" @click="publish(selected.id)">{{ t('experiences.publish') }}</el-button>
+        <el-button v-if="selected.status === 'published'" @click="archive(selected.id)">{{ t('experiences.archive') }}</el-button>
       </div>
     </el-drawer>
-    <el-dialog v-model="dialog" :title="$t('experiences.create')" width="620">
+    <el-dialog v-model="dialog" :title="t('experiences.create')" width="620">
       <el-form label-position="top">
-        <el-form-item :label="$t('experiences.labelTitle')"><el-input v-model="draft.title" /></el-form-item>
-        <el-form-item :label="$t('experiences.labelTags')"><el-input v-model="draft.tags" /></el-form-item>
-        <el-form-item :label="$t('experiences.labelContent')"><el-input v-model="draft.content" type="textarea" :rows="6" /></el-form-item>
+        <el-form-item :label="t('experiences.labelTitle')"><el-input v-model="draft.title" /></el-form-item>
+        <el-form-item :label="t('experiences.labelTags')"><el-input v-model="draft.tags" /></el-form-item>
+        <el-form-item :label="t('experiences.labelContent')"><el-input v-model="draft.content" type="textarea" :rows="6" /></el-form-item>
       </el-form>
       <template #footer>
-        <el-button @click="dialog = false">{{ $t('experiences.cancel') }}</el-button>
-        <el-button type="primary" @click="create">{{ $t('experiences.save') }}</el-button>
+        <el-button @click="dialog = false">{{ t('experiences.cancel') }}</el-button>
+        <el-button type="primary" @click="create">{{ t('experiences.save') }}</el-button>
       </template>
     </el-dialog>
   </div>
@@ -240,11 +240,11 @@ async function create() {
 }
 
 [data-status='archived'] .dot {
-  background: #9099a5;
+  background: var(--info);
 }
 
 .count {
-  background: #fff;
+  background: var(--surface);
   border: 1px solid var(--border);
   border-radius: var(--radius-full);
   color: var(--text-3);
@@ -256,7 +256,7 @@ async function create() {
 }
 
 .exp-card {
-  background: #fff;
+  background: var(--surface);
   border: 1px solid var(--border);
   border-radius: 10px;
   box-shadow: var(--shadow-sm);

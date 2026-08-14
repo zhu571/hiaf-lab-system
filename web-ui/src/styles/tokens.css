@@ -2,6 +2,11 @@
  * 令牌登记（美术 §8 要求两方案同 PR 登记；仓库内无方案登记表文件，按约定在文件头注释说明）：
  * - --shadow-brand-sm / --shadow-brand-md（S4 批新增）：DashboardView 品牌色半透明阴影上提为令牌，
  *   原「美术附录 B 白名单」rgba(18,112,138,·) 值入令牌文件合法，视图侧不再保留白名单豁免。
+ * - --login-*（S5 批新增，美术附录 B「LoginView 渐变字面量归并」）：登录页渐变/毛玻璃/阴影
+ *   字面量值入令牌文件（含 alpha 合成值，注释说明），视图侧不再保留白名单豁免。
+ * - --shadow-avatar / --pulse-ring（S5 批新增）：SettingsView 头像阴影、
+ *   InstrumentMeasureView running 态呼吸光圈 rgba 值上提为令牌，
+ *   原「美术附录 B 白名单」alpha 值入令牌文件合法，视图侧不再保留白名单豁免。
  */
 :root {
   /* ========== 色彩：底色 ========== */
@@ -118,6 +123,25 @@
   /* 品牌色阴影（S4 新增）：原 DashboardView 附录 B 白名单 rgba(18,112,138,·) 上提为令牌 */
   --shadow-brand-sm: 0 6px 16px -8px rgba(18, 112, 138, 0.35);
   --shadow-brand-md: 0 2px 6px -2px rgba(18, 112, 138, 0.5);
+  /* 头像品牌色阴影（S5 新增）：SettingsView 头像 alpha 阴影上提为令牌，无对应色阶档位，alpha 合成值整体入令牌 */
+  --shadow-avatar: 0 6px 16px -6px rgba(20, 112, 138, 0.5);
+  /* 呼吸光圈（S5 新增）：InstrumentMeasureView running 态脉冲动画两帧，alpha 渐变值整体入令牌，
+     基色与 --brand-500 (#1a86a2) 对齐，扩散帧 alpha 归零 */
+  --pulse-ring: 0 0 0 0 rgba(26, 134, 162, 0.35);
+  --pulse-ring-end: 0 0 0 5px rgba(26, 134, 162, 0);
+
+  /* 登录页美术处理（S5 新增，美术附录 B LoginView 归并；alpha 合成值整体入令牌） */
+  --login-bg:
+    radial-gradient(1100px 560px at 85% -10%, rgba(230, 184, 76, 0.16), transparent 60%),
+    radial-gradient(900px 520px at -10% 110%, rgba(26, 134, 162, 0.35), transparent 55%),
+    linear-gradient(150deg, #0a1c2e 0%, #123652 55%, #155a72 100%);
+  --login-grid:
+    linear-gradient(rgba(255, 255, 255, 0.05) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(255, 255, 255, 0.05) 1px, transparent 1px);
+  --login-panel-bg: rgba(255, 255, 255, 0.97);
+  --login-panel-border: rgba(255, 255, 255, 0.6);
+  --login-panel-shadow: 0 32px 80px -24px rgba(4, 18, 30, 0.55);
+  --login-mark-shadow: 0 8px 20px -6px rgba(20, 112, 138, 0.55);
 
   /* ========== 动效 ========== */
   --dur-fast: 120ms;

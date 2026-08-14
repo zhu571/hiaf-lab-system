@@ -26,7 +26,7 @@
         <h3>{{ t('dailyReport.structuredLogs') }}</h3>
         <el-button @click="openAddLog">{{ t('dailyReport.addLog') }}</el-button>
       </div>
-      <el-table v-if="!isMobile" :data="tableRows">
+      <ResponsiveTable :rows="(tableRows as any[])">
         <el-table-column :label="t('dailyReport.category')" width="150">
           <template #default="{ row }">
             <el-select v-if="row._draft" v-model="row.category" size="small">
@@ -76,29 +76,28 @@
         <template #empty>
           <el-empty :description="t('dailyReport.emptyLogs')" />
         </template>
-      </el-table>
-      <div v-else class="log-card-list">
-        <div v-for="row in (tableRows as any[])" :key="row._draft ? `draft-${row.key}` : row.id" class="log-card">
-          <div class="log-card-head">
-            <span class="log-card-time">{{ row.occurred_at }}</span>
-            <el-tag v-if="row._draft" size="small" type="warning">{{ t('dailyReport.aiTag') }}</el-tag>
-            <StatusBadge v-else :value="row.content_status" />
+        <template #card="{ row }">
+          <div class="log-card">
+            <div class="log-card-head">
+              <span class="log-card-time">{{ row.occurred_at }}</span>
+              <el-tag v-if="row._draft" size="small" type="warning">{{ t('dailyReport.aiTag') }}</el-tag>
+              <StatusBadge v-else :value="row.content_status" />
+            </div>
+            <div class="log-card-meta">{{ row.category }}<template v-if="row.project_id"> · {{ projectName(row.project_id) }}</template></div>
+            <p class="log-card-content">{{ row.content }}</p>
+            <div class="log-card-actions">
+              <template v-if="row._draft">
+                <el-button size="small" type="success" :loading="row.confirming" @click="confirmDraft(row)">{{ t('dailyReport.confirm') }}</el-button>
+                <el-button size="small" @click="removeDraft(row)">{{ t('dailyReport.remove') }}</el-button>
+              </template>
+              <template v-else-if="row.content_status === 'draft'">
+                <el-button size="small" type="primary" @click="openEditLog(row)">{{ t('dailyReport.edit') }}</el-button>
+                <el-button size="small" type="success" @click="confirmLog(row.id)">{{ t('dailyReport.confirm') }}</el-button>
+              </template>
+            </div>
           </div>
-          <div class="log-card-meta">{{ row.category }}<template v-if="row.project_id"> · {{ projectName(row.project_id) }}</template></div>
-          <p class="log-card-content">{{ row.content }}</p>
-          <div class="log-card-actions">
-            <template v-if="row._draft">
-              <el-button size="small" type="success" :loading="row.confirming" @click="confirmDraft(row)">{{ t('dailyReport.confirm') }}</el-button>
-              <el-button size="small" @click="removeDraft(row)">{{ t('dailyReport.remove') }}</el-button>
-            </template>
-            <template v-else-if="row.content_status === 'draft'">
-              <el-button size="small" type="primary" @click="openEditLog(row)">{{ t('dailyReport.edit') }}</el-button>
-              <el-button size="small" type="success" @click="confirmLog(row.id)">{{ t('dailyReport.confirm') }}</el-button>
-            </template>
-          </div>
-        </div>
-        <el-empty v-if="!tableRows.length" :description="t('dailyReport.emptyLogs')" />
-      </div>
+        </template>
+      </ResponsiveTable>
     </section>
     <el-dialog v-model="logDialog" :title="editingLogId ? t('dailyReport.editLog') : t('dailyReport.addNewLog')" width="560">
       <el-form label-position="top">
@@ -143,16 +142,15 @@ import { ElMessage, ElMessageBox } from 'element-plus'
 import { showApiError } from '../composables/useNotify'
 import { Paperclip } from '@element-plus/icons-vue'
 import StatusBadge from '@/components/base/StatusBadge.vue'
+import ResponsiveTable from '@/components/base/ResponsiveTable.vue'
 import { aiParseReport, createLog, submitReport, todayReport, updateLog, updateReportRawText, type DailyReport, type LogItem } from '../api/logs'
 import { useProjectStore } from '../stores/project'
 import { useAuthStore } from '../stores/auth'
-import { useMobile } from '../composables/useMobile'
 import { uploadAttachment } from '../api/attachments'
 
 const { t } = useI18n()
 const projectStore = useProjectStore()
 const auth = useAuthStore()
-const isMobile = useMobile()
 const canSubmit = computed(() => auth.user?.role !== 'viewer')
 const projects = projectStore
 

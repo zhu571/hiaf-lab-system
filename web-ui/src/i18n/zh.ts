@@ -329,7 +329,7 @@ export default {
     noMatch: '没有匹配的用户',
     empty: '暂无用户',
     changeRoleTitle: '角色变更',
-    changeRoleFrom: '将 <strong>{username}</strong> 的角色从「{role}」变更为：',
+    changeRoleFrom: '将「{username}」的角色从「{role}」变更为：',
     confirmChange: '确认变更',
     tempPassword: '临时密码',
     copy: '复制',
@@ -522,6 +522,7 @@ export default {
     title: '实验批次',
     status: '状态',
     all: '全部',
+    campaign: 'Campaign',
     searchCampaign: '搜索 campaign',
     create: '新建批次',
     retry: '重试',
@@ -608,6 +609,12 @@ export default {
       in_progress: '进行中',
       resolved: '已解决',
       closed: '已关闭'
+    },
+    comments: {
+      title: '评论',
+      empty: '暂无评论',
+      placeholder: '添加评论',
+      send: '发送'
     }
   },
   experiences: {
@@ -792,7 +799,22 @@ export default {
     projectsLoadFailed: '项目列表加载失败',
     runsLoadFailed: '实验批次列表加载失败',
     applyTipAssembly: '将模板「{name}」的 {count} 个步骤追加到目标项目的装配步骤。',
-    applyTipExperiment: '将模板「{name}」的 {count} 个步骤追加到目标实验批次的步骤。'
+    applyTipExperiment: '将模板「{name}」的 {count} 个步骤追加到目标实验批次的步骤。',
+    editor: {
+      name: '名称',
+      namePlaceholder: '步骤名称',
+      description: '描述',
+      descriptionPlaceholder: '可选',
+      dependsOn: '依赖',
+      dependsOnPlaceholder: '无',
+      unnamed: '（未命名）',
+      actions: '操作',
+      moveUp: '上移',
+      moveDown: '下移',
+      delete: '删除',
+      empty: '暂无步骤，请添加',
+      add: '添加步骤'
+    }
   },
   agentCandidates: {
     pageTitle: 'AI 候选审核',
@@ -1158,6 +1180,7 @@ export default {
     createdAt: '创建时间',
     startedAt: '开始时间',
     endedAt: '结束时间',
+    campaign: 'Campaign',
     created: '已创建',
     started: '已开始',
     ended: '已结束',
@@ -1269,6 +1292,8 @@ export default {
     importFailed: '导入失败',
     confirmRunTransition: '确认对批次「{name}」执行「{action}」操作？',
     runTransitionTitle: '状态变更',
+    runNameRequired: '请填写批次名称',
+    runTransitionFailed: '状态更新失败',
     confirmButton: '确认',
     cancelButton: '取消',
     confirmDeleteRun: '确认删除批次「{name}」？该操作不可恢复。',

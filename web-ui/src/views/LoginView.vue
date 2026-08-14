@@ -104,10 +104,7 @@ async function submitRegister() {
 <style scoped>
 .login-page {
   align-items: center;
-  background:
-    radial-gradient(1100px 560px at 85% -10%, rgba(230, 184, 76, 0.16), transparent 60%),
-    radial-gradient(900px 520px at -10% 110%, rgba(26, 134, 162, 0.35), transparent 55%),
-    linear-gradient(150deg, #0a1c2e 0%, #123652 55%, #155a72 100%);
+  background: var(--login-bg);
   display: grid;
   min-height: 100dvh;
   overflow: auto;
@@ -117,9 +114,7 @@ async function submitRegister() {
 }
 
 .login-page::before {
-  background-image:
-    linear-gradient(rgba(255, 255, 255, 0.05) 1px, transparent 1px),
-    linear-gradient(90deg, rgba(255, 255, 255, 0.05) 1px, transparent 1px);
+  background-image: var(--login-grid);
   background-size: 44px 44px;
   content: '';
   inset: 0;
@@ -129,10 +124,10 @@ async function submitRegister() {
 
 .login-panel {
   animation: rise 0.35s ease;
-  background: rgba(255, 255, 255, 0.97);
-  border: 1px solid rgba(255, 255, 255, 0.6);
+  background: var(--login-panel-bg);
+  border: 1px solid var(--login-panel-border);
   border-radius: var(--radius-xl);
-  box-shadow: 0 32px 80px -24px rgba(4, 18, 30, 0.55);
+  box-shadow: var(--login-panel-shadow);
   display: grid;
   gap: var(--space-6);
   max-width: 400px;
@@ -159,8 +154,8 @@ async function submitRegister() {
 .brand-mark {
   background: linear-gradient(135deg, var(--brand-500), var(--brand-700));
   border-radius: 13px;
-  box-shadow: 0 8px 20px -6px rgba(20, 112, 138, 0.55);
-  color: #fff;
+  box-shadow: var(--login-mark-shadow);
+  color: var(--text-inverse);
   display: grid;
   font-size: 22px;
   font-weight: 800;

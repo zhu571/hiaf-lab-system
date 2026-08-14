@@ -35,7 +35,7 @@
           <template #default="{ row }">{{ row.created_by || '—' }}</template>
         </el-table-column>
         <el-table-column :label="t('stepTemplates.createdAt')" width="170">
-          <template #default="{ row }">{{ fmtTime(row.created_at) }}</template>
+          <template #default="{ row }">{{ formatDateTime(row.created_at) }}</template>
         </el-table-column>
         <el-table-column :label="t('stepTemplates.actions')" width="300">
           <template #default="{ row }">
@@ -56,7 +56,7 @@
             </div>
             <div class="card-fields">
               <span>{{ t('stepTemplates.stepCount') }}：{{ row._item_count ?? '—' }}</span>
-              <span>{{ fmtTime(row.created_at) }}</span>
+              <span>{{ formatDateTime(row.created_at) }}</span>
             </div>
             <div class="card-actions">
               <el-button size="small" @click="openDetail(row)">{{ t('stepTemplates.detail') }}</el-button>
@@ -86,7 +86,7 @@
             <el-descriptions-item :label="t('stepTemplates.description')">{{ detail.description || '—' }}</el-descriptions-item>
             <el-descriptions-item v-if="detail.source_prompt" :label="t('stepTemplates.sourcePrompt')">{{ detail.source_prompt }}</el-descriptions-item>
             <el-descriptions-item :label="t('stepTemplates.source')">{{ detail.ai_generated ? t('stepTemplates.aiGenerated') : t('stepTemplates.manuallyCreated') }}</el-descriptions-item>
-            <el-descriptions-item :label="t('stepTemplates.createdAt')">{{ fmtTime(detail.created_at) }}</el-descriptions-item>
+            <el-descriptions-item :label="t('stepTemplates.createdAt')">{{ formatDateTime(detail.created_at) }}</el-descriptions-item>
           </el-descriptions>
           <el-table :data="sortedItems(detail)" size="small">
             <el-table-column label="#" width="50" align="center">
@@ -184,6 +184,7 @@ import { useI18n } from 'vue-i18n'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import StepItemsEditor from '@/components/business/StepItemsEditor.vue'
 import ResponsiveTable from '@/components/base/ResponsiveTable.vue'
+import { formatDateTime } from '@/utils/datetime'
 import {
   createTemplate,
   deleteTemplate,
@@ -289,9 +290,6 @@ function kindLabel(kind: string) {
   return kind === 'assembly' ? t('stepTemplates.assembly') : kind === 'experiment' ? t('stepTemplates.experiment') : kind
 }
 
-function fmtTime(t?: string) {
-  return t ? new Date(t).toLocaleString('zh-CN', { hour12: false }) : '—'
-}
 
 function sortedItems(t: StepTemplate) {
   return (t.items ?? []).slice().sort((a, b) => a.step_order - b.step_order)

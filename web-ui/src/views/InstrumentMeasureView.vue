@@ -10,7 +10,7 @@
     <el-alert v-if="error" :title="error" type="error" show-icon :closable="false">
       <el-button size="small" @click="loadInstruments">{{ t('instrument.retry') }}</el-button>
     </el-alert>
-    <div v-loading="loading" class="card-grid">
+    <div v-loading="loading" ref="cardGridRef" class="card-grid">
       <section v-for="ins in instruments" :key="ins.id" class="panel ins-card">
         <header class="ins-head">
           <span class="state-dot" :class="{ pulse: ins.state === 'running' }" :style="{ background: stateColor(ins.state) }" />
@@ -108,75 +108,14 @@
     </section>
 
     <!-- AI 对话（常驻） -->
-    <section ref="aiPanelRef" class="panel">
-      <div class="panel-head">
-        <h3 class="panel-title">{{ t('instrument.aiChat') }}</h3>
-        <el-select v-model="aiInstrumentId" :placeholder="t('instrument.selectAiInstrument')" class="ai-ins-select" @change="resetAIChat">
-          <el-option v-for="ins in instruments" :key="ins.id" :label="ins.name" :value="ins.id" />
-        </el-select>
-      </div>
-      <div class="chat-shell">
-        <div class="chat-list">
-          <el-empty v-if="!aiMessages.length" :description="t('instrument.aiPlaceholder')" :image-size="72" />
-          <div v-for="(message, index) in aiMessages" :key="index" class="chat-message" :class="message.role">
-            <div class="chat-bubble">
-              <p v-if="message.content">{{ message.content }}</p>
-              <div v-if="message.candidate" class="candidate-card">
-                <template v-if="message.candidate.status === 'ok'">
-                  <div class="candidate-title">
-                    <code>{{ message.candidate.command }}</code>
-                    <el-tag :type="riskTag(message.candidate.risk || '')" size="small">{{ message.candidate.risk }}</el-tag>
-                  </div>
-                  <p v-if="message.candidate.explanation">{{ message.candidate.explanation }}</p>
-                  <pre class="candidate-json">{{ JSON.stringify(message.candidate.params || {}, null, 2) }}</pre>
-                  <pre v-if="message.candidate.scpi_preview" class="candidate-scpi">{{ message.candidate.scpi_preview }}</pre>
-                  <el-alert
-                    v-if="!message.candidate.validation?.ok"
-                    :title="message.candidate.validation?.reasons?.join('\uff1b') || t('instrument.validationFailed')"
-                    type="error"
-                    :closable="false"
-                  />
-                  <div class="candidate-actions">
-                    <el-button
-                      size="small"
-                      type="primary"
-                      :loading="message.running"
-                      :disabled="!canOperate || !message.candidate.validation?.ok || message.done"
-                      @click="runAICandidate(message)"
-                    >{{ t('instrument.execute') }}</el-button>
-                    <el-button size="small" :disabled="message.done" @click="message.done = true">{{ t('instrument.discard') }}</el-button>
-                  </div>
-                </template>
-                <el-alert
-                  v-else
-                  :title="message.candidate.question || message.candidate.reason || t('instrument.cannotGenerate')"
-                  :type="message.candidate.status === 'rejected' ? 'error' : 'info'"
-                  :closable="false"
-                />
-                <p v-if="message.requestId" class="request-id">request_id: {{ message.requestId }}</p>
-              </div>
-              <div v-if="message.exec && !isViewer" class="exec-actions">
-                <el-button size="small" plain @click="openSave(message.exec!)">{{ t('instrument.saveToTestData') }}</el-button>
-              </div>
-            </div>
-          </div>
-          <p v-if="aiLoading" class="muted chat-loading">{{ t('instrument.aiTranslating') }}</p>
-        </div>
-        <el-alert v-if="aiError" :title="aiError" type="error" :closable="false" show-icon />
-        <div class="chat-input">
-          <el-input
-            v-model="aiInput"
-            type="textarea"
-            :rows="3"
-            maxlength="1000"
-            show-word-limit
-            :placeholder="t('instrument.aiInputPlaceholder')"
-            @keydown.ctrl.enter.prevent="sendAI"
-          />
-          <el-button type="primary" :loading="aiLoading" :disabled="!aiInstrument || !aiInput.trim()" @click="sendAI">{{ t('instrument.send') }}</el-button>
-        </div>
-      </div>
-    </section>
+    <InstrumentAiChat
+      ref="aiChatRef"
+      :instruments="instruments"
+      :can-operate="canOperate"
+      :is-viewer="isViewer"
+      :parse-execution="parseExecution"
+      @save="openSave"
+    />
 
     <!-- 命令白名单（默认收起，点击顶栏按钮弹出） -->
     <el-dialog v-model="whitelistOpen" :title="t('instrument.whitelist')" :width="isMobile ? '100%' : '900px'">
@@ -279,7 +218,6 @@ import {
   type CommandResult,
   type InstrumentStatus,
   type InstrumentSummary,
-  type NLCommandCandidate,
   type ParsedResult,
   type WhitelistCommand
 } from '../api/instruments'
@@ -290,7 +228,9 @@ import { useAuthStore } from '../stores/auth'
 import { showApiError } from '../composables/useNotify'
 import { useMobile } from '../composables/useMobile'
 import ResponsiveTable from '@/components/base/ResponsiveTable.vue'
+import InstrumentAiChat, { riskTag, type ExecRecord } from '@/components/business/InstrumentAiChat.vue'
 import { chartPalette } from '../utils/chartTheme'
+import { statusMetaFor } from '@/utils/statusMeta'
 
 // Chart.register 已收口到 utils/chartTheme.ts setupChartDefaults()（美术方案 §3.7，main.ts 调用一次）
 
@@ -302,31 +242,12 @@ const canOperate = computed(() => ['maintainer', 'admin'].includes(auth.user?.ro
 const isViewer = computed(() => auth.user?.role === 'viewer')
 const isMobile = useMobile()
 
-// 一次命令执行的结构化结果，cmdResult 区块和 AI 对话执行结果共用同一个保存对话框
-type ExecRecord = {
-  instrumentId: string
-  command: string
-  response?: string
-  parsed?: ParsedResult | null
-}
+// 卡片「AI 对话」入口：选中仪器并滚动到常驻对话面板（对话状态在 InstrumentAiChat 内部）
+const aiChatRef = ref<InstanceType<typeof InstrumentAiChat>>()
 
-type ChatMessage = {
-  role: 'user' | 'assistant'
-  content: string
-  candidate?: NLCommandCandidate
-  requestId?: string
-  running?: boolean
-  done?: boolean
-  exec?: ExecRecord
+function openAI(ins: InstrumentSummary) {
+  aiChatRef.value?.openAiFor(ins)
 }
-
-const aiInstrumentId = ref('')
-const aiInstrument = computed(() => instruments.value.find((i) => i.id === aiInstrumentId.value) ?? null)
-const aiInput = ref('')
-const aiLoading = ref(false)
-const aiError = ref('')
-const aiMessages = ref<ChatMessage[]>([])
-const aiPanelRef = ref<HTMLElement>()
 
 const instruments = ref<InstrumentSummary[]>([])
 const whitelist = ref<WhitelistCommand[]>([])
@@ -338,6 +259,8 @@ const error = ref('')
 const expandedId = ref('')
 const detailStatus = ref<InstrumentStatus | null>(null)
 const detailLoading = ref(false)
+// 白名单「执行」后的滚动目标（替代 document.querySelector('.ins-card')，S5）
+const cardGridRef = ref<HTMLElement>()
 
 const cmdName = ref('')
 const cmdParams = reactive<Record<string, any>>({})
@@ -460,7 +383,7 @@ async function executeFromWhitelist(cmd: WhitelistCommand) {
   cmdName.value = cmd.name
   onCommandPick()
   await nextTick()
-  document.querySelector('.ins-card')?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+  cardGridRef.value?.scrollIntoView({ behavior: 'smooth', block: 'start' })
 }
 
 function paramEntries(def: WhitelistCommand): [string, CommandParamDef][] {
@@ -474,75 +397,6 @@ function paramLabel(name: string, def: CommandParamDef) {
 function numOrUndef(v: unknown) {
   const n = Number(v)
   return Number.isFinite(n) ? n : undefined
-}
-
-function resetAIChat() {
-  aiMessages.value = []
-  aiInput.value = ''
-  aiError.value = ''
-}
-
-// 卡片上的「AI 对话」按钮：在常驻面板中选中该仪器并滚动到面板
-function openAI(ins: InstrumentSummary) {
-  aiInstrumentId.value = ins.id
-  resetAIChat()
-  aiPanelRef.value?.scrollIntoView({ behavior: 'smooth', block: 'start' })
-}
-
-async function sendAI() {
-  const ins = aiInstrument.value
-  const input = aiInput.value.trim()
-  if (!ins || !input || aiLoading.value) return
-  const history = aiMessages.value
-    .filter((message) => message.content)
-    .map((message) => ({ role: message.role, content: message.content }))
-  aiMessages.value.push({ role: 'user', content: input })
-  aiInput.value = ''
-  aiError.value = ''
-  aiLoading.value = true
-  try {
-    const response = await interpretCommand(ins.id, input, history)
-    aiMessages.value.push({
-      role: 'assistant',
-      content: response.data.explanation || response.data.question || response.data.reason || '',
-      candidate: response.data,
-      requestId: response.requestId
-    })
-  } catch (err) {
-    aiError.value = err instanceof Error ? err.message : t('instrument.aiTranslateFailed')
-  } finally {
-    aiLoading.value = false
-  }
-}
-
-async function runAICandidate(message: ChatMessage) {
-  const ins = aiInstrument.value
-  const candidate = message.candidate
-  if (!ins || !candidate?.command || !candidate.validation?.ok || message.done) return
-  if (candidate.risk === 'yellow') {
-    try {
-      await ElMessageBox.confirm(t('instrument.confirmExecute', { command: candidate.command }), t('instrument.manualConfirm'), {
-        confirmButtonText: t('instrument.execute'), cancelButtonText: t('common.cancel'), type: 'warning'
-      })
-    } catch {
-      return
-    }
-  }
-  message.running = true
-  try {
-    const response = await executeCommandWithMeta(ins.id, candidate.command, candidate.params || {})
-    message.done = true
-    const parsed = await parseExecution(ins.id, candidate.command, response.data.response)
-    aiMessages.value.push({
-      role: 'assistant',
-      content: `${response.data.response || t('instrument.commandExecuted')}\nrequest_id: ${response.requestId}`,
-      exec: { instrumentId: ins.id, command: candidate.command, response: response.data.response, parsed }
-    })
-  } catch (err) {
-    aiError.value = err instanceof Error ? err.message : t('instrument.commandExecFailed')
-  } finally {
-    message.running = false
-  }
 }
 
 async function runCommand(ins: InstrumentSummary) {
@@ -757,36 +611,17 @@ async function onEmergencyStop(ins: InstrumentSummary) {
   }
 }
 
-const STATE_META: Record<string, { color: string; tag: 'success' | 'warning' | 'danger' | 'info' }> = {
-  running: { color: 'var(--ok)', tag: 'success' },
-  rate_limited: { color: 'var(--warn)', tag: 'warning' },
-  needs_reconnect: { color: 'var(--warn)', tag: 'warning' },
-  error: { color: 'var(--danger)', tag: 'danger' }
-}
-
 function stateColor(s: string) {
-  return STATE_META[s]?.color || 'var(--text-3)'
+  // 状态色收敛到 statusMeta 注册表（美术 §3.8 语义→族总表：running→primary 族、rate_limited/needs_reconnect→warn 族、error→danger 族）
+  return `var(${statusMetaFor('instrumentState', s)?.graphic ?? '--text-3'})`
 }
 
 function stateLabel(s: string) {
-  const map: Record<string, string> = {
-    running: 'instrument.stateRunning',
-    rate_limited: 'instrument.stateRateLimited',
-    needs_reconnect: 'instrument.stateNeedsReconnect',
-    error: 'instrument.stateError'
-  }
-  return t(map[s] || '') || s
+  return t(statusMetaFor('instrumentState', s)?.labelKey ?? '') || s
 }
 
 function stateTag(s: string) {
-  return STATE_META[s]?.tag || 'info'
-}
-
-function riskTag(risk: string): 'success' | 'warning' | 'danger' | 'info' {
-  if (risk === 'green') return 'success'
-  if (risk === 'yellow') return 'warning'
-  if (risk === 'red') return 'danger'
-  return 'info'
+  return statusMetaFor('instrumentState', s)?.tone ?? 'info'
 }
 
 </script>
@@ -855,10 +690,10 @@ function riskTag(risk: string): 'success' | 'warning' | 'danger' | 'info' {
 @keyframes dot-pulse {
   0%,
   100% {
-    box-shadow: 0 0 0 0 rgba(77, 158, 107, 0.35);
+    box-shadow: var(--pulse-ring);
   }
   50% {
-    box-shadow: 0 0 0 5px rgba(77, 158, 107, 0);
+    box-shadow: var(--pulse-ring-end);
   }
 }
 
@@ -960,93 +795,6 @@ function riskTag(risk: string): 'success' | 'warning' | 'danger' | 'info' {
 
 .cmd-result-footer p {
   margin: 0;
-}
-
-.exec-actions {
-  margin-top: 8px;
-}
-
-.save-number {
-  width: 100%;
-}
-
-.scpi-code {
-  font-size: 12px;
-  white-space: pre-wrap;
-}
-
-.chat-shell {
-  display: grid;
-  gap: var(--space-3);
-}
-
-.chat-list {
-  max-height: 360px;
-  overflow-y: auto;
-}
-
-.chat-message {
-  display: flex;
-  margin-bottom: 12px;
-}
-
-.chat-message.user {
-  justify-content: flex-end;
-}
-
-.chat-bubble {
-  background: var(--surface-2);
-  border-radius: var(--radius-sm);
-  max-width: 92%;
-  padding: 10px 12px;
-  white-space: pre-wrap;
-}
-
-.chat-message.user .chat-bubble {
-  background: var(--brand-100);
-}
-
-.candidate-card,
-.candidate-actions,
-.candidate-title,
-.chat-input {
-  display: flex;
-  gap: 8px;
-}
-
-.candidate-card {
-  flex-direction: column;
-}
-
-.candidate-title,
-.chat-input {
-  align-items: center;
-  justify-content: space-between;
-}
-
-.candidate-json,
-.candidate-scpi {
-  background: var(--surface);
-  border: 1px solid var(--border);
-  border-radius: var(--radius-sm);
-  margin: 0;
-  overflow-x: auto;
-  padding: 8px;
-  white-space: pre-wrap;
-}
-
-.request-id,
-.chat-loading {
-  color: var(--text-3);
-  font-size: 11px;
-}
-
-.chat-input .el-textarea {
-  flex: 1;
-}
-
-.ai-ins-select {
-  max-width: 240px;
 }
 
 .whitelist-hint {

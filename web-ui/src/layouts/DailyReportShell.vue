@@ -1,8 +1,8 @@
 <template>
   <div class="page">
     <el-tabs :model-value="activeTab" class="shell-tabs" @tab-change="onTabChange">
-      <el-tab-pane label="今日录入" name="today" />
-      <el-tab-pane label="历史查询" name="history" />
+      <el-tab-pane :label="t('nav.dailyReport')" name="today" />
+      <el-tab-pane :label="t('dailyHistory.title')" name="history" />
     </el-tabs>
     <RouterView />
   </div>
@@ -11,7 +11,9 @@
 <script setup lang="ts">
 import { computed } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
+import { useI18n } from 'vue-i18n'
 
+const { t } = useI18n()
 const route = useRoute()
 const router = useRouter()
 
