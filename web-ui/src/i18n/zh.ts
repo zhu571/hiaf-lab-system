@@ -5,7 +5,8 @@ export default {
     offline: '离线',
     confirm: '确定',
     retry: '重试',
-    empty: '暂无数据'
+    empty: '暂无数据',
+    listSeparator: '；'
   },
   login: {
     subtitle: '实验室日志管理平台',
@@ -599,6 +600,9 @@ export default {
     save: '保存',
     statusUpdated: '状态已更新',
     statusUpdateFailed: '状态更新失败',
+    loadFailed: '加载失败',
+    createFailed: '创建失败',
+    commentFailed: '评论失败',
     status: {
       open: '未解决',
       in_progress: '进行中',

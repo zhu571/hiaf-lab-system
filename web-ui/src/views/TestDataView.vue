@@ -28,13 +28,17 @@
           </section>
 
           <section class="panel">
-            <el-alert v-if="error" :title="error" type="error" show-icon :closable="false">
-              <el-button size="small" @click="load">{{ $t('testData.retry') }}</el-button>
-            </el-alert>
-            <template v-else>
-              <ResponsiveTable :rows="items" :loading="loading">
+            <StateBlock
+              :loading="loading && !items"
+              :error="error"
+              :empty="!items?.length"
+              :error-text="$t('testData.loadFailed')"
+              :empty-text="$t('testData.empty')"
+              @retry="run"
+            >
+              <ResponsiveTable :rows="items ?? []" :loading="loading">
                 <el-table-column :label="$t('testData.measuredAt')" width="170">
-                  <template #default="{ row }">{{ formatTime(row.measured_at) }}</template>
+                  <template #default="{ row }">{{ formatDateTime(row.measured_at) }}</template>
                 </el-table-column>
                 <el-table-column prop="data_type" :label="$t('testData.dataType')" width="110" />
                 <el-table-column prop="measurement" :label="$t('testData.measurement')" min-width="140" />
@@ -43,7 +47,7 @@
                 </el-table-column>
                 <el-table-column :label="$t('testData.quality')" width="100">
                   <template #default="{ row }">
-                    <el-tag :type="qualityTag(row.quality)" size="small" effect="light">{{ row.quality }}</el-tag>
+                    <StatusBadge domain="testQuality" :value="row.quality" />
                   </template>
                 </el-table-column>
                 <el-table-column prop="source" :label="$t('testData.source')" width="100" />
@@ -55,17 +59,14 @@
                     <el-button size="small" type="danger" plain :disabled="row.quality === 'invalid'" @click="invalidate(row)">{{ $t('testData.markInvalid') }}</el-button>
                   </template>
                 </el-table-column>
-                <template #empty>
-                  <el-empty :description="$t('testData.empty')" />
-                </template>
                 <template #card="{ row }">
                   <div class="td-card">
                     <span class="card-title">{{ row.measurement }}</span>
                     <div class="card-fields">
                       <span>{{ row.data_type }}</span>
-                      <span>{{ formatTime(row.measured_at) }}</span>
+                      <span>{{ formatDateTime(row.measured_at) }}</span>
                       <span>{{ row.value }}{{ row.unit ? ` ${row.unit}` : '' }}</span>
-                      <el-tag :type="qualityTag(row.quality)" size="small" effect="light">{{ row.quality }}</el-tag>
+                      <StatusBadge domain="testQuality" :value="row.quality" />
                     </div>
                     <div class="card-actions">
                       <el-button v-if="!isViewer" size="small" type="danger" plain :disabled="row.quality === 'invalid'" @click="invalidate(row)">{{ $t('testData.markInvalid') }}</el-button>
@@ -75,13 +76,14 @@
               </ResponsiveTable>
               <el-pagination
                 v-model:current-page="page"
+                v-model:page-size="perPage"
                 class="pager"
                 layout="total, prev, pager, next"
-                :page-size="perPage"
                 :total="total"
-                @current-change="load"
+                @current-change="run"
+                @size-change="(n: number) => { onSizeChange(n); run() }"
               />
-            </template>
+            </StateBlock>
           </section>
         </div>
       </el-tab-pane>
@@ -122,31 +124,32 @@
 </template>
 
 <script setup lang="ts">
-import { computed, onMounted, ref, watch } from 'vue'
+import { computed, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useRoute } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { deleteTestData, listTestData, type TestData } from '../api/testdata'
-import { listRuns, type ExperimentRun } from '../api/runs'
-import { useAuthStore } from '../stores/auth'
-import { showApiError } from '../composables/useNotify'
+import { deleteTestData, listTestData, type TestData } from '@/api/testdata'
+import { listRuns, type ExperimentRun } from '@/api/runs'
+import { useAuthStore } from '@/stores/auth'
+import { showApiError } from '@/composables/useNotify'
+import { useAsyncData } from '@/composables/useAsyncData'
+import { usePagination } from '@/composables/usePagination'
 import ResponsiveTable from '@/components/base/ResponsiveTable.vue'
+import StateBlock from '@/components/base/StateBlock.vue'
+import StatusBadge from '@/components/base/StatusBadge.vue'
 import TestDataBatchEditor from '@/components/business/TestDataBatchEditor.vue'
-import { buildChartGroups, chartPalette, type ChartGroup } from '../utils/chartTheme'
+import { buildChartGroups, chartPalette, type ChartGroup } from '@/utils/chartTheme'
+import { formatDateTime } from '@/utils/datetime'
 
 const { t } = useI18n()
 const route = useRoute()
 const auth = useAuthStore()
 
-const items = ref<TestData[]>([])
 const runs = ref<ExperimentRun[]>([])
-const loading = ref(false)
-const error = ref('')
-const page = ref(1)
-const perPage = 20
-const total = ref(0)
 const dataType = ref('')
 const quality = ref('')
+// 分页状态收敛到 usePagination（保持原 perPage=20 与 el-pagination layout 不变）
+const { page, perPage, total, onSizeChange } = usePagination({ perPage: 20 })
 
 const dataTypes = ['cryo', 'pressure', 'voltage', 'rf_voltage', 'efficiency']
 const qualities = ['normal', 'outlier', 'suspect', 'invalid']
@@ -165,7 +168,7 @@ const PAD_Y = 20
 
 const chartGroups = computed<ChartGroup[]>(() =>
   buildChartGroups(
-    items.value.map((item) => {
+    (items.value ?? []).map((item) => {
       const time = new Date(item.measured_at || item.created_at).getTime()
       return { key: item.measurement, time: Number.isNaN(time) ? 0 : time, value: item.value }
     }),
@@ -190,28 +193,30 @@ function polyline(group: ChartGroup) {
     .join(' ')
 }
 
-onMounted(load)
-watch(projectId, load)
-
-async function load() {
-  if (!projectId.value) return
-  loading.value = true
-  error.value = ''
-  try {
-    const params: Record<string, string | number> = { page: page.value, per_page: perPage }
-    if (dataType.value) params.data_type = dataType.value
-    if (quality.value) params.quality = quality.value
-    const data = await listTestData(projectId.value, params)
-    items.value = data.items ?? []
-    total.value = data.total
-  } catch (err) {
-    error.value = err instanceof Error ? err.message : t('testData.loadFailed')
-    showApiError(err, t('testData.loadFailed'))
-  } finally {
-    loading.value = false
-  }
-  await loadRuns()
-}
+// 列表数据收敛到 useAsyncData（竞态 seq + 卸载丢弃内建；对齐原 onMounted(load) / watch(projectId, load)）：
+// immediate 首屏自动加载；error 只写 ref 走 StateBlock 三态，不再 toast（操作级错误仍走 showApiError）
+const {
+  data: items,
+  loading,
+  error,
+  run
+} = useAsyncData<TestData[]>(
+  async () => {
+    if (!projectId.value) return []
+    try {
+      const params: Record<string, string | number> = { page: page.value, per_page: perPage.value }
+      if (dataType.value) params.data_type = dataType.value
+      if (quality.value) params.quality = quality.value
+      const res = await listTestData(projectId.value, params)
+      total.value = res.total ?? 0
+      return res.items ?? []
+    } finally {
+      // 保持原 load() 数据流：无论列表请求成败，结束后都刷新运行下拉（批量录入编辑器的 runs 数据源）
+      await loadRuns()
+    }
+  },
+  { watch: [projectId] }
+)
 
 async function loadRuns() {
   if (isViewer.value || !projectId.value) {
@@ -228,12 +233,12 @@ async function loadRuns() {
 
 function onFilter() {
   page.value = 1
-  load()
+  run()
 }
 
 // 批量录入成功 → 刷新列表（批量编辑器内部已清空表格）
 async function onBatchSubmitted() {
-  await load()
+  await run()
 }
 
 async function invalidate(row: TestData) {
@@ -249,21 +254,10 @@ async function invalidate(row: TestData) {
   try {
     await deleteTestData(row.id)
     ElMessage.success(t('testData.invalidated'))
-    await load()
+    await run()
   } catch (err) {
     showApiError(err, t('testData.invalidateFailed'))
   }
-}
-
-function qualityTag(v: string): 'success' | 'warning' | 'danger' | 'info' {
-  if (v === 'normal') return 'success'
-  if (v === 'outlier') return 'warning'
-  if (v === 'suspect') return 'danger'
-  return 'info'
-}
-
-function formatTime(v?: string) {
-  return v ? new Date(v).toLocaleString('zh-CN', { hour12: false }) : '—'
 }
 </script>
 
