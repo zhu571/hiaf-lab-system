@@ -128,6 +128,10 @@ BUILD_DIR="$(mktemp -d /tmp/hiaf-e2e-XXXXXX)"
 ( cd "$REPO_ROOT/go-server" && go build -o "$BUILD_DIR/lab-server" . )
 
 echo "== 启动 Go server（127.0.0.1:8000）"
+# E2E 规模说明：login 与 refresh 共享同一 IP 滑动窗口（默认 20 次/15min，auth/handler.go S1），
+# 每个 spec 首屏 loadMe 的 refresh 401 也占窗口——11 spec 13 例必然超限（429 登录限流）。
+# 专用测试环境关闭 IP 级限流（置 0），账户锁定（service 内 5 次/15min/用户名）保持生效；
+# 限流逻辑本身由 go-server/auth 单测覆盖，E2E 只验证真实栈旅程。
 PORT=8000 \
 DB_HOST="$DB_HOST" DB_PORT="$DB_PORT" DB_USER="$DB_USER" DB_PASSWORD="$DB_PASSWORD" DB_NAME="$DB_NAME" \
 JWT_SECRET="$(head -c 32 /dev/urandom | od -An -tx1 | tr -d ' \n')" \
@@ -138,6 +142,7 @@ PY_AGENT_INTERPRET_URL="http://127.0.0.1:18099" PY_AGENT_INTERNAL_TOKEN="e2e-age
 SOURCE_GATE_ENABLED=false \
 TODOS_SCHEDULER_ENABLED=false \
 SELF_BASE_URL="http://127.0.0.1:8000" \
+LOGIN_RATE_LIMIT_IP_MAX=0 \
 "$BUILD_DIR/lab-server" >/tmp/hiaf-e2e-server.log 2>&1 &
 SERVER_PID=$!
 
@@ -172,7 +177,7 @@ until curl -fsS --max-time 2 http://127.0.0.1:5173/login -o /dev/null 2>/dev/nul
 done
 
 # ---------- 4. Playwright ----------
-echo "== 运行 Playwright E2E（8 条冒烟用例）"
+echo "== 运行 Playwright E2E（11 spec 13 条冒烟用例）"
 set +e
 ( cd "$REPO_ROOT/web-ui" && npx playwright test )
 RC=$?

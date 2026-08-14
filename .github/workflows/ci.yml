@@ -261,11 +261,19 @@ jobs:
           cd web-ui
           npm audit --audit-level=high \
             || echo "::warning::npm audit 发现高危漏洞（见日志）——报告模式不阻塞，请人工处理"
-      - name: Coverage report (non-blocking)
+      - name: Coverage gate + report
         run: |
           cd web-ui
-          # vitest --coverage（@vitest/coverage-v8，stores/utils/i18n）：纯报告不阻塞 job
-          npm run test:coverage || echo "::warning::vitest coverage report skipped"
+          # vitest --coverage：include 七目录（stores/utils/i18n/config/composables/router/api/components），
+          # thresholds 60/60/60/50（测试方案 §4.2，R4-8 接力链 T4 现状口径）——阈值不达标即非零退出红 job
+          npm run test:coverage
+      - name: Upload coverage artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: web-ui-coverage
+          path: web-ui/coverage
+          retention-days: 7
 
   python-check:
     runs-on: ubuntu-latest

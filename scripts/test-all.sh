@@ -5,7 +5,7 @@
 #   [1/5] 迁移 up/down 验证   —— scripts/test-migrations.sh（临时 postgres 容器）
 #   [2/5] Go 全量测试         —— scripts/test-go.sh（复用/起 postgres + 全量迁移 + race + 覆盖率）
 #   [3/5] py-agent unittest   —— scripts/test-py.sh（unittest + coverage，91 用例）
-#   [4/5] 前端 vitest         —— web-ui: npm test（4 文件 47 用例，CI frontend-test 同一命令）
+#   [4/5] 前端 vitest         —— web-ui: npm test（63 文件 358 用例，CI frontend-test 同一命令）
 #   [5/5] 前端构建 + static 一致性 —— npm run build 后 diff -rq web-ui/dist go-server/static
 #                                          （防旧 embed 白屏，与 CI frontend-test 的 Check static sync 同一校验）
 #
