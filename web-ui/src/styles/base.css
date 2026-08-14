@@ -47,7 +47,7 @@ h2,
 h3,
 h4 {
   color: var(--text-1);
-  font-weight: 650;
+  font-weight: var(--fw-semibold);
   letter-spacing: -0.01em;
   line-height: 1.35;
 }

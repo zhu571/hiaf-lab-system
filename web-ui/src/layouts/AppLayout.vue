@@ -234,7 +234,7 @@ async function onUserCommand(command: string | number | object) {
   color: var(--text-inverse);
   display: grid;
   font-size: 15px;
-  font-weight: 800;
+  font-weight: var(--fw-bold);
   height: 30px;
   place-items: center;
   width: 30px;

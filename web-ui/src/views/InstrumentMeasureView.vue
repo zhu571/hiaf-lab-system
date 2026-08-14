@@ -720,7 +720,7 @@ function stateTag(s: string) {
 }
 
 .estop-btn {
-  font-weight: 650;
+  font-weight: var(--fw-semibold);
   margin-left: auto;
 }
 
@@ -795,7 +795,7 @@ function stateTag(s: string) {
 
 .parsed-value {
   font-size: 28px;
-  font-weight: 650;
+  font-weight: var(--fw-semibold);
   margin: 0 0 8px;
 }
 

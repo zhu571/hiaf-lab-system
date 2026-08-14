@@ -105,7 +105,7 @@ function goBack() {
 .title {
   color: var(--text-1);
   font-size: 17px;
-  font-weight: 650;
+  font-weight: var(--fw-semibold);
   letter-spacing: -0.01em;
   margin: 0;
   min-width: 0;
