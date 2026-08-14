@@ -22,13 +22,22 @@ export default defineConfig({
     setupFiles: ['src/test-utils/setup.ts'],
     include: ['src/**/__tests__/**/*.test.ts'],
     exclude: ['node_modules/**', 'dist/**'],
+    // el-table 重型行渲染用例（StepItemsEditor 30 行 / 批量录入 100 行）在全量并行下需更长时间
+    testTimeout: 15000,
     coverage: {
       provider: 'v8',
-      reporter: ['text'],
-      // 目录更名随迁（重构方案 S0，§4）：components/ 拆 base/business 子目录。
-      // 注：components/** 尚未纳入 include——该口径属测试方案 §8.4 R4-8 接力链的 T4 状态，届时一并加。
-      // include/阈值口径唯一事实源 = 测试方案 §8.4 R4-8 接力链，本批不动阈值。
-      include: ['src/stores/**', 'src/utils/**', 'src/i18n/**', 'src/config/**']
+      reporter: ['text', 'html', 'json-summary'],
+      // 目录更名随迁（重构方案 S0，§4）：components/ 拆 base/business 子目录，layouts/ 独立。
+      // include/阈值口径唯一事实源 = 测试方案 §8.4 R4-8 接力链（T4 现状平铺口径七目录 60/60/60/50
+      // → 重构 S0 目录随迁 + 补 src/config/** → 重构 S6 窄口径收紧 70/65；本批只立现状口径）。
+      // src/views/** 不纳入阈值口径（组件测试断言点 + E2E 兜底，避免为凑数写低价值页面行覆盖）。
+      include: ['src/stores/**', 'src/utils/**', 'src/i18n/**', 'src/config/**', 'src/layouts/**', 'src/composables/**', 'src/router/**', 'src/api/**', 'src/components/**'],
+      thresholds: {
+        lines: 60,
+        statements: 60,
+        functions: 60,
+        branches: 50
+      }
     }
   }
 })
