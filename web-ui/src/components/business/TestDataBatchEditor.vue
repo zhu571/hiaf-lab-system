@@ -400,11 +400,11 @@ async function submit() {
 }
 
 .table-scroll :deep(.el-table .td-error) {
-  background: #fbe9e7;
+  background: var(--danger-soft);
 }
 
 .table-scroll :deep(.el-table .row-error > td.el-table__cell) {
-  background: #fbe9e7;
+  background: var(--danger-soft);
 }
 
 .table-scroll :deep(.el-table .row-error > td.el-table__cell .cell) {

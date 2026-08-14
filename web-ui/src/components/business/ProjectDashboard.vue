@@ -75,7 +75,7 @@
             <article v-for="log in logs" :key="log.id" class="timeline-item">
               <div class="timeline-meta">
                 <el-tag size="small" effect="plain">{{ log.category }}</el-tag>
-                <time>{{ formatTime(log.occurred_at) }}</time>
+                <time>{{ formatDateTime(log.occurred_at) }}</time>
               </div>
               <p>{{ log.content }}</p>
             </article>
@@ -123,6 +123,7 @@ import { useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import { ElMessage } from 'element-plus'
 import { showApiError } from '@/composables/useNotify'
+import { formatDateTime } from '@/utils/datetime'
 import { useProjectStore } from '@/stores/project'
 import { useAuthStore } from '@/stores/auth'
 import { getMembers, transitionProject, type ProjectMember } from '@/api/projects'
@@ -132,7 +133,7 @@ import { listProjectIssues, type Issue } from '@/api/issues'
 const router = useRouter()
 const store = useProjectStore()
 const auth = useAuthStore()
-const { t, locale } = useI18n()
+const { t } = useI18n()
 
 const members = ref<ProjectMember[]>([])
 const logs = ref<LogItem[]>([])
@@ -315,10 +316,6 @@ const severityLabel = (severity: string) => {
   }
   return map[severity] || severity
 }
-const formatTime = (value: string) => {
-  const l = locale.value === 'zh' ? 'zh-CN' : 'en-US'
-  return new Intl.DateTimeFormat(l, { dateStyle: 'short', timeStyle: 'short' }).format(new Date(value))
-}
 const go = (path: string) => router.push(path)
 </script>
 
@@ -374,7 +371,7 @@ const go = (path: string) => router.push(path)
 }
 
 .stage-node[data-state='done'] {
-  background: #eef6f0;
+  background: var(--ok-soft);
   border-color: var(--ok);
   color: var(--ok);
 }
@@ -383,7 +380,7 @@ const go = (path: string) => router.push(path)
   align-items: center;
   background: var(--ok);
   border-radius: 50%;
-  color: #fff;
+  color: var(--text-inverse);
   display: inline-flex;
   font-size: 11px;
   height: 18px;
@@ -587,9 +584,9 @@ const go = (path: string) => router.push(path)
   -webkit-line-clamp: 2;
 }
 
-.severity-tag[data-severity='low'] { --el-tag-bg-color: #8ba3b8; --el-tag-border-color: #8ba3b8; }
+.severity-tag[data-severity='low'] { --el-tag-bg-color: var(--info); --el-tag-border-color: var(--info); }
 .severity-tag[data-severity='medium'] { --el-tag-bg-color: var(--warn); --el-tag-border-color: var(--warn); }
-.severity-tag[data-severity='high'] { --el-tag-bg-color: #df7344; --el-tag-border-color: #df7344; }
+.severity-tag[data-severity='high'] { --el-tag-bg-color: var(--danger); --el-tag-border-color: var(--danger); }
 .severity-tag[data-severity='critical'] { --el-tag-bg-color: var(--danger); --el-tag-border-color: var(--danger); }
 
 @media (max-width: 768px) {

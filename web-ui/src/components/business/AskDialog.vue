@@ -69,7 +69,7 @@
                 <span class="history-main">
                   <strong class="history-q">{{ item.question }}</strong>
                   <span class="history-meta">
-                    {{ formatTime(item.created_at) }} · {{ item.table_name || '-' }} ·
+                    {{ formatDateTime(item.created_at) }} · {{ item.table_name || '-' }} ·
                     {{ t('ask.rowCount', { n: item.row_count }) }}
                   </span>
                 </span>
@@ -99,6 +99,7 @@ import { ArrowLeft, ArrowRight } from '@element-plus/icons-vue'
 import AskResultPanel from '@/components/business/AskResultPanel.vue'
 import type { AskResultData } from '@/api/ask'
 import { useAskDialog } from '@/composables/useAskDialog'
+import { formatDateTime } from '@/utils/datetime'
 import { useMobile } from '@/composables/useMobile'
 import { askChat, askHistory, askHistoryDetail, type AskHistoryDetail as AskHistoryDetailType, type AskHistoryItem } from '@/api/ask'
 import { newIdempotencyKey } from '@/api/client'
@@ -227,10 +228,6 @@ async function openHistory(item: AskHistoryItem) {
   }
 }
 
-function formatTime(x: string) {
-  if (!x) return ''
-  return new Date(x).toLocaleString('zh-CN', { hour12: false })
-}
 
 function openRoute(route: string) {
   askOpen.value = false

@@ -54,6 +54,7 @@ declare module 'vue' {
     ElTooltip: typeof import('element-plus/es')['ElTooltip']
     ElUpload: typeof import('element-plus/es')['ElUpload']
     FormDialog: typeof import('./src/components/base/FormDialog.vue')['default']
+    InstrumentAiChat: typeof import('./src/components/business/InstrumentAiChat.vue')['default']
     MarkdownView: typeof import('./src/components/business/MarkdownView.vue')['default']
     ProjectDashboard: typeof import('./src/components/business/ProjectDashboard.vue')['default']
     ProjectSidebar: typeof import('./src/components/business/ProjectSidebar.vue')['default']

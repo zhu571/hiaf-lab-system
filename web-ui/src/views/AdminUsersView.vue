@@ -107,7 +107,7 @@
 
     <el-dialog v-model="roleDialog" :title="t('adminUsers.changeRoleTitle')" width="440">
       <p v-if="roleTarget" class="role-dialog-text">
-        <span v-html="t('adminUsers.changeRoleFrom', { username: roleTarget.username, role: roleLabel(roleTarget.role) })" />
+        <span>{{ t('adminUsers.changeRoleFrom', { username: roleTarget.username, role: roleLabel(roleTarget.role) }) }}</span>
       </p>
       <el-select v-model="roleDraft" class="role-select">
         <el-option v-for="role in roles" :key="role" :label="roleLabel(role)" :value="role" />
@@ -163,6 +163,7 @@ import { Search } from '@element-plus/icons-vue'
 import { createUser, listUsers, resetPassword, updateUser, type UserInfo } from '../api/auth'
 import { useAuthStore } from '../stores/auth'
 import ResponsiveTable from '@/components/base/ResponsiveTable.vue'
+import { formatDate } from '@/utils/datetime'
 
 const { t } = useI18n()
 const auth = useAuthStore()
@@ -226,13 +227,6 @@ function avatarText(user: UserInfo) {
   return (user.display_name || user.username).slice(0, 1).toUpperCase()
 }
 
-function formatDate(iso: string) {
-  if (!iso) return '—'
-  const d = new Date(iso)
-  if (Number.isNaN(d.getTime())) return '—'
-  const pad = (n: number) => String(n).padStart(2, '0')
-  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`
-}
 
 function openRoleDialog(row: UserInfo) {
   roleTarget.value = row

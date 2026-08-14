@@ -422,8 +422,8 @@ async function doLogout() {
 .avatar {
   background: linear-gradient(135deg, var(--brand-500), var(--brand-700));
   border-radius: 50%;
-  box-shadow: 0 6px 16px -6px rgba(20, 112, 138, 0.5);
-  color: #fff;
+  box-shadow: var(--shadow-avatar);
+  color: var(--text-inverse);
   display: grid;
   flex-shrink: 0;
   font-size: 18px;
@@ -579,9 +579,10 @@ async function doLogout() {
 }
 
 .log-terminal {
-  background: #1e1e1e;
+  /* 终端深底归并 --code-bg（美术附录 B SettingsView→--code-*；#1e1e1e → #0b1e30 同族合并） */
+  background: var(--code-bg);
   border-radius: 6px;
-  color: #d4d4d4;
+  color: var(--code-text);
   font-family: 'Cascadia Code', 'Fira Code', 'JetBrains Mono', 'Consolas', monospace;
   font-size: 13px;
   line-height: 1.6;
@@ -593,11 +594,11 @@ async function doLogout() {
 }
 
 .log-terminal .log-error {
-  color: #f44747;
+  color: var(--code-red);
 }
 
 .log-terminal .log-warn {
-  color: #e5c07b;
+  color: var(--code-yellow);
 }
 
 .running-indicator {

@@ -31,7 +31,7 @@
               <el-tag size="small" type="info" effect="plain">{{ run.gas_type }}</el-tag>
               <el-tag v-for="d in run.devices || []" :key="d" size="small" type="warning" effect="plain">{{ d }}</el-tag>
             </span>
-            <span class="time">{{ t('runList.createdAt') }}{{ fmtTime(run.created_at) }}</span>
+            <span class="time">{{ t('runList.createdAt') }}{{ formatDateTime(run.created_at) }}</span>
           </button>
         </div>
         <el-pagination
@@ -49,7 +49,7 @@
     <el-dialog v-model="createDialog" :title="t('runList.create')" width="620">
       <el-form label-position="top">
         <el-form-item :label="t('runList.nameLabel')"><el-input v-model="draft.name" /></el-form-item>
-        <el-form-item label="Campaign"><el-input v-model="draft.campaign" /></el-form-item>
+        <el-form-item :label="t('runList.campaign')"><el-input v-model="draft.campaign" /></el-form-item>
         <div class="form-row">
           <el-form-item :label="t('runList.type')">
             <el-select v-model="draft.run_type">
@@ -138,6 +138,7 @@ import StepItemsEditor from '@/components/business/StepItemsEditor.vue'
 import { applyRunTemplate, createRun, listRuns, type ExperimentRun, type RunPayload } from '../api/runs'
 import { createTemplate, generateSteps, type StepTemplateItem } from '../api/stepTemplates'
 import { useAuthStore } from '../stores/auth'
+import { formatDateTime } from '@/utils/datetime'
 import { showApiError } from '../composables/useNotify'
 
 const { t } = useI18n()
@@ -248,11 +249,6 @@ function open(run: ExperimentRun) {
 
 function runTypeLabel(value: string) {
   return runTypes.value.find((t) => t.value === value)?.label || value
-}
-
-function fmtTime(x?: string) {
-  if (!x) return '—'
-  return new Date(x).toLocaleString('zh-CN', { hour12: false })
 }
 
 // 只提交有值的字段，空字符串/空数组转为 undefined（JSON 序列化时会被丢弃）
@@ -490,7 +486,7 @@ async function saveAndApplyTemplate() {
 }
 
 .run-card {
-  background: #fff;
+  background: var(--surface);
   border: 1px solid var(--border);
   border-radius: 10px;
   box-shadow: var(--shadow-sm);

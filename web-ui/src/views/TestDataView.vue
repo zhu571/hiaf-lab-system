@@ -1,27 +1,27 @@
 <template>
   <div class="page">
     <div class="toolbar">
-      <h2>{{ $t('testData.title') }}</h2>
+      <h2>{{ t('testData.title') }}</h2>
     </div>
 
     <el-tabs v-model="activeTab" class="page-tabs">
-      <el-tab-pane v-if="!isViewer" :label="$t('testData.entry')" name="entry">
+      <el-tab-pane v-if="!isViewer" :label="t('testData.entry')" name="entry">
         <section class="panel">
-          <h3 class="panel-title">{{ $t('testData.entryTitle') }}</h3>
+          <h3 class="panel-title">{{ t('testData.entryTitle') }}</h3>
           <TestDataBatchEditor :project-id="projectId" :runs="runs" @submitted="onBatchSubmitted" />
         </section>
       </el-tab-pane>
 
-      <el-tab-pane :label="$t('testData.list')" name="list">
+      <el-tab-pane :label="t('testData.list')" name="list">
         <div class="tab-stack">
           <section class="panel filters-panel">
             <div class="filters">
-              <el-select v-model="dataType" :placeholder="$t('testData.dataType')" @change="onFilter">
-                <el-option :label="$t('testData.allTypes')" value="" />
+              <el-select v-model="dataType" :placeholder="t('testData.dataType')" @change="onFilter">
+                <el-option :label="t('testData.allTypes')" value="" />
                 <el-option v-for="t in dataTypes" :key="t" :label="t" :value="t" />
               </el-select>
-              <el-select v-model="quality" :placeholder="$t('testData.quality')" @change="onFilter">
-                <el-option :label="$t('testData.allQualities')" value="" />
+              <el-select v-model="quality" :placeholder="t('testData.quality')" @change="onFilter">
+                <el-option :label="t('testData.allQualities')" value="" />
                 <el-option v-for="q in qualities" :key="q" :label="q" :value="q" />
               </el-select>
             </div>
@@ -32,31 +32,31 @@
               :loading="loading && !items"
               :error="error"
               :empty="!items?.length"
-              :error-text="$t('testData.loadFailed')"
-              :empty-text="$t('testData.empty')"
+              :error-text="t('testData.loadFailed')"
+              :empty-text="t('testData.empty')"
               @retry="run"
             >
               <ResponsiveTable :rows="items ?? []" :loading="loading">
-                <el-table-column :label="$t('testData.measuredAt')" width="170">
+                <el-table-column :label="t('testData.measuredAt')" width="170">
                   <template #default="{ row }">{{ formatDateTime(row.measured_at) }}</template>
                 </el-table-column>
-                <el-table-column prop="data_type" :label="$t('testData.dataType')" width="110" />
-                <el-table-column prop="measurement" :label="$t('testData.measurement')" min-width="140" />
-                <el-table-column :label="$t('testData.value')" width="130">
+                <el-table-column prop="data_type" :label="t('testData.dataType')" width="110" />
+                <el-table-column prop="measurement" :label="t('testData.measurement')" min-width="140" />
+                <el-table-column :label="t('testData.value')" width="130">
                   <template #default="{ row }">{{ row.value }}{{ row.unit ? ` ${row.unit}` : '' }}</template>
                 </el-table-column>
-                <el-table-column :label="$t('testData.quality')" width="100">
+                <el-table-column :label="t('testData.quality')" width="100">
                   <template #default="{ row }">
                     <StatusBadge domain="testQuality" :value="row.quality" />
                   </template>
                 </el-table-column>
-                <el-table-column prop="source" :label="$t('testData.source')" width="100" />
-                <el-table-column :label="$t('testData.notes')" min-width="140" show-overflow-tooltip>
+                <el-table-column prop="source" :label="t('testData.source')" width="100" />
+                <el-table-column :label="t('testData.notes')" min-width="140" show-overflow-tooltip>
                   <template #default="{ row }">{{ row.notes || '—' }}</template>
                 </el-table-column>
-                <el-table-column v-if="!isViewer" :label="$t('testData.actions')" width="110">
+                <el-table-column v-if="!isViewer" :label="t('testData.actions')" width="110">
                   <template #default="{ row }">
-                    <el-button size="small" type="danger" plain :disabled="row.quality === 'invalid'" @click="invalidate(row)">{{ $t('testData.markInvalid') }}</el-button>
+                    <el-button size="small" type="danger" plain :disabled="row.quality === 'invalid'" @click="invalidate(row)">{{ t('testData.markInvalid') }}</el-button>
                   </template>
                 </el-table-column>
                 <template #card="{ row }">
@@ -69,7 +69,7 @@
                       <StatusBadge domain="testQuality" :value="row.quality" />
                     </div>
                     <div class="card-actions">
-                      <el-button v-if="!isViewer" size="small" type="danger" plain :disabled="row.quality === 'invalid'" @click="invalidate(row)">{{ $t('testData.markInvalid') }}</el-button>
+                      <el-button v-if="!isViewer" size="small" type="danger" plain :disabled="row.quality === 'invalid'" @click="invalidate(row)">{{ t('testData.markInvalid') }}</el-button>
                     </div>
                   </div>
                 </template>
@@ -88,9 +88,9 @@
         </div>
       </el-tab-pane>
 
-      <el-tab-pane :label="$t('testData.chart')" name="chart">
+      <el-tab-pane :label="t('testData.chart')" name="chart">
         <section class="panel chart-panel">
-          <h3 class="panel-title">{{ $t('testData.chart') }} <span class="muted hint">{{ $t('testData.chartHint') }}</span></h3>
+          <h3 class="panel-title">{{ t('testData.chart') }} <span class="muted hint">{{ t('testData.chartHint') }}</span></h3>
           <template v-if="chartGroups.length">
             <div class="chart-scroll">
             <svg class="trend-chart" :viewBox="`0 0 ${CHART_W} ${CHART_H}`" preserveAspectRatio="xMidYMid meet">
@@ -116,7 +116,7 @@
               </span>
             </div>
           </template>
-          <el-empty v-else :description="$t('testData.empty')" />
+          <el-empty v-else :description="t('testData.empty')" />
         </section>
       </el-tab-pane>
     </el-tabs>
