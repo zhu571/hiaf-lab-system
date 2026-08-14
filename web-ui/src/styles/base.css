@@ -90,3 +90,28 @@ h4 {
 ::-webkit-scrollbar-track {
   background: transparent;
 }
+
+/* ---------- 焦点态（美术 §3.10） ---------- */
+
+:focus-visible {
+  border-radius: var(--radius-sm);
+  outline: 2px solid var(--brand-500);
+  outline-offset: 2px;
+}
+
+html.dark :focus-visible {
+  outline-color: var(--brand-400);
+}
+
+/* ---------- 动效偏好（美术 §3.9：关闭入场动画/脉冲/路由过渡） ---------- */
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-delay: 0s !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}

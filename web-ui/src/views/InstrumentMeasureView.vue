@@ -798,14 +798,7 @@ function riskTag(risk: string): 'success' | 'warning' | 'danger' | 'info' {
 <style scoped>
 .panel-head {
   align-items: baseline;
-  display: flex;
-  gap: 10px;
   justify-content: space-between;
-  margin-bottom: 14px;
-}
-
-.panel-title {
-  font-size: 15px;
 }
 
 .hint {

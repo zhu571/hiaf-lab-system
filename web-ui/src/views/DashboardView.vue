@@ -468,41 +468,12 @@ function stagger(i: number) {
 }
 
 .panel-head {
-  align-items: center;
   border-bottom: 1px solid var(--border);
-  display: flex;
-  gap: 10px;
-  margin-bottom: 14px;
   padding-bottom: 12px;
 }
 
-.panel-icon {
-  align-items: center;
-  background: var(--brand-050);
-  border-radius: 8px;
-  color: var(--brand-600);
-  display: inline-flex;
-  flex-shrink: 0;
-  font-size: 15px;
-  height: 28px;
-  justify-content: center;
-  width: 28px;
-}
-
-.panel-head h3 {
-  font-size: var(--fs-title-sm);
-}
-
 .panel-meta {
-  background: var(--surface-2);
-  border: 1px solid var(--border);
-  border-radius: var(--radius-full);
-  color: var(--text-3);
-  font-size: 12px;
-  font-variant-numeric: tabular-nums;
   margin-left: auto;
-  padding: 2px 10px;
-  white-space: nowrap;
 }
 
 .card-list {
@@ -908,18 +879,6 @@ function stagger(i: number) {
 @media (max-width: 480px) {
   .gas-stats {
     grid-template-columns: 1fr;
-  }
-}
-
-@media (prefers-reduced-motion: reduce) {
-  .device-card,
-  .brief-card,
-  .member-card {
-    animation: none;
-  }
-
-  .status-dot.online::after {
-    animation: none;
   }
 }
 </style>
