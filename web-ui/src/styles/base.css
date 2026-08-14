@@ -10,11 +10,8 @@ body {
   background: linear-gradient(180deg, #f3f7fb 0%, var(--bg) 280px) fixed;
   background-color: var(--bg);
   color: var(--text-2);
-  font-family:
-    Inter, "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei",
-    "Noto Sans CJK SC", ui-sans-serif, system-ui, -apple-system,
-    "Segoe UI", sans-serif;
-  font-size: 14px;
+  font-family: var(--font-family-base);
+  font-size: var(--fs-body);
   line-height: 1.6;
   margin: 0;
   min-width: 320px;

@@ -79,7 +79,7 @@ function open(row: Record<string, unknown>) {
 <style scoped>
 .result-panel {
   display: grid;
-  gap: 12px;
+  gap: var(--space-3);
 }
 
 .answer-box {

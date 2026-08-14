@@ -457,7 +457,7 @@ async function saveAndApplyTemplate() {
   align-items: center;
   display: flex;
   flex-wrap: wrap;
-  gap: 12px;
+  gap: var(--space-3);
 }
 
 .status-select {
@@ -478,7 +478,7 @@ async function saveAndApplyTemplate() {
 
 .error-box {
   display: grid;
-  gap: 12px;
+  gap: var(--space-3);
   justify-items: center;
   padding: 32px 0;
 }
@@ -543,7 +543,7 @@ async function saveAndApplyTemplate() {
 
 .form-row {
   display: grid;
-  gap: 12px;
+  gap: var(--space-3);
   grid-template-columns: repeat(2, minmax(0, 1fr));
 }
 

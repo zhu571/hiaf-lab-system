@@ -410,7 +410,7 @@ function staleLevel(time?: string): 'warning' | 'danger' | null {
 .panel-meta {
   background: var(--surface-2);
   border: 1px solid var(--border);
-  border-radius: 999px;
+  border-radius: var(--radius-full);
   color: var(--text-3);
   font-size: 12px;
   font-variant-numeric: tabular-nums;
@@ -433,7 +433,7 @@ function staleLevel(time?: string): 'warning' | 'danger' | null {
 
 .reading-grid {
   display: grid;
-  gap: 12px;
+  gap: var(--space-3);
   grid-template-columns: repeat(auto-fill, minmax(170px, 1fr));
 }
 

@@ -789,7 +789,7 @@ const sections: ManualSection[] = [
   align-items: center;
   background: var(--surface-2);
   border: 1px solid var(--border);
-  border-radius: 999px;
+  border-radius: var(--radius-full);
   color: var(--text-2);
   display: inline-flex;
   font-size: 13px;
@@ -808,7 +808,7 @@ const sections: ManualSection[] = [
 .toc-num {
   align-items: center;
   background: var(--brand-050);
-  border-radius: 999px;
+  border-radius: var(--radius-full);
   color: var(--brand-600);
   display: inline-flex;
   font-size: 11px;
@@ -899,7 +899,7 @@ const sections: ManualSection[] = [
 
 .line-list li::before {
   background: var(--brand-500);
-  border-radius: 999px;
+  border-radius: var(--radius-full);
   content: '';
   height: 6px;
   left: 2px;

@@ -123,7 +123,7 @@ function switchProject(id: string) {
   align-items: center;
   display: flex;
   flex-wrap: wrap;
-  gap: 12px;
+  gap: var(--space-3);
 }
 
 .title-block {
@@ -135,7 +135,7 @@ function switchProject(id: string) {
 }
 
 .title-block h2 {
-  font-size: 18px;
+  font-size: var(--fs-title);
 }
 
 .code {

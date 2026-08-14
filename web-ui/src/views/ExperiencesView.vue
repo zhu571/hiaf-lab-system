@@ -207,7 +207,7 @@ async function create() {
   align-content: start;
   background: var(--surface-2);
   display: grid;
-  gap: 12px;
+  gap: var(--space-3);
 }
 
 .column-head {
@@ -246,7 +246,7 @@ async function create() {
 .count {
   background: #fff;
   border: 1px solid var(--border);
-  border-radius: 999px;
+  border-radius: var(--radius-full);
   color: var(--text-3);
   font-size: 12px;
   font-weight: 600;

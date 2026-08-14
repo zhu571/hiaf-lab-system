@@ -374,7 +374,7 @@ async function onUserCommand(command: string | number | object) {
 
 .content {
   margin-left: 216px;
-  padding: 24px;
+  padding: var(--space-6);
 }
 
 .bottom-nav {
@@ -389,7 +389,7 @@ async function onUserCommand(command: string | number | object) {
   padding-bottom: var(--safe-area-bottom);
   position: fixed;
   right: 0;
-  z-index: 10;
+  z-index: var(--z-bottomnav);
 }
 
 .bottom-link {

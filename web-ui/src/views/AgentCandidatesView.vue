@@ -428,7 +428,7 @@ async function reject() {
 
 .detail {
   display: grid;
-  gap: 12px;
+  gap: var(--space-3);
 }
 
 .detail h3 {

@@ -354,7 +354,7 @@ const go = (path: string) => router.push(path)
   align-items: center;
   background: var(--surface);
   border: 1px solid var(--border-strong);
-  border-radius: 999px;
+  border-radius: var(--radius-full);
   color: var(--text-3);
   display: flex;
   gap: 8px;
@@ -514,7 +514,7 @@ const go = (path: string) => router.push(path)
   border: 1px solid var(--border);
   border-radius: var(--radius-md);
   display: grid;
-  gap: 12px;
+  gap: var(--space-3);
   padding: 16px;
 }
 
@@ -538,7 +538,7 @@ const go = (path: string) => router.push(path)
   align-items: center;
   border-top: 1px solid var(--border);
   display: flex;
-  gap: 12px;
+  gap: var(--space-3);
   justify-content: space-between;
   min-width: 0;
   padding: 10px 0;

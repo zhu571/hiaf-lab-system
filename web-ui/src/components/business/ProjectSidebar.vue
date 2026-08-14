@@ -37,7 +37,7 @@ function open(id: string) {
 .project-sidebar {
   align-content: start;
   display: grid;
-  gap: 12px;
+  gap: var(--space-3);
 }
 
 .project-item {

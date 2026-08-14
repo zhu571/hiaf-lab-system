@@ -988,7 +988,7 @@ function riskTag(risk: string): 'success' | 'warning' | 'danger' | 'info' {
 
 .chat-shell {
   display: grid;
-  gap: 12px;
+  gap: var(--space-3);
 }
 
 .chat-list {
