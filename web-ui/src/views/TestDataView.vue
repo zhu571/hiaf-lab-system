@@ -130,8 +130,8 @@ import { deleteTestData, listTestData, type TestData } from '../api/testdata'
 import { listRuns, type ExperimentRun } from '../api/runs'
 import { useAuthStore } from '../stores/auth'
 import { showApiError } from '../composables/useNotify'
-import ResponsiveTable from '../components/ResponsiveTable.vue'
-import TestDataBatchEditor from '../components/TestDataBatchEditor.vue'
+import ResponsiveTable from '@/components/base/ResponsiveTable.vue'
+import TestDataBatchEditor from '@/components/business/TestDataBatchEditor.vue'
 
 const { t } = useI18n()
 const route = useRoute()

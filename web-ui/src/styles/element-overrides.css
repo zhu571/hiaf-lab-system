@@ -1,0 +1,127 @@
+:root {
+  /* Element Plus 主题变量覆写 */
+  --el-color-primary: #12708a;
+  --el-color-primary-light-3: #4798ac;
+  --el-color-primary-light-5: #7db6c4;
+  --el-color-primary-light-7: #b8d7df;
+  --el-color-primary-light-8: #d1e5ea;
+  --el-color-primary-light-9: #ebf4f6;
+  --el-color-primary-dark-2: #0e5a6e;
+  --el-border-radius-base: 8px;
+  --el-border-radius-small: 6px;
+  --el-border-color: var(--border-strong);
+  --el-border-color-light: var(--border);
+  --el-border-color-lighter: var(--border);
+  --el-border-color-extra-light: #edf1f6;
+  --el-text-color-primary: var(--text-1);
+  --el-text-color-regular: var(--text-2);
+  --el-text-color-secondary: var(--text-3);
+  --el-fill-color-light: #f0f4f9;
+  --el-bg-color-page: var(--bg);
+}
+
+/* ---------- Element Plus 细节打磨 ---------- */
+
+.el-button {
+  font-weight: 500;
+  letter-spacing: 0.01em;
+}
+
+.el-button--primary {
+  box-shadow: 0 4px 12px -6px rgba(18, 112, 138, 0.55);
+}
+
+.el-button--primary:not(.is-disabled):hover {
+  box-shadow: 0 6px 16px -6px rgba(18, 112, 138, 0.6);
+}
+
+.el-button--primary.is-disabled {
+  box-shadow: none;
+}
+
+.el-tag {
+  border-radius: 999px;
+  font-weight: 500;
+}
+
+.el-table {
+  --el-table-border-color: var(--border);
+  --el-table-header-bg-color: var(--surface-2);
+  --el-table-header-text-color: var(--text-3);
+  --el-table-row-hover-bg-color: var(--brand-050);
+}
+
+.el-table th.el-table__cell {
+  font-weight: 600;
+}
+
+.el-dialog {
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-lg);
+}
+
+.el-dialog__title,
+.el-drawer__title {
+  color: var(--text-1);
+  font-weight: 650;
+}
+
+.el-drawer {
+  box-shadow: var(--shadow-lg);
+}
+
+.el-form-item__label {
+  color: var(--text-2);
+  font-weight: 500;
+}
+
+.el-input__wrapper,
+.el-select__wrapper,
+.el-textarea__inner {
+  transition:
+    box-shadow 0.15s ease,
+    border-color 0.15s ease;
+}
+
+.el-empty {
+  padding: 36px 0;
+}
+
+.el-empty__description p {
+  color: var(--text-3);
+}
+
+.el-descriptions__label {
+  color: var(--text-3);
+}
+
+@media (max-width: 768px) {
+  /* 移动端弹层收敛：dialog/drawer 的 width 是内联样式，必须 !important */
+  .el-dialog {
+    width: calc(100vw - 24px) !important;
+    max-height: calc(100dvh - 48px);
+    display: flex;
+    flex-direction: column;
+  }
+  .el-dialog__body { overflow-y: auto; }
+  .el-dialog__footer { flex-shrink: 0; }   /* 超高表单滚动时 footer 不被压缩 */
+  .el-drawer.rtl, .el-drawer.ltr { width: 100vw !important; max-width: 480px; }
+  .el-message-box { width: calc(100vw - 32px); }          /* 非内联，无需 !important */
+  .el-picker__popper.el-popper {                           /* daterange 面板 ~620px，收敛 + 面板内横滑 */
+    max-width: calc(100vw - 24px);
+    overflow-x: auto;
+  }
+
+  /* 触摸目标：最小可点高度（值取自 --touch-target），ElMessageBox 按钮 teleport 到 body 同样命中 */
+  .el-button {
+    min-height: var(--touch-target);
+  }
+  .el-button--small {
+    min-height: 36px;
+  }
+
+  /* 分页器不挤压：隐藏 total，layout 属性不变 */
+  .el-pagination__total {
+    display: none;
+  }
+}

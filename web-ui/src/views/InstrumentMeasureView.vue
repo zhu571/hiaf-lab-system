@@ -296,7 +296,7 @@ import { listRuns, type ExperimentRun } from '../api/runs'
 import { useAuthStore } from '../stores/auth'
 import { showApiError } from '../composables/useNotify'
 import { useMobile } from '../composables/useMobile'
-import ResponsiveTable from '../components/ResponsiveTable.vue'
+import ResponsiveTable from '@/components/base/ResponsiveTable.vue'
 
 Chart.register(LineController, ScatterController, LineElement, PointElement, LinearScale, Legend, Tooltip)
 

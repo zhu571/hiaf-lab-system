@@ -182,8 +182,8 @@
 import { computed, onMounted, reactive, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import StepItemsEditor from '../components/StepItemsEditor.vue'
-import ResponsiveTable from '../components/ResponsiveTable.vue'
+import StepItemsEditor from '@/components/business/StepItemsEditor.vue'
+import ResponsiveTable from '@/components/base/ResponsiveTable.vue'
 import {
   createTemplate,
   deleteTemplate,

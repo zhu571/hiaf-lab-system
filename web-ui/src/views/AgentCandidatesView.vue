@@ -193,8 +193,8 @@ import { useI18n } from 'vue-i18n'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { diffLines, diffWordsWithSpace, type Change } from 'diff'
 import { showApiError } from '../composables/useNotify'
-import StatusBadge from '../components/StatusBadge.vue'
-import ResponsiveTable from '../components/ResponsiveTable.vue'
+import StatusBadge from '@/components/base/StatusBadge.vue'
+import ResponsiveTable from '@/components/base/ResponsiveTable.vue'
 import { approveCandidate, getCandidateTrace, listAgentCandidates, rejectCandidate, type AgentCandidate, type CandidateTrace } from '../api/agent'
 
 const { t } = useI18n()

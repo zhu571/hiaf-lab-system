@@ -48,7 +48,7 @@ import { useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import { ElMessage } from 'element-plus'
 import { showApiError } from '../composables/useNotify'
-import StatusBadge from '../components/StatusBadge.vue'
+import StatusBadge from '@/components/base/StatusBadge.vue'
 import { listReports, type DailyReport } from '../api/logs'
 
 const { t } = useI18n()

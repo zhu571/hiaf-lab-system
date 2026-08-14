@@ -41,8 +41,8 @@ import { useI18n } from 'vue-i18n'
 import { ElMessage } from 'element-plus'
 import { showApiError } from '../composables/useNotify'
 import { useMobile } from '../composables/useMobile'
-import StatusBadge from '../components/StatusBadge.vue'
-import MarkdownView from '../components/MarkdownView.vue'
+import StatusBadge from '@/components/base/StatusBadge.vue'
+import MarkdownView from '@/components/business/MarkdownView.vue'
 import { getReport, type DailyReport } from '../api/logs'
 
 const { t } = useI18n()

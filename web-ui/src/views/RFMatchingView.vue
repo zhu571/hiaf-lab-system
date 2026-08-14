@@ -165,7 +165,7 @@ import { ElMessage, ElMessageBox } from 'element-plus'
 import { createRFMatching, deleteRFMatching, listRFMatching, type RFMatchingPayload, type RFMatchingRecord } from '../api/rfmatch'
 import { useAuthStore } from '../stores/auth'
 import { showApiError } from '../composables/useNotify'
-import ResponsiveTable from '../components/ResponsiveTable.vue'
+import ResponsiveTable from '@/components/base/ResponsiveTable.vue'
 
 const route = useRoute()
 const auth = useAuthStore()
