@@ -104,7 +104,7 @@
                   stroke-linejoin="round"
                   stroke-width="2"
                 />
-                <circle v-for="(c, i) in chartCoords(group)" :key="i" :cx="c.x" :cy="c.y" :fill="group.color" r="3" />
+                <circle v-for="(c, i) in chartCoords(group)" :key="i" :cx="c.x" :cy="c.y" :fill="group.color" r="2" />
               </g>
             </svg>
             </div>
@@ -132,6 +132,7 @@ import { useAuthStore } from '../stores/auth'
 import { showApiError } from '../composables/useNotify'
 import ResponsiveTable from '@/components/base/ResponsiveTable.vue'
 import TestDataBatchEditor from '@/components/business/TestDataBatchEditor.vue'
+import { buildChartGroups, chartPalette, type ChartGroup } from '../utils/chartTheme'
 
 const { t } = useI18n()
 const route = useRoute()
@@ -156,30 +157,21 @@ const projectId = computed(() => String(route.params.id || ''))
 // viewer has no entry permission, default to list tab
 const activeTab = ref(isViewer.value ? 'list' : 'entry')
 
-// Trend chart: viewBox coordinates and palette
+// Trend chart: viewBox coordinates; palette/grouping 收敛到 utils/chartTheme.ts（P15 去重）
 const CHART_W = 640
 const CHART_H = 240
 const PAD_X = 28
 const PAD_Y = 20
-const palette = ['var(--brand-500)', 'var(--ok)', 'var(--warn)', 'var(--danger)', '#7a5af8', '#0d5a70', '#c2477e', '#5a8a3c']
 
-type ChartPoint = { time: number; value: number }
-type ChartGroup = { name: string; color: string; points: ChartPoint[] }
-
-const chartGroups = computed<ChartGroup[]>(() => {
-  const groups = new Map<string, ChartPoint[]>()
-  for (const item of items.value) {
-    const time = new Date(item.measured_at || item.created_at).getTime()
-    const list = groups.get(item.measurement) || []
-    list.push({ time: Number.isNaN(time) ? 0 : time, value: item.value })
-    groups.set(item.measurement, list)
-  }
-  return Array.from(groups.entries()).map(([name, points], index) => ({
-    name,
-    color: palette[index % palette.length],
-    points: points.sort((a, b) => a.time - b.time)
-  }))
-})
+const chartGroups = computed<ChartGroup[]>(() =>
+  buildChartGroups(
+    items.value.map((item) => {
+      const time = new Date(item.measured_at || item.created_at).getTime()
+      return { key: item.measurement, time: Number.isNaN(time) ? 0 : time, value: item.value }
+    }),
+    chartPalette()
+  )
+)
 
 function chartCoords(group: ChartGroup) {
   const n = group.points.length

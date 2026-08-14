@@ -264,13 +264,6 @@ import { useI18n } from 'vue-i18n'
 import { Refresh } from '@element-plus/icons-vue'
 import {
   Chart,
-  LineController,
-  LineElement,
-  PointElement,
-  ScatterController,
-  LinearScale,
-  Legend,
-  Tooltip,
   type ChartDataset
 } from 'chart.js'
 import {
@@ -297,8 +290,9 @@ import { useAuthStore } from '../stores/auth'
 import { showApiError } from '../composables/useNotify'
 import { useMobile } from '../composables/useMobile'
 import ResponsiveTable from '@/components/base/ResponsiveTable.vue'
+import { chartPalette } from '../utils/chartTheme'
 
-Chart.register(LineController, ScatterController, LineElement, PointElement, LinearScale, Legend, Tooltip)
+// Chart.register 已收口到 utils/chartTheme.ts setupChartDefaults()（美术方案 §3.7，main.ts 调用一次）
 
 const { t } = useI18n()
 
@@ -613,13 +607,15 @@ function destroyChart() {
 function renderChart(command: string, parsed: ParsedResult) {
   destroyChart()
   if (!chartCanvas.value || !parsed.points?.length) return
+  // 系列语义色（美术方案 §3.7）：测量曲线 --chart-1、极值点 --chart-3
+  const p = chartPalette()
   const datasets: ChartDataset<'scatter'>[] = [
     {
       label: parsed.y_label || 'value',
       data: parsed.points,
       showLine: true,
-      borderColor: '#167d9a',
-      backgroundColor: '#167d9a',
+      borderColor: p[0],
+      backgroundColor: p[0],
       pointRadius: 2
     }
   ]
@@ -634,8 +630,8 @@ function renderChart(command: string, parsed: ParsedResult) {
     datasets.push({
       label: `${extreme.label} (${extreme.point.x}, ${extreme.point.y})`,
       data: [extreme.point],
-      borderColor: '#e6a23c',
-      backgroundColor: '#e6a23c',
+      borderColor: p[2],
+      backgroundColor: p[2],
       pointRadius: 6,
       pointStyle: 'triangle'
     })

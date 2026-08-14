@@ -98,7 +98,8 @@ import { Odometer, Refresh, TrendCharts } from '@element-plus/icons-vue'
 import { getHistory, getLatest, type SensorPoint } from '../api/sensors'
 import { showApiError } from '../composables/useNotify'
 import { usePolling } from '../composables/usePolling'
-import SensorTrendChart, { type ChartGroup, type ChartPoint } from '@/components/business/SensorTrendChart.vue'
+import SensorTrendChart from '@/components/business/SensorTrendChart.vue'
+import { buildChartGroups, chartPalette, type ChartGroup } from '@/utils/chartTheme'
 
 const { t, locale } = useI18n()
 
@@ -160,25 +161,15 @@ let historySeq = 0
 const latestPolling = usePolling(() => loadLatest({ silent: true }), REFRESH_MS)
 const historyPolling = usePolling(() => loadHistory({ silent: true }), HISTORY_REFRESH_MS, { resumeImmediate: false })
 
-// 趋势图调色板
-const palette = ['var(--brand-500)', 'var(--ok)', 'var(--warn)', 'var(--danger)', '#7a5af8', '#0d5a70', '#c2477e', '#5a8a3c']
-
-const chartGroups = computed<ChartGroup[]>(() => {
-  const groups = new Map<string, ChartPoint[]>()
-  for (const p of historyPoints.value) {
-    const time = new Date(p.time).getTime()
-    if (Number.isNaN(time)) continue
-    const key = p.tag || historyMeasurement.value
-    const list = groups.get(key) || []
-    list.push({ time, value: p.value })
-    groups.set(key, list)
-  }
-  return Array.from(groups.entries()).map(([name, points], index) => ({
-    name,
-    color: palette[index % palette.length],
-    points: points.sort((a, b) => a.time - b.time)
-  }))
-})
+// 趋势图分组（P15：调色板与分组逻辑收敛到 utils/chartTheme.ts，chartPalette 实时读 --chart-1..8 计算色）
+const chartGroups = computed<ChartGroup[]>(() =>
+  buildChartGroups(
+    historyPoints.value
+      .map((p) => ({ key: p.tag || historyMeasurement.value, time: new Date(p.time).getTime(), value: p.value }))
+      .filter((r) => !Number.isNaN(r.time)),
+    chartPalette()
+  )
+)
 
 // windowKey 变化 → SensorTrendChart 复位 xWindow（§4.5）。
 // rangeNonce 保证缩放态下重新点击当前已选档也触发复位（§4.2.2「点击任一档」语义）。

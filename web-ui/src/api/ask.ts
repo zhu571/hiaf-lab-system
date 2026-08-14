@@ -34,6 +34,18 @@ export type AskHistoryItem = {
 
 export type AskHistoryDetail = AskHistoryItem & { rows: Record<string, unknown>[] }
 
+/** AI 查询结果展示数据（重构方案 §3.7 P11：由 AskResultPanel.vue:54-63 迁入，与 19 个 api 文件内联类型惯例统一） */
+export type AskResultData = {
+  answer: string
+  sql: string
+  tableName: string
+  columns: string[]
+  rows: Record<string, unknown>[]
+  rowCount: number
+  truncated: boolean
+  durationMs: number
+}
+
 /** 提问：Idempotency-Key 由调用方传入（显式 header 优先，拦截器只兜底生成） */
 export function askChat(question: string, idempotencyKey: string) {
   return request<AskChatResponse>({

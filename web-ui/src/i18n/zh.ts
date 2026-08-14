@@ -2,7 +2,10 @@ export default {
   common: {
     cancel: '取消',
     online: '在线',
-    offline: '离线'
+    offline: '离线',
+    confirm: '确定',
+    retry: '重试',
+    empty: '暂无数据'
   },
   login: {
     subtitle: '实验室日志管理平台',
@@ -341,6 +344,7 @@ export default {
     roleMaintainer: '维护者',
     roleMember: '成员',
     roleViewer: '只读',
+    roleAgent: 'Agent',
     loadFailed: '用户列表加载失败',
     roleUpdated: '角色已更新',
     roleUpdateFailed: '角色更新失败',
@@ -454,6 +458,10 @@ export default {
     unit: '单位',
     unitPlaceholder: '如 K / mbar / V',
     quality: '质量',
+    qualityNormal: '正常',
+    qualityOutlier: '异常值',
+    qualitySuspect: '可疑',
+    qualityInvalid: '无效',
     measuredAt: '测量时间',
     timePlaceholder: '选择时间（可选）',
     linkedRun: '关联批次',

@@ -50,17 +50,7 @@ import { computed } from 'vue'
 import { useI18n } from 'vue-i18n'
 import MarkdownView from '@/components/business/MarkdownView.vue'
 import { canOpenRow, hasRowRoute, tableToRoute } from '@/composables/askRoutes'
-
-export type AskResultData = {
-  answer: string
-  sql: string
-  tableName: string
-  columns: string[]
-  rows: Record<string, unknown>[]
-  rowCount: number
-  truncated: boolean
-  durationMs: number
-}
+import type { AskResultData } from '@/api/ask'
 
 const props = defineProps<{ data: AskResultData }>()
 
