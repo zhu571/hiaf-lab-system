@@ -596,7 +596,7 @@ async function doLogout() {
 }
 
 .log-terminal {
-  /* 终端深底归并 --code-bg（美术附录 B SettingsView→--code-*；#1e1e1e → #0b1e30 同族合并） */
+  /* 终端深底归并 --code-bg（美术附录 B SettingsView→--code-*；原深灰底同族合并入 navy 系） */
   background: var(--code-bg);
   border-radius: 6px;
   color: var(--code-text);

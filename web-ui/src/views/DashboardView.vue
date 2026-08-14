@@ -483,7 +483,9 @@ function stagger(i: number) {
   align-items: start;
   display: grid;
   gap: 20px;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
+  /* auto-fit + 300px 最小列宽：宽屏与 repeat(3,·) 等价（3 面板 3 列），
+     200% 缩放等窄有效宽度下自动折 2+1/单列，避免 218px 挤压列（S6 缩放走查修复） */
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 300px), 1fr));
 }
 
 .panel-head {

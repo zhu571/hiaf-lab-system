@@ -214,6 +214,11 @@ weekly 自身不 SELECT 任何业务表；新查询方法（`logs.WeeklyReports`
 - 时间格式化统一走 `src/utils/datetime.ts`（locale 取 i18n 当前语言），禁止视图内手写 `formatTime` 类函数。
 - 图表配置统一走 `src/utils/chartTheme.ts`（`setupChartDefaults`/`refreshDefaults`/`chartPalette`/`buildChartGroups`），组件内不再各自 `Chart.register`。
 - 前端测试（vitest，与被测源码同目录 `__tests__/`）：coverage 窄口径门禁 = `stores/utils/i18n/config/layouts/composables/router/api/components/base`，阈值 lines/statements ≥70%、branches ≥65%、functions ≥60%（`components/business` 与 `views` 不纳入，由组件测试断言 + E2E 兜底）；改前端代码后 `npm test` 与 `npm run test:coverage` 必须全绿。
+- 美术约定（美术方案 S6 终验批登记：设计令牌 / 深色模式 / statusMeta 三级色 / 可访问性）：
+  - **设计令牌唯一事实源**：`src/styles/tokens.css`（`:root` light 全表）+ `src/styles/themes/dark.css`（`html.dark` 覆写，首行 `@import` EP dark css-vars）。组件/视图（`*.vue`）内禁止出现 hex/rgba 字面量色值，防线：`grep -rnE '#[0-9a-fA-F]{3,8}\b|rgba?\(' web-ui/src --include='*.vue'` 必须无输出。**后续新增色值必须走令牌**：alpha 合成值/阴影等原值整体上提为令牌并在 tokens.css 文件头注释登记批次，视图侧只经 `var()` 引用。
+  - **深色模式机制**：`src/composables/useTheme.ts` 单例（模块级唯一一次 `useColorMode`，`storageKey: 'theme'`，三态 `'light'|'dark'|'auto'`，`disableTransition: true`），Settings 下拉绑 `store`、联动 watch `state`。**组件禁止直接调 `useColorMode`**（每次调用各建 useStorage 实例并独立同步 html class，多实例冗余且配置易漂移）。`index.html` 内联防闪烁脚本首帧预置 `html.dark` 与 theme-color（meta media / useTheme watch / init 脚本三处职责）。新写样式一律引用令牌即自动获得 dark 双套；图表组件经 `watch(useTheme().state)` → `chartTheme.refreshDefaults()` + destroy/重建联动（不依赖 `Chart.instances`）。
+  - **statusMeta 三级色扩展**：注册表 `StatusMeta` 含 `graphic/text/soft` 扩展字段（FAMILY 族映射 `--ok/--warn/--danger/--info` 三级令牌）；EP 场景（StatusBadge/el-tag）取 `tone`，非 EP 场景（优先级 pill/severity tag/status-dot/图表图例）取 `graphic/text/soft`。Element Plus 功能色单轨：`element-overrides.css`（light）与 dark.css 已把 `--el-color-{success,warning,danger,error,info}` 全档映射到功能令牌（error=danger 族），勿再引入 EP 默认色字面量。
+  - **可访问性**：全局 `:focus-visible` 焦点环在 `styles/base.css`（dark 下 `--brand-400`），禁止「`outline: none` 无替代」写法；`prefers-reduced-motion` 全局规则同在 base.css，新动效遵守 `--dur-*`/`--ease-*` 令牌并被 reduced-motion 覆盖。
 
 ### Python / Agent
 

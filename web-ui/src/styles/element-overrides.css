@@ -7,6 +7,44 @@
   --el-color-primary-light-8: #d1e5ea;
   --el-color-primary-light-9: #ebf4f6;
   --el-color-primary-dark-2: #0e5a6e;
+  /* 功能色四族 → 三级令牌（美术 §3.2，S1 走查遗留 S6 补做；与 dark.css 同手法：
+     base/light-3/light-5=图形级、light-7/8/9=浅底级、dark-2=文本级，error=danger 族。
+     统一前 EP 默认 #67c23a/#e6a23c/#f56c6c/#909399 双轨；统一后对比度全面不劣于原默认对） */
+  --el-color-success: var(--ok);
+  --el-color-success-light-3: var(--ok);
+  --el-color-success-light-5: var(--ok);
+  --el-color-success-light-7: var(--ok-soft);
+  --el-color-success-light-8: var(--ok-soft);
+  --el-color-success-light-9: var(--ok-soft);
+  --el-color-success-dark-2: var(--ok-text);
+  --el-color-warning: var(--warn);
+  --el-color-warning-light-3: var(--warn);
+  --el-color-warning-light-5: var(--warn);
+  --el-color-warning-light-7: var(--warn-soft);
+  --el-color-warning-light-8: var(--warn-soft);
+  --el-color-warning-light-9: var(--warn-soft);
+  --el-color-warning-dark-2: var(--warn-text);
+  --el-color-danger: var(--danger);
+  --el-color-danger-light-3: var(--danger);
+  --el-color-danger-light-5: var(--danger);
+  --el-color-danger-light-7: var(--danger-soft);
+  --el-color-danger-light-8: var(--danger-soft);
+  --el-color-danger-light-9: var(--danger-soft);
+  --el-color-danger-dark-2: var(--danger-text);
+  --el-color-error: var(--danger);
+  --el-color-error-light-3: var(--danger);
+  --el-color-error-light-5: var(--danger);
+  --el-color-error-light-7: var(--danger-soft);
+  --el-color-error-light-8: var(--danger-soft);
+  --el-color-error-light-9: var(--danger-soft);
+  --el-color-error-dark-2: var(--danger-text);
+  --el-color-info: var(--info);
+  --el-color-info-light-3: var(--info);
+  --el-color-info-light-5: var(--info);
+  --el-color-info-light-7: var(--info-soft);
+  --el-color-info-light-8: var(--info-soft);
+  --el-color-info-light-9: var(--info-soft);
+  --el-color-info-dark-2: var(--info-text);
   --el-border-radius-base: 8px;
   --el-border-radius-small: 6px;
   --el-border-color: var(--border-strong);
