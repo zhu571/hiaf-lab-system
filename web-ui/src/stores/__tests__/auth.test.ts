@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { setActivePinia, createPinia } from 'pinia'
 import { useAuthStore } from '../auth'
-import type { UserInfo } from '../../api/auth'
+import { makeUser } from '../../test-utils/factories'
 
 // mock api 层：登录/登出/资料接口全部打桩，不发起任何真实网络请求。
 // setCSRFToken / setLocale 保留真实实现（模块级变量 / localStorage，无副作用断言点）。
@@ -21,18 +21,8 @@ vi.mock('../../api/auth', () => ({
   logout: mocks.logout
 }))
 
-function makeUser(role: string, language = 'zh'): UserInfo {
-  return {
-    id: 'u1',
-    username: 'tester',
-    display_name: 'Tester',
-    role,
-    must_change_password: false,
-    created_at: '2026-01-01T00:00:00+08:00',
-    disabled: false,
-    language
-  }
-}
+// client.ts 仅做 spy（真实实现照常执行）：断言 login 时 setCSRFToken 联动（csrf 会话续期依据）
+vi.mock('../../api/client', { spy: true })
 
 describe('auth store 权限逻辑', () => {
   beforeEach(() => {
@@ -44,22 +34,22 @@ describe('auth store 权限逻辑', () => {
     const store = useAuthStore()
     expect(store.canReviewAgent).toBe(false)
 
-    store.user = makeUser('viewer')
+    store.user = makeUser({ role: 'viewer' })
     expect(store.canReviewAgent).toBe(false)
 
-    store.user = makeUser('maintainer')
+    store.user = makeUser({ role: 'maintainer' })
     expect(store.canReviewAgent).toBe(true)
 
-    store.user = makeUser('admin')
+    store.user = makeUser({ role: 'admin' })
     expect(store.canReviewAgent).toBe(true)
   })
 
   it('isAdmin：仅 admin 角色为 true', () => {
     const store = useAuthStore()
-    store.user = makeUser('maintainer')
+    store.user = makeUser({ role: 'maintainer' })
     expect(store.isAdmin).toBe(false)
 
-    store.user = makeUser('admin')
+    store.user = makeUser({ role: 'admin' })
     expect(store.isAdmin).toBe(true)
   })
 
@@ -77,7 +67,7 @@ describe('auth store 登录/登出 action', () => {
   })
 
   it('login 成功：写入 user、ready=true、返回响应数据', async () => {
-    const user = makeUser('admin')
+    const user = makeUser({ role: 'admin' })
     const data = { user, csrf_token: 'csrf-1', must_change_password: false }
     mocks.login.mockResolvedValue(data)
 
@@ -100,7 +90,7 @@ describe('auth store 登录/登出 action', () => {
   })
 
   it('loadMe 成功路径：user=me() 且 ready=true', async () => {
-    const user = makeUser('maintainer')
+    const user = makeUser({ role: 'maintainer' })
     mocks.me.mockResolvedValue(user)
 
     const store = useAuthStore()
@@ -113,7 +103,7 @@ describe('auth store 登录/登出 action', () => {
   })
 
   it('loadMe 首查失败：先 refresh 再重查 me()', async () => {
-    const user = makeUser('viewer')
+    const user = makeUser({ role: 'viewer' })
     mocks.me.mockRejectedValueOnce(new Error('token expired'))
     mocks.refresh.mockResolvedValue({ user, csrf_token: 'csrf-2', must_change_password: false })
     mocks.me.mockResolvedValue(user)
@@ -141,7 +131,7 @@ describe('auth store 登录/登出 action', () => {
     mocks.logout.mockResolvedValue({ success: true })
 
     const store = useAuthStore()
-    store.user = makeUser('admin')
+    store.user = makeUser({ role: 'admin' })
     await store.logout()
 
     expect(mocks.logout).toHaveBeenCalled()
@@ -149,7 +139,7 @@ describe('auth store 登录/登出 action', () => {
   })
 
   it('setLanguage：更新 user 并调用 setLocale', async () => {
-    const updated = makeUser('admin', 'en')
+    const updated = makeUser({ role: 'admin', language: 'en' })
     mocks.updateProfile.mockResolvedValue(updated)
 
     const store = useAuthStore()
@@ -157,5 +147,44 @@ describe('auth store 登录/登出 action', () => {
 
     expect(mocks.updateProfile).toHaveBeenCalledWith({ language: 'en' })
     expect(store.user).toEqual(updated)
+  })
+})
+
+// §3.3 store 边界补充（5 例预算：auth 3 + project 2，配合 §3.5 守卫断言与 csrf/语言联动）
+describe('auth store 边界', () => {
+  beforeEach(() => {
+    setActivePinia(createPinia())
+    vi.clearAllMocks()
+    localStorage.clear()
+  })
+
+  it('login 响应 must_change_password:true → 落位 store.user（守卫 §3.5 重定向 /settings 依据）', async () => {
+    const user = makeUser({ role: 'viewer', must_change_password: true })
+    mocks.login.mockResolvedValue({ user, csrf_token: 'csrf-1', must_change_password: true })
+
+    const store = useAuthStore()
+    await store.login('tester', 'secret')
+
+    expect(store.user?.must_change_password).toBe(true)
+  })
+
+  it('login 成功 → setCSRFToken 联动（csrf_token 同步到 client 拦截器）', async () => {
+    const user = makeUser({ role: 'admin' })
+    mocks.login.mockResolvedValue({ user, csrf_token: 'csrf-new', must_change_password: false })
+
+    const store = useAuthStore()
+    await store.login('tester', 'secret')
+
+    const { setCSRFToken } = await import('../../api/client')
+    expect(vi.mocked(setCSRFToken)).toHaveBeenCalledWith('csrf-new')
+  })
+
+  it('loadMe 成功 → user.language 落位本地显示语言（setLocale 联动 localStorage）', async () => {
+    mocks.me.mockResolvedValue(makeUser({ role: 'maintainer', language: 'en' }))
+
+    const store = useAuthStore()
+    await store.loadMe()
+
+    expect(localStorage.getItem('language')).toBe('en')
   })
 })

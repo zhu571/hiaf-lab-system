@@ -76,7 +76,7 @@ const router = createRouter({
     // 兼容重定向：保留旧链接不 404
     { path: '/issues', redirect: '/projects' },
     { path: '/daily-reports', redirect: '/daily-report/history' },
-    { path: '/runs/:id', redirect: '/experiment-runs/:id' },
+    { path: '/runs/:id', redirect: (to) => ({ path: '/experiment-runs/' + to.params.id, query: to.query, hash: to.hash }) },
     { path: '/projects/:id/runs', redirect: '/projects/:id/experiment-runs' },
     { path: '/instruments', redirect: '/instrument-measure' }
   ]
