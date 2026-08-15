@@ -45,11 +45,23 @@ const (
 // 必须注册在 chi RealIP 之前：RealIP 会改写 r.RemoteAddr，先于它取数才能拿到真实 TCP 对端。
 // SOURCE_GATE_ENABLED=false 完全放行（回滚开关），仅保留来源 IP 规范化与内网 XFF 剥除；
 // 默认 true 且未配置 LAB_PROXY_SHARED_SECRET 时，除内网外全部拒绝（安全默认）。
-func SourceGate() func(http.Handler) http.Handler {
-	_, lanNet, err := net.ParseCIDR(envString("SOURCE_GATE_LAN_CIDR", defaultSourceGateLANCIDR))
-	if err != nil {
-		lanNet = nil // 配置错误按“其余”公网处理（仍受白名单约束），不误判内网
+// parseLanCIDRs 解析逗号分隔的 LAN CIDR 列表（服务间 docker 网段等可并列内网）。
+func parseLanCIDRs(raw string) []*net.IPNet {
+	var out []*net.IPNet
+	for _, part := range strings.Split(raw, ",") {
+		part = strings.TrimSpace(part)
+		if part == "" {
+			continue
+		}
+		if _, n, err := net.ParseCIDR(part); err == nil {
+			out = append(out, n)
+		}
 	}
+	return out // 配置错误项跳过；全空 = 无内网（安全默认：其余全按公网白名单约束）
+}
+
+func SourceGate() func(http.Handler) http.Handler {
+	lanNets := parseLanCIDRs(envString("SOURCE_GATE_LAN_CIDR", defaultSourceGateLANCIDR))
 	proxyIP := net.ParseIP(envString("SOURCE_GATE_PROXY_HOST", defaultSourceGateProxyHost))
 	secret := os.Getenv("LAB_PROXY_SHARED_SECRET")
 	enabled := os.Getenv("SOURCE_GATE_ENABLED") != "false"
@@ -57,7 +69,7 @@ func SourceGate() func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			peer := hostOnly(r.RemoteAddr)
-			kind, srcIP := classifySource(peer, r.Header.Get("X-Forwarded-For"), r.Header.Get("X-Lab-Proxy"), proxyIP, lanNet, secret)
+			kind, srcIP := classifySource(peer, r.Header.Get("X-Forwarded-For"), r.Header.Get("X-Lab-Proxy"), proxyIP, lanNets, secret)
 			if kind == sourceKindInternal {
 				// 内网直连剥 XFF：chi RealIP 的“盲信”因此不可被内网伪造利用。
 				r.Header.Del("X-Forwarded-For")
@@ -89,7 +101,7 @@ func SourceGate() func(http.Handler) http.Handler {
 }
 
 // classifySource 按状态机判定来源并返回规范化来源 IP。
-func classifySource(peer, xff, secretHeader string, proxyIP net.IP, lanNet *net.IPNet, secret string) (sourceKind, string) {
+func classifySource(peer, xff, secretHeader string, proxyIP net.IP, lanNets []*net.IPNet, secret string) (sourceKind, string) {
 	peerIP := net.ParseIP(peer)
 	if proxyIP != nil && peerIP != nil && proxyIP.Equal(peerIP) {
 		if secret != "" && subtle.ConstantTimeCompare([]byte(secretHeader), []byte(secret)) == 1 {
@@ -101,10 +113,23 @@ func classifySource(peer, xff, secretHeader string, proxyIP net.IP, lanNet *net.
 		}
 		return sourceKindSuspicious, peer
 	}
-	if lanNet != nil && peerIP != nil && lanNet.Contains(peerIP) {
+	if inAnyLAN(peerIP, lanNets) {
 		return sourceKindInternal, peer
 	}
 	return sourceKindPublic, peer
+}
+
+// inAnyLAN 判定 peerIP 是否落在任一内网网段。
+func inAnyLAN(peerIP net.IP, lanNets []*net.IPNet) bool {
+	if peerIP == nil {
+		return false
+	}
+	for _, n := range lanNets {
+		if n.Contains(peerIP) {
+			return true
+		}
+	}
+	return false
 }
 
 // String 返回来源分类的日志字段值（与 GetSourceKind 约定一致）。
