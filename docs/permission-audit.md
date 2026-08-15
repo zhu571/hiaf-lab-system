@@ -224,6 +224,23 @@ Agent 代用户操作额外字段：
 - SHA/MD5 单轮 hash。
 - 可逆加密保存密码。
 
+### 4.3 公网来源门（SourceGate）写白名单
+
+公网入口（VPS Caddy → EasyTier → gascell）经 `middleware/source_gate.go` 来源门管控：内网直连全量写权限；公网（非内网、非 Caddy peer 或秘密头不匹配）仅以下**写路径**放行，其余写一律 403 `source_gate_denied`（实现：`sourceWriteAllowed`，路径精确匹配，无前缀通配）。
+
+| 端点 | 方法 | 说明 |
+|------|------|------|
+| `/api/v1/auth/login` / `refresh` / `register` | POST | 认证入口（S2 注册开关默认关闭） |
+| `/api/v1/auth/logout` | POST | 登出（2026-08-15 #156 新增） |
+| `/api/v1/auth/change-password` | POST | 改密码（2026-08-15 #156 新增；此前公网改密码 403） |
+| `/api/v1/auth/profile` | PATCH | 改语言偏好（2026-08-15 #156 新增） |
+| `/api/v1/ask/chat` | POST | AI 问答 |
+| `/api/v1/instruments/*/nl-commands`、`/parse-result`、`/emergency-stop` | POST | 仪器翻译/解析/急停 |
+| `/api/v1/logs/*/ai-parse` | POST | 日志 AI 解析 |
+
+> 放行的认证端点均有登录态（AuthRequired）+ CSRF 保护；GET/HEAD/OPTIONS 天然放行。SourceGate 挂在日志中间件之前，被门拒绝的请求不打 access log——排查公网 403 时先确认是否被来源门拦截（对照本表）。
+> 变更纪律：白名单变更必须同步本表 + 送审（安全相关）。
+
 ## 5. 传感器推送鉴权
 
 ### 5.1 设备身份
