@@ -164,6 +164,7 @@ func TestSourceWriteAllowedMatrix(t *testing.T) {
 	allowed := []string{
 		http.MethodGet, http.MethodHead, http.MethodOptions,
 		"/api/v1/auth/login", "/api/v1/auth/refresh", "/api/v1/auth/register",
+		"/api/v1/auth/logout", "/api/v1/auth/change-password", "/api/v1/auth/profile",
 		"/api/v1/ask/chat",
 		"/api/v1/instruments/i1/nl-commands",
 		"/api/v1/instruments/i1/parse-result",
