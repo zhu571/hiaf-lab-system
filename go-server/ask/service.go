@@ -21,6 +21,7 @@ import (
 
 	"github.com/lib/pq"
 	"github.com/zhu571/hiaf-lab-system/go-server/common"
+	"github.com/zhu571/hiaf-lab-system/go-server/middleware"
 )
 
 var (
@@ -32,12 +33,29 @@ var (
 	ErrSQLExec      = errors.New("SQL 执行失败")
 )
 
-// mainTables 是 ask_reader 可 SELECT 的 18 张主表（方案 §1，与迁移 033 GRANT 对齐）。
+// mainTables 是 ask 通道可 SELECT 的主表（R2 行级隔离收缩为 10 张：7 张项目
+// 业务表 + projects + 2 张全局模板表）。daily_reports（个人表）、issue_comments /
+// run_steps / attachments / instrument_results（无 project_id 的内容表）、todos
+// （个人表）、project_members / automation_rules（跨项目敏感表）已移出白名单。
+// DB 层 ask_reader GRANT（迁移 033，18 表）保持不变——Go 解析层更严，纵深不降级。
 var mainTables = []string{
-	"daily_reports", "logs", "issues", "issue_comments", "experiences",
-	"test_data", "rf_matching_records", "assembly_steps", "experiment_runs", "run_steps",
-	"step_templates", "step_template_items", "instrument_results", "attachments", "todos",
-	"automation_rules", "projects", "project_members",
+	"logs", "issues", "experiences", "test_data", "rf_matching_records",
+	"assembly_steps", "experiment_runs", "step_templates", "step_template_items", "projects",
+}
+
+// projectFilterColumns 是需要行级隔离的表 → 过滤列：项目业务表按 project_id、
+// projects 表按 id 注入 `IN (调用方可访问项目集合)`（对齐路由层
+// RequireProjectPermission 的 PermRead 语义，admin 为全部 active 项目）。
+// 不在表中的白名单表（step_templates/step_template_items）为全员可读的全局表。
+var projectFilterColumns = map[string]string{
+	"logs":                "project_id",
+	"issues":              "project_id",
+	"experiences":         "project_id",
+	"test_data":           "project_id",
+	"rf_matching_records": "project_id",
+	"assembly_steps":      "project_id",
+	"experiment_runs":     "project_id",
+	"projects":            "id",
 }
 
 const (
@@ -60,6 +78,10 @@ const (
 // 防线 2+3 正则（见方案 §5）。
 var (
 	fromKwRe   = regexp.MustCompile(`(?i)\bfrom\b`)
+	whereKwRe  = regexp.MustCompile(`(?i)\bwhere\b`)
+	orderByRe  = regexp.MustCompile(`(?i)\border\s+by\b`)
+	groupByRe  = regexp.MustCompile(`(?i)\bgroup\s+by\b`)
+	offsetRe   = regexp.MustCompile(`(?i)\boffset\b`)
 	identRe    = regexp.MustCompile(`(?i)^[a-z_][a-z0-9_]*`)
 	quotedRe   = regexp.MustCompile(`(?i)^"([^"]*)"`)
 	joinRe     = regexp.MustCompile(`(?i)\bjoin\b`)
@@ -227,15 +249,16 @@ func (s *Service) BuildSchema(ctx context.Context) (string, error) {
 	return s.schemaText, nil
 }
 
-// buildContext 组装 AI-3 上下文（最近 7 天日报摘要 + 最近项目）：
-// 日报取 summary（为空回退 raw_text），每条截断到 200 字；总量截断到 <4K 字符。
+// buildContext 组装 AI-3 上下文（最近 7 天【当前用户自己】的日报摘要 + 自己
+// 可见的项目）：日报取 summary（为空回退 raw_text），每条截断到 200 字；总量
+// 截断到 <4K 字符。R2：只取当前用户自己的数据，不再把全员日报摘要发给外部 LLM。
 // 数据为空返回空串；错误上抛由调用方静默降级。
-func (s *Service) buildContext(ctx context.Context) (string, error) {
-	reports, err := s.repo.RecentDailyReports(ctx, contextReportDays, contextReportLimit)
+func (s *Service) buildContext(ctx context.Context, userID string) (string, error) {
+	reports, err := s.repo.RecentDailyReports(ctx, userID, contextReportDays, contextReportLimit)
 	if err != nil {
 		return "", err
 	}
-	projects, err := s.repo.RecentProjects(ctx, contextProjectLimit)
+	projects, err := s.repo.RecentProjects(ctx, userID, contextProjectLimit)
 	if err != nil {
 		return "", err
 	}
@@ -280,8 +303,10 @@ func (s *Service) buildContext(ctx context.Context) (string, error) {
 }
 
 // chatPayload 组装发给 py-agent /v1/ask 的载荷；context 为空时省略该键（零行为变化）。
-func chatPayload(question, schema, contextText string) map[string]any {
-	payload := map[string]any{"question": question, "schema": schema}
+// user_id（R2）随载荷下发，py-agent 在 /ask/execute 回调时回传，Go 侧按该用户
+// 可访问项目集合做行级隔离。
+func chatPayload(question, schema, contextText, userID string) map[string]any {
+	payload := map[string]any{"question": question, "schema": schema, "user_id": userID}
 	if contextText != "" {
 		payload["context"] = contextText
 	}
@@ -304,15 +329,15 @@ func (s *Service) Chat(ctx context.Context, userID, question string) (*ChatRespo
 	if err != nil {
 		return nil, err
 	}
-	// AI-3 上下文：最近 7 天日报摘要 + 最近项目。失败静默降级（只警告，不影响问答）。
+	// AI-3 上下文：当前用户最近 7 天日报摘要 + 自己可见的项目。失败静默降级（只警告，不影响问答）。
 	ctxText := ""
-	if c, err := s.buildContext(ctx); err != nil {
+	if c, err := s.buildContext(ctx, userID); err != nil {
 		slog.Warn("ask context build failed, degraded to no-context", "error", err)
 	} else {
 		ctxText = c
 	}
 	started := time.Now()
-	payload, err := json.Marshal(chatPayload(question, schema, ctxText))
+	payload, err := json.Marshal(chatPayload(question, schema, ctxText, userID))
 	if err != nil {
 		return nil, err
 	}
@@ -381,10 +406,26 @@ func (s *Service) Chat(ctx context.Context, userID, question string) (*ChatRespo
 	}, nil
 }
 
-// Execute 只读执行：SQL 校验（防线 2+3）→ 只读事务 + SET LOCAL ROLE ask_reader
-// （防线 1，DB 权限级白名单）→ statement_timeout → 行集序列化 + 限额（防线 4）。
-func (s *Service) Execute(ctx context.Context, rawSQL string) (*ExecuteResponse, error) {
-	sqlText, table, truncated, err := prepareSQL(rawSQL)
+// Execute 只读执行：SQL 校验（防线 2+3）→ 行级隔离（R2：按调用方可访问项目
+// 集合强制注入 project_id IN (...)，admin 为全部 active 项目）→ 只读事务 +
+// SET LOCAL ROLE ask_reader（防线 1，DB 权限级白名单）→ statement_timeout →
+// 行集序列化 + 限额（防线 4）。
+// userID 是发起问答的用户，经 Chat → py-agent → execute 链路回传（SERVICE_TOKEN
+// 内部通道，非用户可控）；空则整体拒绝——fail-closed，不退化为全库可见。
+func (s *Service) Execute(ctx context.Context, userID, rawSQL string) (*ExecuteResponse, error) {
+	userID = strings.TrimSpace(userID)
+	if userID == "" {
+		return nil, fmt.Errorf("%w: 缺少调用方用户上下文（user_id）", ErrSQLRejected)
+	}
+	accessible, err := middleware.ListProjectsWithPermission(s.db, userID, middleware.PermRead)
+	if err != nil {
+		return nil, fmt.Errorf("resolve accessible projects: %w", err)
+	}
+	projectIDs := make([]string, len(accessible))
+	for i, p := range accessible {
+		projectIDs[i] = p.ID
+	}
+	sqlText, table, truncated, err := prepareSQL(rawSQL, projectIDs)
 	if err != nil {
 		return nil, err
 	}
@@ -465,10 +506,12 @@ func (s *Service) Execute(ctx context.Context, rawSQL string) (*ExecuteResponse,
 	}, nil
 }
 
-// prepareSQL 防线 2+3 校验 + LIMIT 封顶（防线 4）：
-// 首字符 S（禁 WITH/CTE）、禁多语句/注释/写关键字/系统访问、FROM 仅 18 主表单表、
-// JOIN 一律拒绝；无 LIMIT 补 200，已有 LIMIT n>200 改写 200。
-func prepareSQL(raw string) (sqlText, table string, truncated bool, err error) {
+// prepareSQL 防线 2+3 校验 + 行级隔离注入（R2）+ LIMIT 封顶（防线 4）：
+// 首字符 S（禁 WITH/CTE）、禁多语句/注释/写关键字/系统访问、FROM 仅白名单单表、
+// JOIN 一律拒绝；项目表强制注入 project_id/id IN (projectIDs)；无 LIMIT 补 200，
+// 已有 LIMIT n>200 改写 200。projectIDs 为调用方可访问项目集合（空集 → IN (NULL)
+// 恒假，0 行）。
+func prepareSQL(raw string, projectIDs []string) (sqlText, table string, truncated bool, err error) {
 	sqlText = strings.TrimSpace(raw)
 	if sqlText == "" {
 		return "", "", false, fmt.Errorf("%w: SQL 为空", ErrSQLRejected)
@@ -537,6 +580,14 @@ func prepareSQL(raw string) (sqlText, table string, truncated bool, err error) {
 		table = t
 	}
 
+	// R2 行级隔离：项目表强制注入过滤条件。定位基于 stripStrings 后的等长文本，
+	// 字面量内的 WHERE/ORDER BY/LIMIT 不会被误定位；注入后重算 stripped 供
+	// 下文 LIMIT 封顶使用（注入片段为引号包裹的 DB 侧 UUID，无关键字）。
+	if col, ok := projectFilterColumns[table]; ok {
+		sqlText = injectRowFilter(sqlText, stripped, col, projectIDs)
+		stripped = stripStrings(sqlText)
+	}
+
 	// LIMIT 封顶：已有 LIMIT n>200 → 改写；LIMIT 非数字（ALL/NULL）→ 整体替换；无 LIMIT → 补 200。
 	// 改写/补全只是查询层封顶，不置 truncated——只有实际截断（扫描循环/capSnapshot）才置位。
 	if m := limitNumRe.FindStringSubmatchIndex(stripped); m != nil {
@@ -555,8 +606,10 @@ func prepareSQL(raw string) (sqlText, table string, truncated bool, err error) {
 // stripStrings 把单引号字符串字面量与双引号标识符内容逐字节替换为空格：
 // 字节长度不变，正则匹配偏移与原文一一对应；SQL 内两个连续引号视为转义。
 // 未闭合的引号段掩到结尾（SQL 本身非法，交由 PG 拒绝，此处只做纵深）。
+// 先掩蔽 dollar-quote（R1）：否则 $a$ ' $a$ 中未配对单引号会让下方循环把
+// 后半句整体当"未闭合字符串"掩掉，UNION/pg_/子查询黑名单全部失效。
 func stripStrings(s string) string {
-	b := []byte(s)
+	b := []byte(maskDollarQuotes(s))
 	for i := 0; i < len(b); {
 		q := b[i]
 		if q != '\'' && q != '"' {
@@ -585,6 +638,73 @@ func stripStrings(s string) string {
 		i = j
 	}
 	return string(b)
+}
+
+// dollarQuoteRe 匹配 PG dollar-quote 起始定界符 $tag$（tag 可空，[A-Za-z_0-9]*）。
+var dollarQuoteRe = regexp.MustCompile(`\$[A-Za-z_0-9]*\$`)
+
+// maskDollarQuotes 把 $tag$...$tag$（含未闭合形态：掩到结尾）逐字节替换为空格，
+// 字节长度不变，保持与原文的偏移对齐。未闭合 dollar-quote 在 PG 侧同为语法错误，
+// 此处掩到结尾是纵深（防止尾部关键字检查被"吞进"未闭合段）。含单引号/双引号的
+// 定界符内内容一并掩掉，stripStrings 的引号扫描不会再进入这些区域。
+func maskDollarQuotes(s string) string {
+	b := []byte(s)
+	for i := 0; i < len(b); {
+		loc := dollarQuoteRe.FindIndex(b[i:])
+		if loc == nil {
+			break
+		}
+		start := i + loc[0]
+		tag := b[start : i+loc[1]]
+		rest := b[i+loc[1]:]
+		end := bytes.Index(rest, tag)
+		if end < 0 {
+			for k := start; k < len(b); k++ {
+				b[k] = ' '
+			}
+			break
+		}
+		stop := i + loc[1] + end + len(tag)
+		for k := start; k < stop; k++ {
+			b[k] = ' '
+		}
+		i = stop
+	}
+	return string(b)
+}
+
+// injectRowFilter 把 `col IN (...)` 注入已通过防线 2+3 的单表 SELECT：
+// 有 WHERE → 紧随其后以 AND 连接；无 WHERE → 插在「首个出现的
+// GROUP BY / ORDER BY / LIMIT / OFFSET」之前（合法 SQL 中该位置必然在 WHERE 之后、
+// 这些子句之前），无任何子句 → 句尾。定位用 stripStrings 后的等长文本
+// （第二个参数），字面量内的关键字不参与定位。
+// 扩展四个注入点的理由：仅认 ORDER BY / LIMIT 时，`... GROUP BY x` 与 `... OFFSET 10`
+// 形态会落到句尾追加，产出 `GROUP BY x WHERE ...` / `OFFSET 10 WHERE ...` 非法 SQL，
+// 被 PG 以 422 拒绝（fail-closed 但属可避免的回归）。
+// projectIDs 为空时注入 IN (NULL)（恒假，0 行）——可访问集合为空即无行可见。
+func injectRowFilter(sqlText, stripped, col string, ids []string) string {
+	list := "NULL"
+	if len(ids) > 0 {
+		quoted := make([]string, len(ids))
+		for i, id := range ids {
+			quoted[i] = "'" + id + "'"
+		}
+		list = strings.Join(quoted, ",")
+	}
+	cond := col + " IN (" + list + ")"
+	if loc := whereKwRe.FindStringIndex(stripped); loc != nil {
+		return sqlText[:loc[1]] + " " + cond + " AND" + sqlText[loc[1]:]
+	}
+	best := -1
+	for _, re := range []*regexp.Regexp{groupByRe, orderByRe, limitRe, offsetRe} {
+		if loc := re.FindStringIndex(stripped); loc != nil && (best < 0 || loc[0] < best) {
+			best = loc[0]
+		}
+	}
+	if best >= 0 {
+		return sqlText[:best] + " WHERE " + cond + " " + sqlText[best:]
+	}
+	return strings.TrimRight(sqlText, " \t\r\n") + " WHERE " + cond + " "
 }
 
 // extractFromTables 解析 SQL 中每个 FROM 子句的表清单（防线 2）。

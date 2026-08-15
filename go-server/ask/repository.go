@@ -104,14 +104,15 @@ type contextDailyReport struct {
 	RawText    string
 }
 
-// RecentDailyReports 最近 days 天的日报（AI-3 上下文数据源，只读单表 SELECT，
-// LIMIT 封顶防 token 浪费；日报内容可能为空串，由 service 层回退/裁剪）。
-func (r *Repository) RecentDailyReports(ctx context.Context, days, limit int) ([]contextDailyReport, error) {
+// RecentDailyReports 最近 days 天【指定用户自己】的日报（AI-3 上下文数据源，
+// 只读单表 SELECT，LIMIT 封顶防 token 浪费；R2：不再取全员，ask 上下文只含
+// 调用方自己的日报；日报内容可能为空串，由 service 层回退/裁剪）。
+func (r *Repository) RecentDailyReports(ctx context.Context, authorID string, days, limit int) ([]contextDailyReport, error) {
 	rows, err := r.db.QueryContext(ctx,
 		`SELECT report_date, summary, raw_text FROM daily_reports
-		 WHERE report_date >= CURRENT_DATE - $1::int
+		 WHERE author_id = $1 AND report_date >= CURRENT_DATE - $2::int
 		 ORDER BY report_date DESC, created_at DESC
-		 LIMIT $2`, days, limit)
+		 LIMIT $3`, authorID, days, limit)
 	if err != nil {
 		return nil, fmt.Errorf("query recent daily_reports: %w", err)
 	}
@@ -137,12 +138,17 @@ type contextProject struct {
 	Status string
 }
 
-// RecentProjects 最近创建的项目（AI-3 上下文数据源，前 limit 个，只读单表 SELECT）。
-func (r *Repository) RecentProjects(ctx context.Context, limit int) ([]contextProject, error) {
+// RecentProjects 最近创建的项目（AI-3 上下文数据源，只读单表 SELECT）。
+// R2：仅取该用户 active 成员的项目（对齐 projects 模块 List 的可见性语义）；
+// 未加入任何项目的用户（含 admin）项目节为空——上下文只作 LLM 参考，安全侧降级可接受。
+func (r *Repository) RecentProjects(ctx context.Context, userID string, limit int) ([]contextProject, error) {
 	rows, err := r.db.QueryContext(ctx,
-		`SELECT code, name, status FROM projects
-		 ORDER BY created_at DESC
-		 LIMIT $1`, limit)
+		`SELECT p.code, p.name, p.status
+		 FROM projects p
+		 JOIN project_members m ON m.project_id = p.id AND m.user_id = $1 AND m.status = 'active'
+		 WHERE p.status = 'active'
+		 ORDER BY p.created_at DESC
+		 LIMIT $2`, userID, limit)
 	if err != nil {
 		return nil, fmt.Errorf("query recent projects: %w", err)
 	}

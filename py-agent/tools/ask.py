@@ -92,11 +92,13 @@ class AskEngine:
         agent.loaded_tools = {}
         return agent
 
-    def ask(self, question, schema, history=None, context=""):
+    def ask(self, question, schema, history=None, context="", user_id=""):
         """规划→执行→整合。同步方法（serve 层 asyncio.to_thread + wait_for 总 60s 预算）。
 
         context 为 Go 注入的实验室最近上下文（AI-3，trusted）：非空时置于规划/整合
         prompt 最前（"以下为实验室最近上下文：..."），为空时零行为变化（不加块）。
+        user_id 为发起问答的用户（Go Chat 下发）：随 /ask/execute 回调回传，
+        Go 侧按该用户可访问项目集合做行级隔离（缺省空串会被 Go 拒绝）。
 
         返回 {answer, sql, rows, columns, table, row_count, truncated}（对齐 Go 侧
         agentAskResponse，见 go-server/ask/model.go）。
@@ -108,7 +110,7 @@ class AskEngine:
             ensure_safe(str(item.get("content", "")))
         context = str(context or "")
         plan = self._plan(question, schema, history, context=context)
-        result = self._execute_with_retry(plan, question, schema, history, context=context)
+        result = self._execute_with_retry(plan, question, schema, history, context=context, user_id=user_id)
         answer = self._integrate(question, result["sql"], result["table_name"],
                                  result["columns"], result["rows"], history, context=context)
         return {
@@ -154,7 +156,7 @@ class AskEngine:
             raise ParseError("plan output is missing sql")
         return {"sql": sql, "reason": str(item.get("reason", "")).strip()}
 
-    def _execute_with_retry(self, plan, question, schema, history, context=""):
+    def _execute_with_retry(self, plan, question, schema, history, context="", user_id=""):
         """执行 + SQL 被拒（4xx）重试一次：失败信息回填 prompt 让 LLM 改 SQL，再执行一次，仍失败 → ParseError。
 
         Go 不可达 / 5xx / 401 / 403 → APIError（502 provider_unavailable，不重试）。
@@ -162,7 +164,7 @@ class AskEngine:
         error = ""
         for attempt in range(2):
             try:
-                return self._execute(plan["sql"])
+                return self._execute(plan["sql"], user_id)
             except _ExecuteRejected as exc:
                 error = str(exc)
                 if attempt == 1:
@@ -206,14 +208,14 @@ class AskEngine:
         except Exception as exc:
             raise ParseError(f"{stage} model request failed: {type(exc).__name__}") from exc
 
-    def _execute(self, sql):
+    def _execute(self, sql, user_id=""):
         if not self.service_token:
             raise APIError("service token is not configured")
         try:
             with self._client_lock:
                 response = self.client.post(
                     self.go_api_base + "/api/v1/ask/execute",
-                    json={"sql": sql},
+                    json={"sql": sql, "user_id": str(user_id or "")},
                     headers={"Authorization": "Bearer " + self.service_token},
                 )
         except (httpx.TimeoutException, httpx.TransportError) as exc:

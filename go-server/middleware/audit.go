@@ -93,8 +93,14 @@ func Audit(db *sql.DB) func(next http.Handler) http.Handler {
 
 			clientIP := requestSourceIP(r)
 
-			if err := insertAuditLog(r.Context(), db, auditRow{
-				requestID:      common.GetRequestID(r.Context()),
+			// 审计写不依赖请求 context：客户端在写请求后立即断连会取消 r.Context()，
+			// 业务写已落库而审计行随 ctx 取消静默丢失（反取证，hash 链前提是行不被丢）。
+			// 响应完成后改用独立 5s 超时 context 写审计；request_id 等仍先从请求 ctx 取值。
+			reqID := common.GetRequestID(r.Context())
+			auditCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			defer cancel()
+			if err := insertAuditLog(auditCtx, db, auditRow{
+				requestID:      reqID,
 				userID:         nullString(userID),
 				username:       username,
 				method:         r.Method,

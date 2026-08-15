@@ -704,9 +704,24 @@ Body：`{entity_type, entity_id, description?}`。响应 201：`AttachmentLink`�
 
 触发 OCR，OCR 文本标记为不可信输入，只能进入 Agent 的数据通道。**代码中无此路由**（main.go 无注册）。
 
-附件绑定对象权限通过 `GET /api/v1/{entity_type}s/{entity_id}/permission-check?user_id=...&action=read|write`
-回调目标模块（attachments/service.go:421）。**当前各目标模块未实现该回调端点**，走
-permissive fallback（service.go:433 TODO：实现完成后删除兼容回退）。
+附件绑定对象权限**不走回环 HTTP 回调**：`main.go` 构造期向 attachments 注入窄接口
+`attachmentPermissionBridge`（`main_bridges.go`，实现 `attachments.PermissionChecker`），
+按实体类型复用各模块既有读路径（logs/issues/assembly/runs/testdata/rfmatch 的 GetByID
+等）+ 项目 ACL 判定 read/write（main_bridges.go:321-411）。早期版本的回环
+`GET /api/v1/{entity_type}s/{entity_id}/permission-check?user_id=...&action=...`
+端点无任何模块实现且回环请求不带认证，属链路断裂 + fail-open（R3），已废弃删除；
+服务层对权限检查器未注入/判定失败的路径 fail-closed（`attachments.ErrForbidden`）。
+
+**ask/execute 豁免登记**：`POST /api/v1/ask/execute` 仅接受 SERVICE_TOKEN 鉴权
+（handler 先 `IsServiceCall`，用户 JWT 一律 403），调用方身份由请求体 `user_id`
+携带（py-agent 内部传参），服务层在只读事务内 `SET LOCAL ROLE ask_reader` 直读
+业务表（迁移 033 GRANT SELECT 白名单，禁写/禁 join），与常规用户 JWT + 行级 ACL
+认证模型互为隔离，属全库只读登记豁免（详见 AGENTS.md §5 例外小节）。
+
+**R6 语义登记**：改角色（role 实际变化）时 `users.token_version` +1；JWT claims
+携带旧 token_version 的 access token 经 `middleware.TokenVersionValidator`
+（main.go 构造期接线，比对 `authRepo.GetByID`，停用账号同样立即失效）在
+AuthRequired 阶段 401。同值 role、仅改 display_name / language **不递增**。
 
 ## 3.13 传感器与 EPICS 模块（已实现；设备推送未实现）
 

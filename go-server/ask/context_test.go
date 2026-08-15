@@ -7,20 +7,24 @@ import (
 	"testing"
 )
 
-// TestChatPayload AI-3：context 非空时注入 payload，为空时省略 context 键（零行为变化）。
+// TestChatPayload AI-3：context 非空时注入 payload，为空时省略 context 键（零行为变化）；
+// user_id（R2）始终随载荷下发，py-agent 在 execute 回调时回传做行级隔离。
 func TestChatPayload(t *testing.T) {
-	payload := chatPayload("问题", "schema", "")
+	payload := chatPayload("问题", "schema", "", "u1")
 	if _, ok := payload["context"]; ok {
 		t.Fatal("empty context must be omitted from payload")
 	}
+	if payload["user_id"] != "u1" {
+		t.Fatalf("user_id must be sent to py-agent, got: %v", payload["user_id"])
+	}
 
 	const ctxText = "最近 7 天日报摘要：\n- 2026-08-11: 完成预冷"
-	payload = chatPayload("问题", "schema", ctxText)
+	payload = chatPayload("问题", "schema", ctxText, "u2")
 	if payload["context"] != ctxText {
 		t.Fatalf("context not injected: %v", payload["context"])
 	}
-	if payload["question"] != "问题" || payload["schema"] != "schema" {
-		t.Fatalf("question/schema dropped: %v", payload)
+	if payload["question"] != "问题" || payload["schema"] != "schema" || payload["user_id"] != "u2" {
+		t.Fatalf("question/schema/user_id dropped: %v", payload)
 	}
 
 	data, err := json.Marshal(payload)
@@ -45,6 +49,9 @@ func TestBuildContext(t *testing.T) {
 
 	cleanup := func() {
 		db.Exec(`DELETE FROM daily_reports WHERE author_id = $1 AND report_date >= CURRENT_DATE - 10`, askUserID)
+		// 只清本用例项目的成员行——askUserID 是迁移 009 种子用户，其种子成员关系不能动。
+		db.Exec(`DELETE FROM project_members WHERE user_id = $1
+		          AND project_id IN (SELECT id FROM projects WHERE code = 'AI3-CTX-TEST')`, askUserID)
 		db.Exec(`DELETE FROM projects WHERE code = 'AI3-CTX-TEST'`)
 	}
 	cleanup()
@@ -67,8 +74,15 @@ func TestBuildContext(t *testing.T) {
 		askUserID); err != nil {
 		t.Fatal(err)
 	}
+	// R2：上下文项目节只取本人 active 成员项目，须补成员关系。
+	if _, err := db.Exec(
+		`INSERT INTO project_members (project_id, user_id, role, status, added_by)
+		 SELECT id, $1, 'member', 'active', $1 FROM projects WHERE code = 'AI3-CTX-TEST'`,
+		askUserID); err != nil {
+		t.Fatal(err)
+	}
 
-	got, err := svc.buildContext(context.Background())
+	got, err := svc.buildContext(context.Background(), askUserID)
 	if err != nil {
 		t.Fatalf("buildContext: %v", err)
 	}

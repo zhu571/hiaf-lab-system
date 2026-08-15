@@ -50,10 +50,23 @@ func TestPrepareSQL_Rejected(t *testing.T) {
 		{"window over", "SELECT row_number() OVER (ORDER BY id) FROM logs"},
 		{"non-select leading", "DELETE FROM logs"},
 		{"empty", "   "},
+		// R2 白名单收缩：个人表/无 project_id 的内容表/跨项目敏感表移出白名单。
+		{"daily_reports removed", "SELECT * FROM daily_reports"},
+		{"issue_comments removed", "SELECT * FROM issue_comments"},
+		{"run_steps removed", "SELECT * FROM run_steps"},
+		{"todos removed", "SELECT * FROM todos"},
+		{"attachments removed", "SELECT * FROM attachments"},
+		{"project_members removed", "SELECT * FROM project_members"},
+		{"automation_rules removed", "SELECT * FROM automation_rules"},
+		{"instrument_results removed", "SELECT * FROM instrument_results"},
+		{"dollar-quote unmatched quote hides union (R1)", "SELECT 1 FROM logs WHERE $a$ ' $a$ IS NULL UNION SELECT usename FROM pg_user"},
+		{"dollar-quote unmatched quote hides subquery (R1)", "SELECT id FROM logs WHERE $q$ ' $q$ = 1 AND id IN (SELECT id FROM users)"},
+		{"dollar-quote unmatched quote hides pg_catalog (R1)", "SELECT * FROM logs WHERE $x$ ' $x$ IS NULL UNION SELECT * FROM pg_catalog.pg_tables"},
+		{"dollar-quote unmatched quote hides write (R1)", "SELECT * FROM logs WHERE $w$ ' $w$ IS NULL UNION SELECT 1 INTO tmp"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			_, _, _, err := prepareSQL(tc.sql)
+			_, _, _, err := prepareSQL(tc.sql, nil)
 			if err == nil {
 				t.Fatalf("expected rejection for %q", tc.sql)
 			}
@@ -61,36 +74,52 @@ func TestPrepareSQL_Rejected(t *testing.T) {
 	}
 }
 
+// prepareSQL 行级隔离注入的可访问项目集合（R2 测试固定值）。
+var r2TestProjectIDs = []string{"11111111-1111-4111-8111-111111111111"}
+
 func TestPrepareSQL_Allowed(t *testing.T) {
+	filter := "project_id IN ('11111111-1111-4111-8111-111111111111')"
+	projectsFilter := "id IN ('11111111-1111-4111-8111-111111111111')"
 	cases := []struct {
-		name, sql, wantTable string
-		wantCapped           bool // 无 LIMIT 补 200 / 已有 LIMIT n>200 改写
-		wantUnchanged        bool // 已有 LIMIT ≤200：原样保留
+		name, sql, wantTable, wantFilter string
+		wantCapped                       bool // 无 LIMIT 补 200 / 已有 LIMIT n>200 改写
+		wantUnchanged                    bool // 全局表 + 已有 LIMIT ≤200：原样保留
+		wantLimit                        string
 	}{
-		{"simple", "SELECT * FROM logs", "logs", true, false},
-		{"lowercase", "select id from logs where project_id = 'x'", "logs", true, false},
-		{"leading whitespace", " \n\t SELECT id FROM projects", "projects", true, false},
-		{"quoted table", `SELECT * FROM "logs"`, "logs", true, false},
-		{"existing limit 100", "SELECT * FROM daily_reports LIMIT 100", "daily_reports", false, true},
-		{"explicit limit 200", "SELECT * FROM issues LIMIT 200", "issues", false, true},
-		{"projects plain", "SELECT * FROM projects", "projects", true, false},
-		{"projects schema qualified", "SELECT * FROM public.projects", "projects", true, false},
-		{"projects quoted", `SELECT * FROM "projects"`, "projects", true, false},
-		{"projects alias small limit", "SELECT * FROM projects p LIMIT 5", "projects", false, true},
+		{"simple", "SELECT * FROM logs", "logs", filter, true, false, ""},
+		{"lowercase", "select id from logs where project_id = 'x'", "logs", filter, true, false, ""},
+		{"leading whitespace", " \n\t SELECT id FROM projects", "projects", projectsFilter, true, false, ""},
+		{"quoted table", `SELECT * FROM "logs"`, "logs", filter, true, false, ""},
+		// 全局模板表（全员可读）不注入行级过滤，LIMIT 语义原样保留。
+		{"existing limit 100 global table", "SELECT * FROM step_templates LIMIT 100", "step_templates", "", false, true, ""},
+		{"explicit limit 200 global table", "SELECT * FROM step_template_items LIMIT 200", "step_template_items", "", false, true, ""},
+		// 项目表带小 LIMIT：注入过滤但不改写 LIMIT 本身。
+		{"projects alias small limit", "SELECT * FROM projects p LIMIT 5", "projects", projectsFilter, false, false, "LIMIT 5"},
+		// dollar-quote 字面量内的关键字（合法字符串值）不得误拒。
+		{"dollar-quote literal keywords allowed", "SELECT * FROM logs WHERE content = $a$union select from users$a$", "logs", filter, true, false, ""},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			out, table, truncated, err := prepareSQL(tc.sql)
+			out, table, truncated, err := prepareSQL(tc.sql, r2TestProjectIDs)
 			if err != nil {
 				t.Fatalf("unexpected error: %v", err)
 			}
 			if table != tc.wantTable {
 				t.Fatalf("table = %q, want %q", table, tc.wantTable)
 			}
+			if tc.wantFilter != "" && !strings.Contains(out, tc.wantFilter) {
+				t.Fatalf("row filter %q missing in %q", tc.wantFilter, out)
+			}
+			if tc.wantFilter == "" && strings.Contains(out, " IN (") {
+				t.Fatalf("global table must not be filtered: %q", out)
+			}
 			if tc.wantCapped {
 				if !strings.Contains(out, "LIMIT 200") {
 					t.Fatalf("expected LIMIT 200 in %q", out)
 				}
+			}
+			if tc.wantLimit != "" && !strings.Contains(out, tc.wantLimit) {
+				t.Fatalf("expected %s preserved in %q", tc.wantLimit, out)
 			}
 			if tc.wantUnchanged {
 				if out != strings.TrimSpace(tc.sql) {
@@ -104,8 +133,58 @@ func TestPrepareSQL_Allowed(t *testing.T) {
 	}
 }
 
+// R2：行级隔离注入位置——有 WHERE 用 AND 连接、无 WHERE 插在 ORDER BY/LIMIT 前、
+// 空可访问集合注入 IN (NULL)（恒假 0 行）。
+func TestPrepareSQL_RowFilterInjection(t *testing.T) {
+	pids := []string{"11111111-1111-4111-8111-111111111111", "22222222-2222-4222-8222-222222222222"}
+	two := "project_id IN ('11111111-1111-4111-8111-111111111111','22222222-2222-4222-8222-222222222222')"
+
+	out, _, _, err := prepareSQL("SELECT id FROM logs WHERE content = 'x' ORDER BY id", pids)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(out, "WHERE "+two+" AND content = 'x' ORDER BY id") {
+		t.Fatalf("WHERE must be extended with AND: %q", out)
+	}
+
+	out, _, _, err = prepareSQL("SELECT id FROM logs ORDER BY id LIMIT 10", pids)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(out, "WHERE "+two+" ORDER BY id LIMIT 10") {
+		t.Fatalf("filter must precede ORDER BY/LIMIT: %q", out)
+	}
+
+	// WHERE 出现在字符串字面量中：不得被误当作注入点。
+	out, _, _, err = prepareSQL(`SELECT id FROM logs WHERE content = 'where x' ORDER BY id`, pids)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(out, two+" AND content = 'where x'") {
+		t.Fatalf("literal 'where' must not hijack injection point: %q", out)
+	}
+
+	// 空可访问集合 → IN (NULL) 恒假。
+	out, _, _, err = prepareSQL("SELECT * FROM logs", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(out, "WHERE project_id IN (NULL)") {
+		t.Fatalf("empty accessible set must inject IN (NULL): %q", out)
+	}
+
+	// projects 表用 id 列过滤。
+	out, _, _, err = prepareSQL("SELECT * FROM projects", pids)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(out, "WHERE id IN (") {
+		t.Fatalf("projects must filter by id: %q", out)
+	}
+}
+
 func TestPrepareSQL_LimitRewrite(t *testing.T) {
-	out, _, truncated, err := prepareSQL("SELECT * FROM logs LIMIT 5000")
+	out, _, truncated, err := prepareSQL("SELECT * FROM logs LIMIT 5000", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -116,7 +195,7 @@ func TestPrepareSQL_LimitRewrite(t *testing.T) {
 		t.Fatal("LIMIT rewrite is not actual truncation, must not set truncated")
 	}
 
-	out, _, _, err = prepareSQL("SELECT * FROM logs LIMIT ALL")
+	out, _, _, err = prepareSQL("SELECT * FROM logs LIMIT ALL", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -124,7 +203,7 @@ func TestPrepareSQL_LimitRewrite(t *testing.T) {
 		t.Fatalf("LIMIT ALL not rewritten: %q", out)
 	}
 
-	out, _, _, err = prepareSQL("SELECT * FROM logs LIMIT 5000 OFFSET 10")
+	out, _, _, err = prepareSQL("SELECT * FROM logs LIMIT 5000 OFFSET 10", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -134,7 +213,7 @@ func TestPrepareSQL_LimitRewrite(t *testing.T) {
 }
 
 func TestPrepareSQL_LimitStringLiteralUntouched(t *testing.T) {
-	out, _, _, err := prepareSQL(`SELECT * FROM logs WHERE content = 'limit 5000'`)
+	out, _, _, err := prepareSQL(`SELECT * FROM logs WHERE content = 'limit 5000'`, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -154,14 +233,14 @@ func TestPrepareSQL_StringLiteralKeywordsAllowed(t *testing.T) {
 		`SELECT * FROM logs WHERE content = 'limit 5000'`,
 	}
 	for _, sql := range cases {
-		if _, _, _, err := prepareSQL(sql); err != nil {
+		if _, _, _, err := prepareSQL(sql, nil); err != nil {
 			t.Fatalf("string literal keyword falsely rejected %q: %v", sql, err)
 		}
 	}
 }
 
 func TestPrepareSQL_QuotedWhitelistOK(t *testing.T) {
-	out, table, _, err := prepareSQL(`SELECT * FROM "logs"`)
+	out, table, _, err := prepareSQL(`SELECT * FROM "logs"`, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
