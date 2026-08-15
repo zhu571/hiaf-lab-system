@@ -133,6 +133,9 @@ func sourceWriteAllowed(method, path string) bool {
 	case path == "/api/v1/auth/login",
 		path == "/api/v1/auth/refresh",
 		path == "/api/v1/auth/register",
+		path == "/api/v1/auth/logout",
+		path == "/api/v1/auth/change-password",
+		path == "/api/v1/auth/profile",
 		path == "/api/v1/ask/chat":
 		return true
 	case strings.HasPrefix(path, "/api/v1/instruments/") && strings.HasSuffix(path, "/nl-commands"),
