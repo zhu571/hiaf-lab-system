@@ -67,7 +67,7 @@ type fakePermissionChecker struct {
 	write bool
 }
 
-func (f *fakePermissionChecker) Check(entityType, entityID, userID, action string) (bool, error) {
+func (f *fakePermissionChecker) Check(entityType, entityID, userID, userRole, action string) (bool, error) {
 	if userID == attOutsiderID {
 		return false, nil
 	}

@@ -113,8 +113,8 @@ func TestExecuteHandler_ServiceTokenChain(t *testing.T) {
 	router.Use(middleware.AuthRequired)
 	router.Post("/api/v1/ask/execute", h.Execute)
 
-	// 200：service token + 合法 SQL
-	req := httptest.NewRequest(http.MethodPost, "/api/v1/ask/execute", strings.NewReader(`{"sql":"SELECT id FROM logs LIMIT 3"}`))
+	// 200：service token + 合法 SQL + 调用方用户（R2 行级隔离按 user_id 取可访问项目）
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/ask/execute", strings.NewReader(`{"sql":"SELECT id FROM logs LIMIT 3","user_id":"a0000000-0000-4000-8000-000000000001"}`))
 	req.Header.Set("Authorization", "Bearer ask-st-0123456789abcdef")
 	rec := httptest.NewRecorder()
 	router.ServeHTTP(rec, req)

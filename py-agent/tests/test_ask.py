@@ -83,6 +83,21 @@ class AskEngineTests(unittest.TestCase):
         engine.service_token = "secret"
         return engine
 
+    def test_execute_body_includes_user_id(self):
+        # R2：execute 回调必须回传 user_id，Go 侧据此做行级隔离。
+        captured = {}
+
+        def handler(request):
+            captured["json"] = json.loads(request.content)
+            return execute_ok(request)
+
+        engine = self.make_engine(plan_results=[plan_json()], integrate_results=["### 回答"])
+        engine.client = httpx.Client(transport=httpx.MockTransport(handler))
+        result = engine.ask(VALID_QUESTION, VALID_SCHEMA, user_id="u-42")
+        self.assertEqual(captured["json"]["user_id"], "u-42")
+        self.assertEqual(captured["json"]["sql"], "SELECT id, project_id FROM issues")
+        self.assertEqual(result["row_count"], 1)
+
     def test_injection_rejected_before_any_llm_call(self):
         engine = self.make_engine()
         with self.assertRaises(ParseError):
@@ -220,16 +235,17 @@ class AskEngineTests(unittest.TestCase):
 
 class ValidateAskTests(unittest.TestCase):
     def base(self, **overrides):
-        body = {"question": VALID_QUESTION, "schema": VALID_SCHEMA}
+        body = {"question": VALID_QUESTION, "schema": VALID_SCHEMA, "user_id": "u-ask-1"}
         body.update(overrides)
         return body
 
     def test_valid(self):
-        question, schema, history, context = validate_ask(self.base())
+        question, schema, history, context, user_id = validate_ask(self.base())
         self.assertEqual(question, VALID_QUESTION)
         self.assertEqual(schema, VALID_SCHEMA)
         self.assertEqual(history, [])
         self.assertEqual(context, "")
+        self.assertEqual(user_id, "u-ask-1")
 
     def test_empty_question_rejected(self):
         with self.assertRaises(ValueError):
@@ -260,7 +276,7 @@ class ValidateAskTests(unittest.TestCase):
     def test_context_optional_passthrough(self):
         # AI-3：context 可选，合法字符串原样透传（strip）
         context = "最近 7 天日报摘要：\n- 2026-08-11: 完成预冷"
-        _, _, _, got = validate_ask(self.base(context=context))
+        _, _, _, got, _ = validate_ask(self.base(context=context))
         self.assertEqual(got, context)
 
     def test_context_invalid_rejected(self):
@@ -271,6 +287,20 @@ class ValidateAskTests(unittest.TestCase):
         validate_ask(self.base(context="x" * 8000))
 
 
+    def test_user_id_required(self):
+        # R2：user_id 必填——Go Chat 下发的提问用户，execute 回调回传做行级隔离。
+        with self.assertRaises(ValueError):
+            validate_ask(self.base(user_id=None))
+        with self.assertRaises(ValueError):
+            validate_ask(self.base(user_id=""))
+        with self.assertRaises(ValueError):
+            validate_ask(self.base(user_id="   "))
+        with self.assertRaises(ValueError):
+            validate_ask(self.base(user_id="x" * 129))
+        got = validate_ask(self.base(user_id="  u-ask-1  "))
+        self.assertEqual(got[4], "u-ask-1")
+
+
 class FakeAskEngine:
     result = {
         "answer": "共 1 条记录。", "sql": "SELECT id FROM issues LIMIT 200",
@@ -278,9 +308,13 @@ class FakeAskEngine:
     }
     error = None
 
-    def ask(self, question, schema, history=None, context=""):
+    def __init__(self):
+        self.calls = []
+
+    def ask(self, question, schema, history=None, context="", user_id=""):
         if self.error:
             raise self.error
+        self.calls.append({"question": question, "user_id": user_id})
         return self.result
 
 
@@ -290,7 +324,7 @@ def make_client(engine=None):
 
 class AskEndpointTests(unittest.TestCase):
     def body(self, **overrides):
-        body = {"question": VALID_QUESTION, "schema": VALID_SCHEMA}
+        body = {"question": VALID_QUESTION, "schema": VALID_SCHEMA, "user_id": "11111111-1111-4111-8111-111111111111"}
         body.update(overrides)
         return body
 
@@ -303,6 +337,19 @@ class AskEndpointTests(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.json()["table"], "issues")
         self.assertEqual(response.json()["row_count"], 0)
+
+    def test_user_id_passed_to_engine(self):
+        engine = FakeAskEngine()
+        response = make_client(engine).post("/v1/ask", json=self.body(), headers={"Authorization": "Bearer secret"})
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(engine.calls[-1]["user_id"], "11111111-1111-4111-8111-111111111111")
+
+    def test_missing_user_id_maps_400(self):
+        response = make_client().post(
+            "/v1/ask", json=self.body(user_id=""),
+            headers={"Authorization": "Bearer secret"},
+        )
+        self.assertEqual(response.status_code, 400)
 
     def test_validation_error_maps_400(self):
         response = make_client().post(

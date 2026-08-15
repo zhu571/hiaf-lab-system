@@ -140,7 +140,10 @@ func (r *Repository) ListUsers() ([]User, error) {
 }
 
 // UpdateUser applies the given admin edits. When the account is disabled, all
-// existing refresh tokens are revoked so the session cannot be renewed.
+// existing refresh tokens are revoked so the session cannot be renewed. When
+// the role changes, token_version is incremented so outstanding access tokens
+// (whose claims carry the old role) are rejected immediately instead of
+// surviving until natural expiry.
 func (r *Repository) UpdateUser(id string, displayName *string, role *string, disabled *bool) (*User, error) {
 	var user User
 	var lockedUntil sql.NullTime
@@ -148,6 +151,8 @@ func (r *Repository) UpdateUser(id string, displayName *string, role *string, di
 		`UPDATE users
 		 SET display_name = COALESCE($2, display_name),
 		     role = COALESCE($3, role),
+		     token_version = CASE WHEN $3 IS NOT NULL AND role IS DISTINCT FROM $3
+		                          THEN token_version + 1 ELSE token_version END,
 		     disabled = COALESCE($4, disabled),
 		     updated_at = now()
 		 WHERE id = $1

@@ -41,8 +41,11 @@ type ChatResponse struct {
 }
 
 // ExecuteRequest POST /api/v1/ask/execute 入参（py-agent 内部调用）。
+// user_id 为发起问答的用户（Chat 链路经 py-agent 回传），行级隔离按其
+// 可访问项目集合过滤；缺失即拒绝（fail-closed）。
 type ExecuteRequest struct {
-	SQL string `json:"sql"`
+	SQL    string `json:"sql"`
+	UserID string `json:"user_id"`
 }
 
 // ExecuteResponse 只读执行结果（与 ask_history.rows 快照同源同封顶）。

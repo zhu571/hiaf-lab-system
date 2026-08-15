@@ -3,11 +3,14 @@ package auth
 import (
 	"database/sql"
 	"fmt"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"testing"
 	"time"
 
 	_ "github.com/lib/pq"
+	"github.com/zhu571/hiaf-lab-system/go-server/middleware"
 )
 
 // 集成测试：需要 TEST_DATABASE_URL（CI/本地按 scripts/test-go.sh 应用全量迁移 001-038）。
@@ -213,4 +216,104 @@ func TestIncrementFailedAttemptsLocksAfterFive(t *testing.T) {
 	if user2.LockedUntil != nil {
 		t.Fatal("reset must clear lock")
 	}
+}
+
+// R6：改角色 → token_version +1，旧版本 claims 的 access token 被 TokenVersionValidator
+// 拒绝（HTTP 层 401）；同值 role / 仅改 display_name 不递增。
+// 验证器接线与 main.go:85-92 一致（version 匹配且未停用），AuthRequired 兜底返回 401。
+func TestDBTokenVersionInvalidatedOnRoleChange(t *testing.T) {
+	db := openAuthSvcDB(t)
+	repo := NewRepository(db)
+
+	user, err := repo.GetByID(authDBUserID)
+	if err != nil || user == nil {
+		t.Fatalf("get user: %v %v", user, err)
+	}
+
+	middleware.SetJWTSecret([]byte(authTestJWTSecret))
+	t.Cleanup(func() { middleware.SetJWTSecret(nil) })
+	middleware.TokenVersionValidator = func(userID string, version int) bool {
+		u, err := repo.GetByID(userID)
+		if err != nil || u == nil {
+			return false
+		}
+		return u.TokenVersion == version && !u.Disabled
+	}
+	t.Cleanup(func() { middleware.TokenVersionValidator = nil })
+	t.Cleanup(func() { _, _ = repo.UpdateUser(authDBUserID, nil, nil, boolPtr(false)) })
+
+	// 基线：当前版本 token 通过 AuthRequired（200）。
+	okToken := authTestToken(t, user.ID, user.Username, user.Role, user.TokenVersion)
+	if got := authGuardStatus(okToken); got != http.StatusOK {
+		t.Fatalf("baseline token = %d, want 200", got)
+	}
+
+	// 改角色 → token_version +1。
+	newRole := RoleMaintainer
+	updated, err := repo.UpdateUser(user.ID, nil, &newRole, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if updated.TokenVersion != user.TokenVersion+1 {
+		t.Fatalf("token_version = %d, want %d", updated.TokenVersion, user.TokenVersion+1)
+	}
+	if updated.Role != RoleMaintainer {
+		t.Fatalf("role = %q, want %q", updated.Role, RoleMaintainer)
+	}
+
+	// 旧版本 claims 被 TokenVersionValidator 拒绝（直查 + HTTP 401）。
+	if middleware.TokenVersionValidator(user.ID, user.TokenVersion) {
+		t.Fatal("stale version must be rejected by validator")
+	}
+	if got := authGuardStatus(okToken); got != http.StatusUnauthorized {
+		t.Fatalf("stale-version token = %d, want 401", got)
+	}
+	// 新版本 claims 通过（直查 + HTTP 200）。
+	if !middleware.TokenVersionValidator(user.ID, updated.TokenVersion) {
+		t.Fatal("current version must pass validator")
+	}
+	if got := authGuardStatus(authTestToken(t, user.ID, user.Username, updated.Role, updated.TokenVersion)); got != http.StatusOK {
+		t.Fatalf("current-version token = %d, want 200", got)
+	}
+
+	// 同值 role → 不递增。
+	sameRole := updated.Role
+	same, err := repo.UpdateUser(user.ID, nil, &sameRole, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if same.TokenVersion != updated.TokenVersion {
+		t.Fatalf("same-role update bumped version: %d → %d", updated.TokenVersion, same.TokenVersion)
+	}
+
+	// 仅改 display_name → 不递增。
+	name := "改名不失效token"
+	renamed, err := repo.UpdateUser(user.ID, &name, nil, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if renamed.TokenVersion != updated.TokenVersion {
+		t.Fatalf("display-name update bumped version: %d → %d", updated.TokenVersion, renamed.TokenVersion)
+	}
+}
+
+// authTestToken 用固定测试密钥签发 access token（等价 middleware.GenerateToken 的直接用法）。
+func authTestToken(t *testing.T, userID, username, role string, version int) string {
+	t.Helper()
+	token, err := middleware.GenerateToken(userID, username, role, version, []byte(authTestJWTSecret))
+	if err != nil {
+		t.Fatal(err)
+	}
+	return token
+}
+
+// authGuardStatus 经 AuthRequired 中间件做一次最小请求，返回状态码。
+func authGuardStatus(token string) int {
+	req := httptest.NewRequest(http.MethodGet, "/", nil)
+	req.Header.Set("Authorization", "Bearer "+token)
+	rec := httptest.NewRecorder()
+	middleware.AuthRequired(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	})).ServeHTTP(rec, req)
+	return rec.Code
 }

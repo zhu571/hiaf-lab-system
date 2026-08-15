@@ -1,6 +1,7 @@
 package middleware
 
 import (
+	"crypto/subtle"
 	"net/http"
 	"strings"
 
@@ -24,8 +25,10 @@ func CSRF(next http.Handler) http.Handler {
 			next.ServeHTTP(w, r)
 			return
 		}
-		// Agent 服务账号 API 无需 CSRF（有 JWT + acting-user 认证链）
-		if strings.HasPrefix(r.URL.Path, "/api/v1/agent/") {
+		// Agent 服务账号任务 API 无需 CSRF（有 JWT + acting-user 认证链，无 cookie 可用）。
+		// 豁免只覆盖 /api/v1/agent/tasks：candidates approve/reject 是 admin/maintainer
+		// 的人工端点（cookie 认证），必须纳入 CSRF 检查，防止跨站触发 AI 候选落库。
+		if strings.HasPrefix(r.URL.Path, "/api/v1/agent/tasks/") || r.URL.Path == "/api/v1/agent/tasks" {
 			next.ServeHTTP(w, r)
 			return
 		}
@@ -37,7 +40,8 @@ func CSRF(next http.Handler) http.Handler {
 
 		header := r.Header.Get("X-CSRF-Token")
 		cookie, err := r.Cookie("csrf_token")
-		if err != nil || header == "" || header != cookie.Value {
+		// 恒定时间比较（对齐 service_token / ask 等仓库其他三处先例），防时序侧信道。
+		if err != nil || header == "" || subtle.ConstantTimeCompare([]byte(header), []byte(cookie.Value)) != 1 {
 			common.WriteError(w, r, http.StatusForbidden, "csrf_failed", "CSRF token 无效", nil)
 			return
 		}

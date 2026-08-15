@@ -1,6 +1,7 @@
 package ask
 
 import (
+	"strings"
 	"testing"
 	"time"
 )
@@ -156,18 +157,49 @@ func TestAllowOne(t *testing.T) {
 }
 
 func TestPrepareSQL_MixedCaseLimitRewrite(t *testing.T) {
-	out, _, _, err := prepareSQL("select * from logs limit 5000")
+	// 全局表（无行级过滤注入）验证 LIMIT 改写的原文对齐。
+	out, _, _, err := prepareSQL("select * from step_templates limit 5000", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if out != "select * from logs LIMIT 200" {
+	if out != "select * from step_templates LIMIT 200" {
 		t.Fatalf("rewrite = %q", out)
 	}
-	out, _, _, err = prepareSQL("SELECT * FROM logs LiMiT 300")
+	out, _, _, err = prepareSQL("SELECT * FROM step_template_items LiMiT 300", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if out != "SELECT * FROM logs LIMIT 200" {
+	if out != "SELECT * FROM step_template_items LIMIT 200" {
 		t.Fatalf("mixed case rewrite = %q", out)
+	}
+}
+
+// R1：dollar-quote 掩蔽——$tag$...$tag$（含未闭合）整体变空格、字节等长、
+// 定界符内容中的引号不再影响 stripStrings 的引号扫描。
+func TestMaskDollarQuotes(t *testing.T) {
+	spaces := func(n int) string { return strings.Repeat(" ", n) }
+	cases := []struct{ in, want string }{
+		// 审查报告样例：dollar-quote 内未配对单引号整体掩蔽，尾部 UNION 暴露给黑名单。
+		{"$a$ ' $a$ IS NULL UNION", spaces(9) + " IS NULL UNION"},
+		// 空 tag（$$）与带数字 tag。
+		{"$$x$$", spaces(5)},
+		{"$42$ab$42$", spaces(10)},
+		// 未闭合：掩到结尾（PG 侧同为语法错误）。
+		{"WHERE x = $a$ UNION SELECT", "WHERE x = " + spaces(16)},
+		// 普通 $ 字面量与 $1 参数占位不受影响（不构成 $...$ 定界对）。
+		{"price > $5", "price > $5"},
+		{"WHERE id = $1", "WHERE id = $1"},
+		// 无 dollar-quote 原样返回。
+		{"SELECT 'a' FROM logs", "SELECT 'a' FROM logs"},
+		// 定界符内的嵌套不同 tag：整段一并掩蔽（与 PG 语义一致，内层是字面量）。
+		{"$a$ $b$ inner $b$ $a$ tail", spaces(21) + " tail"},
+	}
+	for _, tc := range cases {
+		if got := maskDollarQuotes(tc.in); got != tc.want {
+			t.Errorf("maskDollarQuotes(%q) = %q, want %q", tc.in, got, tc.want)
+		}
+		if len(maskDollarQuotes(tc.in)) != len(tc.in) {
+			t.Errorf("maskDollarQuotes(%q) must preserve byte length", tc.in)
+		}
 	}
 }

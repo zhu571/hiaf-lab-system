@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -10,14 +11,19 @@ import (
 	"github.com/zhu571/hiaf-lab-system/go-server/agent"
 	"github.com/zhu571/hiaf-lab-system/go-server/alert"
 	"github.com/zhu571/hiaf-lab-system/go-server/assembly"
+	"github.com/zhu571/hiaf-lab-system/go-server/attachments"
 	"github.com/zhu571/hiaf-lab-system/go-server/audit"
 	"github.com/zhu571/hiaf-lab-system/go-server/auth"
 	"github.com/zhu571/hiaf-lab-system/go-server/experiences"
 	"github.com/zhu571/hiaf-lab-system/go-server/issues"
 	"github.com/zhu571/hiaf-lab-system/go-server/logs"
+	mw "github.com/zhu571/hiaf-lab-system/go-server/middleware"
 	"github.com/zhu571/hiaf-lab-system/go-server/notify"
+	"github.com/zhu571/hiaf-lab-system/go-server/projects"
+	"github.com/zhu571/hiaf-lab-system/go-server/rfmatch"
 	"github.com/zhu571/hiaf-lab-system/go-server/runs"
 	"github.com/zhu571/hiaf-lab-system/go-server/steptemplates"
+	"github.com/zhu571/hiaf-lab-system/go-server/testdata"
 	"github.com/zhu571/hiaf-lab-system/go-server/weekly"
 )
 
@@ -310,4 +316,137 @@ func (b experienceIssueBridge) ResolvedIssuesSince(ctx context.Context, since ti
 		}
 	}
 	return out, nil
+}
+
+// attachmentPermissionBridge 实现 attachments.PermissionChecker（R3：替代回环
+// HTTP permission-check——该端点无任何模块实现且回环请求无认证，原链路整体断裂）。
+// read 判定走各模块 GetByID 的既有读权限（PermRead / RoleViewer / 日报作者或 admin）；
+// write 判定对齐各模块 Update 的写门槛：issue 走 PermUpdateIssue、log 走
+// PermUpdateAnyLog/OwnLog（作者匹配）、assembly/experiment_run ≥maintainer
+// （run 另允许创建者本人）、test_data/rf_matching ≥member、daily_report 仅作者。
+// 模块 sentinel（不存在/无权/参数非法）→ (false, nil)；其他错误（DB 故障）原样
+// 上抛——fail-closed 且可观测，无 404/501 放行分支。
+type attachmentPermissionBridge struct {
+	db       *sql.DB
+	logs     *logs.Service
+	issues   *issues.Service
+	assembly *assembly.Service
+	runs     *runs.Service
+	testdata *testdata.Service
+	rfmatch  *rfmatch.Service
+	projects *projects.Repository
+}
+
+func (b attachmentPermissionBridge) Check(entityType, entityID, userID, userRole, action string) (bool, error) {
+	switch entityType {
+	case attachments.EntityDailyReport:
+		report, err := b.logs.GetReportByID(entityID, userID, userRole)
+		if err != nil {
+			return false, nilErr(err, logs.ErrReportNotFound, logs.ErrNotReportOwner, logs.ErrForbidden, logs.ErrInvalidInput)
+		}
+		if action == "write" {
+			return report.AuthorID == userID, nil // UpdateReportRawText 仅作者本人
+		}
+		return true, nil
+	case attachments.EntityLog:
+		item, err := b.logs.GetLog(entityID, userID, userRole)
+		if err != nil {
+			return false, nilErr(err, logs.ErrLogNotFound, logs.ErrForbidden, logs.ErrInvalidInput)
+		}
+		if action == "write" {
+			return b.canWriteLog(item.ProjectID, item.AuthorID, userID)
+		}
+		return true, nil
+	case attachments.EntityIssue:
+		issue, err := b.issues.GetByID(entityID, userID, userRole)
+		if err != nil {
+			return false, nilErr(err, issues.ErrIssueNotFound, issues.ErrForbidden, issues.ErrInvalidInput)
+		}
+		if action == "write" {
+			return mw.HasPermission(b.db, issue.ProjectID, userID, mw.PermUpdateIssue)
+		}
+		return true, nil
+	case attachments.EntityAssemblyStep:
+		step, err := b.assembly.GetByID(entityID, userID, userRole)
+		if err != nil {
+			return false, nilErr(err, assembly.ErrStepNotFound, assembly.ErrForbidden, assembly.ErrInvalidInput)
+		}
+		if action == "write" {
+			return b.canAccessProject(step.ProjectID, userID, userRole, projects.RoleMaintainer)
+		}
+		return true, nil
+	case attachments.EntityExperimentRun:
+		run, err := b.runs.GetByID(entityID, userID, userRole)
+		if err != nil {
+			return false, nilErr(err, runs.ErrRunNotFound, runs.ErrForbidden, runs.ErrInvalidInput)
+		}
+		if action == "write" {
+			if run.CreatedBy != nil && *run.CreatedBy == userID {
+				return true, nil // runs.Update 的 getAccessible(creatorAllowed=true) 先例
+			}
+			return b.canAccessProject(run.ProjectID, userID, userRole, projects.RoleMaintainer)
+		}
+		return true, nil
+	case attachments.EntityTestData:
+		td, err := b.testdata.GetByID(entityID, userID, userRole)
+		if err != nil {
+			return false, nilErr(err, testdata.ErrTestDataNotFound, testdata.ErrForbidden, testdata.ErrInvalidInput)
+		}
+		if action == "write" {
+			return b.canAccessProject(td.ProjectID, userID, userRole, projects.RoleMember)
+		}
+		return true, nil
+	case attachments.EntityRFMatchingRecord:
+		rec, err := b.rfmatch.GetByID(entityID, userID, userRole)
+		if err != nil {
+			return false, nilErr(err, rfmatch.ErrRecordNotFound, rfmatch.ErrForbidden, rfmatch.ErrInvalidInput)
+		}
+		if action == "write" {
+			return b.canAccessProject(rec.ProjectID, userID, userRole, projects.RoleMember)
+		}
+		return true, nil
+	default:
+		return false, fmt.Errorf("attachment permission: unknown entity type %q", entityType)
+	}
+}
+
+// canWriteLog 对齐 logs.UpdateLog 的授权核（不含 draft/active 等业务态约束）：
+// PermUpdateAnyLog 直接过，否则 PermUpdateOwnLog 且是作者本人。
+func (b attachmentPermissionBridge) canWriteLog(projectID, authorID, userID string) (bool, error) {
+	canAny, err := mw.HasPermission(b.db, projectID, userID, mw.PermUpdateAnyLog)
+	if err != nil {
+		return false, err
+	}
+	if canAny {
+		return true, nil
+	}
+	canOwn, err := mw.HasPermission(b.db, projectID, userID, mw.PermUpdateOwnLog)
+	if err != nil {
+		return false, err
+	}
+	return canOwn && authorID == userID, nil
+}
+
+// canAccessProject 项目角色 ≥minRole（镜像 rfmatch.ProjectAccessAdapter 先例）。
+func (b attachmentPermissionBridge) canAccessProject(projectID, userID, userRole, minRole string) (bool, error) {
+	if userRole == auth.RoleAdmin {
+		return true, nil
+	}
+	member, err := b.projects.GetMember(projectID, userID)
+	if err != nil {
+		return false, err
+	}
+	rank := map[string]int{projects.RoleViewer: 1, projects.RoleMember: 2, projects.RoleMaintainer: 3, projects.RoleOwner: 4}
+	return member != nil && member.Status == projects.MemberStatusActive && rank[member.Role] >= rank[minRole], nil
+}
+
+// nilErr 把已知 sentinel（不存在/无权/参数非法）折叠为 nil（判定=拒绝，不报错），
+// 未知错误保留上抛。
+func nilErr(err error, sentinels ...error) error {
+	for _, s := range sentinels {
+		if errors.Is(err, s) {
+			return nil
+		}
+	}
+	return err
 }

@@ -52,7 +52,7 @@ func (h *Handler) Execute(w http.ResponseWriter, r *http.Request) {
 		common.WriteError(w, r, http.StatusBadRequest, "bad_request", "请求体解析失败", nil)
 		return
 	}
-	resp, err := h.svc.Execute(r.Context(), req.SQL)
+	resp, err := h.svc.Execute(r.Context(), req.UserID, req.SQL)
 	if err != nil {
 		h.writeError(w, r, err)
 		return

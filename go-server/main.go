@@ -154,8 +154,19 @@ func main() {
 	rfMatchingSvc := rfmatch.NewService(rfMatchingRepo, rfmatch.ProjectAccessAdapter{Repo: projectsRepo})
 	rfMatchingHandler := rfmatch.NewHandler(rfMatchingSvc)
 	attachmentsRepo := attachments.NewRepository(db)
+	// R3：实体权限检查改 main 构造期注入桥接（各模块既有读路径 + 项目 ACL），
+	// 不再走无认证的回环 HTTP permission-check（无模块实现且 fail-open）。
 	attachmentsSvc := attachments.NewService(attachmentsRepo,
-		attachments.NewHTTPPermissionChecker(selfBase),
+		attachmentPermissionBridge{
+			db:       db,
+			logs:     logsSvc,
+			issues:   issuesSvc,
+			assembly: assemblySvc,
+			runs:     runsSvc,
+			testdata: testDataSvc,
+			rfmatch:  rfMatchingSvc,
+			projects: projectsRepo,
+		},
 		commonEnv("ATTACHMENT_DIR", "./uploads/"))
 	attachmentsHandler := attachments.NewHandler(attachmentsSvc)
 	agentSvc.SetExecutor(candidateExecutor{issues: issuesSvc, experiences: experiencesSvc})

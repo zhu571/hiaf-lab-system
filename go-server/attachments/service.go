@@ -4,17 +4,14 @@ import (
 	"crypto/sha256"
 	"database/sql"
 	"encoding/hex"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
 	"mime/multipart"
 	"net/http"
-	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
-	"time"
 
 	"github.com/google/uuid"
 	"github.com/zhu571/hiaf-lab-system/go-server/auth"
@@ -40,8 +37,14 @@ type attachmentRepository interface {
 	SoftDelete(id string) error
 }
 
+// PermissionChecker 按实体类型判定用户对该实体的读/写权限（action ∈ read/write）。
+// userRole 是调用方 JWT claims 中的角色（admin 短路已在 service 层完成，此处
+// 仍传入以支持各模块自身的角色语义）。实现由 main.go 构造期注入各模块权限
+// 窄接口（先例：logs.ProjectAccessAdapter / agent.SetExecutor）——早期版本走
+// 回环 HTTP permission-check，但仓库没有任何模块实现该端点且回环请求不带认证，
+// 属链路断裂 + fail-open（R3），已废弃删除。
 type PermissionChecker interface {
-	Check(entityType, entityID, userID, action string) (bool, error)
+	Check(entityType, entityID, userID, userRole, action string) (bool, error)
 }
 
 type Service struct {
@@ -309,7 +312,7 @@ func (s *Service) getReadable(id, userID, userRole string) (*Attachment, error) 
 		return nil, ErrForbidden
 	}
 	for _, link := range links {
-		allowed, err := s.permissions.Check(link.EntityType, link.EntityID, userID, "read")
+		allowed, err := s.permissions.Check(link.EntityType, link.EntityID, userID, userRole, "read")
 		if err != nil {
 			return nil, err
 		}
@@ -328,7 +331,7 @@ func (s *Service) canOperate(attachment *Attachment, links []AttachmentLink, use
 		return attachment.UploadedBy != nil && *attachment.UploadedBy == userID, nil
 	}
 	for _, link := range links {
-		allowed, err := s.permissions.Check(link.EntityType, link.EntityID, userID, "write")
+		allowed, err := s.permissions.Check(link.EntityType, link.EntityID, userID, userRole, "write")
 		if err != nil {
 			return false, err
 		}
@@ -354,7 +357,7 @@ func (s *Service) entityAllowed(entityType, entityID, userID, userRole, action s
 	if userRole == auth.RoleAdmin {
 		return true, nil
 	}
-	return s.permissions.Check(entityType, entityID, userID, action)
+	return s.permissions.Check(entityType, entityID, userID, userRole, action)
 }
 
 func validateEntity(entityType, entityID string) error {
@@ -403,45 +406,4 @@ func cleanFilename(name string) string {
 		return "attachment"
 	}
 	return name
-}
-
-type HTTPPermissionChecker struct {
-	baseURL string
-	client  *http.Client
-}
-
-func NewHTTPPermissionChecker(baseURL string) *HTTPPermissionChecker {
-	return &HTTPPermissionChecker{
-		baseURL: strings.TrimRight(baseURL, "/"),
-		client:  &http.Client{Timeout: 3 * time.Second},
-	}
-}
-
-func (c *HTTPPermissionChecker) Check(entityType, entityID, userID, action string) (bool, error) {
-	endpoint := fmt.Sprintf("%s/api/v1/%s/%s/permission-check", c.baseURL,
-		url.PathEscape(entityType+"s"), url.PathEscape(entityID))
-	query := url.Values{"user_id": {userID}, "action": {action}}
-	req, err := http.NewRequest(http.MethodGet, endpoint+"?"+query.Encode(), nil)
-	if err != nil {
-		return false, fmt.Errorf("create permission request: %w", err)
-	}
-	resp, err := c.client.Do(req)
-	if err != nil {
-		return false, fmt.Errorf("check entity permission: %w", err)
-	}
-	defer resp.Body.Close()
-	// TODO: remove permissive fallback after every target module implements permission-check.
-	if resp.StatusCode == http.StatusNotFound || resp.StatusCode == http.StatusNotImplemented {
-		return true, nil
-	}
-	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return false, fmt.Errorf("permission check returned status %d", resp.StatusCode)
-	}
-	var result struct {
-		Allowed bool `json:"allowed"`
-	}
-	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
-		return false, fmt.Errorf("decode permission response: %w", err)
-	}
-	return result.Allowed, nil
 }
