@@ -18,6 +18,12 @@
  *   --pulse-ring/-end 基色随 brand-500 换 rgba(22,140,169,·)（= #168ca9）；
  *   新增令牌 --fs-title-xl / --fs-metric / --shadow-btn-primary[-hover] / --bg-top /
  *   --scrollbar-thumb[-hover] / --nav-width（--nav-width 为 S2 预留，本批仅登记）。
+ * - 视觉改版 S2 批（2026-08-15，.hermes/plans/2026-08-15_visual-redesign.md §3）：
+ *   侧栏浅色化——nav 令牌族 light 由深 navy 套改为瓷白套（--nav-bg-start/end #ffffff→#f8fafc
+ *   微渐变、文字/hover/边框/卡片底改深色系、--nav-active-bg 浅胶囊 var(--brand-050)、
+ *   --nav-active-shadow 去发光置 none）；新增令牌 --nav-active-color / --nav-active-accent
+ *   （激活态文字色 + 左侧 3px 光条，box-shadow 型）；--nav-width 本批正式接线。
+ *   dark 套保留深 navy 不变，经 dark.css 覆写（含 --nav-active-shadow 发光重新钉住）。
  */
 :root {
   /* ========== 色彩：底色 ========== */
@@ -88,23 +94,30 @@
   --code-red: #f44747;
   --code-yellow: #e5c07b;
 
-  /* 侧栏令牌族（light=dark 双套，dark 仅 navy 微压暗） */
-  --nav-bg-start: var(--navy-800);
-  --nav-bg-end: var(--navy-900);
-  --nav-text: #9db1c4;
-  --nav-text-strong: #e6eef6;
-  --nav-text-title: var(--text-inverse);
-  --nav-text-group: #7e93a8;
-  --nav-hover-bg: rgba(255, 255, 255, 0.06);
-  --nav-active-bg: linear-gradient(135deg, var(--brand-600), var(--brand-500));
-  --nav-border: rgba(255, 255, 255, 0.06);
+  /* 侧栏令牌族（视觉改版 S2 批浅色化：light 为瓷白套；dark 保留深 navy 套，经 dark.css 全量覆写） */
+  --nav-bg-start: #ffffff;
+  --nav-bg-end: #f8fafc;
+  --nav-text: #42546a;
+  --nav-text-strong: #17283c;
+  --nav-text-title: var(--text-1);
+  --nav-text-group: #5f7086;
+  --nav-hover-bg: rgba(18, 38, 58, 0.05);
+  --nav-active-bg: var(--brand-050);
+  --nav-border: var(--border);
   --nav-bottom-bg: rgba(255, 255, 255, 0.88);
-  /* S6 新增（S2 走查遗留）：AppLayout 原字面量原值入令牌，视觉零变化；
-     S1 批品牌阴影换基 rgba(12,118,147,·)（随 brand-600 #0c7693） */
+  /* S6 新增（美术 S2 走查遗留）：AppLayout 原字面量原值入令牌；
+     S1 批品牌阴影换基 rgba(12,118,147,·)（随 brand-600 #0c7693）；
+     视觉改版 S2 批：light 激活态去发光（--nav-active-shadow 置 none），
+     卡片底由白 alpha 系换深 alpha 系；dark 发光由 dark.css 重新钉住 */
   --nav-mark-shadow: 0 4px 12px rgba(12, 118, 147, 0.45);
-  --nav-active-shadow: 0 6px 16px -6px rgba(12, 118, 147, 0.55);
-  --nav-card-bg: rgba(255, 255, 255, 0.04);
-  --nav-card-hover-bg: rgba(255, 255, 255, 0.08);
+  --nav-active-shadow: none;
+  /* S2 新增：激活态文字色（浅胶囊内 brand-700，对比度 6.6:1）+ 左侧 3px 光条（box-shadow 型）。
+     组件内与 --nav-active-shadow 两条 box-shadow 声明并列、后声明生效；
+     dark 下 --nav-active-accent 覆写为发光值（box-shadow 多值列表不允许混入 none，机制见 dark.css 注释） */
+  --nav-active-color: var(--brand-700);
+  --nav-active-accent: inset 3px 0 0 0 var(--brand-600);
+  --nav-card-bg: rgba(18, 38, 58, 0.04);
+  --nav-card-hover-bg: rgba(18, 38, 58, 0.07);
   --nav-bottom-shadow: 0 -8px 24px -12px rgba(18, 38, 58, 0.18);
   /* 侧栏宽度（S1 登记，S2 接线使用） */
   --nav-width: 232px;
