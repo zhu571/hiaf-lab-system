@@ -316,7 +316,7 @@ function fmtSize(size: number) {
 .att-card {
   background: var(--surface-2);
   border: 1px solid var(--border);
-  border-radius: 10px;
+  border-radius: var(--radius-md);
   display: grid;
   gap: 8px;
   justify-items: center;

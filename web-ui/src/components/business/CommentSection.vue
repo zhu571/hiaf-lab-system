@@ -48,7 +48,7 @@ function submit() {
 
 .empty-hint {
   border: 1px dashed var(--border-strong);
-  border-radius: 10px;
+  border-radius: var(--radius-md);
   color: var(--text-3);
   padding: 18px;
   text-align: center;

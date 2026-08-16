@@ -227,21 +227,18 @@ async function create() {
 .issue-card {
   background: var(--surface);
   border: 1px solid var(--border);
-  border-radius: 10px;
+  border-radius: var(--radius-md);
   box-shadow: var(--shadow-sm);
   cursor: pointer;
   display: grid;
   gap: 8px;
   padding: 12px 14px;
   text-align: left;
-  transition:
-    border-color 0.15s ease,
-    box-shadow 0.15s ease,
-    transform 0.15s ease;
+  transition: var(--dur-base) var(--ease-standard);
 }
 
 .issue-card:hover {
-  border-color: var(--brand-100);
+  border-color: var(--brand-400);
   box-shadow: var(--shadow-md);
   transform: translateY(-2px);
 }
@@ -263,7 +260,7 @@ async function create() {
 
 .empty-hint {
   border: 1px dashed var(--border-strong);
-  border-radius: 10px;
+  border-radius: var(--radius-md);
   color: var(--text-3);
   font-size: 12px;
   padding: 16px 0;

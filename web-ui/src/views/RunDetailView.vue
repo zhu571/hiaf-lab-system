@@ -602,7 +602,7 @@ function numText(n?: number) {
 }
 
 .title-block h2 {
-  font-size: 20px;
+  font-size: var(--fs-title-xl);
 }
 
 .actions {

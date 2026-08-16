@@ -450,7 +450,7 @@ function stagger(i: number) {
 /* ---------- 页头 ---------- */
 
 .dash-title h2 {
-  font-size: 22px;
+  font-size: var(--fs-title-xl);
 }
 
 .dash-sub {
@@ -482,7 +482,7 @@ function stagger(i: number) {
 .dashboard-grid {
   align-items: start;
   display: grid;
-  gap: 20px;
+  gap: var(--space-6);
   /* auto-fit + 300px 最小列宽：宽屏与 repeat(3,·) 等价（3 面板 3 列），
      200% 缩放等窄有效宽度下自动折 2+1/单列，避免 218px 挤压列（S6 缩放走查修复） */
   grid-template-columns: repeat(auto-fit, minmax(min(100%, 300px), 1fr));
@@ -572,16 +572,13 @@ function stagger(i: number) {
   box-shadow: var(--shadow-sm);
   cursor: pointer;
   padding: 14px 16px;
-  transition:
-    border-color 0.18s ease,
-    box-shadow 0.18s ease,
-    transform 0.18s ease;
+  transition: var(--dur-base) var(--ease-standard);
 }
 
 .device-card:hover,
 .brief-card:hover,
 .member-card:hover {
-  border-color: var(--brand-500);
+  border-color: var(--brand-400);
   box-shadow: var(--shadow-md);
   transform: translateY(-2px);
 }
@@ -699,8 +696,7 @@ function stagger(i: number) {
 }
 
 .gas-stat {
-  background: var(--surface);
-  border: 1px solid var(--border);
+  background: var(--surface-2);
   border-radius: var(--radius-sm);
   display: grid;
   gap: 1px;
@@ -826,7 +822,7 @@ function stagger(i: number) {
 .avatar {
   align-items: center;
   background: linear-gradient(135deg, var(--brand-500), var(--brand-700));
-  border-radius: 10px;
+  border-radius: var(--radius-md);
   box-shadow: var(--shadow-brand-md);
   color: var(--text-inverse);
   display: inline-flex;

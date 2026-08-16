@@ -341,7 +341,7 @@ function staleLevel(time?: string): 'warning' | 'danger' | null {
 }
 
 .dash-title h2 {
-  font-size: 22px;
+  font-size: var(--fs-title-xl);
 }
 
 .dash-sub {
@@ -375,7 +375,6 @@ function staleLevel(time?: string): 'warning' | 'danger' | null {
 
 .reading-card {
   background: var(--surface-2);
-  border: 1px solid var(--border);
   border-radius: var(--radius-sm);
   display: grid;
   gap: 2px;
