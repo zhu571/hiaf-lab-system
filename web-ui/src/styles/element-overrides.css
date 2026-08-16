@@ -1,12 +1,13 @@
 :root {
   /* Element Plus 主题变量覆写 */
-  --el-color-primary: #12708a;
-  --el-color-primary-light-3: #4798ac;
-  --el-color-primary-light-5: #7db6c4;
-  --el-color-primary-light-7: #b8d7df;
-  --el-color-primary-light-8: #d1e5ea;
-  --el-color-primary-light-9: #ebf4f6;
-  --el-color-primary-dark-2: #0e5a6e;
+  /* primary 九档 → brand 令牌（S1：消除与 brand 色阶的字面量双轨；dark.css:101 同手法） */
+  --el-color-primary: var(--brand-600);
+  --el-color-primary-light-3: var(--brand-400);
+  --el-color-primary-light-5: var(--brand-300);
+  --el-color-primary-light-7: var(--brand-200);
+  --el-color-primary-light-8: var(--brand-100);
+  --el-color-primary-light-9: var(--brand-050);
+  --el-color-primary-dark-2: var(--brand-700);
   /* 功能色四族 → 三级令牌（美术 §3.2，S1 走查遗留 S6 补做；与 dark.css 同手法：
      base/light-3/light-5=图形级、light-7/8/9=浅底级、dark-2=文本级，error=danger 族。
      统一前 EP 默认 #67c23a/#e6a23c/#f56c6c/#909399 双轨；统一后对比度全面不劣于原默认对） */
@@ -66,11 +67,11 @@
 }
 
 .el-button--primary {
-  box-shadow: 0 4px 12px -6px rgba(18, 112, 138, 0.55);
+  box-shadow: var(--shadow-btn-primary);
 }
 
 .el-button--primary:not(.is-disabled):hover {
-  box-shadow: 0 6px 16px -6px rgba(18, 112, 138, 0.6);
+  box-shadow: var(--shadow-btn-primary-hover);
 }
 
 .el-button--primary.is-disabled {

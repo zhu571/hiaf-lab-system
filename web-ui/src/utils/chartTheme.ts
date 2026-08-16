@@ -36,13 +36,14 @@ export type ChartGroupRow = { key: string; time: number; value: number }
 const FONT_FALLBACK =
   '"PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", "Noto Sans CJK SC", ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif'
 
-/** LIGHT 令牌兜底值（styles/tokens.css 现值逐字一致，2026-08-14） */
+/** LIGHT 令牌兜底值（styles/tokens.css 现值逐字一致，2026-08-15） */
 const LIGHT_FALLBACK: Record<string, string> = {
   '--text-1': '#12263a',
   '--text-2': '#35485e',
   '--text-3': '#5c6f82',
-  '--border': '#e3e9f1',
+  '--border': '#e4e9f1',
   '--surface': '#ffffff',
+  // --chart-1..8：独立图表色，不随 brand ramp（brand-500 已换 #168ca9，--chart-1 保持 #1a86a2）
   '--chart-1': '#1a86a2',
   '--chart-2': '#4d9e6b',
   '--chart-3': '#d9932c',
