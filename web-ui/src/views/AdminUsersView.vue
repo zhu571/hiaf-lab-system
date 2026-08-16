@@ -96,7 +96,7 @@
     </ResponsiveTable>
   </ListPage>
 
-    <el-dialog v-model="roleDialog" :title="t('adminUsers.changeRoleTitle')" width="440">
+    <FormDialog v-model="roleDialog" :title="t('adminUsers.changeRoleTitle')" width="440">
       <p v-if="roleTarget" class="role-dialog-text">
         <span>{{ t('adminUsers.changeRoleFrom', { username: roleTarget.username, role: roleLabel(roleTarget.role) }) }}</span>
       </p>
@@ -114,7 +114,7 @@
           {{ t('adminUsers.confirmChange') }}
         </el-button>
       </template>
-    </el-dialog>
+    </FormDialog>
 
     <el-dialog v-model="passwordDialog" :title="t('adminUsers.tempPassword')" width="460">
       <div class="password-row">
@@ -124,24 +124,18 @@
       <p class="muted dialog-hint">{{ t('adminUsers.tempPasswordHint') }}</p>
     </el-dialog>
 
-    <el-dialog v-model="createDialog" :title="t('adminUsers.createUser')" width="520">
-      <el-form label-position="top">
-        <el-form-item :label="t('adminUsers.formUsername')"><el-input v-model="draft.username" /></el-form-item>
-        <el-form-item :label="t('adminUsers.formDisplayName')"><el-input v-model="draft.display_name" /></el-form-item>
-        <el-form-item :label="t('adminUsers.formRole')">
-          <el-select v-model="draft.role">
-            <el-option v-for="role in roles" :key="role" :label="roleLabel(role)" :value="role" />
-          </el-select>
-        </el-form-item>
-        <el-form-item :label="t('adminUsers.formPassword')">
-          <el-input v-model="draft.password" type="password" show-password :placeholder="t('adminUsers.passwordPlaceholder')" />
-        </el-form-item>
-      </el-form>
-      <template #footer>
-        <el-button @click="createDialog = false">{{ t('common.cancel') }}</el-button>
-        <el-button type="primary" :loading="saving" @click="create">{{ t('adminUsers.save') }}</el-button>
-      </template>
-    </el-dialog>
+    <FormDialog v-model="createDialog" :title="t('adminUsers.createUser')" width="520" :loading="saving" @submit="create">
+      <el-form-item :label="t('adminUsers.formUsername')"><el-input v-model="draft.username" /></el-form-item>
+      <el-form-item :label="t('adminUsers.formDisplayName')"><el-input v-model="draft.display_name" /></el-form-item>
+      <el-form-item :label="t('adminUsers.formRole')">
+        <el-select v-model="draft.role">
+          <el-option v-for="role in roles" :key="role" :label="roleLabel(role)" :value="role" />
+        </el-select>
+      </el-form-item>
+      <el-form-item :label="t('adminUsers.formPassword')">
+        <el-input v-model="draft.password" type="password" show-password :placeholder="t('adminUsers.passwordPlaceholder')" />
+      </el-form-item>
+    </FormDialog>
 </template>
 
 <script setup lang="ts">
@@ -153,6 +147,7 @@ import { Search } from '@element-plus/icons-vue'
 import { createUser, listUsers, resetPassword, updateUser, type UserInfo } from '../api/auth'
 import { useAuthStore } from '../stores/auth'
 import ListPage from '@/components/base/ListPage.vue'
+import FormDialog from '@/components/base/FormDialog.vue'
 import ResponsiveTable from '@/components/base/ResponsiveTable.vue'
 import { formatDate } from '@/utils/datetime'
 

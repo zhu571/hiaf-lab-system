@@ -7,18 +7,12 @@
     <div class="panel">
       <ProjectSidebar />
     </div>
-    <el-dialog v-model="dialog" :title="t('projects.create')" width="520">
-      <el-form label-position="top">
-        <el-form-item :label="t('projects.code')"><el-input v-model="draft.code" /></el-form-item>
-        <el-form-item :label="t('projects.name')"><el-input v-model="draft.name" /></el-form-item>
-        <el-form-item :label="t('projects.shortName')"><el-input v-model="draft.short_name" /></el-form-item>
-        <el-form-item :label="t('projects.description')"><el-input v-model="draft.description" type="textarea" /></el-form-item>
-      </el-form>
-      <template #footer>
-        <el-button @click="dialog = false">{{ t('common.cancel') }}</el-button>
-        <el-button type="primary" @click="create">{{ t('projects.save') }}</el-button>
-      </template>
-    </el-dialog>
+    <FormDialog v-model="dialog" :title="t('projects.create')" width="520" @submit="create">
+      <el-form-item :label="t('projects.code')"><el-input v-model="draft.code" /></el-form-item>
+      <el-form-item :label="t('projects.name')"><el-input v-model="draft.name" /></el-form-item>
+      <el-form-item :label="t('projects.shortName')"><el-input v-model="draft.short_name" /></el-form-item>
+      <el-form-item :label="t('projects.description')"><el-input v-model="draft.description" type="textarea" /></el-form-item>
+    </FormDialog>
   </div>
 </template>
 
@@ -27,6 +21,7 @@ import { computed, onMounted, reactive, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { ElMessage } from 'element-plus'
 import { showApiError } from '../composables/useNotify'
+import FormDialog from '@/components/base/FormDialog.vue'
 import ProjectSidebar from '@/components/business/ProjectSidebar.vue'
 import { useProjectStore } from '../stores/project'
 import { useAuthStore } from '../stores/auth'

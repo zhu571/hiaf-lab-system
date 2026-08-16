@@ -22,7 +22,8 @@ test.describe('批次状态流转', () => {
 
     const dialog = page.locator('.el-dialog')
     await dialog.locator('.el-form-item').filter({ hasText: '名称（必填）' }).locator('input').fill(runName)
-    await dialog.getByRole('button', { name: '保存' }).click()
+    // R4 弹窗单轨化后 FormDialog 默认 footer 按钮为「确定」
+    await dialog.getByRole('button', { name: '确定' }).click()
 
     // 列表出现批次卡片（初始 planned）→ 点进详情
     const card = page.locator('.run-card', { hasText: runName })

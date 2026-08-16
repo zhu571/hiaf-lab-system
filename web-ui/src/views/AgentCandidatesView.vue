@@ -182,13 +182,13 @@
       </div>
     </el-drawer>
 
-    <el-dialog v-model="rejectDialog" :title="t('agentCandidates.rejectCandidateTitle')" width="480">
+    <FormDialog v-model="rejectDialog" :title="t('agentCandidates.rejectCandidateTitle')" width="480">
       <el-input v-model="rejectReason" type="textarea" :rows="3" :placeholder="t('agentCandidates.rejectReasonRequired')" />
       <template #footer>
         <el-button @click="rejectDialog = false">{{ t('common.cancel') }}</el-button>
         <el-button type="danger" :disabled="!rejectReason.trim()" @click="reject">{{ t('agentCandidates.confirmReject') }}</el-button>
       </template>
-    </el-dialog>
+    </FormDialog>
   </div>
 </template>
 
@@ -200,6 +200,7 @@ import { diffLines, diffWordsWithSpace, type Change } from 'diff'
 import { showApiError } from '../composables/useNotify'
 import StatusBadge from '@/components/base/StatusBadge.vue'
 import ListPage from '@/components/base/ListPage.vue'
+import FormDialog from '@/components/base/FormDialog.vue'
 import ResponsiveTable from '@/components/base/ResponsiveTable.vue'
 import { useAsyncData } from '@/composables/useAsyncData'
 import { formatDateTime } from '@/utils/datetime'

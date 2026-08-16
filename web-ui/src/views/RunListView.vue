@@ -43,45 +43,39 @@
         />
       </StateBlock>
     </section>
-    <el-dialog v-model="createDialog" :title="t('runList.create')" width="620">
-      <el-form label-position="top">
-        <el-form-item :label="t('runList.nameLabel')"><el-input v-model="draft.name" /></el-form-item>
-        <el-form-item :label="t('runList.campaign')"><el-input v-model="draft.campaign" /></el-form-item>
-        <div class="form-row">
-          <el-form-item :label="t('runList.type')">
-            <el-select v-model="draft.run_type">
-              <el-option v-for="t in runTypes" :key="t.value" :label="t.label" :value="t.value" />
-            </el-select>
-          </el-form-item>
-          <el-form-item :label="t('runList.gasType')">
-            <el-select v-model="draft.gas_type">
-              <el-option v-for="g in gasTypes" :key="g" :label="g" :value="g" />
-            </el-select>
-          </el-form-item>
-        </div>
-        <div class="form-row">
-          <el-form-item :label="t('runList.targetTemp')"><el-input-number v-model="draft.target_temp" :controls="false" :placeholder="t('runList.optional')" /></el-form-item>
-          <el-form-item :label="t('runList.minTemp')"><el-input-number v-model="draft.min_temp" :controls="false" :placeholder="t('runList.optional')" /></el-form-item>
-        </div>
-        <div class="form-row three">
-          <el-form-item :label="t('runList.pressureMin')"><el-input-number v-model="draft.pressure_min" :controls="false" :placeholder="t('runList.optional')" /></el-form-item>
-          <el-form-item :label="t('runList.pressureMax')"><el-input-number v-model="draft.pressure_max" :controls="false" :placeholder="t('runList.optional')" /></el-form-item>
-          <el-form-item :label="t('runList.pressureUnit')"><el-input v-model="draft.pressure_unit" /></el-form-item>
-        </div>
-        <el-form-item :label="t('runList.hasBeam')"><el-switch v-model="draft.has_beam" /></el-form-item>
-        <el-form-item :label="t('runList.devices')">
-          <el-select v-model="draft.devices" multiple :placeholder="t('runList.devicesPlaceholder')">
-            <el-option v-for="d in deviceOptions" :key="d" :label="d" :value="d" />
+    <FormDialog v-model="createDialog" :title="t('runList.create')" width="620" :loading="creating" @submit="create">
+      <el-form-item :label="t('runList.nameLabel')"><el-input v-model="draft.name" /></el-form-item>
+      <el-form-item :label="t('runList.campaign')"><el-input v-model="draft.campaign" /></el-form-item>
+      <div class="form-row">
+        <el-form-item :label="t('runList.type')">
+          <el-select v-model="draft.run_type">
+            <el-option v-for="t in runTypes" :key="t.value" :label="t.label" :value="t.value" />
           </el-select>
         </el-form-item>
-        <el-form-item :label="t('runList.description')"><el-input v-model="draft.description" type="textarea" :rows="3" /></el-form-item>
-      </el-form>
-      <template #footer>
-        <el-button @click="createDialog = false">{{ t('common.cancel') }}</el-button>
-        <el-button type="primary" :loading="creating" @click="create">{{ t('runList.save') }}</el-button>
-      </template>
-    </el-dialog>
-    <el-dialog v-model="aiDialog" :title="t('runList.aiGenerateSteps')" width="760" @closed="resetAi">
+        <el-form-item :label="t('runList.gasType')">
+          <el-select v-model="draft.gas_type">
+            <el-option v-for="g in gasTypes" :key="g" :label="g" :value="g" />
+          </el-select>
+        </el-form-item>
+      </div>
+      <div class="form-row">
+        <el-form-item :label="t('runList.targetTemp')"><el-input-number v-model="draft.target_temp" :controls="false" :placeholder="t('runList.optional')" /></el-form-item>
+        <el-form-item :label="t('runList.minTemp')"><el-input-number v-model="draft.min_temp" :controls="false" :placeholder="t('runList.optional')" /></el-form-item>
+      </div>
+      <div class="form-row three">
+        <el-form-item :label="t('runList.pressureMin')"><el-input-number v-model="draft.pressure_min" :controls="false" :placeholder="t('runList.optional')" /></el-form-item>
+        <el-form-item :label="t('runList.pressureMax')"><el-input-number v-model="draft.pressure_max" :controls="false" :placeholder="t('runList.optional')" /></el-form-item>
+        <el-form-item :label="t('runList.pressureUnit')"><el-input v-model="draft.pressure_unit" /></el-form-item>
+      </div>
+      <el-form-item :label="t('runList.hasBeam')"><el-switch v-model="draft.has_beam" /></el-form-item>
+      <el-form-item :label="t('runList.devices')">
+        <el-select v-model="draft.devices" multiple :placeholder="t('runList.devicesPlaceholder')">
+          <el-option v-for="d in deviceOptions" :key="d" :label="d" :value="d" />
+        </el-select>
+      </el-form-item>
+      <el-form-item :label="t('runList.description')"><el-input v-model="draft.description" type="textarea" :rows="3" /></el-form-item>
+    </FormDialog>
+    <FormDialog v-model="aiDialog" :title="t('runList.aiGenerateSteps')" width="760" @closed="resetAi">
       <div v-if="aiStage === 'input'" class="grid">
         <el-alert v-if="aiNotice" :type="aiNoticeType" :title="aiNotice" show-icon :closable="false" />
         <el-input
@@ -93,20 +87,18 @@
         />
       </div>
       <div v-else class="grid">
-        <el-form label-position="top">
-          <el-form-item :label="t('runList.targetRun')">
-            <el-select v-model="aiTarget" :placeholder="t('runList.selectTarget')" class="target-select">
-              <el-option :label="t('runList.newRunOption')" value="__new__" />
-              <el-option v-for="r in aiRunOptions" :key="r.id" :label="r.name" :value="r.id" />
-            </el-select>
-          </el-form-item>
-          <el-form-item v-if="aiTarget === '__new__'" :label="t('runList.newRunName')">
-            <el-input v-model="aiNewRunName" maxlength="256" />
-          </el-form-item>
-          <el-form-item :label="t('runList.templateName')">
-            <el-input v-model="aiName" maxlength="256" />
-          </el-form-item>
-        </el-form>
+        <el-form-item :label="t('runList.targetRun')">
+          <el-select v-model="aiTarget" :placeholder="t('runList.selectTarget')" class="target-select">
+            <el-option :label="t('runList.newRunOption')" value="__new__" />
+            <el-option v-for="r in aiRunOptions" :key="r.id" :label="r.name" :value="r.id" />
+          </el-select>
+        </el-form-item>
+        <el-form-item v-if="aiTarget === '__new__'" :label="t('runList.newRunName')">
+          <el-input v-model="aiNewRunName" maxlength="256" />
+        </el-form-item>
+        <el-form-item :label="t('runList.templateName')">
+          <el-input v-model="aiName" maxlength="256" />
+        </el-form-item>
         <StepItemsEditor :key="aiKey" v-model="aiItems" />
       </div>
       <template #footer>
@@ -121,7 +113,7 @@
           <el-button v-if="canSaveTemplate" type="primary" :loading="aiSubmitting" :disabled="!aiTargetReady" @click="saveAndApplyTemplate">{{ t('runList.saveAndApply') }}</el-button>
         </template>
       </template>
-    </el-dialog>
+    </FormDialog>
   </div>
 </template>
 
@@ -132,6 +124,7 @@ import { useI18n } from 'vue-i18n'
 import { ElMessage } from 'element-plus'
 import StatusBadge from '@/components/base/StatusBadge.vue'
 import StateBlock from '@/components/base/StateBlock.vue'
+import FormDialog from '@/components/base/FormDialog.vue'
 import StepItemsEditor from '@/components/business/StepItemsEditor.vue'
 import { applyRunTemplate, createRun, listRuns, type ExperimentRun, type RunPayload } from '../api/runs'
 import { createTemplate, generateSteps, type StepTemplateItem } from '../api/stepTemplates'

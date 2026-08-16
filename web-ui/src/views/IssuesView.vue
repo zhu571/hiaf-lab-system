@@ -49,17 +49,11 @@
         <CommentSection :comments="selected.comments || []" @submit="comment" />
       </div>
     </el-drawer>
-    <el-dialog v-model="createDialog" :title="t('issues.create')" width="560">
-      <el-form label-position="top">
-        <el-form-item :label="t('issues.fieldTitle')"><el-input v-model="draft.title" /></el-form-item>
-        <el-form-item :label="t('issues.severity')"><el-select v-model="draft.severity"><el-option v-for="s in severities" :key="s" :label="severityLabel(s)" :value="s" /></el-select></el-form-item>
-        <el-form-item :label="t('issues.description')"><el-input v-model="draft.description" type="textarea" /></el-form-item>
-      </el-form>
-      <template #footer>
-        <el-button @click="createDialog = false">{{ t('common.cancel') }}</el-button>
-        <el-button type="primary" @click="create">{{ t('issues.save') }}</el-button>
-      </template>
-    </el-dialog>
+    <FormDialog v-model="createDialog" :title="t('issues.create')" width="560" @submit="create">
+      <el-form-item :label="t('issues.fieldTitle')"><el-input v-model="draft.title" /></el-form-item>
+      <el-form-item :label="t('issues.severity')"><el-select v-model="draft.severity"><el-option v-for="s in severities" :key="s" :label="severityLabel(s)" :value="s" /></el-select></el-form-item>
+      <el-form-item :label="t('issues.description')"><el-input v-model="draft.description" type="textarea" /></el-form-item>
+    </FormDialog>
   </div>
 </template>
 
@@ -71,6 +65,7 @@ import { ElMessage } from 'element-plus'
 import { showApiError } from '../composables/useNotify'
 import StatusBadge from '@/components/base/StatusBadge.vue'
 import StateBlock from '@/components/base/StateBlock.vue'
+import FormDialog from '@/components/base/FormDialog.vue'
 import CommentSection from '@/components/business/CommentSection.vue'
 import MarkdownView from '@/components/business/MarkdownView.vue'
 import { useAsyncData } from '@/composables/useAsyncData'
