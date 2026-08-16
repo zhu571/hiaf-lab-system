@@ -70,6 +70,13 @@ describe('refreshDefaults 快照（jsdom 无计算样式 → LIGHT 兜底）', (
     expect(Chart.defaults.plugins.tooltip.titleColor).toBe('#12263a')
   })
 
+  it('S4 曲线化与 tooltip 规范：line tension 0.3 / borderWidth 2，tooltip cornerRadius 8 / padding 10', () => {
+    expect(Chart.defaults.elements.line.tension).toBe(0.3)
+    expect(Chart.defaults.elements.line.borderWidth).toBe(2)
+    expect(Chart.defaults.plugins.tooltip.cornerRadius).toBe(8)
+    expect(Chart.defaults.plugins.tooltip.padding).toBe(10)
+  })
+
   it('getComputedStyle 实时取色：mock 计算样式后 defaults 随之更新（主题联动前提）', () => {
     computedSpy = vi.spyOn(window, 'getComputedStyle').mockReturnValue({
       getPropertyValue: (name: string) => COLOR_STUB[name] ?? ''
