@@ -1,52 +1,64 @@
 <template>
-  <div class="layout">
+  <div class="layout" :class="{ 'nav-collapsed': collapsed && !isMobile }">
     <MobileTopBar v-if="isMobile" @ask="openAskDialog" />
     <aside v-if="!isMobile" class="nav">
       <div class="brand">
         <span class="brand-mark">H</span>
         <span class="brand-name">HIAF Lab</span>
       </div>
-      <RouterLink
-        v-for="item in navItems"
-        :key="item.path"
-        :to="item.path"
-        :class="['nav-link', { 'router-link-active': navActive(item.path) }]"
-      >
-        <el-icon><component :is="item.icon" /></el-icon>
-        <el-badge
-          v-if="item.badge === 'agentPending'"
-          :value="agentPending"
-          :max="99"
-          :hidden="agentPending === 0"
-          :title="t('nav.pendingReview')"
-          class="nav-badge"
-        >
-          <span>{{ item.label }}</span>
-        </el-badge>
-        <span v-else>{{ item.label }}</span>
-      </RouterLink>
-      <button type="button" class="nav-link nav-ask" @click="openAskDialog">
-        <el-icon><ChatDotRound /></el-icon>
-        <span>{{ t('nav.aiAsk') }}</span>
-      </button>
+      <el-tooltip v-for="item in navItems" :key="item.path" :content="item.label" placement="right" :disabled="!collapsed">
+        <RouterLink :to="item.path" :class="['nav-link', { 'router-link-active': navActive(item.path) }]">
+          <el-badge
+            v-if="item.badge === 'agentPending'"
+            :value="agentPending"
+            :max="99"
+            :is-dot="collapsed"
+            :hidden="agentPending === 0"
+            :title="t('nav.pendingReview')"
+            class="nav-badge"
+          >
+            <el-icon><component :is="item.icon" /></el-icon>
+            <span class="nav-label">{{ item.label }}</span>
+          </el-badge>
+          <template v-else>
+            <el-icon><component :is="item.icon" /></el-icon>
+            <span class="nav-label">{{ item.label }}</span>
+          </template>
+        </RouterLink>
+      </el-tooltip>
+      <el-tooltip :content="t('nav.aiAsk')" placement="right" :disabled="!collapsed">
+        <button type="button" class="nav-link nav-ask" @click="openAskDialog">
+          <el-icon><ChatDotRound /></el-icon>
+          <span class="nav-label">{{ t('nav.aiAsk') }}</span>
+        </button>
+      </el-tooltip>
       <p class="nav-group">{{ t('nav.systemGroup') }}</p>
-      <RouterLink
-        v-for="item in systemItems"
-        :key="item.path"
-        :to="item.path"
-        :class="['nav-link', { 'router-link-active': navActive(item.path) }]"
+      <el-tooltip v-for="item in systemItems" :key="item.path" :content="item.label" placement="right" :disabled="!collapsed">
+        <RouterLink :to="item.path" :class="['nav-link', { 'router-link-active': navActive(item.path) }]">
+          <el-icon><component :is="item.icon" /></el-icon>
+          <span class="nav-label">{{ item.label }}</span>
+        </RouterLink>
+      </el-tooltip>
+    </aside>
+
+    <header v-if="!isMobile" class="topbar">
+      <button
+        class="collapse-btn"
+        type="button"
+        :aria-label="collapsed ? t('common.expandSidebar') : t('common.collapseSidebar')"
+        @click="collapsed = !collapsed"
       >
-        <el-icon><component :is="item.icon" /></el-icon>
-        <span>{{ item.label }}</span>
-      </RouterLink>
-      <el-dropdown class="user-card" trigger="click" placement="top-start" @command="onUserCommand">
-        <button class="user-card-btn" type="button">
+        <el-icon><Expand v-if="collapsed" /><Fold v-else /></el-icon>
+      </button>
+      <AppBreadcrumb :items="breadcrumbItems" class="topbar-breadcrumb" />
+      <el-dropdown class="topbar-user" trigger="click" placement="bottom-end" @command="onUserCommand">
+        <button class="user-card-btn" type="button" :aria-label="t('common.userMenu')">
           <span class="user-avatar">{{ avatarText }}</span>
           <span class="user-meta">
             <strong>{{ displayName }}</strong>
             <small>{{ auth.user?.role }}</small>
           </span>
-          <el-icon class="user-caret"><ArrowUp /></el-icon>
+          <el-icon class="user-caret"><ArrowDown /></el-icon>
         </button>
         <template #dropdown>
           <el-dropdown-menu>
@@ -55,7 +67,7 @@
           </el-dropdown-menu>
         </template>
       </el-dropdown>
-    </aside>
+    </header>
 
     <main class="content">
       <RouterView v-slot="{ Component }">
@@ -85,7 +97,8 @@
 import { computed, onMounted, ref, watch, type Component } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
-import { ArrowUp, ChatDotRound } from '@element-plus/icons-vue'
+import { useLocalStorage } from '@vueuse/core'
+import { ArrowDown, ChatDotRound, Expand, Fold } from '@element-plus/icons-vue'
 import { useMobile } from '@/composables/useMobile'
 import { usePolling } from '@/composables/usePolling'
 import { useAuthStore } from '@/stores/auth'
@@ -95,8 +108,10 @@ import { listAgentCandidates } from '@/api/agent'
 import { NAV_ITEMS, filterNavByRole } from '@/config/navigation'
 import MobileTopBar from '@/layouts/MobileTopBar.vue'
 import AskDialog from '@/components/business/AskDialog.vue'
+import AppBreadcrumb from '@/components/base/AppBreadcrumb.vue'
 
 type NavItem = { label: string; path: string; icon: Component; badge?: 'agentPending' }
+type Crumb = { label: string; to?: string }
 
 const isMobile = useMobile()
 const route = useRoute()
@@ -105,6 +120,11 @@ const auth = useAuthStore()
 const projects = useProjectStore()
 const { t } = useI18n()
 const { openAskDialog } = useAskDialog()
+
+// 侧栏折叠（结构改版 R1 §2.2）：桌面双态 232↔64（--nav-width ↔ --nav-width-collapsed），
+// localStorage 持久化（仅布尔值）；移动端不读取——nav-collapsed class 经 !isMobile 门控，
+// 顶栏整体 v-if 不渲染，移动断点样式与本状态零交集。
+const collapsed = useLocalStorage('lab-nav-collapsed', false)
 
 onMounted(() => {
   projects.load().catch(() => undefined)
@@ -140,6 +160,40 @@ watch(
     if (p.startsWith('/agent-candidates')) refreshAgentPending()
   }
 )
+
+// 面包屑（结构改版 R1 §2.3 规则表）：数据源 = route.meta.titleKey + 项目名
+//（project store 只读缓存，与 ProjectLayout 同法 find，不回写）。
+// 单段页纯标题文本；≥2 段父段可点。/login 为 public 裸渲染不经本壳，此处防御性置空。
+const breadcrumbItems = computed<Crumb[]>(() => {
+  if (route.meta.public) return []
+  const path = route.path
+  // 项目工作区：[项目 / 项目名] 两段即止——tab 层级归 ProjectLayout tabs 表达，面包屑不重复
+  if (path.startsWith('/projects/')) {
+    const id = String(route.params.id || '')
+    const name = projects.projects.find((p) => p.id === id)?.name
+    if (!name) return [{ label: t('nav.projects') }]
+    return [
+      { label: t('nav.projects'), to: '/projects' },
+      { label: name, to: `/projects/${id}` }
+    ]
+  }
+  // 日报历史：[日报 / 日报历史]（sibling 页定位）
+  if (path === '/daily-report/history') {
+    return [
+      { label: t('nav.dailyReport'), to: '/daily-report' },
+      { label: t('dailyHistory.title') }
+    ]
+  }
+  // 日报详情：[日报 / 日报详情]
+  if (path.startsWith('/daily-reports/')) {
+    return [
+      { label: t('nav.dailyReport'), to: '/daily-report/history' },
+      { label: t('mobile.title.dailyReportDetail') }
+    ]
+  }
+  const key = route.meta.titleKey as string | undefined
+  return key ? [{ label: t(key) }] : []
+})
 
 // 导航单一数据源（重构方案 §3.3）：三组均从 NAV_ITEMS 过滤派生，角色判断收敛到 filterNavByRole 纯函数。
 // 桌面主组/系统组按 group 过滤 + minRole 过滤；移动底栏取 mobile:true 项（settings 为仅移动端项）。
@@ -208,11 +262,18 @@ async function onUserCommand(command: string | number | object) {
   gap: 4px;
   height: 100vh;
   left: 0;
+  overflow-x: hidden;
   overflow-y: auto;
   padding: 20px 12px;
   position: fixed;
   top: 0;
+  /* 折叠双态（R1）：宽度与顶栏 left / 内容区 margin-left 同帧过渡，不脱节 */
+  transition: width var(--dur-base) var(--ease-standard);
   width: var(--nav-width);
+}
+
+.layout.nav-collapsed .nav {
+  width: var(--nav-width-collapsed);
 }
 
 /* 200% 缩放/矮屏下侧栏内容超高时滚动触达（flex 子项 shrink 会先压缩而非溢出，须置 0） */
@@ -233,6 +294,7 @@ async function onUserCommand(command: string | number | object) {
   box-shadow: var(--nav-mark-shadow);
   color: var(--text-inverse);
   display: grid;
+  flex-shrink: 0;
   font-size: 15px;
   font-weight: var(--fw-bold);
   height: 30px;
@@ -244,6 +306,18 @@ async function onUserCommand(command: string | number | object) {
   font-size: 17px;
   font-weight: 700;
   letter-spacing: 0.02em;
+  white-space: nowrap;
+}
+
+/* 折叠态：品牌区紧凑化（只留 H 标居中） */
+.layout.nav-collapsed .brand {
+  justify-content: center;
+  padding-left: 0;
+  padding-right: 0;
+}
+
+.layout.nav-collapsed .brand-name {
+  display: none;
 }
 
 .nav-group {
@@ -251,6 +325,12 @@ async function onUserCommand(command: string | number | object) {
   font-size: 12px;
   letter-spacing: 0.08em;
   margin: 14px 10px 2px;
+  white-space: nowrap;
+}
+
+/* 折叠态：系统组标题隐藏 */
+.layout.nav-collapsed .nav-group {
+  display: none;
 }
 
 .nav-link,
@@ -271,16 +351,44 @@ async function onUserCommand(command: string | number | object) {
 }
 
 .nav-link .el-icon {
+  flex-shrink: 0;
   font-size: 17px;
+}
+
+.nav-label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* 折叠态：图标收敛居中、文字隐藏（名称经 el-tooltip 悬浮显示） */
+.layout.nav-collapsed .nav-link {
+  justify-content: center;
+  padding-left: 0;
+  padding-right: 0;
+}
+
+.layout.nav-collapsed .nav-label {
+  display: none;
 }
 
 .nav-badge {
   display: inline-flex;
 }
 
+/* 展开态：数字角标内联于标签后 */
 .nav-badge :deep(.el-badge__content) {
   margin-left: 6px;
   position: static;
+  transform: none;
+}
+
+/* 折叠态：is-dot 圆点吸附图标右上角（label 已隐藏，badge 内容框 = 图标） */
+.layout.nav-collapsed .nav-badge :deep(.el-badge__content) {
+  margin-left: 0;
+  position: absolute;
+  right: -2px;
+  top: -2px;
   transform: none;
 }
 
@@ -299,6 +407,10 @@ async function onUserCommand(command: string | number | object) {
   width: 100%;
 }
 
+.layout.nav-collapsed .nav-ask {
+  text-align: center;
+}
+
 .nav-link.router-link-active {
   background: var(--nav-active-bg);
   box-shadow: var(--nav-active-shadow);
@@ -308,29 +420,80 @@ async function onUserCommand(command: string | number | object) {
   color: var(--nav-active-color);
 }
 
-.user-card {
-  border-top: 1px solid var(--nav-border);
+/* 顶栏（R1 新增）：56px fixed，底 surface + 1px border 分隔 + shadow-sm；z 复用 --z-topbar
+   （与 MobileTopBar 同层级但双端互斥渲染，无叠压）；left 双态跟随侧栏宽度同帧过渡 */
+.topbar {
+  align-items: center;
+  background: var(--topbar-bg);
+  border-bottom: 1px solid var(--topbar-border);
+  box-shadow: var(--shadow-sm);
   display: flex;
-  margin-top: auto;
-  padding-top: 12px;
+  gap: var(--space-4);
+  height: var(--topbar-height);
+  left: var(--nav-width);
+  padding: 0 var(--space-5);
+  position: fixed;
+  right: 0;
+  top: 0;
+  transition: left var(--dur-base) var(--ease-standard);
+  z-index: var(--z-topbar);
+}
+
+.layout.nav-collapsed .topbar {
+  left: var(--nav-width-collapsed);
+}
+
+.collapse-btn {
+  align-items: center;
+  background: none;
+  border: none;
+  border-radius: var(--radius-sm);
+  color: var(--text-2);
+  cursor: pointer;
+  display: inline-flex;
+  flex: 0 0 auto;
+  font-size: 18px;
+  height: 36px;
+  justify-content: center;
+  padding: 0;
+  transition:
+    background 0.15s ease,
+    color 0.15s ease;
+  width: 36px;
+}
+
+.collapse-btn:hover {
+  background: var(--surface-2);
+  color: var(--text-1);
+}
+
+.topbar-breadcrumb {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+/* 用户菜单（R1 由侧栏底部迁入顶栏右侧，业界惯例位置）：
+   触发按钮保留 user-card-btn 类名（e2e helpers.ts 登出选择器依赖），样式按顶栏语境重写 */
+.topbar-user {
+  flex: 0 0 auto;
+  margin-left: auto;
 }
 
 .user-card-btn {
   align-items: center;
-  background: var(--nav-card-bg);
-  border: 1px solid var(--nav-border);
+  background: none;
+  border: none;
   border-radius: var(--radius-md);
-  color: var(--nav-text-strong);
   cursor: pointer;
   display: flex;
+  font-family: inherit;
   gap: 10px;
-  padding: 8px 10px;
+  padding: 4px 8px;
   transition: background 0.15s ease;
-  width: 100%;
 }
 
 .user-card-btn:hover {
-  background: var(--nav-card-hover-bg);
+  background: var(--surface-2);
 }
 
 .user-avatar {
@@ -355,7 +518,7 @@ async function onUserCommand(command: string | number | object) {
 }
 
 .user-meta strong {
-  color: var(--nav-text-strong);
+  color: var(--text-1);
   font-size: 13px;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -363,18 +526,31 @@ async function onUserCommand(command: string | number | object) {
 }
 
 .user-meta small {
-  color: var(--nav-text);
+  color: var(--text-3);
   font-size: 11px;
 }
 
 .user-caret {
-  color: var(--nav-text);
-  margin-left: auto;
+  color: var(--text-3);
+}
+
+/* 窄桌面（近 768px 断点）：顶栏横向空间有限，用户菜单收敛为头像按钮 */
+@media (max-width: 1100px) {
+  .user-meta,
+  .user-caret {
+    display: none;
+  }
 }
 
 .content {
   margin-left: var(--nav-width);
-  padding: var(--space-6);
+  /* 顶栏占位：padding-top = 顶栏高 + 原页边距 */
+  padding: calc(var(--topbar-height) + var(--space-6)) var(--space-6) var(--space-6);
+  transition: margin-left var(--dur-base) var(--ease-standard);
+}
+
+.layout.nav-collapsed .content {
+  margin-left: var(--nav-width-collapsed);
 }
 
 .bottom-nav {

@@ -7,6 +7,7 @@ export {}
 /* prettier-ignore */
 declare module 'vue' {
   export interface GlobalComponents {
+    AppBreadcrumb: typeof import('./src/components/base/AppBreadcrumb.vue')['default']
     AskDialog: typeof import('./src/components/business/AskDialog.vue')['default']
     AskResultPanel: typeof import('./src/components/business/AskResultPanel.vue')['default']
     CommentSection: typeof import('./src/components/business/CommentSection.vue')['default']

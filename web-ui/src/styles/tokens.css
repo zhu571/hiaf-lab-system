@@ -24,6 +24,10 @@
  *   --nav-active-shadow 去发光置 none）；新增令牌 --nav-active-color / --nav-active-accent
  *   （激活态文字色 + 左侧 3px 光条，box-shadow 型）；--nav-width 本批正式接线。
  *   dark 套保留深 navy 不变，经 dark.css 覆写（含 --nav-active-shadow 发光重新钉住）。
+ * - 结构改版 R1 批（2026-08-16，.hermes/plans/2026-08-15_visual-restructure.md §2.4）：
+ *   新增 --topbar-height / --topbar-bg / --topbar-border / --nav-width-collapsed
+ *   （桌面 56px 顶栏 + 侧栏 232↔64 折叠）；--topbar-* 全引用型，dark.css 零覆写；
+ *   z-index 复用既有 --z-topbar，不新增层级。
  */
 :root {
   /* ========== 色彩：底色 ========== */
@@ -121,6 +125,11 @@
   --nav-bottom-shadow: 0 -8px 24px -12px rgba(18, 38, 58, 0.18);
   /* 侧栏宽度（S1 登记，S2 接线使用） */
   --nav-width: 232px;
+  /* 结构改版 R1 批：桌面顶栏高度/底色/边框（全引用型，dark 零覆写）+ 侧栏折叠宽度 */
+  --topbar-height: 56px;
+  --topbar-bg: var(--surface);
+  --topbar-border: var(--border);
+  --nav-width-collapsed: 64px;
 
   /* ========== 字体 ========== */
   --font-family-base:

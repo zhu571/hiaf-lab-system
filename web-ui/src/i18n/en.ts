@@ -12,7 +12,11 @@ export default {
     retry: 'Retry',
     empty: 'No data',
     // Locale-aware list separator for joining summary strings (DashboardView brief cards).
-    listSeparator: '; '
+    listSeparator: '; ',
+    // Desktop topbar controls (AppLayout, R1 shell restructure).
+    collapseSidebar: 'Collapse sidebar',
+    expandSidebar: 'Expand sidebar',
+    userMenu: 'User menu'
   },
   login: {
     // Tagline under the "HIAF Lab System" brand on the login page.
