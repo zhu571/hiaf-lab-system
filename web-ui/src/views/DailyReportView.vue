@@ -378,7 +378,7 @@ async function submit(force: boolean) {
 .file-item {
   align-items: center;
   border: 1px solid var(--border);
-  border-radius: 6px;
+  border-radius: var(--radius-sm);
   display: flex;
   gap: 8px;
   padding: 8px 12px;
@@ -391,7 +391,6 @@ async function submit(force: boolean) {
 
 .log-card {
   background: var(--surface-2);
-  border: 1px solid var(--border);
   border-radius: var(--radius-sm);
   display: grid;
   gap: 8px;

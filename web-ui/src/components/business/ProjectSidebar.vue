@@ -43,7 +43,7 @@ function open(id: string) {
 .project-item {
   background: transparent;
   border: 1px solid transparent;
-  border-radius: 10px;
+  border-radius: var(--radius-md);
   cursor: pointer;
   display: grid;
   gap: 2px;

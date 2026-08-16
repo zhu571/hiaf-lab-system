@@ -598,7 +598,7 @@ async function doLogout() {
 .log-terminal {
   /* 终端深底归并 --code-bg（美术附录 B SettingsView→--code-*；原深灰底同族合并入 navy 系） */
   background: var(--code-bg);
-  border-radius: 6px;
+  border-radius: var(--radius-sm);
   color: var(--code-text);
   font-family: 'Cascadia Code', 'Fira Code', 'JetBrains Mono', 'Consolas', monospace;
   font-size: 13px;
