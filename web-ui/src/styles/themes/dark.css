@@ -77,7 +77,11 @@ html.dark {
   --code-red: #f44747;
   --code-yellow: #e5c07b;
 
-  /* 侧栏令牌族（light=dark 同值；navy 覆写经 var() 引用自动跟随） */
+  /* 侧栏令牌族（dark 保留深 navy 套不变：视觉改版 S2 后 light 已浅色化，本块为 dark 全量显式覆写。
+     S2 新增三条覆写：--nav-active-shadow 重新钉住发光（:root 已置 none，不重钉 dark 发光会被一并去掉）、
+     --nav-active-color 激活态文字色、--nav-active-accent 左光条槽位。
+     accent 不取 none 的原因：box-shadow 多值列表语法不允许混入 none，同规则后声明覆盖前声明又与主题无关，
+     accent 置 none 会冲掉发光（违反 dark 零风险），故 dark 的 accent 槽位复用 --nav-active-shadow） */
   --nav-bg-start: var(--navy-800);
   --nav-bg-end: var(--navy-900);
   --nav-text: #9db1c4;
@@ -87,6 +91,9 @@ html.dark {
   --nav-hover-bg: rgba(255, 255, 255, 0.06);
   --nav-active-bg: linear-gradient(135deg, var(--brand-600), var(--brand-500));
   --nav-border: rgba(255, 255, 255, 0.06);
+  --nav-active-shadow: 0 6px 16px -6px rgba(12, 118, 147, 0.55);
+  --nav-active-color: var(--text-inverse);
+  --nav-active-accent: var(--nav-active-shadow);
   --nav-bottom-bg: rgba(21, 34, 48, 0.88);
   /* 底栏上投阴影的 dark 对应：浅蓝灰阴影在深底上不可见，改黑色系（与 --shadow-md 主层同手法） */
   --nav-bottom-shadow: 0 -8px 24px -12px rgba(0, 0, 0, 0.5);

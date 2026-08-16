@@ -200,7 +200,7 @@ async function onUserCommand(command: string | number | object) {
 }
 
 .nav {
-  background: linear-gradient(180deg, var(--navy-800) 0%, var(--navy-900) 100%);
+  background: linear-gradient(180deg, var(--nav-bg-start) 0%, var(--nav-bg-end) 100%);
   box-shadow: inset -1px 0 0 var(--nav-border);
   color: var(--nav-text-title);
   display: flex;
@@ -212,7 +212,7 @@ async function onUserCommand(command: string | number | object) {
   padding: 20px 12px;
   position: fixed;
   top: 0;
-  width: 216px;
+  width: var(--nav-width);
 }
 
 /* 200% 缩放/矮屏下侧栏内容超高时滚动触达（flex 子项 shrink 会先压缩而非溢出，须置 0） */
@@ -261,7 +261,7 @@ async function onUserCommand(command: string | number | object) {
 }
 
 .nav-link {
-  border-radius: 10px;
+  border-radius: var(--radius-md);
   color: var(--nav-text);
   font-weight: 500;
   padding: 10px 12px;
@@ -302,7 +302,10 @@ async function onUserCommand(command: string | number | object) {
 .nav-link.router-link-active {
   background: var(--nav-active-bg);
   box-shadow: var(--nav-active-shadow);
-  color: var(--text-inverse);
+  /* 左光条（视觉改版 S2）：与上行 box-shadow 并列、本声明生效；
+     dark 下 --nav-active-accent 覆写为发光值，双主题各自正确（机制见 tokens.css/dark.css 注释） */
+  box-shadow: var(--nav-active-accent);
+  color: var(--nav-active-color);
 }
 
 .user-card {
@@ -316,7 +319,7 @@ async function onUserCommand(command: string | number | object) {
   align-items: center;
   background: var(--nav-card-bg);
   border: 1px solid var(--nav-border);
-  border-radius: 10px;
+  border-radius: var(--radius-md);
   color: var(--nav-text-strong);
   cursor: pointer;
   display: flex;
@@ -352,7 +355,7 @@ async function onUserCommand(command: string | number | object) {
 }
 
 .user-meta strong {
-  color: var(--text-inverse);
+  color: var(--nav-text-strong);
   font-size: 13px;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -370,7 +373,7 @@ async function onUserCommand(command: string | number | object) {
 }
 
 .content {
-  margin-left: 216px;
+  margin-left: var(--nav-width);
   padding: var(--space-6);
 }
 
