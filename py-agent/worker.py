@@ -3,6 +3,7 @@ import json
 import logging
 import os
 import re
+import threading
 import time
 
 from tools.api import APIError, sanitize_error
@@ -10,6 +11,25 @@ from tools.parse import LLM_TIMEOUT_SECONDS
 
 
 LOG = logging.getLogger("py-agent")
+
+
+def default_renew_interval(lease_seconds):
+    # R8：续约节奏 = 租约 1/3，夹在 [30s, 90s]。上限封顶保证即使配置超长租约，
+    # 续约延迟与心跳间隙（healthcheck 依赖续约线程周期 touch）都不会被拉爆；
+    # 下限 30s 对齐 Go 侧 claim/renew 的最小租约，避免续约风暴。
+    return max(30.0, min(lease_seconds / 3.0, 90.0))
+
+
+def touch_heartbeat():
+    # compose healthcheck（部署面第 4 项）探 worker 自身心跳：主循环每轮与
+    # 续约线程每周期各 touch 一次。正常时两次 touch 间隔 ≤ renew_interval；
+    # 进程假死/崩溃后文件停更，healthcheck 判 unhealthy（watchdog 告警接手）。
+    path = os.environ.get("WORKER_HEARTBEAT_FILE", "/tmp/py-agent-heartbeat")
+    try:
+        with open(path, "w", encoding="utf-8") as fh:
+            fh.write(str(time.time()))
+    except OSError:
+        LOG.debug("heartbeat write failed", exc_info=True)
 
 
 def _service_token():
@@ -102,12 +122,15 @@ def _is_invalid_lease(exc):
 
 
 class Worker:
-    def __init__(self, api, parser, poll_interval=5, lease_seconds=300, llm_timeout=LLM_TIMEOUT_SECONDS):
+    def __init__(self, api, parser, poll_interval=5, lease_seconds=300, llm_timeout=LLM_TIMEOUT_SECONDS,
+                 renew_interval=None):
         self.api = api
         self.parser = parser
         self.poll_interval = poll_interval
         self.lease_seconds = lease_seconds
         self.llm_timeout = llm_timeout
+        # R8：租约靠周期续约维持（见 _renew_loop），不再要求租约一次覆盖全链路耗时。
+        self.renew_interval = default_renew_interval(lease_seconds) if renew_interval is None else renew_interval
 
     def run_once(self):
         task = self.api.claim(self.lease_seconds)
@@ -115,6 +138,7 @@ class Worker:
             return False
         task_id = task["id"]
         claim_token = task.get("claim_token")
+        renew_stop = self._start_renewal(task_id, claim_token)
         try:
             report = self.api.get_report(task["report_id"], task["acting_user_id"], task_id)
             project_ids = list(dict.fromkeys(
@@ -154,7 +178,36 @@ class Worker:
                     return True
                 LOG.exception("could not mark task failed", extra={"task_id": task_id})
                 dead_letter_alert(task_id, detail)
+        finally:
+            if renew_stop is not None:
+                renew_stop.set()
         return True
+
+    def _start_renewal(self, task_id, claim_token):
+        # R8：claim 后立刻起后台续约线程，覆盖前置 HTTP 链（get_report + 2N 次
+        # list_issues）与 LLM 调用全程；complete/fail 返回后在 finally 停止。
+        # 无 claim_token（028 之前的老 server）时不续约，行为退回旧模式。
+        if not claim_token:
+            return None
+        stop = threading.Event()
+        threading.Thread(
+            target=self._renew_loop, args=(task_id, claim_token, stop),
+            name=f"lease-renew-{task_id}", daemon=True,
+        ).start()
+        return stop
+
+    def _renew_loop(self, task_id, claim_token, stop):
+        while not stop.wait(self.renew_interval):
+            try:
+                self.api.renew(task_id, claim_token, self.lease_seconds)
+                touch_heartbeat()
+            except Exception as exc:
+                if _is_invalid_lease(exc):
+                    # 任务已被他人重领：停止续约，complete/fail 侧自会得到
+                    # 同样的 409 并按既有路径静默处理。
+                    LOG.info("task ownership lost, stop renewing", extra={"task_id": task_id})
+                    return
+                LOG.warning("lease renew failed, will retry", extra={"task_id": task_id, "error": sanitize_error(exc)})
 
     def _parse_with_timeout(self, raw_text, issues, project_ids):
         # 硬超时只包 LLM parse（前置 HTTP 调用已有自身超时）。每次调用新建
@@ -172,6 +225,7 @@ class Worker:
 
     def run_forever(self):
         while True:
+            touch_heartbeat()
             try:
                 worked = self.run_once()
             except Exception:

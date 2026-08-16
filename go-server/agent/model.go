@@ -90,6 +90,14 @@ type FailTaskRequest struct {
 	ClaimToken string `json:"claim_token"`
 }
 
+// RenewTaskRequest 是 POST /api/v1/agent/tasks/{id}/renew 的请求体（R8）：
+// worker 在 LLM 调用前与执行期间周期续约，防止前置 HTTP 链 + LLM 最坏耗时
+// 超出租约导致任务被重领、双跑。
+type RenewTaskRequest struct {
+	LeaseSeconds int    `json:"lease_seconds,omitempty"`
+	ClaimToken   string `json:"claim_token"`
+}
+
 type ReviewRequest struct {
 	Reason string `json:"reason"`
 }

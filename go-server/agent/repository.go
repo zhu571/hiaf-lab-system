@@ -200,6 +200,37 @@ func (r *Repository) Fail(taskID, lastError string, maxAttempts int, claimToken 
 	return &task, nil
 }
 
+// Renew 在租约未过期且 claim_token 匹配的前提下延长租约（R8）。
+// 条件与 Fail 同式（token + status + 未过期）：过期后被重领的任务，旧 worker
+// 的续约请求一律 409 invalid_agent_lease，与 complete/fail 的所有权语义一致。
+func (r *Repository) Renew(taskID, claimToken string, leaseSeconds int) (*PendingAgentTask, error) {
+	var task PendingAgentTask
+	err := scanTask(r.db.QueryRow(
+		`UPDATE pending_agent_tasks
+		 SET lease_expires_at = now() + $2 * interval '1 second', updated_at = now()
+		 WHERE id = $1 AND claim_token = $3 AND status = 'processing' AND lease_expires_at > now()
+		 RETURNING id, report_id, acting_user_id, status, attempts, claim_token, claimed_at,
+		           lease_expires_at, next_attempt_at, completed_at, last_error,
+		           result, model, prompt_version, agent_confidence,
+		           raw_text_snapshot, raw_text_sha256, report_date, created_at, updated_at`,
+		taskID, leaseSeconds, claimToken,
+	), &task)
+	if err != nil {
+		if err == sql.ErrNoRows {
+			var exists bool
+			if checkErr := r.db.QueryRow(`SELECT EXISTS (SELECT 1 FROM pending_agent_tasks WHERE id = $1)`, taskID).Scan(&exists); checkErr != nil {
+				return nil, fmt.Errorf("check agent task: %w", checkErr)
+			}
+			if !exists {
+				return nil, ErrTaskNotFound
+			}
+			return nil, ErrInvalidLease
+		}
+		return nil, fmt.Errorf("renew agent task lease: %w", err)
+	}
+	return &task, nil
+}
+
 func (r *Repository) ListCandidates(status string, page, perPage int) ([]AgentCandidateAction, int, error) {
 	where := ""
 	args := []any{}

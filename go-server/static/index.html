@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
     <!-- theme-color 双 meta 带 media（美术 §3.6 三处职责之一）：auto 态系统级跟随；
          手动指定 light/dark 时由防闪烁脚本初始化和 useTheme watch 改写 content（JS 兜底） -->
-    <meta name="theme-color" media="(prefers-color-scheme: light)" content="#edf1f6" />
+    <meta name="theme-color" media="(prefers-color-scheme: light)" content="#f1f4f9" />
     <meta name="theme-color" media="(prefers-color-scheme: dark)" content="#0e1822" />
     <title>HIAF Lab System</title>
     <script>
@@ -22,18 +22,18 @@
         if (dark) document.documentElement.classList.add('dark')
         // theme-color 初始化：仅手动指定（'light'|'dark'）时改写 content；auto/缺省保留 canonical 双值走 media
         if (v === 'light' || v === 'dark') {
-          var color = dark ? '#0e1822' : '#edf1f6'
+          var color = dark ? '#0e1822' : '#f1f4f9'
           var metas = document.querySelectorAll('meta[name="theme-color"]')
           for (var i = 0; i < metas.length; i++) metas[i].setAttribute('content', color)
         }
       })()
     </script>
-    <script type="module" crossorigin src="/assets/index-D8UdxOnH.js"></script>
+    <script type="module" crossorigin src="/assets/index-BW65HFQD.js"></script>
     <link rel="modulepreload" crossorigin href="/assets/vendor-BzJgIxdW.js">
     <link rel="modulepreload" crossorigin href="/assets/vendor-icons-Yzd_nXzQ.js">
     <link rel="modulepreload" crossorigin href="/assets/vendor-element-ArH6ZKMW.js">
     <link rel="stylesheet" crossorigin href="/assets/vendor-element-B5J09LY3.css">
-    <link rel="stylesheet" crossorigin href="/assets/index-BgbaE-ty.css">
+    <link rel="stylesheet" crossorigin href="/assets/index-d-cDOPIB.css">
   </head>
   <body>
     <div id="app"></div>

@@ -79,6 +79,25 @@ func (h *Handler) Fail(w http.ResponseWriter, r *http.Request) {
 	common.WriteSuccess(w, r, task)
 }
 
+// Renew 延长任务租约（R8）：worker 在长耗时阶段（前置 HTTP 链 / LLM）周期调用，
+// 防止租约过期被重领导致重复双跑。错误码与 complete/fail 同套（409 invalid_agent_lease）。
+func (h *Handler) Renew(w http.ResponseWriter, r *http.Request) {
+	if !requireIdempotencyKey(w, r) {
+		return
+	}
+	var req RenewTaskRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		common.WriteError(w, r, http.StatusBadRequest, "bad_request", "请求体解析失败", nil)
+		return
+	}
+	task, err := h.svc.Renew(chi.URLParam(r, "id"), req)
+	if err != nil {
+		h.writeError(w, r, err)
+		return
+	}
+	common.WriteSuccess(w, r, task)
+}
+
 func (h *Handler) ListCandidates(w http.ResponseWriter, r *http.Request) {
 	result, err := h.svc.ListCandidates(
 		r.URL.Query().Get("status"), queryInt(r, "page", 1), queryInt(r, "per_page", 20),

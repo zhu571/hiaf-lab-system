@@ -342,3 +342,99 @@ func TestCandidateTracePostgres(t *testing.T) {
 		t.Fatalf("trace missing candidate err = %v", err)
 	}
 }
+
+// TestRenewLeasePostgres 验证 R8 租约续约：正确 token 延长租约；错误 token /
+// 租约已过期 / 任务不存在分别拒绝；续约不改变任务状态与 claim_token。
+func TestRenewLeasePostgres(t *testing.T) {
+	dsn := os.Getenv("TEST_DATABASE_URL")
+	if dsn == "" {
+		t.Skip("TEST_DATABASE_URL is not set")
+	}
+	db, err := sql.Open("postgres", dsn)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+
+	const userID = "00000000-0000-0000-0000-00000000a150"
+	const reportID = "00000000-0000-0000-0000-00000000a151"
+	defer func() {
+		db.Exec(`DELETE FROM agent_candidate_actions WHERE task_id IN (SELECT id FROM pending_agent_tasks WHERE report_id = $1)`, reportID)
+		db.Exec(`DELETE FROM pending_agent_tasks WHERE report_id = $1`, reportID)
+		db.Exec(`DELETE FROM daily_reports WHERE id = $1`, reportID)
+		db.Exec(`DELETE FROM users WHERE id = $1`, userID)
+	}()
+	db.Exec(`DELETE FROM pending_agent_tasks WHERE report_id = $1`, reportID)
+	db.Exec(`DELETE FROM daily_reports WHERE id = $1`, reportID)
+	db.Exec(`DELETE FROM users WHERE id = $1`, userID)
+	if _, err := db.Exec(`INSERT INTO users (id, username, password_hash) VALUES ($1, 'agent-renew-user', 'unused')`, userID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Exec(`INSERT INTO daily_reports (id, report_date, author_id) VALUES ($1, '2099-02-01', $2)`, reportID, userID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Exec(`UPDATE daily_reports SET content_status = 'submitted' WHERE id = $1`, reportID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Exec(`UPDATE pending_agent_tasks SET created_at = '2000-01-03' WHERE report_id = $1`, reportID); err != nil {
+		t.Fatal(err)
+	}
+
+	svc := NewService(NewRepository(db))
+	task, err := svc.Claim(30)
+	if err != nil || task == nil || task.ReportID != reportID {
+		t.Fatalf("claim = %#v, %v", task, err)
+	}
+	if task.LeaseExpiresAt == nil {
+		t.Fatal("claimed task must carry lease_expires_at")
+	}
+
+	// 参数校验：越界租约 / 空 token。
+	if _, err := svc.Renew(task.ID, RenewTaskRequest{LeaseSeconds: 10, ClaimToken: *task.ClaimToken}); !errors.Is(err, ErrInvalidInput) {
+		t.Fatalf("renew out-of-range lease err = %v", err)
+	}
+	if _, err := svc.Renew(task.ID, RenewTaskRequest{LeaseSeconds: 60}); !errors.Is(err, ErrInvalidInput) {
+		t.Fatalf("renew without token err = %v", err)
+	}
+	// 所有权校验：错误 token 拒绝且不影响后续正确续约。
+	if _, err := svc.Renew(task.ID, RenewTaskRequest{LeaseSeconds: 60, ClaimToken: "wrong-token"}); !errors.Is(err, ErrInvalidLease) {
+		t.Fatalf("renew with wrong token err = %v", err)
+	}
+
+	// 正确 token 续约：租约被推远（> 原 30s 窗口），状态与 token 不变。
+	renewed, err := svc.Renew(task.ID, RenewTaskRequest{LeaseSeconds: 120, ClaimToken: *task.ClaimToken})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if renewed.Status != TaskProcessing || renewed.ClaimToken == nil || *renewed.ClaimToken != *task.ClaimToken {
+		t.Fatalf("renew must not change status/token: %#v", renewed)
+	}
+	if !renewed.LeaseExpiresAt.After(*task.LeaseExpiresAt) {
+		t.Fatalf("renew must extend lease: %v -> %v", task.LeaseExpiresAt, renewed.LeaseExpiresAt)
+	}
+
+	// 续约后的任务在原 30s 窗口过期时刻仍可 complete（租约确实被延长）。
+	if _, err := db.Exec(`UPDATE pending_agent_tasks SET lease_expires_at = lease_expires_at - interval '90 seconds' WHERE id = $1`, task.ID); err != nil {
+		t.Fatal(err)
+	}
+	var count int
+	if err := db.QueryRow(`SELECT count(*) FROM pending_agent_tasks WHERE id = $1 AND lease_expires_at > now()`, task.ID).Scan(&count); err != nil {
+		t.Fatal(err)
+	}
+	if count != 1 {
+		t.Fatal("post-renew lease must still cover the original 30s horizon")
+	}
+
+	// 租约彻底过期后续约被拒（防旧 worker 复活延长他人已重领的任务）。
+	if _, err := db.Exec(`UPDATE pending_agent_tasks SET lease_expires_at = now() - interval '1 second' WHERE id = $1`, task.ID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := svc.Renew(task.ID, RenewTaskRequest{LeaseSeconds: 60, ClaimToken: *task.ClaimToken}); !errors.Is(err, ErrInvalidLease) {
+		t.Fatalf("renew on expired lease err = %v", err)
+	}
+
+	// 不存在的任务：404 语义（ErrTaskNotFound）。
+	if _, err := svc.Renew("00000000-0000-0000-0000-000000009999", RenewTaskRequest{LeaseSeconds: 60, ClaimToken: *task.ClaimToken}); !errors.Is(err, ErrTaskNotFound) {
+		t.Fatalf("renew missing task err = %v", err)
+	}
+}
