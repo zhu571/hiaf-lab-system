@@ -6,7 +6,11 @@ export default {
     confirm: '确定',
     retry: '重试',
     empty: '暂无数据',
-    listSeparator: '；'
+    listSeparator: '；',
+    // 桌面顶栏控件（结构改版 R1，AppLayout）
+    collapseSidebar: '收起侧边栏',
+    expandSidebar: '展开侧边栏',
+    userMenu: '用户菜单'
   },
   login: {
     subtitle: '实验室日志管理平台',
