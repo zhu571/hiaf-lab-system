@@ -65,7 +65,9 @@ export const NAV_ITEMS: NavEntry[] = [
 const ROLE_ORDER: Record<string, number> = { viewer: 0, maintainer: 1, admin: 2 }
 
 // 角色过滤纯函数（可单测）：minRole 缺省放行全部角色；未知角色按 viewer 最低级处理。
-export function filterNavByRole(items: NavEntry[], role: string): NavEntry[] {
+// 泛型放宽（结构改版 R2 §3.1）：命令面板动作组等非 NavEntry 项复用同一过滤机制，
+// 仅约束 minRole 字段，运行时行为不变。
+export function filterNavByRole<T extends { minRole?: 'maintainer' | 'admin' }>(items: T[], role: string): T[] {
   const level = ROLE_ORDER[role] ?? 0
   return items.filter((item) => {
     if (!item.minRole) return true

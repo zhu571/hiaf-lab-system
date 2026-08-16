@@ -77,6 +77,37 @@ export default {
       stepTemplates: 'Step Templates'
     }
   },
+  // Command palette (R2 structural restructure, CommandPalette). The placeholder
+  // names the scope (pages/projects/actions) so it is not mistaken for full-text search.
+  palette: {
+    placeholder: 'Jump to page / project / action…',
+    empty: 'No matches',
+    hint: '↑↓ Select · Enter Run · Esc Close',
+    groups: {
+      page: 'Pages',
+      project: 'Projects',
+      action: 'Actions'
+    },
+    actions: {
+      dailyReport: 'Write daily report',
+      todo: 'New todo',
+      ask: 'AI Query',
+      project: 'New project',
+      run: 'New run'
+    }
+  },
+  // Notification center (R2 structural restructure, NotificationCenter).
+  notifications: {
+    title: 'Notifications',
+    viewAll: 'View all',
+    empty: 'No notifications',
+    groupEmpty: 'None',
+    groups: {
+      todo: 'Todos (today)',
+      alert: 'Active alerts',
+      review: 'Pending review'
+    }
+  },
   instrument: {
     // Measurement instrument page (InstrumentMeasureView).
     title: 'Instruments',

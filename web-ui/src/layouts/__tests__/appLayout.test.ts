@@ -5,6 +5,8 @@ import { ElBadge } from 'element-plus'
 import AppLayout from '@/layouts/AppLayout.vue'
 import { createTestI18n } from '@/test-utils/setup'
 import { useAskDialog } from '@/composables/useAskDialog'
+import { useCommandPalette } from '@/composables/useCommandPalette'
+import { useAgentPending } from '@/composables/useAgentPending'
 import { useAuthStore } from '@/stores/auth'
 import type { UserInfo } from '@/api/auth'
 
@@ -18,6 +20,14 @@ const routeState = vi.hoisted(() => ({
 
 vi.mock('@/api/agent', () => ({
   listAgentCandidates: vi.fn()
+}))
+
+vi.mock('@/api/todos', () => ({
+  listTodos: vi.fn().mockResolvedValue([])
+}))
+
+vi.mock('@/api/alerts', () => ({
+  listAlerts: vi.fn().mockResolvedValue({ items: [], total: 0, limit: 6, offset: 0 })
 }))
 
 vi.mock('@/api/ask', () => ({
@@ -84,6 +94,9 @@ beforeEach(() => {
 
 afterEach(() => {
   useAskDialog().askOpen.value = false
+  useCommandPalette().closePalette()
+  // R2 单例计数跨用例共享，后置清零防串扰
+  useAgentPending().agentPending.value = 0
   vi.restoreAllMocks()
 })
 
@@ -158,6 +171,29 @@ describe('AppLayout 桌面顶栏（R1）', () => {
     expect(wrapper.find('.layout').classes()).not.toContain('nav-collapsed')
     expect(localStorage.getItem('lab-nav-collapsed')).toBe('false')
     expect(wrapper.findComponent(ElBadge).props('isDot')).toBe(false)
+    wrapper.unmount()
+  })
+})
+
+describe('AppLayout 顶栏 R2 入口（命令面板 + 通知中心）', () => {
+  it('顶栏渲染搜索触发框与铃铛；点击触发框打开全局挂载的命令面板', async () => {
+    const wrapper = await mountLayout('admin')
+    expect(wrapper.find('.palette-trigger').exists()).toBe(true)
+    expect(wrapper.find('.notify-trigger').exists()).toBe(true)
+    expect(useCommandPalette().paletteOpen.value).toBe(false)
+
+    await wrapper.find('.palette-trigger').trigger('click')
+    await flushPromises()
+    expect(useCommandPalette().paletteOpen.value).toBe(true)
+    expect(wrapper.find('.palette-input').exists()).toBe(true)
+    wrapper.unmount()
+  })
+
+  it('Ctrl+K 全局快捷键唤起命令面板（AppLayout 全局挂载生效）', async () => {
+    const wrapper = await mountLayout('viewer')
+    window.dispatchEvent(new KeyboardEvent('keydown', { key: 'k', ctrlKey: true }))
+    await flushPromises()
+    expect(useCommandPalette().paletteOpen.value).toBe(true)
     wrapper.unmount()
   })
 })

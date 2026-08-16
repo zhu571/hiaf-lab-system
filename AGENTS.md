@@ -124,7 +124,7 @@ hiaf-lab-system/
 │   ├── src/styles/         # tokens/base/utilities/element-overrides/themes/dark.css
 │   ├── src/utils/          # datetime.ts/statusMeta.ts/chartTheme.ts/testDataPaste.ts
 │   ├── src/views/          # 25 个业务视图
-│   └── e2e/                # Playwright 冒烟（11 spec 13 用例）
+│   └── e2e/                # Playwright 冒烟（13 spec 16 用例；R2 新增 command-palette / notifications 两 spec）
 ├── migrations/             # PostgreSQL 迁移脚本
 ├── deploy/                 # Docker Compose、frp、Nginx 配置
 ├── images/                 # 运行时图片附件目录
