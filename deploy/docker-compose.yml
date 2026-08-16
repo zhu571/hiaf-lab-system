@@ -62,7 +62,11 @@ services:
     logging: *default-logging
     restart: unless-stopped
     ports:
-      - "8086:8086"
+      # 默认仅绑定 127.0.0.1（R 部署面 2，与 Grafana/Prometheus 同模式）：它持有
+      # 全库读写 token，全网卡可达面越大风险越高；server/ioc/Grafana 走 compose
+      # 网络内 influxdb:8086，不依赖宿主端口。需要本机外访问 Influx UI 时经
+      # .env 显式放宽（INFLUXDB_BIND_ADDR=0.0.0.0）或走 frp/VPS 反代。
+      - "${INFLUXDB_BIND_ADDR:-127.0.0.1}:8086:8086"
     volumes:
       - /var/lib/influxdb:/var/lib/influxdb2
       - influxdb_config:/etc/influxdb2
@@ -167,10 +171,13 @@ services:
       DB_USER: lab
       DB_NAME: lab
       PORT: 8000
-      # SourceGate 回滚开关（2026-08-10 生产事故曾硬编码 false）：docker 健康检查(127.0.0.1)/容器互调(172.x)
-      # 不在 10.144.144.0/24 白名单 → 写操作被拒；GET 读请求白名单放行故健康检查不受影响。
-      # 现允许 .env 覆盖（SOURCE_GATE_ENABLED=true 启用公网来源门；默认 false 保持回滚安全）。
-      SOURCE_GATE_ENABLED: "${SOURCE_GATE_ENABLED:-false}"
+      # SourceGate 来源门（R 部署面 1）：默认 true，与代码安全默认（source_gate.go
+      # 未配置即启用、拒绝公网写）和 .env.example 对齐——此前默认 false 与两处矛盾，
+      # .env 漏项时公网写门静默全开。回滚方式：在 .env 显式置 SOURCE_GATE_ENABLED=false。
+      # 2026-08-10 生产事故背景：docker 健康检查(127.0.0.1)/容器互调(172.x) 不在
+      # 10.144.144.0/24 白名单 → 写操作被拒；现已通过 SOURCE_GATE_LAN_CIDR 放行，
+      # GET 读请求白名单放行故健康检查不受影响。
+      SOURCE_GATE_ENABLED: "${SOURCE_GATE_ENABLED:-true}"
       # 内网网段列表（逗号分隔）：EasyTier + docker 服务网段（py-agent 容器互调必须放行；2026-08-15 事故：漏配 172.18.0.0/16 → claim 全拒）
       SOURCE_GATE_LAN_CIDR: "${SOURCE_GATE_LAN_CIDR:-10.144.144.0/24,172.18.0.0/16}"
       # 公网来源门共享秘密（group-access 2026-08-12）：Caddy 与 server 两端一致，≥32 字符
@@ -274,10 +281,15 @@ services:
       server:
         condition: service_healthy
     healthcheck:
-      test: ["CMD", "python", "-c", "import httpx; httpx.get('http://server:8000/health').raise_for_status()"]
+      # 探 worker 自身心跳（R 部署面 4）：worker.py 主循环每轮 + 租约续约线程每周期
+      # touch /tmp/py-agent-heartbeat（worker.py touch_heartbeat）。此前探的是
+      # server 的 /health，worker 假死全盲。180s 阈值 > 最长 touch 间隙
+      # （续约间隔 ≤ 90s + 单次续约最坏 ~63s）。
+      test: ["CMD-SHELL", "python -c \"import os,time,sys; sys.exit(0 if time.time()-os.path.getmtime('/tmp/py-agent-heartbeat')<180 else 1)\""]
       interval: 30s
       timeout: 5s
       retries: 3
+      start_period: 30s
     restart: unless-stopped
 
   py-agent-interpret:

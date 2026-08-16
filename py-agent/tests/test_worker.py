@@ -1,6 +1,8 @@
 import json
+import os
 import sys
 import tempfile
+import threading
 import time
 import unittest
 from pathlib import Path
@@ -11,7 +13,15 @@ sys.path.insert(0, str(Path(__file__).parents[1]))
 import httpx  # noqa: E402
 from tools.api import APIError, GoAPI  # noqa: E402
 from tools.parse import ParseError, _json_array, ensure_safe  # noqa: E402
-from worker import Worker, _ntfy_publish_token, _service_token, dead_letter_alert, to_candidate  # noqa: E402
+from worker import (  # noqa: E402
+    Worker,
+    _ntfy_publish_token,
+    _service_token,
+    dead_letter_alert,
+    default_renew_interval,
+    to_candidate,
+    touch_heartbeat,
+)
 
 
 TASK = {"id": "task-1", "report_id": "report-1", "acting_user_id": "user-1", "claim_token": "token-1"}
@@ -289,6 +299,118 @@ class WorkerTests(unittest.TestCase):
         self.assertEqual(len(calls), 2)
         self.assertTrue(calls[0].endswith("/api/v1/alerts/report"))
         self.assertEqual(calls[1], "http://ntfy:80/lab-alerts")
+
+
+    # ---------- R8：租约续约 ----------
+
+    def test_default_renew_interval_bounds(self):
+        # 常规租约 300s → 90s；超长租约封顶 90s；小租约保底 30s（对齐 Go 侧下限）。
+        self.assertEqual(default_renew_interval(300), 90.0)
+        self.assertEqual(default_renew_interval(3600), 90.0)
+        self.assertEqual(default_renew_interval(60), 30.0)
+        self.assertEqual(default_renew_interval(90), 30.0)
+
+    def test_renew_loop_extends_lease_during_parse(self):
+        # LLM 解析期间续约线程必须已至少续约一次（gate 保证解析等到首次续约后才返回）。
+        renew_calls = []
+
+        class RecordingAPI(FakeAPI):
+            def renew(self, task_id, claim_token, lease_seconds=300):
+                renew_calls.append((task_id, claim_token, lease_seconds))
+
+        renewed = threading.Event()
+
+        class GatedParser:
+            def parse(self, *_args):
+                renewed.wait(timeout=5)
+                return [CREATE]
+
+        class GatedRecordingAPI(RecordingAPI):
+            def renew(self, task_id, claim_token, lease_seconds=300):
+                super().renew(task_id, claim_token, lease_seconds)
+                renewed.set()
+
+        api = GatedRecordingAPI()
+        self.assertTrue(Worker(api, GatedParser(), renew_interval=0.01).run_once())
+        self.assertTrue(api.completed)
+        self.assertGreaterEqual(len(renew_calls), 1)
+        for task_id, token, lease in renew_calls:
+            self.assertEqual(task_id, TASK["id"])
+            self.assertEqual(token, "token-1")
+            self.assertEqual(lease, 300)
+
+    def test_renew_rejected_as_stale_is_silent(self):
+        # 任务被重领后续约 409：线程静默退出，主流程 complete 照常（其自身的
+        # invalid_agent_lease 由既有用例覆盖）。
+        renewed = threading.Event()
+
+        class StaleRenewAPI(FakeAPI):
+            def renew(self, *_args):
+                renewed.set()
+                raise APIError("invalid_agent_lease: Agent 任务租约无效或已过期")
+
+        class GatedParser:
+            def parse(self, *_args):
+                renewed.wait(timeout=5)
+                return [CREATE]
+
+        api = StaleRenewAPI()
+        self.assertTrue(Worker(api, GatedParser(), renew_interval=0.01).run_once())
+        self.assertTrue(api.completed)
+        self.assertFalse(api.failed)
+
+    def test_renew_transient_error_keeps_retrying(self):
+        # 瞬时网络错误不打断主流程，续约线程继续重试。
+        first_renew = threading.Event()
+
+        class FlakyRenewAPI(FakeAPI):
+            def renew(self, *_args):
+                if not first_renew.is_set():
+                    first_renew.set()
+                    raise APIError("Go API unavailable")
+
+        class GatedParser:
+            def parse(self, *_args):
+                first_renew.wait(timeout=5)
+                time.sleep(0.05)
+                return [CREATE]
+
+        api = FlakyRenewAPI()
+        self.assertTrue(Worker(api, GatedParser(), renew_interval=0.01).run_once())
+        self.assertTrue(api.completed)
+
+    def test_api_renew_request_shape_and_fresh_idempotency_keys(self):
+        calls = []
+
+        def handler(request):
+            calls.append(request)
+            return httpx.Response(200, json={"data": {"status": "processing"}})
+
+        api = GoAPI("http://test", "agent", "secret", client=httpx.Client(transport=httpx.MockTransport(handler)))
+        api.access_token = "access"  # nosec B105
+        api.renew("task-9", "tok-9", 120)
+        api.renew("task-9", "tok-9", 120)
+        self.assertEqual([c.method for c in calls], ["POST", "POST"])
+        self.assertEqual([c.url.path for c in calls], ["/api/v1/agent/tasks/task-9/renew"] * 2)
+        bodies = [json.loads(c.content) for c in calls]
+        self.assertEqual(bodies, [{"lease_seconds": 120, "claim_token": "tok-9"}] * 2)
+        keys = [c.headers["Idempotency-Key"] for c in calls]
+        self.assertTrue(all(keys))
+        self.assertNotEqual(keys[0], keys[1])
+
+    def test_touch_heartbeat_writes_timestamp(self):
+        # healthcheck 依据：心跳文件可写且内容为当前时间戳。
+        with tempfile.NamedTemporaryFile("w", suffix=".hb", delete=False) as fh:
+            path = fh.name
+        try:
+            before = time.time()
+            with patch.dict("os.environ", {"WORKER_HEARTBEAT_FILE": path}):
+                touch_heartbeat()
+            with open(path, encoding="utf-8") as fh:
+                ts = float(fh.read())
+            self.assertTrue(before - 1 <= ts <= time.time() + 1)
+        finally:
+            os.unlink(path)
 
 
 if __name__ == "__main__":

@@ -921,6 +921,16 @@ agent 角色 + `{id}` 路由挂 QueueTaskContext（claim_token 所有权校验�
 Go 侧计算 `raw_text_sha256` 落库；旧 worker 缺省时保持 NULL）。
 fail 请求体：`{error, claim_token}`。candidates 非空时异步发 ntfy「Agent 待审核」。
 
+### `POST /api/v1/agent/tasks/{task_id}/renew`（R8）
+
+租约续约（agent 角色，幂等 header 照旧）。请求体：`{lease_seconds?, claim_token}`，
+`lease_seconds` 缺省 300、范围 30-3600（与 claim 同界）。持有正确 `claim_token` 且任务
+`processing`、租约未过期时，把 `lease_expires_at` 推到 `now() + lease_seconds` 并返回任务
+（不改状态与 token）。worker 在前置 HTTP 链（get_report + list_issues）与 LLM 调用期间
+周期调用（默认间隔 = 租约 1/3，夹 [30s, 90s]），防止全链路最坏耗时超租约导致任务被
+重领双跑。错误：404 `agent_task_not_found`、409 `invalid_agent_lease`（token 错 / 租约已
+过期被重领）、400 `bad_request`（越界或缺 token）。
+
 ### `GET /api/v1/agent/candidates`
 
 admin/maintainer。参数：`status`（pending_review/approved/rejected/executed/execution_failed）、`page`、`per_page`（默认 1/20）。

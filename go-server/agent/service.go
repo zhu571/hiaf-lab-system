@@ -78,6 +78,22 @@ func (s *Service) Claim(leaseSeconds int) (*PendingAgentTask, error) {
 	return s.repo.Claim(leaseSeconds)
 }
 
+// Renew 校验并延长任务租约（R8）：worker 周期续约，租约长度不再需要覆盖
+// 「前置 HTTP 链 + LLM + fail 开销」的全链路最坏时间。
+func (s *Service) Renew(taskID string, req RenewTaskRequest) (*PendingAgentTask, error) {
+	if strings.TrimSpace(taskID) == "" || strings.TrimSpace(req.ClaimToken) == "" {
+		return nil, ErrInvalidInput
+	}
+	leaseSeconds := req.LeaseSeconds
+	if leaseSeconds == 0 {
+		leaseSeconds = 300
+	}
+	if leaseSeconds < 30 || leaseSeconds > 3600 {
+		return nil, ErrInvalidInput
+	}
+	return s.repo.Renew(taskID, req.ClaimToken, leaseSeconds)
+}
+
 func (s *Service) Complete(taskID string, req CompleteTaskRequest) (*PendingAgentTask, error) {
 	if strings.TrimSpace(taskID) == "" || strings.TrimSpace(req.Model) == "" ||
 		strings.TrimSpace(req.PromptVersion) == "" || !json.Valid(req.Result) {

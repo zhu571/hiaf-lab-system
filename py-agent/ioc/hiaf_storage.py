@@ -226,11 +226,22 @@ class HiafStorage:
             if ok:
                 self._last_influx_write = now
             else:
-                self._write_backlog = points
+                self._buffer_backlog(points)
         except Exception as e:
             LOGGER.warning("InfluxDB write failed: %s — buffered to backlog (%d)",
                            e, len(points))
-            self._write_backlog = points
+            self._buffer_backlog(points)
+
+    def _buffer_backlog(self, points: list) -> None:
+        # R9：断写时 backlog 无上限增长（每秒 ~35 Point，断 24h ≈ 300 万对象 → OOM）。
+        # 截断到 BACKLOG_MAX（~10 分钟 @ 1s 批）。每批含全部 tag 同一时间戳的采样，
+        # 取尾部既保最新，也天然保住了各 tag 的最近样本。
+        if len(points) > BACKLOG_MAX:
+            dropped = len(points) - BACKLOG_MAX
+            points = points[-BACKLOG_MAX:]
+            LOGGER.warning("InfluxDB backlog capped at %d, dropped %d oldest points",
+                           BACKLOG_MAX, dropped)
+        self._write_backlog = points
 
     async def close(self) -> None:
         if self._db is not None:

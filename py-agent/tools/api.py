@@ -65,6 +65,15 @@ class GoAPI:
             headers={"Idempotency-Key": str(uuid.uuid4())},
         )
 
+    def renew(self, task_id, claim_token, lease_seconds=300):
+        # R8：租约续约。幂等键每次随机：续约是周期性重复动作，每次都是
+        # 独立审计事件（Go 侧幂等校验只查 header 存在，语义由 claim_token 保证）。
+        return self._request(
+            "POST", f"/api/v1/agent/tasks/{task_id}/renew",
+            json={"lease_seconds": lease_seconds, "claim_token": claim_token},
+            headers={"Idempotency-Key": str(uuid.uuid4())},
+        )
+
     def get_report(self, report_id, acting_user_id, task_id):
         return self._request(
             "GET", f"/api/v1/daily-reports/{report_id}",

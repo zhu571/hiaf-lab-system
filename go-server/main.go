@@ -325,6 +325,9 @@ func main() {
 			r.Use(mw.Audit(db))
 			r.Post("/complete", agentHandler.Complete)
 			r.Post("/fail", agentHandler.Fail)
+			// R8：租约续约——worker 在前置 HTTP 链 / LLM 长耗时阶段周期调用，
+			// 与 complete/fail 同套 claim_token 所有权校验（service 层）。
+			r.Post("/renew", agentHandler.Renew)
 		})
 	})
 	r.Route("/api/v1/agent/candidates", func(r chi.Router) {

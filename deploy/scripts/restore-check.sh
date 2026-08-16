@@ -5,8 +5,8 @@ set -euo pipefail
 # lab-restore-check.sh — 数据库恢复演练（10h 优化 A 项）
 #
 # 用途：把最近一份备份（或 $1 指定的备份文件）pg_restore 到临时库 lab_restore_check，
-#       校验恢复结果（表数与生产一致、迁移版本号含 001-037、daily_reports 最新日期非空），
-#       输出「通过/失败」，无论成败都 drop 临时库（trap 兜底）。
+#       校验恢复结果（表数与生产一致、迁移版本号与仓库 migrations/ 最大版本一致、
+#       daily_reports 最新日期非空），输出「通过/失败」，无论成败都 drop 临时库（trap 兜底）。
 #       只动临时库，不碰生产库任何数据，可安全在 gascell 部署机上手动执行。
 #
 # 先例对照：
@@ -29,8 +29,19 @@ REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
 COMPOSE_FILE="${BACKUP_COMPOSE_FILE:-$REPO_ROOT/deploy/docker-compose.yml}"
 BACKUP_DIR="${BACKUP_DIR:-/opt/lab-backups}"
 TEMP_DB="lab_restore_check"
-# 迁移 001-037 共 37 个版本（golang-migrate 顺序执行，见 migrations/）
-EXPECTED_MIGRATIONS=37
+# 期望迁移版本 = 仓库 migrations/ 内最大版本号（R 部署面 3：此前硬编码 37，实际已 38，
+# 每新增迁移漏改必导致恢复演练误报）。按文件名版本前缀取最大值，不依赖文件个数
+# （未来若插入非连续版本号也成立）。golang-migrate 的 schema_migrations 只存当前版本，
+# 全量应用后应等于该最大值。
+EXPECTED_MIGRATIONS="$(ls "$REPO_ROOT"/migrations/*.up.sql 2>/dev/null | sed 's|.*/\([0-9]*\)_[^/]*$|\1|' | sort -n | tail -1)"
+if [ -n "$EXPECTED_MIGRATIONS" ]; then
+  # schema_migrations.version 是整数（无前导零），文件名是 038 形态——统一成整数再比较。
+  EXPECTED_MIGRATIONS="$((10#$EXPECTED_MIGRATIONS))"
+fi
+if [ -z "$EXPECTED_MIGRATIONS" ]; then
+  echo "失败：未在 $REPO_ROOT/migrations 找到迁移文件（restore-check 需在仓库内执行）" >&2
+  exit 1
+fi
 # 表数核实：migrations/*.up.sql 共 35 个 CREATE TABLE + golang-migrate 自建 schema_migrations 表 ≈ 36 张。
 # 主判据是临时库与生产表数严格相等；MIN_TABLES=30 只是防「两边都空」误判的兜底下限。
 MIN_TABLES=30
@@ -91,9 +102,9 @@ echo "表数：临时库 $REST_TABLES / 生产 $PROD_TABLES"
   exit 1
 }
 
-# 校验 2：迁移版本号（golang-migrate 的 schema_migrations 只存当前版本一行，应 = 37）
+# 校验 2：迁移版本号（golang-migrate 的 schema_migrations 只存当前版本一行，应 = 仓库最大版本）
 MIG_VERSION="$(psql_exec "$TEMP_DB" "SELECT version FROM schema_migrations LIMIT 1")"
-echo "已应用迁移：v${MIG_VERSION:-0} / 期望 v$EXPECTED_MIGRATIONS"
+echo "已应用迁移：v${MIG_VERSION:-0} / 期望 v$EXPECTED_MIGRATIONS（仓库动态统计）"
 [ "${MIG_VERSION:-0}" = "$EXPECTED_MIGRATIONS" ] || {
   echo "失败：schema_migrations 版本 ${MIG_VERSION:-0} ≠ $EXPECTED_MIGRATIONS（缺失迁移）"
   exit 1
@@ -110,5 +121,5 @@ echo "daily_reports：共 $REPORT_COUNT 行，最新日期 ${LATEST_DATE:-<空>}
 
 echo ""
 echo "===== 恢复演练通过 ====="
-echo "备份 $RESTORE_FILE 可完整恢复（表数一致 / 迁移 001-037 完整 / 日报数据可读）"
+echo "备份 $RESTORE_FILE 可完整恢复（表数一致 / 迁移 001-$EXPECTED_MIGRATIONS 完整 / 日报数据可读）"
 exit 0
