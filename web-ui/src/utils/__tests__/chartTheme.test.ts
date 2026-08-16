@@ -55,13 +55,13 @@ describe('refreshDefaults 快照（jsdom 无计算样式 → LIGHT 兜底）', (
   it('字体/颜色默认值 = 令牌兜底值', () => {
     expect(Chart.defaults.font.size).toBe(12)
     expect(Chart.defaults.color).toBe('#35485e')
-    expect(Chart.defaults.borderColor).toBe('#e3e9f1')
+    expect(Chart.defaults.borderColor).toBe('#e4e9f1')
     expect(Chart.defaults.font.family).toContain('PingFang SC')
   })
 
   it('刻度/网格/图例/tooltip 统一样式', () => {
     expect(Chart.defaults.scales.linear.ticks.color).toBe('#5c6f82')
-    expect(Chart.defaults.scales.linear.grid.color).toBe('#e3e9f1')
+    expect(Chart.defaults.scales.linear.grid.color).toBe('#e4e9f1')
     expect(Chart.defaults.scales.linear.grid.lineWidth).toBe(1)
     expect(Chart.defaults.scales.category.ticks.color).toBe('#5c6f82')
     expect(Chart.defaults.plugins.legend.position).toBe('bottom')

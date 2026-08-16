@@ -15,7 +15,7 @@ import { useColorMode, type BasicColorSchema } from '@vueuse/core'
 export type ThemeMode = BasicColorSchema // 'light' | 'dark' | 'auto'
 
 /** theme-color 双 meta 的 canonical 值（= --bg light/dark，tokens.css / themes/dark.css 逐字一致） */
-const THEME_COLOR_LIGHT = '#edf1f6'
+const THEME_COLOR_LIGHT = '#f1f4f9'
 const THEME_COLOR_DARK = '#0e1822'
 
 const colorMode = useColorMode({

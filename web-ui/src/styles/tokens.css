@@ -11,17 +11,30 @@
  *   --nav-bottom-shadow（S6 批新增，美术 S2 走查遗留补做）：AppLayout 侧栏品牌标阴影、
  *   激活项投影、用户卡片常态/hover 底、底栏上投阴影的原值整体上提为令牌，
  *   视图侧不再保留 hex/rgba 字面量（附录 B 防线 grep 归零）。
+ * - 视觉改版 S1 批（2026-08-15，.hermes/plans/2026-08-15_visual-redesign.md §2）：
+ *   底色/边框微调、brand 十档色阶重调、--shadow-sm/md 现代化（基色换 rgba(15,40,60,·)）；
+ *   brand 阴影族（--nav-mark-shadow/--nav-active-shadow/--shadow-brand-sm/--shadow-brand-md/
+ *   --shadow-avatar）统一换基 rgba(12,118,147,·)（= brand-600 #0c7693），
+ *   --pulse-ring/-end 基色随 brand-500 换 rgba(22,140,169,·)（= #168ca9）；
+ *   新增令牌 --fs-title-xl / --fs-metric / --shadow-btn-primary[-hover] / --bg-top /
+ *   --scrollbar-thumb[-hover] / --nav-width（--nav-width 为 S2 预留，本批仅登记）。
  */
 :root {
   /* ========== 色彩：底色 ========== */
-  --bg: #edf1f6;
+  --bg: #f1f4f9;
   --surface: #ffffff;
-  --surface-2: #f5f8fb;
-  --surface-3: #eaf0f6;
+  --surface-2: #f4f7fb;
+  --surface-3: #e9eef5;
+  /* body 顶端渐变起点（S1 新增：base.css body 渐变字面量 #f3f7fb 令牌化） */
+  --bg-top: #f7fafc;
 
   /* 边框 */
-  --border: #e3e9f1;
-  --border-strong: #d2dce7;
+  --border: #e4e9f1;
+  --border-strong: #d4dce7;
+
+  /* 滚动条（S1 新增：base.css 滚动条字面量 #c3d0dd/#a7b8c8 令牌化） */
+  --scrollbar-thumb: #c5d2df;
+  --scrollbar-thumb-hover: #a9bacb;
 
   /* 文字 */
   --text-1: #12263a;
@@ -30,16 +43,16 @@
   --text-inverse: #f8fbff;
 
   /* 品牌阶梯（十档） */
-  --brand-050: #edf6f8;
-  --brand-100: #d3e7ec;
-  --brand-200: #a9cfd9;
-  --brand-300: #7db6c4;
-  --brand-400: #4798ac;
-  --brand-500: #1a86a2;
-  --brand-600: #12708a;
-  --brand-700: #0d5a70;
-  --brand-800: #0a4556;
-  --brand-900: #073341;
+  --brand-050: #ecf7fa;
+  --brand-100: #d3edf3;
+  --brand-200: #a7dcea;
+  --brand-300: #71c5da;
+  --brand-400: #3aa7c4;
+  --brand-500: #168ca9;
+  --brand-600: #0c7693;
+  --brand-700: #0a5f77;
+  --brand-800: #084c60;
+  --brand-900: #063a4a;
 
   /* 侧栏 navy */
   --navy-800: #10283e;
@@ -86,12 +99,15 @@
   --nav-active-bg: linear-gradient(135deg, var(--brand-600), var(--brand-500));
   --nav-border: rgba(255, 255, 255, 0.06);
   --nav-bottom-bg: rgba(255, 255, 255, 0.88);
-  /* S6 新增（S2 走查遗留）：AppLayout 原字面量原值入令牌，视觉零变化 */
-  --nav-mark-shadow: 0 4px 12px rgba(20, 112, 138, 0.45);
-  --nav-active-shadow: 0 6px 16px -6px rgba(20, 112, 138, 0.55);
+  /* S6 新增（S2 走查遗留）：AppLayout 原字面量原值入令牌，视觉零变化；
+     S1 批品牌阴影换基 rgba(12,118,147,·)（随 brand-600 #0c7693） */
+  --nav-mark-shadow: 0 4px 12px rgba(12, 118, 147, 0.45);
+  --nav-active-shadow: 0 6px 16px -6px rgba(12, 118, 147, 0.55);
   --nav-card-bg: rgba(255, 255, 255, 0.04);
   --nav-card-hover-bg: rgba(255, 255, 255, 0.08);
   --nav-bottom-shadow: 0 -8px 24px -12px rgba(18, 38, 58, 0.18);
+  /* 侧栏宽度（S1 登记，S2 接线使用） */
+  --nav-width: 232px;
 
   /* ========== 字体 ========== */
   --font-family-base:
@@ -99,6 +115,10 @@
     "Noto Sans CJK SC", ui-sans-serif, system-ui, -apple-system,
     "Segoe UI", sans-serif;
   --fs-display: 24px;
+  /* S1 新增：监控读数大号字（S4 用） */
+  --fs-metric: 24px;
+  /* S1 新增：页标题统一字号（S3/S5 用） */
+  --fs-title-xl: 22px;
   --fs-title-lg: 20px;
   --fs-title: 18px;
   --fs-title-sm: 15px;
@@ -125,20 +145,27 @@
   --radius-lg: 16px;
   --radius-xl: 20px;
   --radius-full: 999px;
-  --shadow-sm: 0 1px 2px rgba(18, 38, 58, 0.05);
+  --shadow-sm:
+    0 1px 2px rgba(15, 40, 60, 0.04),
+    0 1px 3px rgba(15, 40, 60, 0.05);
   --shadow-md:
-    0 1px 2px rgba(18, 38, 58, 0.05),
-    0 10px 28px -12px rgba(18, 38, 58, 0.16);
+    0 2px 4px -1px rgba(15, 40, 60, 0.05),
+    0 12px 28px -10px rgba(15, 40, 60, 0.16);
   --shadow-lg: 0 28px 64px -24px rgba(11, 30, 48, 0.35);
-  /* 品牌色阴影（S4 新增）：原 DashboardView 附录 B 白名单 rgba(18,112,138,·) 上提为令牌 */
-  --shadow-brand-sm: 0 6px 16px -8px rgba(18, 112, 138, 0.35);
-  --shadow-brand-md: 0 2px 6px -2px rgba(18, 112, 138, 0.5);
-  /* 头像品牌色阴影（S5 新增）：SettingsView 头像 alpha 阴影上提为令牌，无对应色阶档位，alpha 合成值整体入令牌 */
-  --shadow-avatar: 0 6px 16px -6px rgba(20, 112, 138, 0.5);
+  /* 主按钮阴影（S1 新增）：element-overrides 主按钮阴影令牌化；dark 覆写为黑色系（深底压深投影） */
+  --shadow-btn-primary: 0 4px 12px -6px rgba(12, 118, 147, 0.45);
+  --shadow-btn-primary-hover: 0 6px 16px -6px rgba(12, 118, 147, 0.5);
+  /* 品牌色阴影（S4 新增）：原 DashboardView 附录 B 白名单 rgba(18,112,138,·) 上提为令牌；
+     S1 批统一换基 rgba(12,118,147,·)（随 brand-600 #0c7693） */
+  --shadow-brand-sm: 0 6px 16px -8px rgba(12, 118, 147, 0.35);
+  --shadow-brand-md: 0 2px 6px -2px rgba(12, 118, 147, 0.5);
+  /* 头像品牌色阴影（S5 新增）：SettingsView 头像 alpha 阴影上提为令牌，无对应色阶档位，alpha 合成值整体入令牌；
+     S1 批换基 rgba(12,118,147,·) */
+  --shadow-avatar: 0 6px 16px -6px rgba(12, 118, 147, 0.5);
   /* 呼吸光圈（S5 新增）：InstrumentMeasureView running 态脉冲动画两帧，alpha 渐变值整体入令牌，
-     基色与 --brand-500 (#1a86a2) 对齐，扩散帧 alpha 归零 */
-  --pulse-ring: 0 0 0 0 rgba(26, 134, 162, 0.35);
-  --pulse-ring-end: 0 0 0 5px rgba(26, 134, 162, 0);
+     基色与 --brand-500 对齐（S1 批随 brand-500 换为 #168ca9 = rgba(22,140,169,·)），扩散帧 alpha 归零 */
+  --pulse-ring: 0 0 0 0 rgba(22, 140, 169, 0.35);
+  --pulse-ring-end: 0 0 0 5px rgba(22, 140, 169, 0);
 
   /* 登录页美术处理（S5 新增，美术附录 B LoginView 归并；alpha 合成值整体入令牌） */
   --login-bg:

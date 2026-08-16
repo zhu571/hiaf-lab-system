@@ -12,7 +12,7 @@ let useThemeFn: ThemeModule['useTheme']
 let theme: ReturnType<ThemeModule['useTheme']>
 
 // 双 meta canonical 值（与 useTheme.ts / index.html / tokens.css 逐字一致）
-const THEME_COLOR_LIGHT = '#edf1f6'
+const THEME_COLOR_LIGHT = '#f1f4f9'
 const THEME_COLOR_DARK = '#0e1822'
 
 type MqlListener = (e: { matches: boolean }) => void
