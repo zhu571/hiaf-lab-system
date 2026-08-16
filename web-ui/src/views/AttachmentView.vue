@@ -70,25 +70,19 @@
         </div>
       </StateBlock>
     </section>
-    <el-dialog v-model="bindDialog" :title="t('attachment.bindTitle')" width="480">
-      <el-form label-position="top">
-        <el-form-item :label="t('attachment.bindEntityType')" required>
-          <el-select v-model="linkForm.entity_type" :placeholder="t('attachment.selectType')">
-            <el-option v-for="t in ATTACHMENT_ENTITY_TYPES" :key="t" :label="t" :value="t" />
-          </el-select>
-        </el-form-item>
-        <el-form-item :label="t('attachment.bindEntityId')" required>
-          <el-input v-model="linkForm.entity_id" :placeholder="t('attachment.objectUuidPlaceholder')" />
-        </el-form-item>
-        <el-form-item :label="t('attachment.description')">
-          <el-input v-model="linkForm.description" type="textarea" :rows="2" />
-        </el-form-item>
-      </el-form>
-      <template #footer>
-        <el-button @click="bindDialog = false">{{ t('common.cancel') }}</el-button>
-        <el-button type="primary" @click="submitBind">{{ t('attachment.bind') }}</el-button>
-      </template>
-    </el-dialog>
+    <FormDialog v-model="bindDialog" :title="t('attachment.bindTitle')" width="480" @submit="submitBind">
+      <el-form-item :label="t('attachment.bindEntityType')" required>
+        <el-select v-model="linkForm.entity_type" :placeholder="t('attachment.selectType')">
+          <el-option v-for="t in ATTACHMENT_ENTITY_TYPES" :key="t" :label="t" :value="t" />
+        </el-select>
+      </el-form-item>
+      <el-form-item :label="t('attachment.bindEntityId')" required>
+        <el-input v-model="linkForm.entity_id" :placeholder="t('attachment.objectUuidPlaceholder')" />
+      </el-form-item>
+      <el-form-item :label="t('attachment.description')">
+        <el-input v-model="linkForm.description" type="textarea" :rows="2" />
+      </el-form-item>
+    </FormDialog>
   </div>
 </template>
 
@@ -111,6 +105,7 @@ import { showApiError } from '@/composables/useNotify'
 import { useAsyncData } from '@/composables/useAsyncData'
 import { usePagination } from '@/composables/usePagination'
 import StateBlock from '@/components/base/StateBlock.vue'
+import FormDialog from '@/components/base/FormDialog.vue'
 import { formatDateTime } from '@/utils/datetime'
 
 const auth = useAuthStore()

@@ -75,83 +75,77 @@
     </template>
   </ListPage>
 
-  <el-dialog v-model="dialog" :title="t('rfMatching.dialogTitle')" width="640">
-      <el-form label-position="top" @submit.prevent>
-        <div class="form-grid">
-          <el-form-item :label="t('rfMatching.device')" required>
-            <el-select v-model="draft.device" :placeholder="t('rfMatching.selectDevice')">
-              <el-option v-for="d in devices" :key="d" :label="d" :value="d" />
-            </el-select>
-          </el-form-item>
-          <el-form-item :label="t('rfMatching.frequency')" required>
-            <el-input-number v-model="draft.frequency_mhz" :controls="false" :min="0" :placeholder="t('rfMatching.mustBePositive')" />
-          </el-form-item>
-          <el-form-item :label="t('rfMatching.status')" required>
-            <el-select v-model="draft.status" :placeholder="t('rfMatching.selectStatus')">
-              <el-option v-for="s in statuses" :key="s" :label="s" :value="s" />
-            </el-select>
-          </el-form-item>
-        </div>
-        <el-collapse v-model="activeMore">
-          <el-collapse-item :title="t('rfMatching.moreParams')" name="more">
-            <div class="form-grid more-grid">
-              <el-form-item :label="t('rfMatching.s11')">
-                <el-input-number v-model="draft.s11" :controls="false" />
-              </el-form-item>
-              <el-form-item :label="t('rfMatching.inputFreq')">
-                <el-input-number v-model="draft.input_freq" :controls="false" />
-              </el-form-item>
-              <el-form-item :label="t('rfMatching.inputVoltage')">
-                <el-input-number v-model="draft.input_voltage" :controls="false" />
-              </el-form-item>
-              <el-form-item :label="t('rfMatching.inputPower')">
-                <el-input-number v-model="draft.input_power" :controls="false" />
-              </el-form-item>
-              <el-form-item :label="t('rfMatching.inputDesc')">
-                <el-input v-model="draft.input_desc" />
-              </el-form-item>
-              <el-form-item :label="t('rfMatching.outputFreq')">
-                <el-input-number v-model="draft.output_freq" :controls="false" />
-              </el-form-item>
-              <el-form-item :label="t('rfMatching.outputVoltage')">
-                <el-input-number v-model="draft.output_voltage" :controls="false" />
-              </el-form-item>
-              <el-form-item :label="t('rfMatching.outputPower')">
-                <el-input-number v-model="draft.output_power" :controls="false" />
-              </el-form-item>
-              <el-form-item :label="t('rfMatching.outputDesc')">
-                <el-input v-model="draft.output_desc" />
-              </el-form-item>
-              <el-form-item :label="t('rfMatching.transformerTurns')">
-                <el-input v-model="draft.transformer_turns" />
-              </el-form-item>
-              <el-form-item :label="t('rfMatching.capacitance')">
-                <el-input v-model="draft.capacitance_text" />
-              </el-form-item>
-              <el-form-item :label="t('rfMatching.transformerMaterial')">
-                <el-input v-model="draft.transformer_material" />
-              </el-form-item>
-              <el-form-item :label="t('rfMatching.shuntInductance')">
-                <el-input v-model="draft.shunt_inductance" />
-              </el-form-item>
-              <el-form-item :label="t('rfMatching.seriesCapacitor')">
-                <el-input v-model="draft.series_capacitor" />
-              </el-form-item>
-              <el-form-item :label="t('rfMatching.measuredAt')">
-                <el-date-picker v-model="draft.measured_at" type="datetime" :placeholder="t('rfMatching.selectTime')" />
-              </el-form-item>
-            </div>
-            <el-form-item :label="t('rfMatching.notes')">
-              <el-input v-model="draft.notes" type="textarea" :rows="3" />
+  <FormDialog v-model="dialog" :title="t('rfMatching.dialogTitle')" width="640" :loading="submitting" @submit="create">
+      <div class="form-grid">
+        <el-form-item :label="t('rfMatching.device')" required>
+          <el-select v-model="draft.device" :placeholder="t('rfMatching.selectDevice')">
+            <el-option v-for="d in devices" :key="d" :label="d" :value="d" />
+          </el-select>
+        </el-form-item>
+        <el-form-item :label="t('rfMatching.frequency')" required>
+          <el-input-number v-model="draft.frequency_mhz" :controls="false" :min="0" :placeholder="t('rfMatching.mustBePositive')" />
+        </el-form-item>
+        <el-form-item :label="t('rfMatching.status')" required>
+          <el-select v-model="draft.status" :placeholder="t('rfMatching.selectStatus')">
+            <el-option v-for="s in statuses" :key="s" :label="s" :value="s" />
+          </el-select>
+        </el-form-item>
+      </div>
+      <el-collapse v-model="activeMore">
+        <el-collapse-item :title="t('rfMatching.moreParams')" name="more">
+          <div class="form-grid more-grid">
+            <el-form-item :label="t('rfMatching.s11')">
+              <el-input-number v-model="draft.s11" :controls="false" />
             </el-form-item>
-          </el-collapse-item>
-        </el-collapse>
-      </el-form>
-      <template #footer>
-        <el-button @click="dialog = false">{{ t('common.cancel') }}</el-button>
-        <el-button type="primary" :loading="submitting" @click="create">{{ t('rfMatching.save') }}</el-button>
-      </template>
-    </el-dialog>
+            <el-form-item :label="t('rfMatching.inputFreq')">
+              <el-input-number v-model="draft.input_freq" :controls="false" />
+            </el-form-item>
+            <el-form-item :label="t('rfMatching.inputVoltage')">
+              <el-input-number v-model="draft.input_voltage" :controls="false" />
+            </el-form-item>
+            <el-form-item :label="t('rfMatching.inputPower')">
+              <el-input-number v-model="draft.input_power" :controls="false" />
+            </el-form-item>
+            <el-form-item :label="t('rfMatching.inputDesc')">
+              <el-input v-model="draft.input_desc" />
+            </el-form-item>
+            <el-form-item :label="t('rfMatching.outputFreq')">
+              <el-input-number v-model="draft.output_freq" :controls="false" />
+            </el-form-item>
+            <el-form-item :label="t('rfMatching.outputVoltage')">
+              <el-input-number v-model="draft.output_voltage" :controls="false" />
+            </el-form-item>
+            <el-form-item :label="t('rfMatching.outputPower')">
+              <el-input-number v-model="draft.output_power" :controls="false" />
+            </el-form-item>
+            <el-form-item :label="t('rfMatching.outputDesc')">
+              <el-input v-model="draft.output_desc" />
+            </el-form-item>
+            <el-form-item :label="t('rfMatching.transformerTurns')">
+              <el-input v-model="draft.transformer_turns" />
+            </el-form-item>
+            <el-form-item :label="t('rfMatching.capacitance')">
+              <el-input v-model="draft.capacitance_text" />
+            </el-form-item>
+            <el-form-item :label="t('rfMatching.transformerMaterial')">
+              <el-input v-model="draft.transformer_material" />
+            </el-form-item>
+            <el-form-item :label="t('rfMatching.shuntInductance')">
+              <el-input v-model="draft.shunt_inductance" />
+            </el-form-item>
+            <el-form-item :label="t('rfMatching.seriesCapacitor')">
+              <el-input v-model="draft.series_capacitor" />
+            </el-form-item>
+            <el-form-item :label="t('rfMatching.measuredAt')">
+              <el-date-picker v-model="draft.measured_at" type="datetime" :placeholder="t('rfMatching.selectTime')" />
+            </el-form-item>
+          </div>
+          <el-form-item :label="t('rfMatching.notes')">
+            <el-input v-model="draft.notes" type="textarea" :rows="3" />
+          </el-form-item>
+        </el-collapse-item>
+      </el-collapse>
+  </FormDialog>
 </template>
 
 <script setup lang="ts">
@@ -163,6 +157,7 @@ import { createRFMatching, deleteRFMatching, listRFMatching, type RFMatchingPayl
 import { useAuthStore } from '../stores/auth'
 import { showApiError } from '../composables/useNotify'
 import ListPage from '@/components/base/ListPage.vue'
+import FormDialog from '@/components/base/FormDialog.vue'
 import ResponsiveTable from '@/components/base/ResponsiveTable.vue'
 import { formatDateTime } from '@/utils/datetime'
 

@@ -80,53 +80,41 @@
       <el-alert v-if="subscribeError" class="subscribe-error" type="error" :title="subscribeError" show-icon :closable="false" />
     </section>
 
-    <el-dialog v-model="createDialog" :title="t('todos.add')" width="480">
-      <el-form label-position="top">
-        <el-form-item :label="t('todos.titleLabel')" required>
-          <el-input v-model="createForm.title" :placeholder="t('todos.titlePlaceholder')" maxlength="256" show-word-limit />
-        </el-form-item>
-        <el-form-item :label="t('todos.priority')">
-          <el-radio-group v-model="createForm.priority">
-            <el-radio value="high">{{ t('todos.priorityHigh') }}</el-radio>
-            <el-radio value="medium">{{ t('todos.priorityMedium') }}</el-radio>
-            <el-radio value="low">{{ t('todos.priorityLow') }}</el-radio>
-          </el-radio-group>
-        </el-form-item>
-        <el-form-item :label="t('todos.shareToProject')">
-          <el-select v-model="createForm.project_id" clearable :placeholder="t('todos.noShare')">
-            <el-option v-for="p in projects" :key="p.id" :label="p.name" :value="p.id" />
-          </el-select>
-        </el-form-item>
-      </el-form>
-      <template #footer>
-        <el-button @click="createDialog = false">{{ t('common.cancel') }}</el-button>
-        <el-button type="primary" :loading="saving" @click="onCreate">{{ t('todos.save') }}</el-button>
-      </template>
-    </el-dialog>
+    <FormDialog v-model="createDialog" :title="t('todos.add')" width="480" :loading="saving" @submit="onCreate">
+      <el-form-item :label="t('todos.titleLabel')" required>
+        <el-input v-model="createForm.title" :placeholder="t('todos.titlePlaceholder')" maxlength="256" show-word-limit />
+      </el-form-item>
+      <el-form-item :label="t('todos.priority')">
+        <el-radio-group v-model="createForm.priority">
+          <el-radio value="high">{{ t('todos.priorityHigh') }}</el-radio>
+          <el-radio value="medium">{{ t('todos.priorityMedium') }}</el-radio>
+          <el-radio value="low">{{ t('todos.priorityLow') }}</el-radio>
+        </el-radio-group>
+      </el-form-item>
+      <el-form-item :label="t('todos.shareToProject')">
+        <el-select v-model="createForm.project_id" clearable :placeholder="t('todos.noShare')">
+          <el-option v-for="p in projects" :key="p.id" :label="p.name" :value="p.id" />
+        </el-select>
+      </el-form-item>
+    </FormDialog>
 
-    <el-dialog v-model="editDialog" :title="t('todos.edit')" width="480">
-      <el-form label-position="top">
-        <el-form-item :label="t('todos.titleLabel')" required>
-          <el-input v-model="editForm.title" maxlength="256" show-word-limit />
-        </el-form-item>
-        <el-form-item :label="t('todos.priority')">
-          <el-radio-group v-model="editForm.priority">
-            <el-radio value="high">{{ t('todos.priorityHigh') }}</el-radio>
-            <el-radio value="medium">{{ t('todos.priorityMedium') }}</el-radio>
-            <el-radio value="low">{{ t('todos.priorityLow') }}</el-radio>
-          </el-radio-group>
-        </el-form-item>
-        <el-form-item :label="t('todos.shareToProject')">
-          <el-select v-model="editForm.project_id" clearable :placeholder="t('todos.noShare')">
-            <el-option v-for="p in projects" :key="p.id" :label="p.name" :value="p.id" />
-          </el-select>
-        </el-form-item>
-      </el-form>
-      <template #footer>
-        <el-button @click="editDialog = false">{{ t('common.cancel') }}</el-button>
-        <el-button type="primary" :loading="saving" @click="onEditSave">{{ t('todos.save') }}</el-button>
-      </template>
-    </el-dialog>
+    <FormDialog v-model="editDialog" :title="t('todos.edit')" width="480" :loading="saving" @submit="onEditSave">
+      <el-form-item :label="t('todos.titleLabel')" required>
+        <el-input v-model="editForm.title" maxlength="256" show-word-limit />
+      </el-form-item>
+      <el-form-item :label="t('todos.priority')">
+        <el-radio-group v-model="editForm.priority">
+          <el-radio value="high">{{ t('todos.priorityHigh') }}</el-radio>
+          <el-radio value="medium">{{ t('todos.priorityMedium') }}</el-radio>
+          <el-radio value="low">{{ t('todos.priorityLow') }}</el-radio>
+        </el-radio-group>
+      </el-form-item>
+      <el-form-item :label="t('todos.shareToProject')">
+        <el-select v-model="editForm.project_id" clearable :placeholder="t('todos.noShare')">
+          <el-option v-for="p in projects" :key="p.id" :label="p.name" :value="p.id" />
+        </el-select>
+      </el-form-item>
+    </FormDialog>
   </div>
 </template>
 
@@ -142,6 +130,7 @@ import {
 } from '@/api/todos'
 import { listProjects, type Project } from '@/api/projects'
 import ListPage from '@/components/base/ListPage.vue'
+import FormDialog from '@/components/base/FormDialog.vue'
 import { useAsyncData } from '@/composables/useAsyncData'
 import { showApiError } from '@/composables/useNotify'
 import { statusMetaFor } from '@/utils/statusMeta'

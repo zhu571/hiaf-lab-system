@@ -72,27 +72,21 @@
         />
       </StateBlock>
     </section>
-    <el-dialog v-model="createDialog" :title="t('assembly.create')" width="560">
-      <el-form label-position="top">
-        <el-form-item :label="t('assembly.name')" required><el-input v-model="draft.name" /></el-form-item>
-        <el-form-item :label="t('assembly.description')"><el-input v-model="draft.description" type="textarea" :rows="3" /></el-form-item>
-        <el-form-item :label="t('assembly.dependsOn')">
-          <el-select v-model="draft.depends_on" clearable :placeholder="t('assembly.noDependency')">
-            <el-option v-for="s in steps" :key="s.id" :label="`${s.step_order}. ${s.name}`" :value="s.id" />
-          </el-select>
-        </el-form-item>
-        <el-form-item :label="t('assembly.assignee')">
-          <el-select v-model="draft.assigned_to" clearable :placeholder="t('assembly.unassigned')">
-            <el-option v-for="m in members" :key="m.user_id" :label="m.username || m.user_id" :value="m.user_id" />
-          </el-select>
-        </el-form-item>
-      </el-form>
-      <template #footer>
-        <el-button @click="createDialog = false">{{ t('common.cancel') }}</el-button>
-        <el-button type="primary" @click="create">{{ t('assembly.save') }}</el-button>
-      </template>
-    </el-dialog>
-    <el-dialog v-model="aiDialog" :title="t('assembly.aiGenerate')" width="760" @closed="resetAi">
+    <FormDialog v-model="createDialog" :title="t('assembly.create')" width="560" @submit="create">
+      <el-form-item :label="t('assembly.name')" required><el-input v-model="draft.name" /></el-form-item>
+      <el-form-item :label="t('assembly.description')"><el-input v-model="draft.description" type="textarea" :rows="3" /></el-form-item>
+      <el-form-item :label="t('assembly.dependsOn')">
+        <el-select v-model="draft.depends_on" clearable :placeholder="t('assembly.noDependency')">
+          <el-option v-for="s in steps" :key="s.id" :label="`${s.step_order}. ${s.name}`" :value="s.id" />
+        </el-select>
+      </el-form-item>
+      <el-form-item :label="t('assembly.assignee')">
+        <el-select v-model="draft.assigned_to" clearable :placeholder="t('assembly.unassigned')">
+          <el-option v-for="m in members" :key="m.user_id" :label="m.username || m.user_id" :value="m.user_id" />
+        </el-select>
+      </el-form-item>
+    </FormDialog>
+    <FormDialog v-model="aiDialog" :title="t('assembly.aiGenerate')" width="760" @closed="resetAi">
       <div v-if="aiStage === 'input'" class="grid">
         <el-alert v-if="aiNotice" :type="aiNoticeType" :title="aiNotice" show-icon :closable="false" />
         <el-input
@@ -104,11 +98,9 @@
         />
       </div>
       <div v-else class="grid">
-        <el-form label-position="top">
-          <el-form-item :label="t('assembly.templateName')">
-            <el-input v-model="aiName" maxlength="256" />
-          </el-form-item>
-        </el-form>
+        <el-form-item :label="t('assembly.templateName')">
+          <el-input v-model="aiName" maxlength="256" />
+        </el-form-item>
         <StepItemsEditor :key="aiKey" v-model="aiItems" />
       </div>
       <template #footer>
@@ -123,7 +115,7 @@
           <el-button v-if="canSaveTemplate" type="primary" :loading="aiSubmitting" @click="saveAndApply">{{ t('assembly.saveAndApply') }}</el-button>
         </template>
       </template>
-    </el-dialog>
+    </FormDialog>
     <el-dialog v-model="overrideDialog" :title="t('assembly.overrideTitle')" width="480">
       <div class="grid">
         <p class="override-tip">
@@ -153,6 +145,7 @@ import { ElMessage, ElMessageBox } from 'element-plus'
 import { Rank } from '@element-plus/icons-vue'
 import StatusBadge from '@/components/base/StatusBadge.vue'
 import StateBlock from '@/components/base/StateBlock.vue'
+import FormDialog from '@/components/base/FormDialog.vue'
 import { formatDateTime } from '@/utils/datetime'
 import StepItemsEditor from '@/components/business/StepItemsEditor.vue'
 import { useMobile } from '../composables/useMobile'

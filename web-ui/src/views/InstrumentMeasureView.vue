@@ -155,44 +155,38 @@
     </el-dialog>
 
     <!-- 保存到测试数据 -->
-    <el-dialog v-model="saveOpen" :title="t('instrument.saveDialogTitle')" :width="isMobile ? '100%' : '480px'">
-      <el-form label-position="top" @submit.prevent>
-        <el-form-item :label="t('instrument.project')" required>
-          <el-select v-model="saveForm.project_id" :placeholder="t('instrument.selectProject')" :loading="saveProjectsLoading" @change="onSaveProjectChange">
-            <el-option v-for="p in saveProjects" :key="p.id" :label="`${p.name}（${p.code}）`" :value="p.id" />
-          </el-select>
-        </el-form-item>
-        <el-form-item :label="t('instrument.run')">
-          <el-select v-model="saveForm.run_id" :placeholder="t('instrument.selectRun')" clearable :disabled="!saveForm.project_id">
-            <el-option v-for="r in saveRuns" :key="r.id" :label="r.name" :value="r.id" />
-          </el-select>
-        </el-form-item>
-        <el-form-item :label="t('instrument.dataType')" required>
-          <el-select v-model="saveForm.data_type" :placeholder="t('instrument.selectDataType')">
-            <el-option v-for="t in dataTypes" :key="t" :label="t" :value="t" />
-          </el-select>
-        </el-form-item>
-        <el-form-item :label="t('instrument.measurement')" required>
-          <el-input v-model="saveForm.measurement" :placeholder="t('instrument.measurementPlaceholder')" />
-        </el-form-item>
-        <el-form-item :label="t('instrument.valueLabel')" required>
-          <el-input-number v-model="saveForm.value" :controls="false" class="save-number" :placeholder="t('instrument.valueLabel')" />
-        </el-form-item>
-        <el-form-item :label="t('instrument.unitLabel')">
-          <el-input v-model="saveForm.unit" :placeholder="t('instrument.unitPlaceholder')" />
-        </el-form-item>
-        <el-form-item :label="t('instrument.measuredAt')">
-          <el-date-picker v-model="saveForm.measured_at" type="datetime" :placeholder="t('instrument.selectTime')" />
-        </el-form-item>
-        <el-form-item :label="t('instrument.notesLabel')">
-          <el-input v-model="saveForm.notes" :placeholder="t('instrument.notesPlaceholder')" />
-        </el-form-item>
-      </el-form>
-      <template #footer>
-        <el-button @click="saveOpen = false">{{ t('common.cancel') }}</el-button>
-        <el-button type="primary" :loading="saveLoading" @click="submitSave">{{ t('instrument.save') }}</el-button>
-      </template>
-    </el-dialog>
+    <FormDialog v-model="saveOpen" :title="t('instrument.saveDialogTitle')" :width="isMobile ? '100%' : '480px'" :loading="saveLoading" @submit="submitSave">
+      <el-form-item :label="t('instrument.project')" required>
+        <el-select v-model="saveForm.project_id" :placeholder="t('instrument.selectProject')" :loading="saveProjectsLoading" @change="onSaveProjectChange">
+          <el-option v-for="p in saveProjects" :key="p.id" :label="`${p.name}（${p.code}）`" :value="p.id" />
+        </el-select>
+      </el-form-item>
+      <el-form-item :label="t('instrument.run')">
+        <el-select v-model="saveForm.run_id" :placeholder="t('instrument.selectRun')" clearable :disabled="!saveForm.project_id">
+          <el-option v-for="r in saveRuns" :key="r.id" :label="r.name" :value="r.id" />
+        </el-select>
+      </el-form-item>
+      <el-form-item :label="t('instrument.dataType')" required>
+        <el-select v-model="saveForm.data_type" :placeholder="t('instrument.selectDataType')">
+          <el-option v-for="t in dataTypes" :key="t" :label="t" :value="t" />
+        </el-select>
+      </el-form-item>
+      <el-form-item :label="t('instrument.measurement')" required>
+        <el-input v-model="saveForm.measurement" :placeholder="t('instrument.measurementPlaceholder')" />
+      </el-form-item>
+      <el-form-item :label="t('instrument.valueLabel')" required>
+        <el-input-number v-model="saveForm.value" :controls="false" class="save-number" :placeholder="t('instrument.valueLabel')" />
+      </el-form-item>
+      <el-form-item :label="t('instrument.unitLabel')">
+        <el-input v-model="saveForm.unit" :placeholder="t('instrument.unitPlaceholder')" />
+      </el-form-item>
+      <el-form-item :label="t('instrument.measuredAt')">
+        <el-date-picker v-model="saveForm.measured_at" type="datetime" :placeholder="t('instrument.selectTime')" />
+      </el-form-item>
+      <el-form-item :label="t('instrument.notesLabel')">
+        <el-input v-model="saveForm.notes" :placeholder="t('instrument.notesPlaceholder')" />
+      </el-form-item>
+    </FormDialog>
   </div>
 </template>
 
@@ -228,6 +222,7 @@ import { useAuthStore } from '../stores/auth'
 import { showApiError } from '../composables/useNotify'
 import { useMobile } from '../composables/useMobile'
 import ResponsiveTable from '@/components/base/ResponsiveTable.vue'
+import FormDialog from '@/components/base/FormDialog.vue'
 import InstrumentAiChat, { riskTag, type ExecRecord } from '@/components/business/InstrumentAiChat.vue'
 import { chartPalette, refreshDefaults } from '../utils/chartTheme'
 import { statusMetaFor } from '@/utils/statusMeta'

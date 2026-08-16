@@ -48,17 +48,11 @@
         <el-button v-if="selected.status === 'published'" @click="archive(selected.id)">{{ t('experiences.archive') }}</el-button>
       </div>
     </el-drawer>
-    <el-dialog v-model="dialog" :title="t('experiences.create')" width="620">
-      <el-form label-position="top">
-        <el-form-item :label="t('experiences.labelTitle')"><el-input v-model="draft.title" /></el-form-item>
-        <el-form-item :label="t('experiences.labelTags')"><el-input v-model="draft.tags" /></el-form-item>
-        <el-form-item :label="t('experiences.labelContent')"><el-input v-model="draft.content" type="textarea" :rows="6" /></el-form-item>
-      </el-form>
-      <template #footer>
-        <el-button @click="dialog = false">{{ t('experiences.cancel') }}</el-button>
-        <el-button type="primary" @click="create">{{ t('experiences.save') }}</el-button>
-      </template>
-    </el-dialog>
+    <FormDialog v-model="dialog" :title="t('experiences.create')" width="620" @submit="create">
+      <el-form-item :label="t('experiences.labelTitle')"><el-input v-model="draft.title" /></el-form-item>
+      <el-form-item :label="t('experiences.labelTags')"><el-input v-model="draft.tags" /></el-form-item>
+      <el-form-item :label="t('experiences.labelContent')"><el-input v-model="draft.content" type="textarea" :rows="6" /></el-form-item>
+    </FormDialog>
   </div>
 </template>
 
@@ -68,6 +62,7 @@ import { useI18n } from 'vue-i18n'
 import { ElMessage } from 'element-plus'
 import { showApiError } from '../composables/useNotify'
 import StatusBadge from '@/components/base/StatusBadge.vue'
+import FormDialog from '@/components/base/FormDialog.vue'
 import MarkdownView from '@/components/business/MarkdownView.vue'
 import { archiveExperience, createExperience, listExperiences, publishExperience, type Experience } from '../api/experiences'
 import { useProjectStore } from '../stores/project'

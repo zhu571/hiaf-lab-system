@@ -16,7 +16,8 @@ test.describe('项目 CRUD', () => {
     await dialog.locator('.el-form-item').filter({ hasText: '编号' }).locator('input').fill(code)
     await dialog.locator('.el-form-item').filter({ hasText: '名称' }).locator('input').fill(`${code} 名称`)
     await dialog.locator('.el-form-item').filter({ hasText: '简称' }).locator('input').fill(code)
-    await dialog.getByRole('button', { name: '保存' }).click()
+    // R4 弹窗单轨化后 FormDialog 默认 footer 按钮为「确定」
+    await dialog.getByRole('button', { name: '确定' }).click()
 
     // 侧边栏出现新项目（code 唯一，直接按 code 文本断言）
     const item = page.locator('.project-item', { hasText: code })

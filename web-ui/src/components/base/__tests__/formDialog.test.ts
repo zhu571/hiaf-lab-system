@@ -1,4 +1,4 @@
-import { describe, it, expect } from 'vitest'
+import { describe, it, expect, vi } from 'vitest'
 import { nextTick } from 'vue'
 import { mount } from '@vue/test-utils'
 import { ElButton, ElDialog, ElForm } from 'element-plus'
@@ -59,5 +59,20 @@ describe('FormDialog 默认 footer', () => {
     const wrapper = await mountDialog({}, { footer: '<el-button class="custom-foot">自定义</el-button>' })
     expect(wrapper.find('.custom-foot').exists()).toBe(true)
     expect(wrapper.text()).not.toContain('确定')
+  })
+})
+
+describe('FormDialog 透传契约（R4 迁移依赖）', () => {
+  it('el-dialog 事件经 $attrs 透传：@closed 关闭钩子可达内部 el-dialog', async () => {
+    const onClosed = vi.fn()
+    const wrapper = await mountDialog({ onClosed })
+    wrapper.findComponent(ElDialog).vm.$emit('closed')
+    expect(onClosed).toHaveBeenCalledTimes(1)
+  })
+
+  it('el-dialog 自身关闭（点 X / 遮罩）经 update:modelValue 向外透传', async () => {
+    const wrapper = await mountDialog()
+    wrapper.findComponent(ElDialog).vm.$emit('update:modelValue', false)
+    expect(wrapper.emitted('update:modelValue')).toEqual([[false]])
   })
 })

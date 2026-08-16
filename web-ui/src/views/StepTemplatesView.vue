@@ -107,41 +107,29 @@
       </div>
     </el-dialog>
 
-    <el-dialog v-model="editDialog" :title="t('stepTemplates.editTemplate')" width="760">
-      <el-form label-position="top">
-        <el-form-item :label="t('stepTemplates.name')" required><el-input v-model="editForm.name" maxlength="256" /></el-form-item>
-        <el-form-item :label="t('stepTemplates.description')"><el-input v-model="editForm.description" type="textarea" :rows="2" maxlength="2000" /></el-form-item>
-        <el-form-item :label="t('stepTemplates.steps')">
-          <StepItemsEditor :key="editKey" v-model="editItems" />
-        </el-form-item>
-      </el-form>
-      <template #footer>
-        <el-button @click="editDialog = false">{{ t('stepTemplates.cancel') }}</el-button>
-        <el-button type="primary" :loading="saving" @click="saveEdit">{{ t('stepTemplates.save') }}</el-button>
-      </template>
-    </el-dialog>
+    <FormDialog v-model="editDialog" :title="t('stepTemplates.editTemplate')" width="760" :loading="saving" @submit="saveEdit">
+      <el-form-item :label="t('stepTemplates.name')" required><el-input v-model="editForm.name" maxlength="256" /></el-form-item>
+      <el-form-item :label="t('stepTemplates.description')"><el-input v-model="editForm.description" type="textarea" :rows="2" maxlength="2000" /></el-form-item>
+      <el-form-item :label="t('stepTemplates.steps')">
+        <StepItemsEditor :key="editKey" v-model="editItems" />
+      </el-form-item>
+    </FormDialog>
 
-    <el-dialog v-model="createDialog" :title="t('stepTemplates.createTemplate')" width="760">
-      <el-form label-position="top">
-        <el-form-item :label="t('stepTemplates.name')" required><el-input v-model="createForm.name" maxlength="256" /></el-form-item>
-        <el-form-item :label="t('stepTemplates.type')" required>
-          <el-select v-model="createForm.kind">
-            <el-option :label="t('stepTemplates.assembly')" value="assembly" />
-            <el-option :label="t('stepTemplates.experiment')" value="experiment" />
-          </el-select>
-        </el-form-item>
-        <el-form-item :label="t('stepTemplates.description')"><el-input v-model="createForm.description" type="textarea" :rows="2" maxlength="2000" /></el-form-item>
-        <el-form-item :label="t('stepTemplates.steps')" required>
-          <StepItemsEditor :key="createKey" v-model="createItems" />
-        </el-form-item>
-      </el-form>
-      <template #footer>
-        <el-button @click="createDialog = false">{{ t('stepTemplates.cancel') }}</el-button>
-        <el-button type="primary" :loading="saving" @click="saveCreate">{{ t('stepTemplates.save') }}</el-button>
-      </template>
-    </el-dialog>
+    <FormDialog v-model="createDialog" :title="t('stepTemplates.createTemplate')" width="760" :loading="saving" @submit="saveCreate">
+      <el-form-item :label="t('stepTemplates.name')" required><el-input v-model="createForm.name" maxlength="256" /></el-form-item>
+      <el-form-item :label="t('stepTemplates.type')" required>
+        <el-select v-model="createForm.kind">
+          <el-option :label="t('stepTemplates.assembly')" value="assembly" />
+          <el-option :label="t('stepTemplates.experiment')" value="experiment" />
+        </el-select>
+      </el-form-item>
+      <el-form-item :label="t('stepTemplates.description')"><el-input v-model="createForm.description" type="textarea" :rows="2" maxlength="2000" /></el-form-item>
+      <el-form-item :label="t('stepTemplates.steps')" required>
+        <StepItemsEditor :key="createKey" v-model="createItems" />
+      </el-form-item>
+    </FormDialog>
 
-    <el-dialog v-model="applyDialog" :title="t('stepTemplates.applyToProjectTitle')" width="480">
+    <FormDialog v-model="applyDialog" :title="t('stepTemplates.applyToProjectTitle')" width="480">
       <div class="grid">
         <p class="apply-tip">{{ applyTip }}</p>
         <el-select
@@ -175,7 +163,7 @@
           {{ t('stepTemplates.confirmApply') }}
         </el-button>
       </template>
-    </el-dialog>
+    </FormDialog>
 </template>
 
 <script setup lang="ts">
@@ -184,6 +172,7 @@ import { useI18n } from 'vue-i18n'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import StepItemsEditor from '@/components/business/StepItemsEditor.vue'
 import ListPage from '@/components/base/ListPage.vue'
+import FormDialog from '@/components/base/FormDialog.vue'
 import ResponsiveTable from '@/components/base/ResponsiveTable.vue'
 import { formatDateTime } from '@/utils/datetime'
 import {

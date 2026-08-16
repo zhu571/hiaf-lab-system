@@ -99,17 +99,11 @@
         </template>
       </ResponsiveTable>
     </section>
-    <el-dialog v-model="logDialog" :title="editingLogId ? t('dailyReport.editLog') : t('dailyReport.addNewLog')" width="560">
-      <el-form label-position="top">
-        <el-form-item v-if="!editingLogId" :label="t('dailyReport.project')"><el-select v-model="logDraft.project_id"><el-option v-for="p in projects.projects" :key="p.id" :label="p.name" :value="p.id" /></el-select></el-form-item>
-        <el-form-item :label="t('dailyReport.category')"><el-input v-model="logDraft.category" /></el-form-item>
-        <el-form-item :label="t('dailyReport.content')"><el-input v-model="logDraft.content" type="textarea" /></el-form-item>
-      </el-form>
-      <template #footer>
-        <el-button @click="logDialog = false">{{ t('common.cancel') }}</el-button>
-        <el-button type="primary" @click="saveLog">{{ t('dailyReport.save') }}</el-button>
-      </template>
-    </el-dialog>
+    <FormDialog v-model="logDialog" :title="editingLogId ? t('dailyReport.editLog') : t('dailyReport.addNewLog')" width="560" @submit="saveLog">
+      <el-form-item v-if="!editingLogId" :label="t('dailyReport.project')"><el-select v-model="logDraft.project_id"><el-option v-for="p in projects.projects" :key="p.id" :label="p.name" :value="p.id" /></el-select></el-form-item>
+      <el-form-item :label="t('dailyReport.category')"><el-input v-model="logDraft.category" /></el-form-item>
+      <el-form-item :label="t('dailyReport.content')"><el-input v-model="logDraft.content" type="textarea" /></el-form-item>
+    </FormDialog>
     <el-dialog v-model="warningDialog" :title="t('dailyReport.confirmSubmit')" width="520">
       <div class="warning-list">
         <el-alert v-for="warning in warnings" :key="warning.code + warning.log_id" :title="warning.message" type="warning" show-icon :closable="false" />
@@ -143,6 +137,7 @@ import { showApiError } from '../composables/useNotify'
 import { Paperclip } from '@element-plus/icons-vue'
 import StatusBadge from '@/components/base/StatusBadge.vue'
 import ResponsiveTable from '@/components/base/ResponsiveTable.vue'
+import FormDialog from '@/components/base/FormDialog.vue'
 import { aiParseReport, createLog, submitReport, todayReport, updateLog, updateReportRawText, type DailyReport, type LogItem } from '../api/logs'
 import { useProjectStore } from '../stores/project'
 import { useAuthStore } from '../stores/auth'
