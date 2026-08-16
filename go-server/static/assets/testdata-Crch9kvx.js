@@ -1,0 +1,1 @@
+import{e as a}from"./index-DvsuAmeT.js";function s(t,e){return a({url:`/projects/${t}/test-data`,method:"POST",data:e})}function o(t,e){return a({url:`/projects/${t}/test-data/batch`,method:"POST",data:e})}function u(t,e={}){return a({url:`/projects/${t}/test-data`,params:e})}function c(t){return a({url:`/test-data/${t}`,method:"DELETE"})}export{s as a,o as c,c as d,u as l};

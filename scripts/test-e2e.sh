@@ -122,6 +122,11 @@ for f in "$REPO_ROOT"/migrations/*.up.sql; do
     psql "$DB_DSN" -v ON_ERROR_STOP=1 -q -f "$f"
 done
 
+# 种子测试数据（009 已改空操作，e2e 登录用户 haofan/zhangsan 等来自 seed-testdata；
+# 幂等：haofan 已存在则跳过。严禁指向生产库——种子密码公开已知 Test1234!）
+echo "== 写入种子测试数据（go run ./cmd/seed-testdata）"
+( cd "$REPO_ROOT/go-server" && DATABASE_URL="$DB_DSN" go run ./cmd/seed-testdata )
+
 # ---------- 2. Go server ----------
 echo "== 构建 Go server（go build ./go-server）"
 BUILD_DIR="$(mktemp -d /tmp/hiaf-e2e-XXXXXX)"
@@ -129,7 +134,7 @@ BUILD_DIR="$(mktemp -d /tmp/hiaf-e2e-XXXXXX)"
 
 echo "== 启动 Go server（127.0.0.1:8000）"
 # E2E 规模说明：login 与 refresh 共享同一 IP 滑动窗口（默认 20 次/15min，auth/handler.go S1），
-# 每个 spec 首屏 loadMe 的 refresh 401 也占窗口——11 spec 13 例必然超限（429 登录限流）。
+# 每个 spec 首屏 loadMe 的 refresh 401 也占窗口——13 spec 16 例必然超限（429 登录限流）。
 # 专用测试环境关闭 IP 级限流（置 0），账户锁定（service 内 5 次/15min/用户名）保持生效；
 # 限流逻辑本身由 go-server/auth 单测覆盖，E2E 只验证真实栈旅程。
 PORT=8000 \
@@ -177,7 +182,7 @@ until curl -fsS --max-time 2 http://127.0.0.1:5173/login -o /dev/null 2>/dev/nul
 done
 
 # ---------- 4. Playwright ----------
-echo "== 运行 Playwright E2E（11 spec 13 条冒烟用例）"
+echo "== 运行 Playwright E2E（13 spec 16 条冒烟用例）"
 set +e
 ( cd "$REPO_ROOT/web-ui" && npx playwright test )
 RC=$?

@@ -51,6 +51,18 @@
         <el-icon><Expand v-if="collapsed" /><Fold v-else /></el-icon>
       </button>
       <AppBreadcrumb :items="breadcrumbItems" class="topbar-breadcrumb" />
+      <!-- R2 落位（方案 §2.1 结构图）：命令面板触发框 + 通知中心铃铛，位于用户菜单左侧 -->
+      <button
+        class="palette-trigger"
+        type="button"
+        :aria-label="t('palette.placeholder')"
+        @click="openPalette"
+      >
+        <el-icon><Search /></el-icon>
+        <span class="palette-trigger-label">{{ t('palette.placeholder') }}</span>
+        <kbd class="palette-kbd">Ctrl K</kbd>
+      </button>
+      <NotificationCenter />
       <el-dropdown class="topbar-user" trigger="click" placement="bottom-end" @command="onUserCommand">
         <button class="user-card-btn" type="button" :aria-label="t('common.userMenu')">
           <span class="user-avatar">{{ avatarText }}</span>
@@ -90,24 +102,29 @@
     </nav>
 
     <AskDialog />
+    <!-- R2 全局挂载命令面板（对齐 AskDialog 先例）；移动端不启用——无 Ctrl+K 与桌面顶栏（方案 §3.1），零降级 -->
+    <CommandPalette v-if="!isMobile" />
   </div>
 </template>
 
 <script setup lang="ts">
-import { computed, onMounted, ref, watch, type Component } from 'vue'
+import { computed, onMounted, watch, type Component } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import { useLocalStorage } from '@vueuse/core'
-import { ArrowDown, ChatDotRound, Expand, Fold } from '@element-plus/icons-vue'
+import { ArrowDown, ChatDotRound, Expand, Fold, Search } from '@element-plus/icons-vue'
 import { useMobile } from '@/composables/useMobile'
 import { usePolling } from '@/composables/usePolling'
 import { useAuthStore } from '@/stores/auth'
 import { useProjectStore } from '@/stores/project'
 import { useAskDialog } from '@/composables/useAskDialog'
-import { listAgentCandidates } from '@/api/agent'
+import { useCommandPalette } from '@/composables/useCommandPalette'
+import { useAgentPending } from '@/composables/useAgentPending'
 import { NAV_ITEMS, filterNavByRole } from '@/config/navigation'
 import MobileTopBar from '@/layouts/MobileTopBar.vue'
 import AskDialog from '@/components/business/AskDialog.vue'
+import CommandPalette from '@/components/business/CommandPalette.vue'
+import NotificationCenter from '@/components/business/NotificationCenter.vue'
 import AppBreadcrumb from '@/components/base/AppBreadcrumb.vue'
 
 type NavItem = { label: string; path: string; icon: Component; badge?: 'agentPending' }
@@ -120,6 +137,7 @@ const auth = useAuthStore()
 const projects = useProjectStore()
 const { t } = useI18n()
 const { openAskDialog } = useAskDialog()
+const { openPalette } = useCommandPalette()
 
 // 侧栏折叠（结构改版 R1 §2.2）：桌面双态 232↔64（--nav-width ↔ --nav-width-collapsed），
 // localStorage 持久化（仅布尔值）；移动端不读取——nav-collapsed class 经 !isMobile 门控，
@@ -132,20 +150,10 @@ onMounted(() => {
 })
 
 // C11 未读徽章：30s 轮询待审核候选数（复用现有分页接口的 total，零新 API）。
-// 仅 admin/maintainer（与 ListCandidates 后端权限一致）拉取；页面隐藏时暂停（usePolling
-// pauseOnHidden），恢复可见、角色资料到位、进入候选页（审核后计数变化）时立即刷新。
-const agentPending = ref(0)
+// R2 抽取（方案 §3.2）：计数与拉取收敛为 useAgentPending 模块级单例，侧栏 badge 与
+// 通知中心待审组共用同一计数；本处仅保留轮询发起与刷新时机（角色到位/进入候选页），行为不变。
+const { agentPending, refreshAgentPending } = useAgentPending()
 const badgePolling = usePolling(refreshAgentPending, 30000)
-
-async function refreshAgentPending() {
-  if (!auth.canReviewAgent || document.hidden) return
-  try {
-    const data = await listAgentCandidates({ status: 'pending_review', page: 1, per_page: 1 })
-    agentPending.value = data.total
-  } catch {
-    // 徽章拉取失败静默降级，下一轮轮询再试，不打断导航
-  }
-}
 
 watch(
   () => auth.canReviewAgent,
@@ -472,6 +480,44 @@ async function onUserCommand(command: string | number | object) {
   min-width: 0;
 }
 
+/* 命令面板触发框（R2）：仿输入框样式 + Ctrl K kbd 提示，点击等价于 Ctrl/⌘+K */
+.palette-trigger {
+  align-items: center;
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  color: var(--text-3);
+  cursor: pointer;
+  display: inline-flex;
+  flex: 0 0 auto;
+  font-family: inherit;
+  font-size: 13px;
+  gap: 8px;
+  height: 34px;
+  padding: 0 10px;
+  transition:
+    border-color 0.15s ease,
+    color 0.15s ease;
+}
+
+.palette-trigger:hover {
+  border-color: var(--brand-500);
+  color: var(--text-2);
+}
+
+.palette-trigger-label {
+  white-space: nowrap;
+}
+
+.palette-kbd {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  font-family: inherit;
+  font-size: 11px;
+  padding: 1px 6px;
+}
+
 /* 用户菜单（R1 由侧栏底部迁入顶栏右侧，业界惯例位置）：
    触发按钮保留 user-card-btn 类名（e2e helpers.ts 登出选择器依赖），样式按顶栏语境重写 */
 .topbar-user {
@@ -534,10 +580,12 @@ async function onUserCommand(command: string | number | object) {
   color: var(--text-3);
 }
 
-/* 窄桌面（近 768px 断点）：顶栏横向空间有限，用户菜单收敛为头像按钮 */
+/* 窄桌面（近 768px 断点）：顶栏横向空间有限，触发框收敛为图标按钮、用户菜单收敛为头像按钮 */
 @media (max-width: 1100px) {
   .user-meta,
-  .user-caret {
+  .user-caret,
+  .palette-trigger-label,
+  .palette-kbd {
     display: none;
   }
 }
