@@ -1,9 +1,13 @@
 <template>
-  <div class="page">
-    <div class="toolbar">
-      <h2>{{ t('dailyHistory.title') }}</h2>
-    </div>
-    <section class="panel filters-panel">
+  <!-- 列表骨架统一 base/ListPage（结构改版 R3）：toolbar + filters 槽 + StateBlock 三态 + pagination 槽 -->
+  <ListPage
+    :title="t('dailyHistory.title')"
+    :loading="loading && !data"
+    :error="error"
+    :error-text="t('dailyHistory.loadFailed')"
+    @retry="run"
+  >
+    <template #filters>
       <div class="filters">
         <el-date-picker v-model="date" value-format="YYYY-MM-DD" type="date" :placeholder="t('dailyHistory.date')" @change="onFilter" />
         <el-select v-model="status" :placeholder="t('dailyHistory.status')" clearable @change="onFilter">
@@ -11,50 +15,47 @@
         </el-select>
         <el-input v-model="keyword" :placeholder="t('dailyHistory.keyword')" clearable @change="onFilter" @clear="onFilter" />
       </div>
-    </section>
-    <section class="panel">
-      <!-- 区块级三态：首屏骨架（翻页/筛选有旧数据时走表格 v-loading，骨架不闪屏）> 错误 > 内容 -->
-      <StateBlock :loading="loading && !data" :error="error" :error-text="t('dailyHistory.loadFailed')" @retry="run">
-        <ResponsiveTable :rows="reports" :loading="loading" class="clickable-table" @row-click="openDetail">
-          <el-table-column :label="t('dailyHistory.date')" width="120" show-overflow-tooltip>
-            <template #default="{ row }">{{ formatDate(row.report_date) }}</template>
-          </el-table-column>
-          <el-table-column :label="t('dailyHistory.author')" width="140" show-overflow-tooltip>
-            <template #default="{ row }">{{ row.author_name || row.author_id }}</template>
-          </el-table-column>
-          <el-table-column prop="summary" :label="t('dailyHistory.summary')" show-overflow-tooltip />
-          <el-table-column :label="t('dailyHistory.status')" width="120" show-overflow-tooltip>
-            <template #default="{ row }">
-              <StatusBadge domain="reportStatus" :value="row.content_status" />
-            </template>
-          </el-table-column>
-          <template #empty>
-            <el-empty :description="t('dailyHistory.empty')" />
-          </template>
-          <template #card="{ row }">
-            <div class="report-card" @click="openDetail(row)">
-              <span class="card-title">{{ row.summary || '—' }}</span>
-              <div class="card-fields">
-                <span>{{ formatDate(row.report_date) }}</span>
-                <span>{{ row.author_name || row.author_id }}</span>
-                <StatusBadge domain="reportStatus" :value="row.content_status" />
-              </div>
-            </div>
-          </template>
-        </ResponsiveTable>
-        <el-pagination
-          v-model:current-page="page"
-          v-model:page-size="perPage"
-          class="pager"
-          layout="total, sizes, prev, pager, next"
-          :page-sizes="[20, 50, 100]"
-          :total="total"
-          @current-change="run"
-          @size-change="(n: number) => { onSizeChange(n); run() }"
-        />
-      </StateBlock>
-    </section>
-  </div>
+    </template>
+    <!-- 区块级三态：首屏骨架（翻页/筛选有旧数据时走表格 v-loading，骨架不闪屏）> 错误 > 内容 -->
+    <ResponsiveTable :rows="reports" :loading="loading" class="clickable-table" @row-click="openDetail">
+      <el-table-column :label="t('dailyHistory.date')" width="120" show-overflow-tooltip>
+        <template #default="{ row }">{{ formatDate(row.report_date) }}</template>
+      </el-table-column>
+      <el-table-column :label="t('dailyHistory.author')" width="140" show-overflow-tooltip>
+        <template #default="{ row }">{{ row.author_name || row.author_id }}</template>
+      </el-table-column>
+      <el-table-column prop="summary" :label="t('dailyHistory.summary')" show-overflow-tooltip />
+      <el-table-column :label="t('dailyHistory.status')" width="120" show-overflow-tooltip>
+        <template #default="{ row }">
+          <StatusBadge domain="reportStatus" :value="row.content_status" />
+        </template>
+      </el-table-column>
+      <template #empty>
+        <el-empty :description="t('dailyHistory.empty')" />
+      </template>
+      <template #card="{ row }">
+        <div class="report-card" @click="openDetail(row)">
+          <span class="card-title">{{ row.summary || '—' }}</span>
+          <div class="card-fields">
+            <span>{{ formatDate(row.report_date) }}</span>
+            <span>{{ row.author_name || row.author_id }}</span>
+            <StatusBadge domain="reportStatus" :value="row.content_status" />
+          </div>
+        </div>
+      </template>
+    </ResponsiveTable>
+    <template #pagination>
+      <el-pagination
+        v-model:current-page="page"
+        v-model:page-size="perPage"
+        layout="total, sizes, prev, pager, next"
+        :page-sizes="[20, 50, 100]"
+        :total="total"
+        @current-change="run"
+        @size-change="(n: number) => { onSizeChange(n); run() }"
+      />
+    </template>
+  </ListPage>
 </template>
 
 <script setup lang="ts">
@@ -63,8 +64,8 @@ import { useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import { useAsyncData } from '@/composables/useAsyncData'
 import { usePagination } from '@/composables/usePagination'
+import ListPage from '@/components/base/ListPage.vue'
 import ResponsiveTable from '@/components/base/ResponsiveTable.vue'
-import StateBlock from '@/components/base/StateBlock.vue'
 import StatusBadge from '@/components/base/StatusBadge.vue'
 import { formatDate } from '@/utils/datetime'
 import { listReports, type DailyReport } from '@/api/logs'
@@ -83,7 +84,7 @@ const statuses = computed(() => [
 ])
 
 // 列表加载收敛到 useAsyncData（重构方案 §3.5）：内建竞态/卸载保护，替代手写 loading + try/catch；
-// 加载失败不再 toast，error 交给上方 StateBlock 展示并重试
+// 加载失败不再 toast，error 交给 ListPage 内 StateBlock 展示并重试
 const { data, loading, error, run } = useAsyncData(loadReports)
 const reports = computed(() => data.value?.items ?? [])
 
@@ -109,15 +110,6 @@ async function loadReports() {
 </script>
 
 <style scoped>
-.filters-panel {
-  padding: 14px 20px;
-}
-
-.pager {
-  justify-content: flex-end;
-  margin-top: 14px;
-}
-
 .filters {
   display: flex;
   flex-wrap: wrap;

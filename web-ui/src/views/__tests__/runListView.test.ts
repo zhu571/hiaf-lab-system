@@ -100,13 +100,13 @@ describe('RunListView 列表', () => {
     expect(wrapper.find('.el-empty__description').text()).toBe('暂无实验批次')
   })
 
-  it('错误态与空态：加载失败 el-alert + 重试；viewer 隐藏创建/AI 入口', async () => {
+  it('错误态与空态：加载失败 StateBlock 错误 + 重试；viewer 隐藏创建/AI 入口', async () => {
     vi.mocked(listRuns)
       .mockRejectedValueOnce(new Error('boom'))
       .mockResolvedValueOnce({ items: [makeRun()], total: 1, page: 1 })
     const wrapper = await mountView('viewer')
     await flushPromises()
-    expect(wrapper.find('.error-box').exists()).toBe(true)
+    expect(wrapper.find('.state-block-error').exists()).toBe(true)
     await wrapper.findAll('button').find((b) => b.text().trim() === '重试')!.trigger('click')
     await flushPromises()
     expect(listRuns).toHaveBeenCalledTimes(2)

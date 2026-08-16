@@ -75,13 +75,13 @@ describe('RFMatchingView 匹配记录', () => {
     expect(emptyWrapper.find('.el-empty__description').text()).toBe('暂无记录')
   })
 
-  it('错误态：加载失败 el-alert + 重试；viewer 隐藏新增/作废入口', async () => {
+  it('错误态：加载失败 StateBlock 错误 + 重试；viewer 隐藏新增/作废入口', async () => {
     vi.mocked(listRFMatching)
       .mockRejectedValueOnce(new Error('boom'))
       .mockResolvedValueOnce({ items: [makeRecord()], total: 1, page: 1 })
     const wrapper = await mountView('viewer')
     await flushPromises()
-    expect(wrapper.find('.el-alert').exists()).toBe(true)
+    expect(wrapper.find('.state-block-error').exists()).toBe(true)
     await wrapper.findAll('button').find((b) => b.text().trim() === '重试')!.trigger('click')
     await flushPromises()
     expect(listRFMatching).toHaveBeenCalledTimes(2)

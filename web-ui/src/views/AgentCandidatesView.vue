@@ -1,16 +1,20 @@
 <template>
   <div class="page">
-    <div class="toolbar">
-      <h2>{{ t('agentCandidates.pageTitle') }}</h2>
-    </div>
-    <section class="panel filters-panel">
-      <div class="filters">
-        <el-select v-model="status" :placeholder="t('agentCandidates.statusFilter')" @change="onFilter">
-          <el-option v-for="s in statuses" :key="s.value" :label="s.label" :value="s.value" />
-        </el-select>
-      </div>
-    </section>
-    <section class="panel">
+    <!-- 列表骨架统一 base/ListPage（结构改版 R3）；加载失败不再 toast，error 交 StateBlock 展示并重试 -->
+    <ListPage
+      :title="t('agentCandidates.pageTitle')"
+      :loading="loading && !data"
+      :error="error"
+      :error-text="t('agentCandidates.loadFailed')"
+      @retry="load"
+    >
+      <template #filters>
+        <div class="filters">
+          <el-select v-model="status" :placeholder="t('agentCandidates.statusFilter')" @change="onFilter">
+            <el-option v-for="s in statuses" :key="s.value" :label="s.label" :value="s.value" />
+          </el-select>
+        </div>
+      </template>
       <ResponsiveTable :rows="candidates" :loading="loading">
         <el-table-column :label="t('agentCandidates.date')" width="170">
           <template #default="{ row }">{{ formatDateTime(row.created_at) }}</template>
@@ -64,15 +68,16 @@
           </div>
         </template>
       </ResponsiveTable>
-      <el-pagination
-        v-model:current-page="page"
-        class="pager"
-        layout="total, prev, pager, next"
-        :page-size="perPage"
-        :total="total"
-        @current-change="load"
-      />
-    </section>
+      <template #pagination>
+        <el-pagination
+          v-model:current-page="page"
+          layout="total, prev, pager, next"
+          :page-size="perPage"
+          :total="total"
+          @current-change="load"
+        />
+      </template>
+    </ListPage>
 
     <el-drawer v-model="drawer" size="720" :title="t('agentCandidates.candidateDetail')">
       <div v-if="selected" class="detail">
@@ -188,20 +193,20 @@
 </template>
 
 <script setup lang="ts">
-import { computed, onMounted, ref } from 'vue'
+import { computed, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { diffLines, diffWordsWithSpace, type Change } from 'diff'
 import { showApiError } from '../composables/useNotify'
 import StatusBadge from '@/components/base/StatusBadge.vue'
+import ListPage from '@/components/base/ListPage.vue'
 import ResponsiveTable from '@/components/base/ResponsiveTable.vue'
+import { useAsyncData } from '@/composables/useAsyncData'
 import { formatDateTime } from '@/utils/datetime'
 import { approveCandidate, getCandidateTrace, listAgentCandidates, rejectCandidate, type AgentCandidate, type CandidateTrace } from '../api/agent'
 
 const { t } = useI18n()
 const status = ref('pending_review')
-const candidates = ref<AgentCandidate[]>([])
-const loading = ref(false)
 const page = ref(1)
 const perPage = 20
 const total = ref(0)
@@ -248,20 +253,14 @@ const actionTypes = computed<Record<string, { label: string; tag: 'primary' | 's
   create_experience: { label: t('agentCandidates.actionCreateExperience'), tag: 'warning' as const }
 }))
 
-onMounted(load)
-
-async function load() {
-  loading.value = true
-  try {
-    const data = await listAgentCandidates({ status: status.value, page: page.value, per_page: perPage })
-    candidates.value = data.items ?? []
-    total.value = data.total
-  } catch (err) {
-    showApiError(err, t('agentCandidates.loadFailed'))
-  } finally {
-    loading.value = false
-  }
-}
+// 列表加载收敛 useAsyncData（结构改版 R3 接入 StateBlock 前提）：immediate 首载、竞态/卸载保护内建；
+// 加载失败不再 toast，error 只写 ref 交 ListPage 内 StateBlock 展示并重试（操作级错误仍走 showApiError）
+const { data, loading, error, run: load } = useAsyncData(async () => {
+  const res = await listAgentCandidates({ status: status.value, page: page.value, per_page: perPage })
+  total.value = res.total
+  return res.items ?? []
+})
+const candidates = computed(() => data.value ?? [])
 
 function onFilter() {
   page.value = 1
@@ -404,10 +403,6 @@ async function reject() {
 </script>
 
 <style scoped>
-.filters-panel {
-  padding: 14px 20px;
-}
-
 .filters {
   display: flex;
   flex-wrap: wrap;
@@ -416,11 +411,6 @@ async function reject() {
 
 .filters .el-select {
   width: 160px;
-}
-
-.pager {
-  justify-content: flex-end;
-  margin-top: 14px;
 }
 
 .detail {

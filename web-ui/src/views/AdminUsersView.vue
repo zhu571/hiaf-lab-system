@@ -1,59 +1,82 @@
 <template>
-  <div class="page">
-    <div class="toolbar">
-      <h2>{{ t('adminUsers.title') }}</h2>
-      <div class="toolbar-actions">
-        <el-input
-          v-model="keyword"
-          class="search-input"
-          :placeholder="t('adminUsers.searchPlaceholder')"
-          clearable
-          :prefix-icon="Search"
-        />
-        <el-button @click="load">{{ t('adminUsers.refresh') }}</el-button>
-        <el-button type="primary" @click="createDialog = true">{{ t('adminUsers.create') }}</el-button>
-      </div>
-    </div>
-    <section class="panel">
-      <el-alert
-        v-if="loadError"
-        class="load-error"
-        type="error"
-        :title="loadError"
-        show-icon
-        :closable="false"
-      >
-        <el-button size="small" @click="load">{{ t('adminUsers.retry') }}</el-button>
-      </el-alert>
-      <ResponsiveTable :rows="filteredUsers" :loading="loading">
-        <el-table-column :label="t('adminUsers.tableUser')" min-width="220">
-          <template #default="{ row }">
-            <div class="user-cell">
-              <el-avatar :size="36">{{ avatarText(row) }}</el-avatar>
-              <div class="user-meta">
-                <span class="username">{{ row.username }}</span>
-                <span class="muted">{{ row.display_name || t('adminUsers.noDisplayName') }}</span>
-              </div>
+  <!-- 列表骨架统一 base/ListPage（结构改版 R3）：搜索在 actions 槽；列表错误态收口 StateBlock -->
+  <ListPage
+    :title="t('adminUsers.title')"
+    :error="loadError ? { message: loadError } : null"
+    @retry="load"
+  >
+    <template #actions>
+      <el-input
+        v-model="keyword"
+        class="search-input"
+        :placeholder="t('adminUsers.searchPlaceholder')"
+        clearable
+        :prefix-icon="Search"
+      />
+      <el-button @click="load">{{ t('adminUsers.refresh') }}</el-button>
+      <el-button type="primary" @click="createDialog = true">{{ t('adminUsers.create') }}</el-button>
+    </template>
+    <ResponsiveTable :rows="filteredUsers" :loading="loading">
+      <el-table-column :label="t('adminUsers.tableUser')" min-width="220">
+        <template #default="{ row }">
+          <div class="user-cell">
+            <el-avatar :size="36">{{ avatarText(row) }}</el-avatar>
+            <div class="user-meta">
+              <span class="username">{{ row.username }}</span>
+              <span class="muted">{{ row.display_name || t('adminUsers.noDisplayName') }}</span>
             </div>
+          </div>
+        </template>
+      </el-table-column>
+      <el-table-column :label="t('adminUsers.tableRole')" width="110">
+        <template #default="{ row }">
+          <el-tag :type="roleTagType(row.role)" effect="light">{{ roleLabel(row.role) }}</el-tag>
+        </template>
+      </el-table-column>
+      <el-table-column :label="t('adminUsers.tableJoinTime')" width="120">
+        <template #default="{ row }">{{ formatDate(row.created_at) }}</template>
+      </el-table-column>
+      <el-table-column :label="t('adminUsers.tableStatus')" width="90">
+        <template #default="{ row }">
+          <el-tag :type="row.disabled ? 'danger' : 'success'" effect="light">
+            {{ row.disabled ? t('adminUsers.disabled') : t('adminUsers.active') }}
+          </el-tag>
+        </template>
+      </el-table-column>
+      <el-table-column :label="t('adminUsers.tableActions')" width="280">
+        <template #default="{ row }">
+          <template v-if="row.id !== auth.user?.id">
+            <el-button size="small" @click="openRoleDialog(row)">{{ t('adminUsers.changeRole') }}</el-button>
+            <el-button size="small" @click="reset(row)">{{ t('adminUsers.resetPassword') }}</el-button>
+            <el-button
+              size="small"
+              :type="row.disabled ? 'success' : 'danger'"
+              plain
+              @click="toggleDisabled(row)"
+            >
+              {{ row.disabled ? t('adminUsers.enable') : t('adminUsers.disable') }}
+            </el-button>
           </template>
-        </el-table-column>
-        <el-table-column :label="t('adminUsers.tableRole')" width="110">
-          <template #default="{ row }">
-            <el-tag :type="roleTagType(row.role)" effect="light">{{ roleLabel(row.role) }}</el-tag>
-          </template>
-        </el-table-column>
-        <el-table-column :label="t('adminUsers.tableJoinTime')" width="120">
-          <template #default="{ row }">{{ formatDate(row.created_at) }}</template>
-        </el-table-column>
-        <el-table-column :label="t('adminUsers.tableStatus')" width="90">
-          <template #default="{ row }">
-            <el-tag :type="row.disabled ? 'danger' : 'success'" effect="light">
+          <span v-else class="muted">{{ t('adminUsers.currentAccount') }}</span>
+        </template>
+      </el-table-column>
+      <template #empty>
+        <el-empty :description="keyword ? t('adminUsers.noMatch') : t('adminUsers.empty')" />
+      </template>
+      <template #card="{ row }">
+        <div class="user-card">
+          <div class="user-card-title">
+            <el-avatar :size="32">{{ avatarText(row) }}</el-avatar>
+            <span class="card-title">{{ row.username }}</span>
+          </div>
+          <div class="card-fields">
+            <span>{{ row.display_name || t('adminUsers.noDisplayName') }}</span>
+            <el-tag :type="roleTagType(row.role)" size="small" effect="light">{{ roleLabel(row.role) }}</el-tag>
+            <el-tag :type="row.disabled ? 'danger' : 'success'" size="small" effect="light">
               {{ row.disabled ? t('adminUsers.disabled') : t('adminUsers.active') }}
             </el-tag>
-          </template>
-        </el-table-column>
-        <el-table-column :label="t('adminUsers.tableActions')" width="280">
-          <template #default="{ row }">
+          </div>
+          <div class="card-actions">
             <template v-if="row.id !== auth.user?.id">
               <el-button size="small" @click="openRoleDialog(row)">{{ t('adminUsers.changeRole') }}</el-button>
               <el-button size="small" @click="reset(row)">{{ t('adminUsers.resetPassword') }}</el-button>
@@ -67,43 +90,11 @@
               </el-button>
             </template>
             <span v-else class="muted">{{ t('adminUsers.currentAccount') }}</span>
-          </template>
-        </el-table-column>
-        <template #empty>
-          <el-empty :description="keyword ? t('adminUsers.noMatch') : t('adminUsers.empty')" />
-        </template>
-        <template #card="{ row }">
-          <div class="user-card">
-            <div class="user-card-title">
-              <el-avatar :size="32">{{ avatarText(row) }}</el-avatar>
-              <span class="card-title">{{ row.username }}</span>
-            </div>
-            <div class="card-fields">
-              <span>{{ row.display_name || t('adminUsers.noDisplayName') }}</span>
-              <el-tag :type="roleTagType(row.role)" size="small" effect="light">{{ roleLabel(row.role) }}</el-tag>
-              <el-tag :type="row.disabled ? 'danger' : 'success'" size="small" effect="light">
-                {{ row.disabled ? t('adminUsers.disabled') : t('adminUsers.active') }}
-              </el-tag>
-            </div>
-            <div class="card-actions">
-              <template v-if="row.id !== auth.user?.id">
-                <el-button size="small" @click="openRoleDialog(row)">{{ t('adminUsers.changeRole') }}</el-button>
-                <el-button size="small" @click="reset(row)">{{ t('adminUsers.resetPassword') }}</el-button>
-                <el-button
-                  size="small"
-                  :type="row.disabled ? 'success' : 'danger'"
-                  plain
-                  @click="toggleDisabled(row)"
-                >
-                  {{ row.disabled ? t('adminUsers.enable') : t('adminUsers.disable') }}
-                </el-button>
-              </template>
-              <span v-else class="muted">{{ t('adminUsers.currentAccount') }}</span>
-            </div>
           </div>
-        </template>
-      </ResponsiveTable>
-    </section>
+        </div>
+      </template>
+    </ResponsiveTable>
+  </ListPage>
 
     <el-dialog v-model="roleDialog" :title="t('adminUsers.changeRoleTitle')" width="440">
       <p v-if="roleTarget" class="role-dialog-text">
@@ -151,7 +142,6 @@
         <el-button type="primary" :loading="saving" @click="create">{{ t('adminUsers.save') }}</el-button>
       </template>
     </el-dialog>
-  </div>
 </template>
 
 <script setup lang="ts">
@@ -162,6 +152,7 @@ import { showApiError } from '../composables/useNotify'
 import { Search } from '@element-plus/icons-vue'
 import { createUser, listUsers, resetPassword, updateUser, type UserInfo } from '../api/auth'
 import { useAuthStore } from '../stores/auth'
+import ListPage from '@/components/base/ListPage.vue'
 import ResponsiveTable from '@/components/base/ResponsiveTable.vue'
 import { formatDate } from '@/utils/datetime'
 
@@ -333,17 +324,8 @@ async function copyPassword() {
 </script>
 
 <style scoped>
-.toolbar-actions {
-  display: flex;
-  gap: 10px;
-}
-
 .search-input {
   width: 240px;
-}
-
-.load-error {
-  margin-bottom: 12px;
 }
 
 .user-cell {

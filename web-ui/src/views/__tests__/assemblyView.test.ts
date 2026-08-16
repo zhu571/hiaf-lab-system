@@ -91,13 +91,13 @@ describe('AssemblyView 装配步骤', () => {
     expect(viewerWrapper.text()).not.toContain('AI 生成装配步骤')
   })
 
-  it('错误态与空态：加载失败 el-alert + 重试；无步骤 el-empty', async () => {
+  it('错误态与空态：加载失败 StateBlock 错误 + 重试；无步骤 el-empty', async () => {
     vi.mocked(listAssemblySteps)
       .mockRejectedValueOnce(new Error('boom'))
       .mockResolvedValueOnce({ items: [], total: 0, page: 1 })
     const wrapper = await mountView('member')
     await flushPromises()
-    expect(wrapper.find('.load-error').exists()).toBe(true)
+    expect(wrapper.find('.state-block-error').exists()).toBe(true)
     await wrapper.findAll('button').find((b) => b.text().trim() === '重试')!.trigger('click')
     await flushPromises()
     expect(wrapper.find('.el-empty__description').text()).toBe('暂无装配步骤')

@@ -10,10 +10,9 @@
       <el-button v-if="canOperate" type="primary" @click="createDialog = true">{{ t('assembly.create') }}</el-button>
     </div>
     <section class="panel">
-      <el-alert v-if="loadError" class="load-error" type="error" :title="loadError" show-icon :closable="false">
-        <el-button size="small" @click="load">{{ t('assembly.retry') }}</el-button>
-      </el-alert>
-      <div v-loading="loading" class="step-list">
+      <!-- 列表错误态收口 StateBlock（结构改版 R3 §4.3）：错误重试 > 内容；加载态仍走列表 v-loading -->
+      <StateBlock :error="loadError ? { message: loadError } : null" @retry="load">
+        <div v-loading="loading" class="step-list">
         <div
           v-for="(step, index) in filteredSteps"
           :key="step.id"
@@ -59,18 +58,19 @@
             <el-button size="small" :disabled="index === filteredSteps.length - 1" @click="moveStep(index, 1)">{{ t('assembly.moveDown') }}</el-button>
           </div>
         </div>
-        <el-empty v-if="!loading && !loadError && filteredSteps.length === 0" :description="t('assembly.empty')" />
-      </div>
-      <el-pagination
-        v-model:current-page="page"
-        v-model:page-size="perPage"
-        class="pager"
-        layout="total, sizes, prev, pager, next"
-        :page-sizes="[20, 50, 100]"
-        :total="total"
-        @current-change="load"
-        @size-change="onSizeChange"
-      />
+        <el-empty v-if="!loading && filteredSteps.length === 0" :description="t('assembly.empty')" />
+        </div>
+        <el-pagination
+          v-model:current-page="page"
+          v-model:page-size="perPage"
+          class="pager"
+          layout="total, sizes, prev, pager, next"
+          :page-sizes="[20, 50, 100]"
+          :total="total"
+          @current-change="load"
+          @size-change="onSizeChange"
+        />
+      </StateBlock>
     </section>
     <el-dialog v-model="createDialog" :title="t('assembly.create')" width="560">
       <el-form label-position="top">
@@ -152,6 +152,7 @@ import { useRoute } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { Rank } from '@element-plus/icons-vue'
 import StatusBadge from '@/components/base/StatusBadge.vue'
+import StateBlock from '@/components/base/StateBlock.vue'
 import { formatDateTime } from '@/utils/datetime'
 import StepItemsEditor from '@/components/business/StepItemsEditor.vue'
 import { useMobile } from '../composables/useMobile'
@@ -508,10 +509,6 @@ async function saveAndApply() {
 <style scoped>
 .status-select {
   max-width: 160px;
-}
-
-.load-error {
-  margin-bottom: 16px;
 }
 
 .step-list {

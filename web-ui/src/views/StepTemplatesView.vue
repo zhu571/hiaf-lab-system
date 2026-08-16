@@ -1,81 +1,82 @@
 <template>
-  <div class="page">
-    <div class="toolbar">
-      <h2>{{ t('stepTemplates.title') }}</h2>
+  <!-- 列表骨架统一 base/ListPage（结构改版 R3）：筛选/搜索在 actions 槽左段；列表错误态收口 StateBlock -->
+  <ListPage
+    :title="t('stepTemplates.title')"
+    :error="loadError ? { message: loadError } : null"
+    @retry="load"
+  >
+    <template #actions>
       <el-select v-model="kindFilter" class="kind-select" :placeholder="t('stepTemplates.allTypes')" clearable @change="onFilter">
         <el-option :label="t('stepTemplates.assembly')" value="assembly" />
         <el-option :label="t('stepTemplates.experiment')" value="experiment" />
       </el-select>
       <el-input v-model="keyword" class="search-input" :placeholder="t('stepTemplates.searchPlaceholder')" clearable @change="onFilter" />
       <el-button v-if="canCreate" type="primary" @click="openCreate">{{ t('stepTemplates.newTemplate') }}</el-button>
-    </div>
-    <section class="panel">
-      <el-alert v-if="loadError" class="load-error" type="error" :title="loadError" show-icon :closable="false">
-        <el-button size="small" @click="load">{{ t('stepTemplates.retry') }}</el-button>
-      </el-alert>
-      <ResponsiveTable :rows="items" :loading="loading">
-        <el-table-column :label="t('stepTemplates.name')" min-width="180">
-          <template #default="{ row }">{{ row.name }}</template>
-        </el-table-column>
-        <el-table-column :label="t('stepTemplates.type')" width="90">
-          <template #default="{ row }">
+    </template>
+    <ResponsiveTable :rows="items" :loading="loading">
+      <el-table-column :label="t('stepTemplates.name')" min-width="180">
+        <template #default="{ row }">{{ row.name }}</template>
+      </el-table-column>
+      <el-table-column :label="t('stepTemplates.type')" width="90">
+        <template #default="{ row }">
+          <el-tag size="small" :type="row.kind === 'assembly' ? 'primary' : 'success'" effect="light">{{ kindLabel(row.kind) }}</el-tag>
+        </template>
+      </el-table-column>
+      <el-table-column :label="t('stepTemplates.stepCount')" width="80" align="center">
+        <template #default="{ row }">{{ row._item_count ?? '—' }}</template>
+      </el-table-column>
+      <el-table-column :label="t('stepTemplates.source')" width="80">
+        <template #default="{ row }">
+          <el-tag v-if="row.ai_generated" size="small" type="warning" effect="light">AI</el-tag>
+          <span v-else>{{ t('stepTemplates.manual') }}</span>
+        </template>
+      </el-table-column>
+      <el-table-column :label="t('stepTemplates.createdBy')" width="120">
+        <template #default="{ row }">{{ row.created_by || '—' }}</template>
+      </el-table-column>
+      <el-table-column :label="t('stepTemplates.createdAt')" width="170">
+        <template #default="{ row }">{{ formatDateTime(row.created_at) }}</template>
+      </el-table-column>
+      <el-table-column :label="t('stepTemplates.actions')" width="300">
+        <template #default="{ row }">
+          <el-button size="small" @click="openDetail(row)">{{ t('stepTemplates.detail') }}</el-button>
+          <el-button v-if="canManage(row)" size="small" @click="openEdit(row)">{{ t('stepTemplates.edit') }}</el-button>
+          <el-button size="small" type="primary" plain @click="openApply(row)">{{ t('stepTemplates.applyToProject') }}</el-button>
+          <el-button v-if="canManage(row)" size="small" type="danger" plain @click="remove(row)">{{ t('stepTemplates.delete') }}</el-button>
+        </template>
+      </el-table-column>
+      <template #empty>
+        <el-empty :description="t('stepTemplates.empty')" />
+      </template>
+      <template #card="{ row }">
+        <div class="tmpl-card">
+          <div class="tmpl-card-title">
+            <span class="card-title">{{ row.name }}</span>
             <el-tag size="small" :type="row.kind === 'assembly' ? 'primary' : 'success'" effect="light">{{ kindLabel(row.kind) }}</el-tag>
-          </template>
-        </el-table-column>
-        <el-table-column :label="t('stepTemplates.stepCount')" width="80" align="center">
-          <template #default="{ row }">{{ row._item_count ?? '—' }}</template>
-        </el-table-column>
-        <el-table-column :label="t('stepTemplates.source')" width="80">
-          <template #default="{ row }">
-            <el-tag v-if="row.ai_generated" size="small" type="warning" effect="light">AI</el-tag>
-            <span v-else>{{ t('stepTemplates.manual') }}</span>
-          </template>
-        </el-table-column>
-        <el-table-column :label="t('stepTemplates.createdBy')" width="120">
-          <template #default="{ row }">{{ row.created_by || '—' }}</template>
-        </el-table-column>
-        <el-table-column :label="t('stepTemplates.createdAt')" width="170">
-          <template #default="{ row }">{{ formatDateTime(row.created_at) }}</template>
-        </el-table-column>
-        <el-table-column :label="t('stepTemplates.actions')" width="300">
-          <template #default="{ row }">
+          </div>
+          <div class="card-fields">
+            <span>{{ t('stepTemplates.stepCount') }}：{{ row._item_count ?? '—' }}</span>
+            <span>{{ formatDateTime(row.created_at) }}</span>
+          </div>
+          <div class="card-actions">
             <el-button size="small" @click="openDetail(row)">{{ t('stepTemplates.detail') }}</el-button>
             <el-button v-if="canManage(row)" size="small" @click="openEdit(row)">{{ t('stepTemplates.edit') }}</el-button>
             <el-button size="small" type="primary" plain @click="openApply(row)">{{ t('stepTemplates.applyToProject') }}</el-button>
             <el-button v-if="canManage(row)" size="small" type="danger" plain @click="remove(row)">{{ t('stepTemplates.delete') }}</el-button>
-          </template>
-        </el-table-column>
-        <template #empty>
-          <el-empty :description="t('stepTemplates.empty')" />
-        </template>
-        <template #card="{ row }">
-          <div class="tmpl-card">
-            <div class="tmpl-card-title">
-              <span class="card-title">{{ row.name }}</span>
-              <el-tag size="small" :type="row.kind === 'assembly' ? 'primary' : 'success'" effect="light">{{ kindLabel(row.kind) }}</el-tag>
-            </div>
-            <div class="card-fields">
-              <span>{{ t('stepTemplates.stepCount') }}：{{ row._item_count ?? '—' }}</span>
-              <span>{{ formatDateTime(row.created_at) }}</span>
-            </div>
-            <div class="card-actions">
-              <el-button size="small" @click="openDetail(row)">{{ t('stepTemplates.detail') }}</el-button>
-              <el-button v-if="canManage(row)" size="small" @click="openEdit(row)">{{ t('stepTemplates.edit') }}</el-button>
-              <el-button size="small" type="primary" plain @click="openApply(row)">{{ t('stepTemplates.applyToProject') }}</el-button>
-              <el-button v-if="canManage(row)" size="small" type="danger" plain @click="remove(row)">{{ t('stepTemplates.delete') }}</el-button>
-            </div>
           </div>
-        </template>
-      </ResponsiveTable>
+        </div>
+      </template>
+    </ResponsiveTable>
+    <template #pagination>
       <el-pagination
         v-model:current-page="page"
-        class="pager"
         layout="total, prev, pager, next"
         :page-size="perPage"
         :total="total"
         @current-change="load"
       />
-    </section>
+    </template>
+  </ListPage>
 
     <el-dialog v-model="detailDialog" :title="t('stepTemplates.templateDetail')" width="640">
       <div v-loading="detailLoading" class="grid">
@@ -175,7 +176,6 @@
         </el-button>
       </template>
     </el-dialog>
-  </div>
 </template>
 
 <script setup lang="ts">
@@ -183,6 +183,7 @@ import { computed, onMounted, reactive, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import StepItemsEditor from '@/components/business/StepItemsEditor.vue'
+import ListPage from '@/components/base/ListPage.vue'
 import ResponsiveTable from '@/components/base/ResponsiveTable.vue'
 import { formatDateTime } from '@/utils/datetime'
 import {
@@ -496,15 +497,6 @@ async function remove(row: StepTemplate) {
 
 .search-input {
   max-width: 240px;
-}
-
-.load-error {
-  margin-bottom: 16px;
-}
-
-.pager {
-  justify-content: flex-end;
-  margin-top: 14px;
 }
 
 .apply-tip {

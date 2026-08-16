@@ -5,127 +5,123 @@
     </div>
     <el-tabs v-model="tab" class="alert-tabs" @tab-change="onTabChange">
       <el-tab-pane :label="t('alert.tabActive')" name="active">
-        <section class="panel">
-          <!-- 三态收敛 StateBlock：首屏骨架（翻页/切 tab 有数据时不闪骨架）> 错误（可重试）> 空态 > 表格 -->
-          <StateBlock
-            :loading="loading && !data"
-            :error="error"
-            :error-text="t('alert.loadFailed')"
-            :empty="rows.length === 0"
-            :empty-text="t('alert.emptyActive')"
-            @retry="run"
-          >
-            <ResponsiveTable :rows="rows" :loading="loading">
-              <el-table-column :label="t('alert.level')" width="100">
-                <template #default="{ row }">
-                  <StatusBadge domain="alertLevel" :value="row.level" />
-                </template>
-              </el-table-column>
-              <el-table-column :label="t('alert.source')" width="110">
-                <template #default="{ row }">{{ sourceLabel(row.source) }}</template>
-              </el-table-column>
-              <el-table-column :label="t('alert.colTitle')">
-                <template #default="{ row }">
-                  <el-tooltip :content="row.detail" placement="top-start" :show-after="300" :disabled="!row.detail">
-                    <span class="title-cell">{{ row.title }}</span>
-                  </el-tooltip>
-                </template>
-              </el-table-column>
-              <el-table-column :label="t('alert.occurrence')" width="90" align="center">
-                <template #default="{ row }">
-                  <el-badge :value="row.occurrence_count" :max="999" type="warning" />
-                </template>
-              </el-table-column>
-              <el-table-column prop="first_seen" :label="t('alert.firstSeen')" width="170" show-overflow-tooltip />
-              <el-table-column prop="last_seen" :label="t('alert.lastSeen')" width="170" show-overflow-tooltip />
-              <el-table-column v-if="canResolve" :label="t('alert.actions')" width="110" align="center">
-                <template #default="{ row }">
-                  <el-button link type="primary" size="small" :loading="resolvingId === row.id" @click="onResolve(row)">
-                    {{ t('alert.resolve') }}
-                  </el-button>
-                </template>
-              </el-table-column>
-              <template #card="{ row }">
-                <div class="alert-card">
-                  <span class="card-title">
-                    <StatusBadge domain="alertLevel" :value="row.level" />
-                    <span class="card-source">{{ sourceLabel(row.source) }}</span>
-                    {{ row.title }}
-                  </span>
-                  <div class="card-fields">
-                    <span>{{ t('alert.occurrence') }} {{ row.occurrence_count }}</span>
-                    <span>{{ row.first_seen }}</span>
-                    <span>{{ row.last_seen }}</span>
-                  </div>
-                  <el-button v-if="canResolve" link type="primary" size="small" :loading="resolvingId === row.id" @click="onResolve(row)">
-                    {{ t('alert.resolve') }}
-                  </el-button>
-                </div>
+        <!-- 列表骨架统一 base/ListPage（结构改版 R3）：tab 内嵌省略 title；三态经 ListPage 内 StateBlock -->
+        <ListPage
+          :loading="loading && !data"
+          :error="error"
+          :error-text="t('alert.loadFailed')"
+          :empty="rows.length === 0"
+          :empty-text="t('alert.emptyActive')"
+          @retry="run"
+        >
+          <ResponsiveTable :rows="rows" :loading="loading">
+            <el-table-column :label="t('alert.level')" width="100">
+              <template #default="{ row }">
+                <StatusBadge domain="alertLevel" :value="row.level" />
               </template>
-            </ResponsiveTable>
-          </StateBlock>
-        </section>
+            </el-table-column>
+            <el-table-column :label="t('alert.source')" width="110">
+              <template #default="{ row }">{{ sourceLabel(row.source) }}</template>
+            </el-table-column>
+            <el-table-column :label="t('alert.colTitle')">
+              <template #default="{ row }">
+                <el-tooltip :content="row.detail" placement="top-start" :show-after="300" :disabled="!row.detail">
+                  <span class="title-cell">{{ row.title }}</span>
+                </el-tooltip>
+              </template>
+            </el-table-column>
+            <el-table-column :label="t('alert.occurrence')" width="90" align="center">
+              <template #default="{ row }">
+                <el-badge :value="row.occurrence_count" :max="999" type="warning" />
+              </template>
+            </el-table-column>
+            <el-table-column prop="first_seen" :label="t('alert.firstSeen')" width="170" show-overflow-tooltip />
+            <el-table-column prop="last_seen" :label="t('alert.lastSeen')" width="170" show-overflow-tooltip />
+            <el-table-column v-if="canResolve" :label="t('alert.actions')" width="110" align="center">
+              <template #default="{ row }">
+                <el-button link type="primary" size="small" :loading="resolvingId === row.id" @click="onResolve(row)">
+                  {{ t('alert.resolve') }}
+                </el-button>
+              </template>
+            </el-table-column>
+            <template #card="{ row }">
+              <div class="alert-card">
+                <span class="card-title">
+                  <StatusBadge domain="alertLevel" :value="row.level" />
+                  <span class="card-source">{{ sourceLabel(row.source) }}</span>
+                  {{ row.title }}
+                </span>
+                <div class="card-fields">
+                  <span>{{ t('alert.occurrence') }} {{ row.occurrence_count }}</span>
+                  <span>{{ row.first_seen }}</span>
+                  <span>{{ row.last_seen }}</span>
+                </div>
+                <el-button v-if="canResolve" link type="primary" size="small" :loading="resolvingId === row.id" @click="onResolve(row)">
+                  {{ t('alert.resolve') }}
+                </el-button>
+              </div>
+            </template>
+          </ResponsiveTable>
+        </ListPage>
       </el-tab-pane>
       <el-tab-pane :label="t('alert.tabHistory')" name="resolved">
-        <section class="panel">
-          <!-- 三态收敛 StateBlock：首屏骨架（翻页有数据时不闪骨架）> 错误（可重试）> 空态 > 表格 -->
-          <StateBlock
-            :loading="loading && !data"
-            :error="error"
-            :error-text="t('alert.loadFailed')"
-            :empty="rows.length === 0"
-            :empty-text="t('alert.emptyHistory')"
-            @retry="run"
-          >
-            <ResponsiveTable :rows="rows" :loading="loading">
-              <el-table-column :label="t('alert.level')" width="100">
-                <template #default="{ row }">
-                  <StatusBadge domain="alertLevel" :value="row.level" />
-                </template>
-              </el-table-column>
-              <el-table-column :label="t('alert.source')" width="110">
-                <template #default="{ row }">{{ sourceLabel(row.source) }}</template>
-              </el-table-column>
-              <el-table-column prop="title" :label="t('alert.colTitle')" show-overflow-tooltip />
-              <el-table-column :label="t('alert.occurrence')" width="90" align="center">
-                <template #default="{ row }">
-                  <el-badge :value="row.occurrence_count" :max="999" type="warning" />
-                </template>
-              </el-table-column>
-              <el-table-column prop="last_seen" :label="t('alert.lastSeen')" width="170" show-overflow-tooltip />
-              <el-table-column :label="t('alert.resolved')" width="170" show-overflow-tooltip>
-                <template #default="{ row }">
-                  <span v-if="row.resolved_at">{{ row.resolved_at }}</span>
-                  <span v-else>-</span>
-                </template>
-              </el-table-column>
-              <el-table-column prop="resolved_by" :label="t('alert.resolvedBy')" width="120" />
-              <template #card="{ row }">
-                <div class="alert-card">
-                  <span class="card-title">
-                    <StatusBadge domain="alertLevel" :value="row.level" />
-                    <span class="card-source">{{ sourceLabel(row.source) }}</span>
-                    {{ row.title }}
-                  </span>
-                  <div class="card-fields">
-                    <span>{{ t('alert.occurrence') }} {{ row.occurrence_count }}</span>
-                    <span>{{ row.last_seen }}</span>
-                    <span>{{ t('alert.resolvedBy') }}: {{ row.resolved_by || '-' }}</span>
-                  </div>
-                </div>
+        <ListPage
+          :loading="loading && !data"
+          :error="error"
+          :error-text="t('alert.loadFailed')"
+          :empty="rows.length === 0"
+          :empty-text="t('alert.emptyHistory')"
+          @retry="run"
+        >
+          <ResponsiveTable :rows="rows" :loading="loading">
+            <el-table-column :label="t('alert.level')" width="100">
+              <template #default="{ row }">
+                <StatusBadge domain="alertLevel" :value="row.level" />
               </template>
-            </ResponsiveTable>
-          </StateBlock>
-          <el-pagination
-            v-model:current-page="page"
-            v-model:page-size="perPage"
-            class="pager"
-            layout="total, prev, pager, next"
-            :total="total"
-            @current-change="run"
-            @size-change="onPageSizeChange"
-          />
-        </section>
+            </el-table-column>
+            <el-table-column :label="t('alert.source')" width="110">
+              <template #default="{ row }">{{ sourceLabel(row.source) }}</template>
+            </el-table-column>
+            <el-table-column prop="title" :label="t('alert.colTitle')" show-overflow-tooltip />
+            <el-table-column :label="t('alert.occurrence')" width="90" align="center">
+              <template #default="{ row }">
+                <el-badge :value="row.occurrence_count" :max="999" type="warning" />
+              </template>
+            </el-table-column>
+            <el-table-column prop="last_seen" :label="t('alert.lastSeen')" width="170" show-overflow-tooltip />
+            <el-table-column :label="t('alert.resolved')" width="170" show-overflow-tooltip>
+              <template #default="{ row }">
+                <span v-if="row.resolved_at">{{ row.resolved_at }}</span>
+                <span v-else>-</span>
+              </template>
+            </el-table-column>
+            <el-table-column prop="resolved_by" :label="t('alert.resolvedBy')" width="120" />
+            <template #card="{ row }">
+              <div class="alert-card">
+                <span class="card-title">
+                  <StatusBadge domain="alertLevel" :value="row.level" />
+                  <span class="card-source">{{ sourceLabel(row.source) }}</span>
+                  {{ row.title }}
+                </span>
+                <div class="card-fields">
+                  <span>{{ t('alert.occurrence') }} {{ row.occurrence_count }}</span>
+                  <span>{{ row.last_seen }}</span>
+                  <span>{{ t('alert.resolvedBy') }}: {{ row.resolved_by || '-' }}</span>
+                </div>
+              </div>
+            </template>
+          </ResponsiveTable>
+          <template #pagination>
+            <el-pagination
+              v-model:current-page="page"
+              v-model:page-size="perPage"
+              layout="total, prev, pager, next"
+              :total="total"
+              @current-change="run"
+              @size-change="onPageSizeChange"
+            />
+          </template>
+        </ListPage>
       </el-tab-pane>
     </el-tabs>
   </div>
@@ -139,7 +135,7 @@ import { showApiError } from '@/composables/useNotify'
 import { useAsyncData } from '@/composables/useAsyncData'
 import { usePagination } from '@/composables/usePagination'
 import ResponsiveTable from '@/components/base/ResponsiveTable.vue'
-import StateBlock from '@/components/base/StateBlock.vue'
+import ListPage from '@/components/base/ListPage.vue'
 import StatusBadge from '@/components/base/StatusBadge.vue'
 import { listAlerts, resolveAlert, type AlertRecord } from '@/api/alerts'
 import { useAuthStore } from '@/stores/auth'
@@ -256,10 +252,5 @@ async function onResolve(row: AlertRecord) {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-}
-
-.pager {
-  justify-content: flex-end;
-  margin-top: 14px;
 }
 </style>

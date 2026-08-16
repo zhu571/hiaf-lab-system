@@ -5,75 +5,75 @@
     </div>
     <el-tabs v-model="tab" class="audit-tabs">
       <el-tab-pane :label="t('audit.tabEvents')" name="events">
-        <section class="panel filters-panel">
-          <div class="filters">
-            <el-input v-model="filterAction" :placeholder="t('audit.action')" clearable class="f-action" @change="onFilter" />
-            <el-input v-model="filterUserId" :placeholder="t('audit.filterUserId')" clearable class="f-user" @change="onFilter" />
-            <el-select v-model="filterActorType" :placeholder="t('audit.actorType')" clearable class="f-actor" @change="onFilter">
-              <el-option v-for="a in actorTypes" :key="a.value" :label="a.label" :value="a.value" />
-            </el-select>
-            <el-date-picker
-              v-model="timeRange"
-              type="datetimerange"
-              value-format="YYYY-MM-DDTHH:mm:ssZ"
-              :start-placeholder="t('audit.rangeStart')"
-              :end-placeholder="t('audit.rangeEnd')"
-              class="f-range"
-              @change="onFilter"
-            />
-          </div>
-        </section>
-        <section class="panel">
-          <!-- 列表三态收敛 StateBlock（S4）：首屏骨架 > 错误 > 空态 > 表格；翻页/筛选刷新时走表格 v-loading，不闪骨架 -->
-          <StateBlock
-            :loading="eventsLoading && !eventsData"
-            :error="eventsError"
-            :empty="events.length === 0"
-            :error-text="t('audit.loadFailed')"
-            :empty-text="t('audit.noRecords')"
-            @retry="loadEvents"
-          >
-            <ResponsiveTable :rows="events" :loading="eventsLoading">
-              <el-table-column :label="t('audit.time')" width="190" show-overflow-tooltip>
-                <template #default="{ row }">{{ formatDateTime(row.created_at) }}</template>
-              </el-table-column>
-              <el-table-column :label="t('audit.actorType')" width="100">
-                <template #default="{ row }">{{ actorLabel(row.actor_type) }}</template>
-              </el-table-column>
-              <el-table-column prop="username" :label="t('audit.user')" width="120" show-overflow-tooltip />
-              <el-table-column prop="method" :label="t('audit.method')" width="90" />
-              <el-table-column prop="path" :label="t('audit.path')" show-overflow-tooltip />
-              <el-table-column prop="status_code" :label="t('audit.status')" width="90" />
-              <el-table-column prop="action" :label="t('audit.action')" show-overflow-tooltip />
-              <el-table-column :label="t('audit.requestIdCol')" width="130">
-                <template #default="{ row }">
-                  <el-button link type="primary" size="small" @click="openByRequestId(row.request_id)">{{ row.request_id.slice(0, 12) }}…</el-button>
-                </template>
-              </el-table-column>
-              <template #card="{ row }">
-                <div class="audit-card">
-                  <span class="card-title"><code class="audit-method">{{ row.method }}</code> {{ row.path }}</span>
-                  <div class="card-fields">
-                    <span>{{ formatDateTime(row.created_at) }}</span>
-                    <span>HTTP {{ row.status_code }}</span>
-                    <span>{{ row.username || '-' }}</span>
-                    <span>{{ actorLabel(row.actor_type) }}</span>
-                  </div>
-                </div>
+        <!-- 列表骨架统一 base/ListPage（结构改版 R3）：tab 内嵌省略 title，用 filters/default/pagination 槽 -->
+        <ListPage
+          :loading="eventsLoading && !eventsData"
+          :error="eventsError"
+          :empty="events.length === 0"
+          :error-text="t('audit.loadFailed')"
+          :empty-text="t('audit.noRecords')"
+          @retry="loadEvents"
+        >
+          <template #filters>
+            <div class="filters">
+              <el-input v-model="filterAction" :placeholder="t('audit.action')" clearable class="f-action" @change="onFilter" />
+              <el-input v-model="filterUserId" :placeholder="t('audit.filterUserId')" clearable class="f-user" @change="onFilter" />
+              <el-select v-model="filterActorType" :placeholder="t('audit.actorType')" clearable class="f-actor" @change="onFilter">
+                <el-option v-for="a in actorTypes" :key="a.value" :label="a.label" :value="a.value" />
+              </el-select>
+              <el-date-picker
+                v-model="timeRange"
+                type="datetimerange"
+                value-format="YYYY-MM-DDTHH:mm:ssZ"
+                :start-placeholder="t('audit.rangeStart')"
+                :end-placeholder="t('audit.rangeEnd')"
+                class="f-range"
+                @change="onFilter"
+              />
+            </div>
+          </template>
+          <!-- 列表三态：首屏骨架 > 错误 > 空态 > 表格；翻页/筛选刷新时走表格 v-loading，不闪骨架 -->
+          <ResponsiveTable :rows="events" :loading="eventsLoading">
+            <el-table-column :label="t('audit.time')" width="190" show-overflow-tooltip>
+              <template #default="{ row }">{{ formatDateTime(row.created_at) }}</template>
+            </el-table-column>
+            <el-table-column :label="t('audit.actorType')" width="100">
+              <template #default="{ row }">{{ actorLabel(row.actor_type) }}</template>
+            </el-table-column>
+            <el-table-column prop="username" :label="t('audit.user')" width="120" show-overflow-tooltip />
+            <el-table-column prop="method" :label="t('audit.method')" width="90" />
+            <el-table-column prop="path" :label="t('audit.path')" show-overflow-tooltip />
+            <el-table-column prop="status_code" :label="t('audit.status')" width="90" />
+            <el-table-column prop="action" :label="t('audit.action')" show-overflow-tooltip />
+            <el-table-column :label="t('audit.requestIdCol')" width="130">
+              <template #default="{ row }">
+                <el-button link type="primary" size="small" @click="openByRequestId(row.request_id)">{{ row.request_id.slice(0, 12) }}…</el-button>
               </template>
-            </ResponsiveTable>
+            </el-table-column>
+            <template #card="{ row }">
+              <div class="audit-card">
+                <span class="card-title"><code class="audit-method">{{ row.method }}</code> {{ row.path }}</span>
+                <div class="card-fields">
+                  <span>{{ formatDateTime(row.created_at) }}</span>
+                  <span>HTTP {{ row.status_code }}</span>
+                  <span>{{ row.username || '-' }}</span>
+                  <span>{{ actorLabel(row.actor_type) }}</span>
+                </div>
+              </div>
+            </template>
+          </ResponsiveTable>
+          <template #pagination>
             <el-pagination
               v-model:current-page="page"
               v-model:page-size="perPage"
-              class="pager"
               layout="total, sizes, prev, pager, next"
               :page-sizes="[20, 50, 100]"
               :total="total"
               @current-change="loadEvents"
               @size-change="onPageSizeChange"
             />
-          </StateBlock>
-        </section>
+          </template>
+        </ListPage>
       </el-tab-pane>
       <el-tab-pane :label="t('audit.tabByRequestId')" name="byRequestId">
         <section class="panel">
@@ -122,7 +122,7 @@
 import { computed, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import ResponsiveTable from '@/components/base/ResponsiveTable.vue'
-import StateBlock from '@/components/base/StateBlock.vue'
+import ListPage from '@/components/base/ListPage.vue'
 import { getAudit, listAuditEvents, type AuditRecord } from '@/api/audit'
 import { showApiError } from '@/composables/useNotify'
 import { useAsyncData } from '@/composables/useAsyncData'
@@ -212,10 +212,6 @@ async function load() {
   margin-top: 4px;
 }
 
-.filters-panel {
-  padding: 14px 20px;
-}
-
 .filters {
   display: flex;
   flex-wrap: wrap;
@@ -236,11 +232,6 @@ async function load() {
 
 .filters .f-range {
   max-width: 360px;
-}
-
-.pager {
-  justify-content: flex-end;
-  margin-top: 14px;
 }
 
 .query-group {
