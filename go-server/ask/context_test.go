@@ -45,11 +45,12 @@ func TestChatPayload(t *testing.T) {
 func TestBuildContext(t *testing.T) {
 	db := openAskTestDB(t)
 	defer db.Close()
+	ensureAskFixture(t, db)
 	svc := NewService(NewRepository(db), db)
 
 	cleanup := func() {
 		db.Exec(`DELETE FROM daily_reports WHERE author_id = $1 AND report_date >= CURRENT_DATE - 10`, askUserID)
-		// 只清本用例项目的成员行——askUserID 是迁移 009 种子用户，其种子成员关系不能动。
+		// 只清本用例项目的成员行——fixture 项目（ASK-FIXTURE）的成员关系归 ensureAskFixture 维护。
 		db.Exec(`DELETE FROM project_members WHERE user_id = $1
 		          AND project_id IN (SELECT id FROM projects WHERE code = 'AI3-CTX-TEST')`, askUserID)
 		db.Exec(`DELETE FROM projects WHERE code = 'AI3-CTX-TEST'`)

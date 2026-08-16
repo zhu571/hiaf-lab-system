@@ -34,6 +34,18 @@ func alertTestStack(db *sql.DB, h http.Handler, resolveGuard bool) http.Handler 
 func newAlertTestEnv(t *testing.T) (*sql.DB, *fakeSender, *Service) {
 	t.Helper()
 	db := openAlertTestDB(t)
+	// 测试用户幂等自建：用户 JWT 的 ack/resolve 经 Audit 中间件写 audit_log
+	// （user_id 外键引用 users），用户不存在时审计行会静默写失败。
+	if _, err := db.Exec(
+		`INSERT INTO users (id, username, password_hash, display_name, role, must_change_pw)
+		 VALUES ($1,'alert_test_admin','x','alert 测试管理员','admin',false),
+		        ($2,'alert_test_member','x','alert 测试成员','member',false),
+		        ($3,'alert_test_viewer','x','alert 测试观察者','viewer',false),
+		        ($4,'alert_test_maintainer','x','alert 测试维护者','maintainer',false)
+		 ON CONFLICT (id) DO NOTHING`,
+		testAdminID, testMemberID, testViewerID, testMaintainerID); err != nil {
+		t.Fatal(err)
+	}
 	if _, err := db.Exec(`DELETE FROM alerts`); err != nil {
 		t.Fatal(err)
 	}
@@ -45,12 +57,15 @@ func newAlertTestEnv(t *testing.T) (*sql.DB, *fakeSender, *Service) {
 	return db, sender, svc
 }
 
-// 迁移 001 种子用户（audit_log.user_id 引用 users(id)，测试 JWT 必须用真实 UUID）。
+// 测试自建用户（audit_log.user_id 引用 users(id)，测试 JWT 必须用真实存在的 UUID；
+// 009 迁移 R7 后不再种子内置账号，由 newAlertTestEnv 显式插入）。
+// 固定 UUID 段 ae000000 独立于 seed-testdata 的 a0000000 段——若沿用种子 ID，
+// 干净库下 seed.sql 插入会撞主键，cmd/seed-testdata 测试随之失败。
 const (
-	seedAdminID      = "a0000000-0000-4000-8000-000000000001"
-	seedMemberID     = "a0000000-0000-4000-8000-000000000002"
-	seedViewerID     = "a0000000-0000-4000-8000-000000000003"
-	seedMaintainerID = "a0000000-0000-4000-8000-000000000005"
+	testAdminID      = "ae000000-0000-4000-8000-000000000001"
+	testMemberID     = "ae000000-0000-4000-8000-000000000002"
+	testViewerID     = "ae000000-0000-4000-8000-000000000003"
+	testMaintainerID = "ae000000-0000-4000-8000-000000000005"
 )
 
 // testRequest 构造带 request_id / JWT / CSRF / 幂等头的请求。
@@ -115,7 +130,7 @@ func TestReportAuthMatrix(t *testing.T) {
 	// 用户 JWT → handler 级 403（仅内部服务可调用；用户通道不可 report）。
 	rr = httptest.NewRecorder()
 	stack.ServeHTTP(rr, testRequest(t, http.MethodPost, "/api/v1/alerts/report",
-		`{"level":"warning","source":"ioc","title":"t","detail":"d"}`, alertJWT(t, seedMemberID, "alice", "member"), true, ""))
+		`{"level":"warning","source":"ioc","title":"t","detail":"d"}`, alertJWT(t, testMemberID, "alice", "member"), true, ""))
 	if rr.Code != http.StatusForbidden {
 		t.Fatalf("user jwt report: expected 403, got %d: %s", rr.Code, rr.Body.String())
 	}
@@ -186,7 +201,7 @@ func TestResolveDualChannel(t *testing.T) {
 	stack := alertTestStack(db, http.HandlerFunc(h.Resolve), true)
 	rr := httptest.NewRecorder()
 	stack.ServeHTTP(rr, testRequest(t, http.MethodPost, "/api/v1/alerts/resolve",
-		`{"id":"`+res.AlertID+`"}`, alertJWT(t, seedMemberID, "alice", "member"), true, "key-member"))
+		`{"id":"`+res.AlertID+`"}`, alertJWT(t, testMemberID, "alice", "member"), true, "key-member"))
 	if rr.Code != http.StatusForbidden {
 		t.Fatalf("member resolve: expected 403, got %d", rr.Code)
 	}
@@ -197,7 +212,7 @@ func TestResolveDualChannel(t *testing.T) {
 	// admin → 200（按 id），resolved_by=username。
 	rr = httptest.NewRecorder()
 	stack.ServeHTTP(rr, testRequest(t, http.MethodPost, "/api/v1/alerts/resolve",
-		`{"id":"`+res.AlertID+`"}`, alertJWT(t, seedAdminID, "admin1", "admin"), true, "key-admin-1"))
+		`{"id":"`+res.AlertID+`"}`, alertJWT(t, testAdminID, "admin1", "admin"), true, "key-admin-1"))
 	if rr.Code != http.StatusOK {
 		t.Fatalf("admin resolve: expected 200, got %d: %s", rr.Code, rr.Body.String())
 	}
@@ -208,7 +223,7 @@ func TestResolveDualChannel(t *testing.T) {
 	// 重复 resolve 同一 id → 幂等 200（换新幂等键）。
 	rr = httptest.NewRecorder()
 	stack.ServeHTTP(rr, testRequest(t, http.MethodPost, "/api/v1/alerts/resolve",
-		`{"id":"`+res.AlertID+`"}`, alertJWT(t, seedAdminID, "admin1", "admin"), true, "key-admin-2"))
+		`{"id":"`+res.AlertID+`"}`, alertJWT(t, testAdminID, "admin1", "admin"), true, "key-admin-2"))
 	if rr.Code != http.StatusOK {
 		t.Fatalf("idempotent resolve: expected 200, got %d", rr.Code)
 	}
@@ -219,7 +234,7 @@ func TestResolveDualChannel(t *testing.T) {
 	}
 	rr = httptest.NewRecorder()
 	stack.ServeHTTP(rr, testRequest(t, http.MethodPost, "/api/v1/alerts/resolve",
-		`{"source":"watchdog","title":"lab-server 健康检查失败"}`, alertJWT(t, seedMaintainerID, "maint1", "maintainer"), true, "key-maint"))
+		`{"source":"watchdog","title":"lab-server 健康检查失败"}`, alertJWT(t, testMaintainerID, "maint1", "maintainer"), true, "key-maint"))
 	if rr.Code != http.StatusBadRequest {
 		t.Fatalf("maintainer resolve by source: expected 400, got %d: %s", rr.Code, rr.Body.String())
 	}
@@ -227,7 +242,7 @@ func TestResolveDualChannel(t *testing.T) {
 	// maintainer 按 id → 200。
 	rr = httptest.NewRecorder()
 	stack.ServeHTTP(rr, testRequest(t, http.MethodPost, "/api/v1/alerts/resolve",
-		`{"id":"`+res.AlertID+`"}`, alertJWT(t, seedMaintainerID, "maint1", "maintainer"), true, "key-maint-id"))
+		`{"id":"`+res.AlertID+`"}`, alertJWT(t, testMaintainerID, "maint1", "maintainer"), true, "key-maint-id"))
 	if rr.Code != http.StatusOK {
 		t.Fatalf("maintainer resolve by id: expected 200, got %d: %s", rr.Code, rr.Body.String())
 	}
@@ -257,7 +272,7 @@ func TestResolveUserGuardRequirements(t *testing.T) {
 	}
 	stack := alertTestStack(db, http.HandlerFunc(h.Resolve), true)
 	body := `{"id":"` + res.AlertID + `"}`
-	admin := alertJWT(t, seedAdminID, "admin1", "admin")
+	admin := alertJWT(t, testAdminID, "admin1", "admin")
 
 	// 用户通道缺 CSRF → 403 csrf_failed。
 	rr := httptest.NewRecorder()
@@ -313,7 +328,7 @@ func TestListDetailOverHTTP(t *testing.T) {
 	// list：JWT 全员可读（member 即可），默认 active。
 	stack := alertTestStack(db, http.HandlerFunc(h.List), false)
 	rr := httptest.NewRecorder()
-	stack.ServeHTTP(rr, testRequest(t, http.MethodGet, "/api/v1/alerts", "", alertJWT(t, seedViewerID, "bob", "viewer"), false, ""))
+	stack.ServeHTTP(rr, testRequest(t, http.MethodGet, "/api/v1/alerts", "", alertJWT(t, testViewerID, "bob", "viewer"), false, ""))
 	if rr.Code != http.StatusOK {
 		t.Fatalf("list: expected 200, got %d", rr.Code)
 	}
@@ -333,7 +348,7 @@ func TestListDetailOverHTTP(t *testing.T) {
 
 	// limit 超上限 → 响应返回截断后的实际值（5000 → 200）。
 	rr = httptest.NewRecorder()
-	stack.ServeHTTP(rr, testRequest(t, http.MethodGet, "/api/v1/alerts?limit=5000", "", alertJWT(t, seedViewerID, "bob", "viewer"), false, ""))
+	stack.ServeHTTP(rr, testRequest(t, http.MethodGet, "/api/v1/alerts?limit=5000", "", alertJWT(t, testViewerID, "bob", "viewer"), false, ""))
 	if rr.Code != http.StatusOK {
 		t.Fatalf("list limit truncation: expected 200, got %d", rr.Code)
 	}
@@ -346,7 +361,7 @@ func TestListDetailOverHTTP(t *testing.T) {
 
 	// list 非法 status → 400。
 	rr = httptest.NewRecorder()
-	stack.ServeHTTP(rr, testRequest(t, http.MethodGet, "/api/v1/alerts?status=bogus", "", alertJWT(t, seedViewerID, "bob", "viewer"), false, ""))
+	stack.ServeHTTP(rr, testRequest(t, http.MethodGet, "/api/v1/alerts?status=bogus", "", alertJWT(t, testViewerID, "bob", "viewer"), false, ""))
 	if rr.Code != http.StatusBadRequest {
 		t.Fatalf("bad status: expected 400, got %d", rr.Code)
 	}
@@ -355,7 +370,7 @@ func TestListDetailOverHTTP(t *testing.T) {
 	rctx := chi.NewRouteContext()
 	rctx.URLParams.Add("id", res.AlertID)
 	stack = alertTestStack(db, http.HandlerFunc(h.Get), false)
-	req := testRequest(t, http.MethodGet, "/api/v1/alerts/"+res.AlertID, "", alertJWT(t, seedViewerID, "bob", "viewer"), false, "")
+	req := testRequest(t, http.MethodGet, "/api/v1/alerts/"+res.AlertID, "", alertJWT(t, testViewerID, "bob", "viewer"), false, "")
 	req = req.WithContext(context.WithValue(req.Context(), chi.RouteCtxKey, rctx))
 	rr = httptest.NewRecorder()
 	stack.ServeHTTP(rr, req)
@@ -369,7 +384,7 @@ func TestListDetailOverHTTP(t *testing.T) {
 	// 非法 UUID → 404（不送 PG）。
 	rctx2 := chi.NewRouteContext()
 	rctx2.URLParams.Add("id", "not-a-uuid")
-	req = testRequest(t, http.MethodGet, "/api/v1/alerts/not-a-uuid", "", alertJWT(t, seedViewerID, "bob", "viewer"), false, "")
+	req = testRequest(t, http.MethodGet, "/api/v1/alerts/not-a-uuid", "", alertJWT(t, testViewerID, "bob", "viewer"), false, "")
 	req = req.WithContext(context.WithValue(req.Context(), chi.RouteCtxKey, rctx2))
 	rr = httptest.NewRecorder()
 	stack.ServeHTTP(rr, req)
@@ -381,7 +396,7 @@ func TestListDetailOverHTTP(t *testing.T) {
 	badUUID := "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
 	rctx3 := chi.NewRouteContext()
 	rctx3.URLParams.Add("id", badUUID)
-	req = testRequest(t, http.MethodGet, "/api/v1/alerts/"+badUUID, "", alertJWT(t, seedViewerID, "bob", "viewer"), false, "")
+	req = testRequest(t, http.MethodGet, "/api/v1/alerts/"+badUUID, "", alertJWT(t, testViewerID, "bob", "viewer"), false, "")
 	req = req.WithContext(context.WithValue(req.Context(), chi.RouteCtxKey, rctx3))
 	rr = httptest.NewRecorder()
 	stack.ServeHTTP(rr, req)

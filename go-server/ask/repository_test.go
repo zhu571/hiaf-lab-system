@@ -10,16 +10,43 @@ import (
 	_ "github.com/lib/pq"
 )
 
-// 集成测试：需要 TEST_DATABASE_URL（CI/本地按 scripts/test-go.sh 应用全量迁移 001-036）。
-// 结束后清理本用例创建的行。ask_history.user_id 引用 users(id)，
-// 用例使用固定 UUID 用户（迁移 001 种子用户范围 00000000-0000-0000-0000-0000000000a1+）。
+// 集成测试：需要 TEST_DATABASE_URL（CI/本地按 scripts/test-go.sh 应用全量迁移 001-038）。
+// 结束后清理本用例创建的行。ask_history.user_id 引用 users(id)。
 
-// 用户取迁移 001 种子用户（ask_history.user_id 引用 users(id)）。
+// 测试用户与 fixture 项目自建（R7 后 009 迁移不再种子内置账号）：固定 UUID 段
+// aa/ab 避开 seed-testdata 的 a0000000/b0000000 段与其他包夹具段（7a-7d、b140 等），
+// 也避免占用种子用户 ID 干扰 cmd/seed-testdata 的「已存在即跳过」判定。
 const (
-	askUserID    = "a0000000-0000-4000-8000-000000000001"
-	askUserID2   = "a0000000-0000-4000-8000-000000000002"
-	askHistoryID = "b0000000-0000-4000-8000-000000000101"
+	askUserID  = "aa000000-0000-4000-8000-000000000001"
+	askUserID2 = "aa000000-0000-4000-8000-000000000002"
+	askProjID  = "ab000000-0000-4000-8000-000000000001"
 )
+
+// ensureAskFixture 幂等保证 ask 测试夹具存在：
+//   - askUserID：ASK-FIXTURE 项目的 active 成员（execute 行级隔离与 chat 上下文项目节的数据源）；
+//   - askUserID2：无任何项目成员关系（「他人不可读」对照）。
+func ensureAskFixture(t *testing.T, db *sql.DB) {
+	t.Helper()
+	if _, err := db.Exec(
+		`INSERT INTO users (id, username, password_hash, display_name, role, must_change_pw)
+		 VALUES ($1,'ask_test_owner','x','ask 测试用户一','member',false),
+		        ($2,'ask_test_other','x','ask 测试用户二','member',false)
+		 ON CONFLICT (id) DO NOTHING`, askUserID, askUserID2); err != nil {
+		t.Fatalf("ensure ask test users: %v", err)
+	}
+	if _, err := db.Exec(
+		`INSERT INTO projects (id, code, name, status, visibility, owner_user_id, created_by, tags_json)
+		 VALUES ($1,'ASK-FIXTURE','ask 测试项目','active','restricted',$2,$2,'["fixture"]'::jsonb)
+		 ON CONFLICT (id) DO NOTHING`, askProjID, askUserID); err != nil {
+		t.Fatalf("ensure ask test project: %v", err)
+	}
+	if _, err := db.Exec(
+		`INSERT INTO project_members (project_id, user_id, role, status, added_by)
+		 VALUES ($1,$2,'owner','active',$2)
+		 ON CONFLICT (project_id, user_id) DO NOTHING`, askProjID, askUserID); err != nil {
+		t.Fatalf("ensure ask test membership: %v", err)
+	}
+}
 
 func openAskTestDB(t *testing.T) *sql.DB {
 	t.Helper()
@@ -40,6 +67,7 @@ func openAskTestDB(t *testing.T) *sql.DB {
 func TestAskRepository(t *testing.T) {
 	db := openAskTestDB(t)
 	defer db.Close()
+	ensureAskFixture(t, db)
 	repo := NewRepository(db)
 
 	cleanup := func() {
@@ -112,6 +140,7 @@ func TestAskRepository(t *testing.T) {
 func TestAskRetention(t *testing.T) {
 	db := openAskTestDB(t)
 	defer db.Close()
+	ensureAskFixture(t, db)
 	repo := NewRepository(db)
 	svc := NewService(repo, db)
 

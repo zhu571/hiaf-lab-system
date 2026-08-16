@@ -33,6 +33,7 @@ func newAskSvc(t *testing.T, agentURL string) *Service {
 	t.Helper()
 	db := openAskTestDB(t)
 	t.Cleanup(func() { db.Close() })
+	ensureAskFixture(t, db) // Chat 落库（ask_history 外键）与上下文项目节都依赖测试用户存在
 	svc := NewService(NewRepository(db), db)
 	if agentURL != "" {
 		svc.agentURL = agentURL
