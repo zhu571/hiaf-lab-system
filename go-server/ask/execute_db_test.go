@@ -6,33 +6,65 @@ import (
 	"testing"
 )
 
-// Execute 集成测试：需要 TEST_DATABASE_URL（CI/本地按 scripts/test-go.sh 应用全量迁移 001-036，
+// Execute 集成测试：需要 TEST_DATABASE_URL（CI/本地按 scripts/test-go.sh 应用全量迁移 001-038，
 // ask_reader 角色由 033 迁移创建）。
 // 覆盖 SET LOCAL ROLE ask_reader + 只读事务 + LIMIT 封顶 + 行集序列化全链路。
-// askUserID 是迁移 009 种子 admin（haofan，三个种子项目的 owner）——行级隔离下
-// 语义等价于修复前（全部 active 项目可见）。
+// 数据自建：askUserID 仅是 fixture 项目（ASK-FIXTURE）成员——行级隔离下只见到
+// 本用例插入的行，与库内种子/其他测试夹具互不可见，全新库与旧库行为一致。
 func TestExecuteDB(t *testing.T) {
 	db := openAskTestDB(t)
 	defer db.Close()
+	ensureAskFixture(t, db)
 	svc := NewService(NewRepository(db), db)
+
+	const (
+		execLogID1  = "ac000000-0000-4000-8000-000000000001"
+		execLogID2  = "ac000000-0000-4000-8000-000000000002"
+		execDataID1 = "ac000000-0000-4000-8000-000000000011"
+	)
+	cleanup := func() {
+		db.Exec(`DELETE FROM logs WHERE id IN ($1,$2)`, execLogID1, execLogID2)
+		db.Exec(`DELETE FROM test_data WHERE id = $1`, execDataID1)
+	}
+	cleanup()
+	defer cleanup()
+
+	for _, l := range []struct{ id, content string }{
+		{execLogID1, "execute 链路日志一"},
+		{execLogID2, "execute 链路日志二"},
+	} {
+		if _, err := db.Exec(
+			`INSERT INTO logs (id, project_id, author_id, category, content, source, content_status)
+			 VALUES ($1,$2,$3,'general',$4,'manual','draft')`, l.id, askProjID, askUserID, l.content); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err := db.Exec(
+		`INSERT INTO test_data (id, project_id, data_type, measurement, value, unit)
+		 VALUES ($1,$2,'cryo','execute 链路温度',3.14,'K')`, execDataID1, askProjID); err != nil {
+		t.Fatal(err)
+	}
 
 	resp, err := svc.Execute(context.Background(), askUserID, "SELECT id, content FROM logs LIMIT 5")
 	if err != nil {
 		t.Fatalf("Execute valid sql: %v", err)
 	}
-	if resp.TableName != "logs" || resp.RowCount > 5 || len(resp.Rows) != resp.RowCount {
+	if resp.TableName != "logs" || resp.RowCount != 2 || len(resp.Rows) != resp.RowCount {
 		t.Fatalf("unexpected response: table=%q rows=%d", resp.TableName, resp.RowCount)
 	}
 	if len(resp.Columns) == 0 {
 		t.Fatal("columns missing")
 	}
 	if resp.Truncated {
-		t.Fatal("LIMIT 5 with 5 rows must not be truncated")
+		t.Fatal("2 rows with LIMIT 5 must not be truncated")
 	}
 
 	resp, err = svc.Execute(context.Background(), askUserID, "SELECT * FROM logs")
 	if err != nil {
 		t.Fatalf("Execute without limit: %v", err)
+	}
+	if resp.RowCount != 2 {
+		t.Fatalf("member sees exactly fixture rows without limit, got %d", resp.RowCount)
 	}
 	if resp.RowCount > maxRows {
 		t.Fatalf("rows over cap: %d", resp.RowCount)
@@ -45,15 +77,17 @@ func TestExecuteDB(t *testing.T) {
 		t.Fatalf("users must be rejected at parser layer, got %v", err)
 	}
 
-	// JSONB 保留结构（projects.tags_json）。
-	resp, err = svc.Execute(context.Background(), askUserID, "SELECT id, tags_json FROM projects LIMIT 1")
+	// JSONB 保留结构（projects.tags_json）。projects 表不做行级注入，
+	// 用 code 精确圈定 fixture 项目行，断言不受库内其他项目影响。
+	resp, err = svc.Execute(context.Background(), askUserID, "SELECT id, tags_json FROM projects WHERE code = 'ASK-FIXTURE' LIMIT 1")
 	if err != nil {
 		t.Fatalf("Execute jsonb: %v", err)
 	}
-	if len(resp.Rows) > 0 {
-		if v, ok := resp.Rows[0]["tags_json"]; !ok || v == nil {
-			t.Fatalf("tags_json should be preserved as JSON, got %v", resp.Rows[0])
-		}
+	if len(resp.Rows) != 1 {
+		t.Fatalf("fixture project must be visible, rows=%d", len(resp.Rows))
+	}
+	if v, ok := resp.Rows[0]["tags_json"]; !ok || v == nil {
+		t.Fatalf("tags_json should be preserved as JSON, got %v", resp.Rows[0])
 	}
 
 	// UUID 列（test_data.id）应序列化为标准 UUID 字符串而非 null。
@@ -61,13 +95,14 @@ func TestExecuteDB(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Execute uuid: %v", err)
 	}
-	if len(resp.Rows) > 0 {
-		for _, c := range []string{"id", "project_id"} {
-			v, ok := resp.Rows[0][c]
-			s, isStr := v.(string)
-			if !ok || !isStr || len(s) != 36 {
-				t.Fatalf("%s should be a 36-char UUID string, got %v", c, v)
-			}
+	if len(resp.Rows) != 1 {
+		t.Fatalf("fixture test_data row must be visible, rows=%d", len(resp.Rows))
+	}
+	for _, c := range []string{"id", "project_id"} {
+		v, ok := resp.Rows[0][c]
+		s, isStr := v.(string)
+		if !ok || !isStr || len(s) != 36 {
+			t.Fatalf("%s should be a 36-char UUID string, got %v", c, v)
 		}
 	}
 }

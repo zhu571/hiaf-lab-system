@@ -104,6 +104,7 @@ func TestExecuteHandler_ForbiddenWithoutServiceToken(t *testing.T) {
 func TestExecuteHandler_ServiceTokenChain(t *testing.T) {
 	db := openAskTestDB(t)
 	defer db.Close()
+	ensureAskFixture(t, db)
 	middleware.SetServiceToken("ask-st-0123456789abcdef")
 	t.Cleanup(func() { middleware.SetServiceToken("") })
 	h := NewHandler(NewService(NewRepository(db), db))
@@ -114,7 +115,7 @@ func TestExecuteHandler_ServiceTokenChain(t *testing.T) {
 	router.Post("/api/v1/ask/execute", h.Execute)
 
 	// 200：service token + 合法 SQL + 调用方用户（R2 行级隔离按 user_id 取可访问项目）
-	req := httptest.NewRequest(http.MethodPost, "/api/v1/ask/execute", strings.NewReader(`{"sql":"SELECT id FROM logs LIMIT 3","user_id":"a0000000-0000-4000-8000-000000000001"}`))
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/ask/execute", strings.NewReader(`{"sql":"SELECT id FROM logs LIMIT 3","user_id":"`+askUserID+`"}`))
 	req.Header.Set("Authorization", "Bearer ask-st-0123456789abcdef")
 	rec := httptest.NewRecorder()
 	router.ServeHTTP(rec, req)
@@ -166,6 +167,7 @@ func TestExecuteHandler_ServiceTokenChain(t *testing.T) {
 func TestHistoryHandlerList(t *testing.T) {
 	db := openAskTestDB(t)
 	defer db.Close()
+	ensureAskFixture(t, db)
 	middleware.SetJWTSecret([]byte("ask-handler-secret"))
 	token, err := middleware.GenerateToken(askUserID, "alice", "member", 0, []byte("ask-handler-secret"))
 	if err != nil {
