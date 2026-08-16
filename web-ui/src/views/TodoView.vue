@@ -1,53 +1,51 @@
 <template>
   <div class="page">
-    <div class="toolbar">
-      <h2>{{ t('todos.title') }}</h2>
-      <el-date-picker v-model="filters.date" type="date" value-format="YYYY-MM-DD" :clearable="false" @change="load" />
-      <el-select v-model="filters.scope" :placeholder="t('todos.scope')" @change="load">
-        <el-option :label="t('todos.scopeAll')" value="all" />
-        <el-option :label="t('todos.scopeMine')" value="mine" />
-        <el-option :label="t('todos.scopeShared')" value="shared" />
-      </el-select>
-      <el-select v-model="filters.status" :placeholder="t('todos.status')" @change="load">
-        <el-option :label="t('todos.statusOpen')" value="open" />
-        <el-option :label="t('todos.statusDone')" value="done" />
-        <el-option :label="t('todos.statusCancelled')" value="cancelled" />
-        <el-option :label="t('todos.statusAll')" value="all" />
-      </el-select>
-      <el-button type="primary" :icon="Plus" @click="openCreate">{{ t('todos.add') }}</el-button>
-    </div>
-
-    <section class="panel">
-      <!-- 列表三态收敛 StateBlock（重构 S4）：首屏骨架 > 错误重试 > 空态 > 列表；操作级错误仍走 showApiError -->
-      <StateBlock
-        :loading="loading && !todos"
-        :error="loadError"
-        :empty="!loading && !todos?.length"
-        :error-text="t('todos.loadFailed')"
-        :empty-text="t('todos.empty')"
-        @retry="load"
-      >
-        <div class="todo-list">
-          <div v-for="item in todos ?? []" :key="item.id" class="todo-row" :class="{ done: item.status === 'done' }">
-            <el-checkbox
-              :model-value="item.status === 'done'"
-              :disabled="item.status === 'cancelled' || !canComplete(item)"
-              @change="onToggleDone(item)"
-            />
-            <span class="todo-priority" :class="item.priority">{{ priorityLabel(item.priority) }}</span>
-            <span class="todo-title">{{ item.title }}</span>
-            <el-tag v-if="item.status === 'deferred'" size="small" type="warning">{{ t('todos.deferredTag') }}</el-tag>
-            <el-tag v-if="item.status === 'cancelled'" size="small" type="info">{{ t('todos.cancelledTag') }}</el-tag>
-            <span class="todo-source">{{ sourceLabel(item) }}</span>
-            <span class="todo-actions">
-              <el-button v-if="canDefer(item)" size="small" @click="onDefer(item)">{{ t('todos.defer') }}</el-button>
-              <el-button v-if="canEdit(item)" size="small" @click="openEdit(item)">{{ t('todos.edit') }}</el-button>
-              <el-button v-if="canEdit(item)" size="small" type="danger" plain @click="onDelete(item)">{{ t('todos.delete') }}</el-button>
-            </span>
-          </div>
+    <!-- 列表骨架统一 base/ListPage（结构改版 R3）：三筛选 + 新建在 actions 槽；ntfy 订阅 panel 非列表骨架，保留在 ListPage 外 -->
+    <ListPage
+      :title="t('todos.title')"
+      :loading="loading && !todos"
+      :error="loadError"
+      :empty="!loading && !todos?.length"
+      :error-text="t('todos.loadFailed')"
+      :empty-text="t('todos.empty')"
+      @retry="load"
+    >
+      <template #actions>
+        <el-date-picker v-model="filters.date" type="date" value-format="YYYY-MM-DD" :clearable="false" @change="load" />
+        <el-select v-model="filters.scope" :placeholder="t('todos.scope')" @change="load">
+          <el-option :label="t('todos.scopeAll')" value="all" />
+          <el-option :label="t('todos.scopeMine')" value="mine" />
+          <el-option :label="t('todos.scopeShared')" value="shared" />
+        </el-select>
+        <el-select v-model="filters.status" :placeholder="t('todos.status')" @change="load">
+          <el-option :label="t('todos.statusOpen')" value="open" />
+          <el-option :label="t('todos.statusDone')" value="done" />
+          <el-option :label="t('todos.statusCancelled')" value="cancelled" />
+          <el-option :label="t('todos.statusAll')" value="all" />
+        </el-select>
+        <el-button type="primary" :icon="Plus" @click="openCreate">{{ t('todos.add') }}</el-button>
+      </template>
+      <!-- 列表三态经 ListPage 内 StateBlock：首屏骨架 > 错误重试 > 空态 > 列表；操作级错误仍走 showApiError -->
+      <div class="todo-list">
+        <div v-for="item in todos ?? []" :key="item.id" class="todo-row" :class="{ done: item.status === 'done' }">
+          <el-checkbox
+            :model-value="item.status === 'done'"
+            :disabled="item.status === 'cancelled' || !canComplete(item)"
+            @change="onToggleDone(item)"
+          />
+          <span class="todo-priority" :class="item.priority">{{ priorityLabel(item.priority) }}</span>
+          <span class="todo-title">{{ item.title }}</span>
+          <el-tag v-if="item.status === 'deferred'" size="small" type="warning">{{ t('todos.deferredTag') }}</el-tag>
+          <el-tag v-if="item.status === 'cancelled'" size="small" type="info">{{ t('todos.cancelledTag') }}</el-tag>
+          <span class="todo-source">{{ sourceLabel(item) }}</span>
+          <span class="todo-actions">
+            <el-button v-if="canDefer(item)" size="small" @click="onDefer(item)">{{ t('todos.defer') }}</el-button>
+            <el-button v-if="canEdit(item)" size="small" @click="openEdit(item)">{{ t('todos.edit') }}</el-button>
+            <el-button v-if="canEdit(item)" size="small" type="danger" plain @click="onDelete(item)">{{ t('todos.delete') }}</el-button>
+          </span>
         </div>
-      </StateBlock>
-    </section>
+      </div>
+    </ListPage>
 
     <section class="panel subscribe-panel">
       <div class="panel-head">
@@ -143,7 +141,7 @@ import {
   type Todo
 } from '@/api/todos'
 import { listProjects, type Project } from '@/api/projects'
-import StateBlock from '@/components/base/StateBlock.vue'
+import ListPage from '@/components/base/ListPage.vue'
 import { useAsyncData } from '@/composables/useAsyncData'
 import { showApiError } from '@/composables/useNotify'
 import { statusMetaFor } from '@/utils/statusMeta'

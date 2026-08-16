@@ -13,8 +13,16 @@
       </el-tab-pane>
 
       <el-tab-pane :label="t('testData.list')" name="list">
-        <div class="tab-stack">
-          <section class="panel filters-panel">
+        <!-- 列表骨架统一 base/ListPage（结构改版 R3）：tab 内嵌省略 title；三态经 ListPage 内 StateBlock -->
+        <ListPage
+          :loading="loading && !items"
+          :error="error"
+          :empty="!items?.length"
+          :error-text="t('testData.loadFailed')"
+          :empty-text="t('testData.empty')"
+          @retry="run"
+        >
+          <template #filters>
             <div class="filters">
               <el-select v-model="dataType" :placeholder="t('testData.dataType')" @change="onFilter">
                 <el-option :label="t('testData.allTypes')" value="" />
@@ -25,67 +33,56 @@
                 <el-option v-for="q in qualities" :key="q" :label="q" :value="q" />
               </el-select>
             </div>
-          </section>
-
-          <section class="panel">
-            <StateBlock
-              :loading="loading && !items"
-              :error="error"
-              :empty="!items?.length"
-              :error-text="t('testData.loadFailed')"
-              :empty-text="t('testData.empty')"
-              @retry="run"
-            >
-              <ResponsiveTable :rows="items ?? []" :loading="loading">
-                <el-table-column :label="t('testData.measuredAt')" width="170">
-                  <template #default="{ row }">{{ formatDateTime(row.measured_at) }}</template>
-                </el-table-column>
-                <el-table-column prop="data_type" :label="t('testData.dataType')" width="110" />
-                <el-table-column prop="measurement" :label="t('testData.measurement')" min-width="140" />
-                <el-table-column :label="t('testData.value')" width="130">
-                  <template #default="{ row }">{{ row.value }}{{ row.unit ? ` ${row.unit}` : '' }}</template>
-                </el-table-column>
-                <el-table-column :label="t('testData.quality')" width="100">
-                  <template #default="{ row }">
-                    <StatusBadge domain="testQuality" :value="row.quality" />
-                  </template>
-                </el-table-column>
-                <el-table-column prop="source" :label="t('testData.source')" width="100" />
-                <el-table-column :label="t('testData.notes')" min-width="140" show-overflow-tooltip>
-                  <template #default="{ row }">{{ row.notes || '—' }}</template>
-                </el-table-column>
-                <el-table-column v-if="!isViewer" :label="t('testData.actions')" width="110">
-                  <template #default="{ row }">
-                    <el-button size="small" type="danger" plain :disabled="row.quality === 'invalid'" @click="invalidate(row)">{{ t('testData.markInvalid') }}</el-button>
-                  </template>
-                </el-table-column>
-                <template #card="{ row }">
-                  <div class="td-card">
-                    <span class="card-title">{{ row.measurement }}</span>
-                    <div class="card-fields">
-                      <span>{{ row.data_type }}</span>
-                      <span>{{ formatDateTime(row.measured_at) }}</span>
-                      <span>{{ row.value }}{{ row.unit ? ` ${row.unit}` : '' }}</span>
-                      <StatusBadge domain="testQuality" :value="row.quality" />
-                    </div>
-                    <div class="card-actions">
-                      <el-button v-if="!isViewer" size="small" type="danger" plain :disabled="row.quality === 'invalid'" @click="invalidate(row)">{{ t('testData.markInvalid') }}</el-button>
-                    </div>
-                  </div>
-                </template>
-              </ResponsiveTable>
-              <el-pagination
-                v-model:current-page="page"
-                v-model:page-size="perPage"
-                class="pager"
-                layout="total, prev, pager, next"
-                :total="total"
-                @current-change="run"
-                @size-change="(n: number) => { onSizeChange(n); run() }"
-              />
-            </StateBlock>
-          </section>
-        </div>
+          </template>
+          <ResponsiveTable :rows="items ?? []" :loading="loading">
+            <el-table-column :label="t('testData.measuredAt')" width="170">
+              <template #default="{ row }">{{ formatDateTime(row.measured_at) }}</template>
+            </el-table-column>
+            <el-table-column prop="data_type" :label="t('testData.dataType')" width="110" />
+            <el-table-column prop="measurement" :label="t('testData.measurement')" min-width="140" />
+            <el-table-column :label="t('testData.value')" width="130">
+              <template #default="{ row }">{{ row.value }}{{ row.unit ? ` ${row.unit}` : '' }}</template>
+            </el-table-column>
+            <el-table-column :label="t('testData.quality')" width="100">
+              <template #default="{ row }">
+                <StatusBadge domain="testQuality" :value="row.quality" />
+              </template>
+            </el-table-column>
+            <el-table-column prop="source" :label="t('testData.source')" width="100" />
+            <el-table-column :label="t('testData.notes')" min-width="140" show-overflow-tooltip>
+              <template #default="{ row }">{{ row.notes || '—' }}</template>
+            </el-table-column>
+            <el-table-column v-if="!isViewer" :label="t('testData.actions')" width="110">
+              <template #default="{ row }">
+                <el-button size="small" type="danger" plain :disabled="row.quality === 'invalid'" @click="invalidate(row)">{{ t('testData.markInvalid') }}</el-button>
+              </template>
+            </el-table-column>
+            <template #card="{ row }">
+              <div class="td-card">
+                <span class="card-title">{{ row.measurement }}</span>
+                <div class="card-fields">
+                  <span>{{ row.data_type }}</span>
+                  <span>{{ formatDateTime(row.measured_at) }}</span>
+                  <span>{{ row.value }}{{ row.unit ? ` ${row.unit}` : '' }}</span>
+                  <StatusBadge domain="testQuality" :value="row.quality" />
+                </div>
+                <div class="card-actions">
+                  <el-button v-if="!isViewer" size="small" type="danger" plain :disabled="row.quality === 'invalid'" @click="invalidate(row)">{{ t('testData.markInvalid') }}</el-button>
+                </div>
+              </div>
+            </template>
+          </ResponsiveTable>
+          <template #pagination>
+            <el-pagination
+              v-model:current-page="page"
+              v-model:page-size="perPage"
+              layout="total, prev, pager, next"
+              :total="total"
+              @current-change="run"
+              @size-change="(n: number) => { onSizeChange(n); run() }"
+            />
+          </template>
+        </ListPage>
       </el-tab-pane>
 
       <el-tab-pane :label="t('testData.chart')" name="chart">
@@ -138,7 +135,7 @@ import { useAsyncData } from '@/composables/useAsyncData'
 import { usePagination } from '@/composables/usePagination'
 import { useTheme } from '@/composables/useTheme'
 import ResponsiveTable from '@/components/base/ResponsiveTable.vue'
-import StateBlock from '@/components/base/StateBlock.vue'
+import ListPage from '@/components/base/ListPage.vue'
 import StatusBadge from '@/components/base/StatusBadge.vue'
 import TestDataBatchEditor from '@/components/business/TestDataBatchEditor.vue'
 import { buildChartGroups, chartPalette, type ChartGroup } from '@/utils/chartTheme'
@@ -287,11 +284,6 @@ async function invalidate(row: TestData) {
   margin-bottom: 16px;
 }
 
-.tab-stack {
-  display: grid;
-  gap: 20px;
-}
-
 .panel-title {
   font-size: var(--fs-title-sm);
   margin-bottom: 14px;
@@ -302,10 +294,6 @@ async function invalidate(row: TestData) {
   font-weight: 400;
 }
 
-.filters-panel {
-  padding: 14px 20px;
-}
-
 .filters {
   display: flex;
   flex-wrap: wrap;
@@ -314,11 +302,6 @@ async function invalidate(row: TestData) {
 
 .filters .el-select {
   width: 160px;
-}
-
-.pager {
-  justify-content: flex-end;
-  margin-top: 14px;
 }
 
 .chart-panel {

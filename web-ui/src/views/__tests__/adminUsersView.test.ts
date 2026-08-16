@@ -76,18 +76,18 @@ describe('AdminUsersView 用户列表', () => {
     expect(actionButtons).toEqual(expect.arrayContaining(['角色变更', '重置密码', '停用']))
   })
 
-  it('admin 专属操作：确认后调 updateUser（停用/启用），加载失败 el-alert + 重试', async () => {
+  it('admin 专属操作：确认后调 updateUser（停用/启用），加载失败 StateBlock 错误 + 重试', async () => {
     vi.mocked(listUsers)
       .mockRejectedValueOnce(new Error('boom'))
       .mockResolvedValueOnce([makeUser({ id: 'user_02', username: 'zhangsan', role: 'viewer' })])
     vi.mocked(updateUser).mockResolvedValue(makeUser({ id: 'user_02', disabled: true }))
     const wrapper = await mountView()
     await flushPromises()
-    expect(wrapper.find('.load-error').exists()).toBe(true)
+    expect(wrapper.find('.state-block-error').exists()).toBe(true)
     await wrapper.findAll('button').find((b) => b.text().trim() === '重试')!.trigger('click')
     await flushPromises()
     expect(listUsers).toHaveBeenCalledTimes(2)
-    expect(wrapper.find('.load-error').exists()).toBe(false)
+    expect(wrapper.find('.state-block-error').exists()).toBe(false)
     // 停用按钮（ElMessageBox.confirm 默认 resolve）→ updateUser({disabled:true})
     const stops = wrapper.findAll('button').filter((b) => b.text().trim() === '停用')
 

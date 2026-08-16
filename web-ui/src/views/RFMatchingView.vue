@@ -1,7 +1,11 @@
 <template>
-  <div class="page">
-    <div class="toolbar">
-      <h2>{{ t('rfMatching.title') }}</h2>
+  <!-- 列表骨架统一 base/ListPage（结构改版 R3）：筛选控件在 actions 槽左段；列表错误态收口 StateBlock -->
+  <ListPage
+    :title="t('rfMatching.title')"
+    :error="error ? { message: error } : null"
+    @retry="load"
+  >
+    <template #actions>
       <el-select v-model="device" class="filter-select" :placeholder="t('rfMatching.device')" @change="onFilter">
         <el-option :label="t('rfMatching.allDevices')" value="" />
         <el-option v-for="d in devices" :key="d" :label="d" :value="d" />
@@ -11,73 +15,67 @@
         <el-option v-for="s in statuses" :key="s" :label="s" :value="s" />
       </el-select>
       <el-button v-if="!isViewer" type="primary" @click="openDialog">{{ t('rfMatching.create') }}</el-button>
-    </div>
-
-    <section class="panel">
-      <el-alert v-if="error" :title="error" type="error" show-icon :closable="false">
-        <el-button size="small" @click="load">{{ t('rfMatching.retry') }}</el-button>
-      </el-alert>
-      <template v-else>
-        <ResponsiveTable :rows="items" :loading="loading" :row-class-name="rowClass">
-          <el-table-column prop="device" :label="t('rfMatching.device')" width="120" />
-          <el-table-column prop="frequency_mhz" :label="t('rfMatching.frequency')" width="110" />
-          <el-table-column :label="t('rfMatching.s11')" width="90">
-            <template #default="{ row }">{{ row.s11 == null ? '—' : row.s11 }}</template>
-          </el-table-column>
-          <el-table-column :label="t('rfMatching.capacitance')" min-width="120" show-overflow-tooltip>
-            <template #default="{ row }">{{ row.capacitance_text || '—' }}</template>
-          </el-table-column>
-          <el-table-column :label="t('rfMatching.status')" width="150">
-            <template #default="{ row }">
-              <el-tag v-if="row.status" :type="statusTag(row.status)" size="small" effect="light">{{ row.status }}</el-tag>
-              <span v-else>—</span>
-              <el-tooltip v-if="row.is_void" :content="row.void_reason ? t('rfMatching.voidReason', { reason: row.void_reason }) : t('rfMatching.voidedRecord')" placement="top">
-                <el-tag class="void-tag" type="info" size="small" effect="plain">{{ t('rfMatching.voided') }}</el-tag>
-              </el-tooltip>
-            </template>
-          </el-table-column>
-          <el-table-column :label="t('rfMatching.measuredAt')" width="170">
-            <template #default="{ row }">{{ formatDateTime(row.measured_at) }}</template>
-          </el-table-column>
-          <el-table-column :label="t('rfMatching.measuredBy')" width="110">
-            <template #default="{ row }">{{ row.measured_by || '—' }}</template>
-          </el-table-column>
-          <el-table-column v-if="!isViewer" :label="t('rfMatching.actions')" width="100">
-            <template #default="{ row }">
-              <el-button size="small" type="danger" plain :disabled="row.is_void" @click="voidRecord(row)">{{ t('rfMatching.void') }}</el-button>
-            </template>
-          </el-table-column>
-          <template #empty>
-            <el-empty :description="t('rfMatching.empty')" />
-          </template>
-          <template #card="{ row }">
-            <div class="rf-card" :class="{ void: row.is_void }">
-              <span class="card-title">{{ row.device }} · {{ row.frequency_mhz }} MHz</span>
-              <div class="card-fields">
-                <span>{{ formatDateTime(row.measured_at) }}</span>
-                <span>s11: {{ row.s11 == null ? '—' : row.s11 }}</span>
-                <span>{{ row.capacitance_text || '—' }}</span>
-                <el-tag v-if="row.status" :type="statusTag(row.status)" size="small" effect="light">{{ row.status }}</el-tag>
-                <el-tag v-if="row.is_void" type="info" size="small" effect="plain">{{ t('rfMatching.voided') }}</el-tag>
-              </div>
-              <div class="card-actions">
-                <el-button v-if="!isViewer" size="small" type="danger" plain :disabled="row.is_void" @click="voidRecord(row)">{{ t('rfMatching.void') }}</el-button>
-              </div>
-            </div>
-          </template>
-        </ResponsiveTable>
-        <el-pagination
-          v-model:current-page="page"
-          class="pager"
-          layout="total, prev, pager, next"
-          :page-size="perPage"
-          :total="total"
-          @current-change="load"
-        />
+    </template>
+    <ResponsiveTable :rows="items" :loading="loading" :row-class-name="rowClass">
+      <el-table-column prop="device" :label="t('rfMatching.device')" width="120" />
+      <el-table-column prop="frequency_mhz" :label="t('rfMatching.frequency')" width="110" />
+      <el-table-column :label="t('rfMatching.s11')" width="90">
+        <template #default="{ row }">{{ row.s11 == null ? '—' : row.s11 }}</template>
+      </el-table-column>
+      <el-table-column :label="t('rfMatching.capacitance')" min-width="120" show-overflow-tooltip>
+        <template #default="{ row }">{{ row.capacitance_text || '—' }}</template>
+      </el-table-column>
+      <el-table-column :label="t('rfMatching.status')" width="150">
+        <template #default="{ row }">
+          <el-tag v-if="row.status" :type="statusTag(row.status)" size="small" effect="light">{{ row.status }}</el-tag>
+          <span v-else>—</span>
+          <el-tooltip v-if="row.is_void" :content="row.void_reason ? t('rfMatching.voidReason', { reason: row.void_reason }) : t('rfMatching.voidedRecord')" placement="top">
+            <el-tag class="void-tag" type="info" size="small" effect="plain">{{ t('rfMatching.voided') }}</el-tag>
+          </el-tooltip>
+        </template>
+      </el-table-column>
+      <el-table-column :label="t('rfMatching.measuredAt')" width="170">
+        <template #default="{ row }">{{ formatDateTime(row.measured_at) }}</template>
+      </el-table-column>
+      <el-table-column :label="t('rfMatching.measuredBy')" width="110">
+        <template #default="{ row }">{{ row.measured_by || '—' }}</template>
+      </el-table-column>
+      <el-table-column v-if="!isViewer" :label="t('rfMatching.actions')" width="100">
+        <template #default="{ row }">
+          <el-button size="small" type="danger" plain :disabled="row.is_void" @click="voidRecord(row)">{{ t('rfMatching.void') }}</el-button>
+        </template>
+      </el-table-column>
+      <template #empty>
+        <el-empty :description="t('rfMatching.empty')" />
       </template>
-    </section>
+      <template #card="{ row }">
+        <div class="rf-card" :class="{ void: row.is_void }">
+          <span class="card-title">{{ row.device }} · {{ row.frequency_mhz }} MHz</span>
+          <div class="card-fields">
+            <span>{{ formatDateTime(row.measured_at) }}</span>
+            <span>s11: {{ row.s11 == null ? '—' : row.s11 }}</span>
+            <span>{{ row.capacitance_text || '—' }}</span>
+            <el-tag v-if="row.status" :type="statusTag(row.status)" size="small" effect="light">{{ row.status }}</el-tag>
+            <el-tag v-if="row.is_void" type="info" size="small" effect="plain">{{ t('rfMatching.voided') }}</el-tag>
+          </div>
+          <div class="card-actions">
+            <el-button v-if="!isViewer" size="small" type="danger" plain :disabled="row.is_void" @click="voidRecord(row)">{{ t('rfMatching.void') }}</el-button>
+          </div>
+        </div>
+      </template>
+    </ResponsiveTable>
+    <template #pagination>
+      <el-pagination
+        v-model:current-page="page"
+        layout="total, prev, pager, next"
+        :page-size="perPage"
+        :total="total"
+        @current-change="load"
+      />
+    </template>
+  </ListPage>
 
-    <el-dialog v-model="dialog" :title="t('rfMatching.dialogTitle')" width="640">
+  <el-dialog v-model="dialog" :title="t('rfMatching.dialogTitle')" width="640">
       <el-form label-position="top" @submit.prevent>
         <div class="form-grid">
           <el-form-item :label="t('rfMatching.device')" required>
@@ -154,7 +152,6 @@
         <el-button type="primary" :loading="submitting" @click="create">{{ t('rfMatching.save') }}</el-button>
       </template>
     </el-dialog>
-  </div>
 </template>
 
 <script setup lang="ts">
@@ -165,6 +162,7 @@ import { ElMessage, ElMessageBox } from 'element-plus'
 import { createRFMatching, deleteRFMatching, listRFMatching, type RFMatchingPayload, type RFMatchingRecord } from '../api/rfmatch'
 import { useAuthStore } from '../stores/auth'
 import { showApiError } from '../composables/useNotify'
+import ListPage from '@/components/base/ListPage.vue'
 import ResponsiveTable from '@/components/base/ResponsiveTable.vue'
 import { formatDateTime } from '@/utils/datetime'
 
@@ -231,8 +229,8 @@ async function load() {
     items.value = data.items ?? []
     total.value = data.total
   } catch (err) {
+    // 列表级错误收口 StateBlock（R3）：error ref 交 ListPage 展示并重试，不再 toast
     error.value = err instanceof Error ? err.message : t('rfMatching.loadFailed')
-    showApiError(err, t('rfMatching.loadFailed'))
   } finally {
     loading.value = false
   }
@@ -340,11 +338,6 @@ function statusTag(v: string): 'success' | 'warning' | 'danger' | 'info' {
 <style scoped>
 .filter-select {
   width: 150px;
-}
-
-.pager {
-  justify-content: flex-end;
-  margin-top: 14px;
 }
 
 .void-tag {

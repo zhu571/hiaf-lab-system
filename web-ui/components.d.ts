@@ -58,6 +58,7 @@ declare module 'vue' {
     ElUpload: typeof import('element-plus/es')['ElUpload']
     FormDialog: typeof import('./src/components/base/FormDialog.vue')['default']
     InstrumentAiChat: typeof import('./src/components/business/InstrumentAiChat.vue')['default']
+    ListPage: typeof import('./src/components/base/ListPage.vue')['default']
     MarkdownView: typeof import('./src/components/business/MarkdownView.vue')['default']
     NotificationCenter: typeof import('./src/components/business/NotificationCenter.vue')['default']
     NotificationPanel: typeof import('./src/components/business/NotificationPanel.vue')['default']

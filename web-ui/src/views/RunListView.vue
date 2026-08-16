@@ -13,11 +13,8 @@
       </div>
     </div>
     <section v-loading="loading" class="panel list-panel">
-      <div v-if="error" class="error-box">
-        <el-alert :title="error" type="error" show-icon :closable="false" />
-        <el-button @click="load">{{ t('runList.retry') }}</el-button>
-      </div>
-      <template v-else>
+      <!-- 列表错误态收口 StateBlock（结构改版 R3 §4.3）：错误重试 > 内容；加载态仍走 panel v-loading -->
+      <StateBlock :error="error ? { message: error } : null" @retry="load">
         <el-empty v-if="!runs.length && !loading" :description="t('runList.empty')" />
         <div v-else class="run-grid">
           <button v-for="run in runs" :key="run.id" class="run-card" @click="open(run)">
@@ -44,7 +41,7 @@
           :total="total"
           @current-change="load"
         />
-      </template>
+      </StateBlock>
     </section>
     <el-dialog v-model="createDialog" :title="t('runList.create')" width="620">
       <el-form label-position="top">
@@ -134,6 +131,7 @@ import { useRoute, useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import { ElMessage } from 'element-plus'
 import StatusBadge from '@/components/base/StatusBadge.vue'
+import StateBlock from '@/components/base/StateBlock.vue'
 import StepItemsEditor from '@/components/business/StepItemsEditor.vue'
 import { applyRunTemplate, createRun, listRuns, type ExperimentRun, type RunPayload } from '../api/runs'
 import { createTemplate, generateSteps, type StepTemplateItem } from '../api/stepTemplates'
@@ -231,8 +229,8 @@ async function load() {
     runs.value = data.items ?? []
     total.value = data.total
   } catch (err) {
+    // 列表级错误收口 StateBlock（R3）：error ref 交 StateBlock 展示并重试，不再 toast
     error.value = err instanceof Error ? err.message : t('runList.loadFailed')
-    showApiError(err, t('runList.loadFailed'))
   } finally {
     loading.value = false
   }
@@ -470,13 +468,6 @@ async function saveAndApplyTemplate() {
 
 .list-panel {
   min-height: 240px;
-}
-
-.error-box {
-  display: grid;
-  gap: var(--space-3);
-  justify-items: center;
-  padding: 32px 0;
 }
 
 .run-grid {
