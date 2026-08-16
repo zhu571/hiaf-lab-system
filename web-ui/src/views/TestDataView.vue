@@ -94,6 +94,8 @@
           <template v-if="chartGroups.length">
             <div class="chart-scroll">
             <svg class="trend-chart" :viewBox="`0 0 ${CHART_W} ${CHART_H}`" preserveAspectRatio="xMidYMid meet">
+              <line v-for="y in GRID_Y" :key="y" class="grid-line" :x1="PAD_X" :y1="y" :x2="CHART_W - PAD_X" :y2="y" />
+              <text v-for="tick in yTicks" :key="tick.y" class="tick" :x="PAD_X - 4" :y="tick.y" text-anchor="end" dominant-baseline="middle">{{ tick.label }}</text>
               <line class="axis" :x1="PAD_X" :y1="CHART_H - PAD_Y" :x2="CHART_W - PAD_X" :y2="CHART_H - PAD_Y" />
               <line class="axis" :x1="PAD_X" :y1="PAD_Y" :x2="PAD_X" :y2="CHART_H - PAD_Y" />
               <g v-for="group in chartGroups" :key="group.name">
@@ -106,7 +108,7 @@
                   stroke-linejoin="round"
                   stroke-width="2"
                 />
-                <circle v-for="(c, i) in chartCoords(group)" :key="i" :cx="c.x" :cy="c.y" :fill="group.color" r="2" />
+                <circle v-for="(c, i) in chartCoords(group)" :key="i" class="dot" :cx="c.x" :cy="c.y" :fill="group.color" r="2" />
               </g>
             </svg>
             </div>
@@ -164,8 +166,11 @@ const activeTab = ref(isViewer.value ? 'list' : 'entry')
 // Trend chart: viewBox coordinates; palette/grouping 收敛到 utils/chartTheme.ts（P15 去重）
 const CHART_W = 640
 const CHART_H = 240
-const PAD_X = 28
+// S4 网格刻度：PAD_X 28→44 为 y 轴刻度文字让位（11px 标签右对齐于 PAD_X-4）
+const PAD_X = 44
 const PAD_Y = 20
+// 3 条横向网格虚线 y 坐标（绘图区四等分）
+const GRID_Y = [1, 2, 3].map((k) => PAD_Y + (k * (CHART_H - 2 * PAD_Y)) / 4)
 
 // themeState 仅作依赖登记（美术 §3.6 SVG 联动）：主题切换 → computed 重算 → chartPalette 取新主题计算色，
 // 系列色经 :stroke/:fill/legend-dot 内联样式自动更新，无需重建 SVG
@@ -179,6 +184,17 @@ const chartGroups = computed<ChartGroup[]>(() => {
     }),
     chartPalette()
   )
+})
+
+// S4 y 轴 min/max 刻度：取全部序列的全局值域（各序列按自身值域归一，刻度作整体读数参照）
+const yTicks = computed(() => {
+  const values = chartGroups.value.flatMap((g) => g.points.map((p) => p.value))
+  if (values.length === 0) return []
+  const fmt = (v: number) => (Number.isInteger(v) ? String(v) : String(Math.round(v * 100) / 100))
+  return [
+    { y: PAD_Y, label: fmt(Math.max(...values)) },
+    { y: CHART_H - PAD_Y, label: fmt(Math.min(...values)) }
+  ]
 })
 
 function chartCoords(group: ChartGroup) {
@@ -319,6 +335,21 @@ async function invalidate(row: TestData) {
 .axis {
   stroke: var(--border-strong);
   stroke-width: 1;
+}
+
+.grid-line {
+  stroke: var(--border);
+  stroke-dasharray: 3 4;
+  stroke-width: 1;
+}
+
+.tick {
+  fill: var(--text-3);
+  font-size: 11px;
+}
+
+.dot:hover {
+  r: 3;
 }
 
 @media (max-width: 768px) {

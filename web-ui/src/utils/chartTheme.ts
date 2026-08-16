@@ -96,18 +96,24 @@ export function refreshDefaults(): void {
   setScaleDefaults(Chart.defaults.scales.linear, cssVar('--text-3'))
   setScaleDefaults(Chart.defaults.scales.category, cssVar('--text-3'))
 
+  // S4 全局曲线化：折线 tension 0.3 / borderWidth 2（开关量阶梯序列由组件侧显式 tension: 0 豁免）
+  Chart.defaults.elements.line.tension = 0.3
+  Chart.defaults.elements.line.borderWidth = 2
+
   // 图例 bottom + pointStyle（沿用 SensorTrendChart.vue:222-226 现风格）
   Chart.defaults.plugins.legend.position = 'bottom'
   Chart.defaults.plugins.legend.labels.usePointStyle = true
   Chart.defaults.plugins.legend.labels.boxWidth = 8
   Chart.defaults.plugins.legend.labels.boxHeight = 8
 
-  // tooltip 底 surface、文字 text-1、边框 border
+  // tooltip 底 surface、文字 text-1、边框 border（S4：圆角 8 / 内边距 10）
   Chart.defaults.plugins.tooltip.backgroundColor = cssVar('--surface')
   Chart.defaults.plugins.tooltip.titleColor = cssVar('--text-1')
   Chart.defaults.plugins.tooltip.bodyColor = cssVar('--text-1')
   Chart.defaults.plugins.tooltip.borderColor = cssVar('--border')
   Chart.defaults.plugins.tooltip.borderWidth = 1
+  Chart.defaults.plugins.tooltip.cornerRadius = 8
+  Chart.defaults.plugins.tooltip.padding = 10
 }
 
 /**

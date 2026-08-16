@@ -33,6 +33,7 @@ vi.mock('chart.js', () => {
       color: '',
       borderColor: '',
       font: { family: '', size: 12 },
+      elements: { line: {} },
       scales: { linear: {}, category: {} },
       plugins: { legend: { position: '', labels: {} }, tooltip: {} }
     }

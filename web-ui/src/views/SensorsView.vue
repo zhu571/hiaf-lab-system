@@ -402,7 +402,7 @@ function staleLevel(time?: string): 'warning' | 'danger' | null {
 
 .reading-value {
   color: var(--text-1);
-  font-size: 20px;
+  font-size: var(--fs-metric);
   font-variant-numeric: tabular-nums;
 }
 

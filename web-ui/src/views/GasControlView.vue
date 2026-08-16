@@ -205,7 +205,8 @@ function createChart() {
   const datasets: ChartDataset<'line'>[] = [
     { label: 'A1 (Pa)', data: [], borderColor: p[0], yAxisID: 'pressure', pointRadius: 0 },
     { label: 'Setpoint (Pa)', data: [], borderColor: p[2], borderDash: [6, 4], yAxisID: 'pressure', pointRadius: 0 },
-    { label: t('gasControl.chartValve'), data: [], borderColor: p[1], yAxisID: 'valve', pointRadius: 0 }
+    // 阀位是开关量（S4 阶梯序列豁免）：显式 tension: 0 防全局曲线化造成误读
+    { label: t('gasControl.chartValve'), data: [], borderColor: p[1], yAxisID: 'valve', pointRadius: 0, tension: 0 }
   ]
   chart = new Chart(chartCanvas.value, {
     type: 'line',
