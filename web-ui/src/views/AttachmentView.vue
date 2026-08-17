@@ -38,7 +38,7 @@
         @retry="run"
       >
         <div v-loading="loading" class="list-area">
-          <div v-if="items.length" class="card-grid">
+          <CardGrid v-if="items.length" min="200px">
             <div v-for="att in items" :key="att.id" class="att-card">
               <div class="thumb">
                 <img v-if="thumbUrls[att.id]" :src="thumbUrls[att.id]" :alt="att.original_name" />
@@ -57,7 +57,7 @@
                 </template>
               </div>
             </div>
-          </div>
+          </CardGrid>
           <el-pagination
             v-if="total > 0"
             v-model:current-page="page"
@@ -105,6 +105,7 @@ import { showApiError } from '@/composables/useNotify'
 import { useAsyncData } from '@/composables/useAsyncData'
 import { usePagination } from '@/composables/usePagination'
 import StateBlock from '@/components/base/StateBlock.vue'
+import CardGrid from '@/components/base/CardGrid.vue'
 import FormDialog from '@/components/base/FormDialog.vue'
 import { formatDateTime } from '@/utils/datetime'
 
@@ -302,11 +303,7 @@ function fmtSize(size: number) {
   min-height: 120px;
 }
 
-.card-grid {
-  display: grid;
-  gap: 16px;
-  grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
-}
+/* 网格本体已收口 base/CardGrid（R5）：min 200px + gap --space-4 等值原 .card-grid */
 
 .att-card {
   background: var(--surface-2);

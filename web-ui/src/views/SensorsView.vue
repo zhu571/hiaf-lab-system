@@ -13,11 +13,8 @@
     </div>
 
     <!-- 最新读数 -->
-    <section class="panel">
-      <div class="panel-head">
-        <span class="panel-icon"><el-icon><Odometer /></el-icon></span>
-        <h3 class="panel-title">{{ t('sensors.latest') }}</h3>
-        <span class="panel-meta">{{ t('sensors.countInfo', { n: latestPoints.length }) }}</span>
+    <DashboardPanel :title="t('sensors.latest')" :icon="Odometer" :meta="t('sensors.countInfo', { n: latestPoints.length })">
+      <template #actions>
         <span class="panel-meta">{{ t('sensors.lastUpdated', { time: lastUpdatedText }) }}</span>
         <span class="muted measurement-label">{{ t('sensors.measurementLabel') }}</span>
         <el-select
@@ -31,10 +28,10 @@
         >
           <el-option v-for="m in MEASUREMENTS" :key="m.value" :label="m.label" :value="m.value" />
         </el-select>
-      </div>
+      </template>
       <!-- 错误态收敛 StateBlock（§3.8）：展示条件不变——仅错误时面板内警示 + 重试，旧读数网格保留在下方 -->
       <StateBlock v-if="latestAsyncError" :error="latestAsyncError" @retry="loadLatest()" />
-      <div v-loading="latestLoading" class="reading-grid">
+      <CardGrid v-loading="latestLoading" min="170px" gap="var(--space-3)" sm-min="140px">
         <div v-for="point in latestPoints" :key="point.tag || point.time" class="reading-card">
           <div class="reading-row">
             <el-tag size="small" effect="plain" class="reading-badge">{{ measurementLabel(point.tag) }}</el-tag>
@@ -47,14 +44,12 @@
           <span class="muted reading-time">{{ formatDateTime(point.time) }}</span>
         </div>
         <el-empty v-if="!latestLoading && !latestPoints.length" :description="t('sensors.noReadings')" class="grid-empty" />
-      </div>
-    </section>
+      </CardGrid>
+    </DashboardPanel>
 
     <!-- 历史趋势 -->
-    <section class="panel chart-panel">
-      <div class="panel-head">
-        <span class="panel-icon"><el-icon><TrendCharts /></el-icon></span>
-        <h3 class="panel-title">{{ t('sensors.history') }}</h3>
+    <DashboardPanel class="chart-panel" :title="t('sensors.history')" :icon="TrendCharts">
+      <template #actions>
         <span class="panel-meta hint-meta">{{ t('sensors.historyHint') }}</span>
         <div class="chart-controls">
           <el-select v-model="historyMeasurement" class="chart-measure" @change="onMeasurementChange">
@@ -69,7 +64,7 @@
             <el-option v-for="r in RANGES" :key="r.from" :label="r.label" :value="r.from" />
           </el-select>
         </div>
-      </div>
+      </template>
       <el-alert v-if="historyError" :title="historyError" :type="historyErrorType" show-icon :closable="false">
         <el-button v-if="historyErrorType === 'error'" size="small" @click="loadHistory()">{{ t('sensors.retry') }}</el-button>
       </el-alert>
@@ -86,7 +81,7 @@
         </template>
         <el-empty v-else-if="!historyLoading && !historyError" :description="t('sensors.noDataInRange')" />
       </div>
-    </section>
+    </DashboardPanel>
   </div>
 </template>
 
@@ -100,6 +95,9 @@ import { useAsyncData } from '@/composables/useAsyncData'
 import { usePolling } from '@/composables/usePolling'
 import { useTheme } from '@/composables/useTheme'
 import SensorTrendChart from '@/components/business/SensorTrendChart.vue'
+import DashboardPanel from '@/components/base/DashboardPanel.vue'
+import CardGrid from '@/components/base/CardGrid.vue'
+import StateBlock from '@/components/base/StateBlock.vue'
 import { buildChartGroups, chartPalette, type ChartGroup } from '@/utils/chartTheme'
 import { formatDateTime } from '@/utils/datetime'
 
@@ -363,11 +361,7 @@ function staleLevel(time?: string): 'warning' | 'danger' | null {
   font-size: 12px;
 }
 
-.reading-grid {
-  display: grid;
-  gap: var(--space-3);
-  grid-template-columns: repeat(auto-fill, minmax(170px, 1fr));
-}
+/* 读数网格已收口 base/CardGrid（R5）：min 170px + gap --space-3 + ≤480px min 140px 等值原 .reading-grid */
 
 .grid-empty {
   grid-column: 1 / -1;
@@ -454,12 +448,6 @@ function staleLevel(time?: string): 'warning' | 'danger' | null {
   .measure-select,
   .chart-controls {
     margin-left: 0;
-  }
-}
-
-@media (max-width: 480px) {
-  .reading-grid {
-    grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
   }
 }
 </style>
