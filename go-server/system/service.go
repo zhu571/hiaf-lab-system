@@ -440,7 +440,9 @@ func (s *Service) runScript(session *UpdateSession) {
 // killRunner 停止 runner（docker kill / 进程组 kill / context cancel，由平台实现决定）。
 func (s *Service) killRunner(session *UpdateSession) {
 	if id := session.getRunnerID(); id != "" {
-		_ = s.runner.Kill(id)
+		if err := s.runner.Kill(id); err != nil {
+			slog.Warn("终止更新 runner 失败", "session", session.ID, "runner", id, "error", err)
+		}
 	}
 }
 
@@ -600,10 +602,11 @@ func (s *Service) finish(session *UpdateSession, exitCode int, success bool) {
 		}
 		session.doneEvent = doneEvent
 		session.mu.Unlock()
-
 		session.writeMarker(exitCode)
 		s.removeRunnerFile(session)
-		session.broadcast(doneEvent)
+		session.mu.Lock()
+		session.broadcastLocked(doneEvent)
+		session.mu.Unlock()
 		close(session.done)
 		slog.Info("update finished",
 			"session", session.ID, "exit_code", exitCode, "success", success,
@@ -615,6 +618,10 @@ func (s *Service) finish(session *UpdateSession, exitCode int, success bool) {
 func (s *UpdateSession) broadcast(evt SSEEvent) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	s.broadcastLocked(evt)
+}
+
+func (s *UpdateSession) broadcastLocked(evt SSEEvent) {
 	for ch := range s.subs {
 		select {
 		case ch <- evt:
@@ -674,14 +681,13 @@ func (s *UpdateSession) unsubscribe(ch chan SSEEvent) {
 // spawn 失败/超时/中断的具体原因用户将看不到；done 后丢弃，避免反超 done 序号。
 func (s *UpdateSession) ingestError(message string) {
 	s.mu.Lock()
+	defer s.mu.Unlock()
 	if s.Status == "done" {
-		s.mu.Unlock()
 		return
 	}
 	s.seq++
 	evt := SSEEvent{Seq: s.seq, Timestamp: time.Now().Format(time.RFC3339Nano), Type: "error", Message: message}
-	s.mu.Unlock()
-	s.broadcast(evt)
+	s.broadcastLocked(evt)
 }
 
 // ingestLine 把一行日志写入内存 RingBuffer、分配 seq 并广播。
@@ -689,13 +695,12 @@ func (s *UpdateSession) ingestError(message string) {
 // 防止行事件 seq 反超 done 事件导致回放时前端按 seq 去重丢掉 done。
 func (s *UpdateSession) ingestLine(line string) {
 	s.mu.Lock()
+	defer s.mu.Unlock()
 	if s.Status == "done" {
-		s.mu.Unlock()
 		return
 	}
 	s.seq++
 	seq := s.seq
-	s.mu.Unlock()
 	ts := time.Now().Format(time.RFC3339Nano)
 	evt := SSEEvent{
 		Seq:       seq,
@@ -710,7 +715,7 @@ func (s *UpdateSession) ingestLine(line string) {
 		evt.Title = m[3]
 	}
 	s.LogBuffer.Append(seq, ts, line)
-	s.broadcast(evt)
+	s.broadcastLocked(evt)
 }
 
 // writeMarker 写 done marker 文件（幂等）。

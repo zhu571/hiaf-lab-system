@@ -17,7 +17,7 @@ import (
 // server 重建不影响它）；区别只在 entrypoint —— go 跑 lab-update 流水线，shell 跑
 // update.sh。shell 引擎不再在 server 容器内直接 bash（server 容器非 root 且仓库只读，
 // 无法写 .git，无法满足 I1），统一走 runner 容器 + 仓库 rw 挂载。
-func newRunner(s *Service, engine string) SessionRunner {
+func newRunner(s *Service, _ string) SessionRunner {
 	return &dockerRunner{cmds: NewExecRunner("", nil), cfg: s.spawnConfig()}
 }
 
@@ -83,27 +83,52 @@ func (r *dockerRunner) Kill(id RunnerID) error {
 		poll = killPollDefault
 	}
 	ctx := context.Background()
-	_, _, _ = r.cmds.Run(ctx, "docker", "kill", "--signal", "SIGTERM", string(id))
+	var firstErr error
+	recordErr := func(action string, err error) {
+		if err == nil {
+			return
+		}
+		slog.Warn("停止 update runner 失败", "action", action, "container", id, "error", err)
+		if firstErr == nil {
+			firstErr = err
+		}
+	}
+	if _, stderr, err := r.cmds.Run(ctx, "docker", "kill", "--signal", "SIGTERM", string(id)); err != nil {
+		recordErr("SIGTERM", fmt.Errorf("docker SIGTERM: %w: %s", err, strings.TrimSpace(stderr)))
+	}
 	deadline := time.Now().Add(grace)
 	for time.Now().Before(deadline) {
-		if !r.Alive(id) {
-			_, _, _ = r.cmds.Run(ctx, "docker", "rm", "-f", string(id))
-			return nil
+		alive, err := r.alive(id)
+		recordErr("轮询存活状态", err)
+		if err == nil && !alive {
+			if _, stderr, err := r.cmds.Run(ctx, "docker", "rm", "-f", string(id)); err != nil {
+				recordErr("rm", fmt.Errorf("docker rm: %w: %s", err, strings.TrimSpace(stderr)))
+			}
+			return firstErr
 		}
 		time.Sleep(poll)
 	}
 	// 优雅退出预算耗尽 → 硬杀兜底
-	_, _, _ = r.cmds.Run(ctx, "docker", "kill", string(id))
-	_, _, _ = r.cmds.Run(ctx, "docker", "rm", "-f", string(id))
-	return nil
+	if _, stderr, err := r.cmds.Run(ctx, "docker", "kill", string(id)); err != nil {
+		recordErr("SIGKILL", fmt.Errorf("docker SIGKILL: %w: %s", err, strings.TrimSpace(stderr)))
+	}
+	if _, stderr, err := r.cmds.Run(ctx, "docker", "rm", "-f", string(id)); err != nil {
+		recordErr("rm", fmt.Errorf("docker rm: %w: %s", err, strings.TrimSpace(stderr)))
+	}
+	return firstErr
 }
 
 func (r *dockerRunner) Alive(id RunnerID) bool {
+	alive, _ := r.alive(id)
+	return alive
+}
+
+func (r *dockerRunner) alive(id RunnerID) (bool, error) {
 	out, _, err := r.cmds.Run(context.Background(), "docker", "inspect", "-f", "{{.State.Running}}", string(id))
 	if err != nil {
-		return false
+		return false, err
 	}
-	return strings.TrimSpace(out) == "true"
+	return strings.TrimSpace(out) == "true", nil
 }
 
 // orphanReapAge 孤儿 runner 判定阈值：server 进程重启前 spawn 但未登记 session 的

@@ -11,18 +11,46 @@ type Repository struct {
 	db *sql.DB
 }
 
+type queryRower interface {
+	QueryRow(query string, args ...any) *sql.Row
+}
+
 func NewRepository(db *sql.DB) *Repository {
 	return &Repository{db: db}
 }
 
 func (r *Repository) Create(p *Project) (*Project, error) {
+	return createProject(r.db, p)
+}
+
+func (r *Repository) CreateWithOwner(p *Project, userID string) (*Project, error) {
+	tx, err := r.db.Begin()
+	if err != nil {
+		return nil, fmt.Errorf("begin create project: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	created, err := createProject(tx, p)
+	if err != nil {
+		return nil, err
+	}
+	if _, err := addMember(tx, created.ID, userID, RoleOwner, userID); err != nil {
+		return nil, err
+	}
+	if err := tx.Commit(); err != nil {
+		return nil, fmt.Errorf("commit create project: %w", err)
+	}
+	return created, nil
+}
+
+func createProject(q queryRower, p *Project) (*Project, error) {
 	tagsJSON, err := json.Marshal(p.Tags)
 	if err != nil {
 		return nil, fmt.Errorf("marshal tags: %w", err)
 	}
 
 	var project Project
-	err = scanProject(r.db.QueryRow(
+	err = scanProject(q.QueryRow(
 		`INSERT INTO projects
 		 (code, name, short_name, description, status, visibility, comment_policy, owner_user_id,
 		  start_date, target_end_date, default_category, tags_json, created_by)
@@ -147,8 +175,12 @@ func (r *Repository) UpdateStatus(id, status string) (*Project, error) {
 }
 
 func (r *Repository) AddMember(projectID, userID, role, addedBy string) (*ProjectMember, error) {
+	return addMember(r.db, projectID, userID, role, addedBy)
+}
+
+func addMember(q queryRower, projectID, userID, role, addedBy string) (*ProjectMember, error) {
 	var m ProjectMember
-	err := r.db.QueryRow(
+	err := q.QueryRow(
 		`INSERT INTO project_members (project_id, user_id, role, status, added_by)
 		 VALUES ($1, $2, $3, 'active', $4)
 		 ON CONFLICT (project_id, user_id)
