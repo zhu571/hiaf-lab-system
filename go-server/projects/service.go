@@ -80,11 +80,8 @@ func (s *Service) Create(req CreateProjectRequest, userID, role string) (*Projec
 		return nil, ErrInvalidInput
 	}
 
-	created, err := s.repo.Create(project)
+	created, err := s.repo.CreateWithOwner(project, userID)
 	if err != nil {
-		return nil, err
-	}
-	if _, err := s.repo.AddMember(created.ID, userID, RoleOwner, userID); err != nil {
 		return nil, err
 	}
 	return created, nil

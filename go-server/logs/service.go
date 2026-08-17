@@ -245,12 +245,9 @@ func (s *Service) CreateLog(projectID, userID, userRole string, req CreateLogReq
 		}
 	}
 
-	item, err := s.repo.CreateLog(projectID, userID, req, occurredAt)
-	if err != nil {
-		return nil, err
-	}
+	var report *DailyReport
 	if req.DailyReportID != nil && strings.TrimSpace(*req.DailyReportID) != "" {
-		report, err := s.repo.GetReportByID(strings.TrimSpace(*req.DailyReportID))
+		report, err = s.repo.GetReportByID(strings.TrimSpace(*req.DailyReportID))
 		if err != nil {
 			return nil, err
 		}
@@ -260,6 +257,13 @@ func (s *Service) CreateLog(projectID, userID, userRole string, req CreateLogReq
 		if report.AuthorID != userID {
 			return nil, ErrNotReportOwner
 		}
+	}
+
+	item, err := s.repo.CreateLog(projectID, userID, req, occurredAt)
+	if err != nil {
+		return nil, err
+	}
+	if report != nil {
 		if err := s.repo.LinkLogToReport(report.ID, item.ID); err != nil {
 			return nil, err
 		}

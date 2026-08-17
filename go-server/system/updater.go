@@ -274,7 +274,10 @@ func (p *Pipeline) stepPull(ctx context.Context) error {
 
 // stepDetect 步骤 4：变更检测；dry-run / none 时提前成功退出。
 func (p *Pipeline) stepDetect(ctx context.Context) error {
-	changed := p.gitDiffNameOnly(ctx, p.oldSHA, p.newSHA)
+	changed, err := p.gitDiffNameOnly(ctx, p.oldSHA, p.newSHA)
+	if err != nil {
+		return fmt.Errorf("git diff 失败: %w", err)
+	}
 	if len(changed) == 0 && !p.cfg.Force {
 		p.log.Linef("[UPDATE] 无文件变更，跳过构建。")
 		return errNoChanges
@@ -568,10 +571,10 @@ func (p *Pipeline) gitRevParse(ctx context.Context, rev string) string {
 	return strings.TrimSpace(out)
 }
 
-func (p *Pipeline) gitDiffNameOnly(ctx context.Context, oldSHA, newSHA string) []string {
+func (p *Pipeline) gitDiffNameOnly(ctx context.Context, oldSHA, newSHA string) ([]string, error) {
 	out, _, err := p.cmds.Run(ctx, "git", "-C", p.cfg.RepoRoot, "diff", "--name-only", oldSHA, newSHA)
 	if err != nil {
-		return nil
+		return nil, err
 	}
 	var files []string
 	for _, ln := range strings.Split(out, "\n") {
@@ -579,7 +582,7 @@ func (p *Pipeline) gitDiffNameOnly(ctx context.Context, oldSHA, newSHA string) [
 			files = append(files, ln)
 		}
 	}
-	return files
+	return files, nil
 }
 
 func (p *Pipeline) serviceState(ctx context.Context, svc string) (string, error) {
