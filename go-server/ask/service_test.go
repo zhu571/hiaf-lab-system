@@ -143,7 +143,7 @@ func TestPrepareSQL_RowFilterInjection(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(out, "WHERE "+two+" AND content = 'x' ORDER BY id") {
+	if !strings.Contains(out, "WHERE "+two+" AND ( content = 'x' ORDER BY id)") {
 		t.Fatalf("WHERE must be extended with AND: %q", out)
 	}
 
@@ -160,7 +160,7 @@ func TestPrepareSQL_RowFilterInjection(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(out, two+" AND content = 'where x'") {
+	if !strings.Contains(out, two+" AND ( content = 'where x' ORDER BY id)") {
 		t.Fatalf("literal 'where' must not hijack injection point: %q", out)
 	}
 

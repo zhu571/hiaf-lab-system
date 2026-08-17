@@ -52,6 +52,7 @@ func TestSendNoToken(t *testing.T) {
 }
 
 func TestMeowSend(t *testing.T) {
+	t.Setenv("MEOW_API_KEY", "f064e4e8")
 	originalClient := client
 	t.Cleanup(func() { client = originalClient })
 	client = &http.Client{Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
