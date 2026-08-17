@@ -240,7 +240,18 @@ export default {
     yesterday: 'Yesterday',
     loadDevicesFailed: 'Failed to load devices',
     loadGasFailed: 'Failed to load gas cell status',
-    loadReportsFailed: 'Failed to load daily reports'
+    loadReportsFailed: 'Failed to load daily reports',
+    greeting: {
+      morning: 'Good morning, {name}',
+      afternoon: 'Good afternoon, {name}',
+      evening: 'Good evening, {name}'
+    },
+    quickActions: {
+      dailyReport: 'Write Report',
+      todo: 'New Todo',
+      ask: 'AI Chat',
+      run: 'New Batch'
+    }
   },
   project: {
     // Project workspace header (ProjectLayout).

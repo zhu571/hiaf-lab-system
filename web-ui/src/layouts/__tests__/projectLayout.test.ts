@@ -31,6 +31,10 @@ describe('ProjectLayout 挂载冒烟', () => {
     await flushPromises()
     expect(wrapper.text()).toContain('低温靶项目')
     expect(wrapper.find('.workspace-head').exists()).toBe(true)
+    // R6 §7.2：head + tabs 由吸顶容器包裹（sticky），返回按钮图标化带 aria-label
+    expect(wrapper.find('.workspace-sticky').exists()).toBe(true)
+    expect(wrapper.find('.back-btn').exists()).toBe(true)
+    expect(wrapper.find('.back-btn').attributes('aria-label')).toBe('项目列表')
     const tabs = wrapper.findAll('.el-tabs__item').map((t) => t.text().trim())
     expect(tabs).toEqual(['概览', '问题', '批次', '数据', 'RF匹配', '装配'])
     expect(useProjectStore().currentId).toBe('proj_01')

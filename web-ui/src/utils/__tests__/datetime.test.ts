@@ -1,5 +1,5 @@
 import { describe, it, expect, afterEach } from 'vitest'
-import { formatDateTime, formatDate, formatTime, formatRelative } from '@/utils/datetime'
+import { formatDateTime, formatDate, formatFullDate, formatTime, formatRelative } from '@/utils/datetime'
 import { i18n } from '@/i18n'
 
 // datetime 纯函数单测（重构方案 §5 关键路径 #6）：同一 ts 在 zh/en locale 下输出不同格式；
@@ -43,6 +43,26 @@ describe('formatDate / formatTime', () => {
     expect(d).not.toContain('10:30')
     expect(tm).toBe('10:30')
     expect(tm).not.toContain('2026')
+  })
+})
+
+describe('formatFullDate', () => {
+  it('zh 输出年月日 + 星期（R6 工作台头条日期）', () => {
+    const zh = formatFullDate(TS, 'zh')
+    expect(zh).toContain('2026年8月14日')
+    expect(zh).toMatch(/星期|周/)
+  })
+
+  it('en 输出长格式英文日期（含 weekday long）', () => {
+    const en = formatFullDate(TS, 'en')
+    expect(en).toContain('Friday')
+    expect(en).toContain('August')
+  })
+
+  it('空值/非法时间返回 —', () => {
+    expect(formatFullDate()).toBe('—')
+    expect(formatFullDate(null)).toBe('—')
+    expect(formatFullDate('not-a-date')).toBe('—')
   })
 })
 

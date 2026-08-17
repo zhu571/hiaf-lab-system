@@ -6,23 +6,26 @@
       <el-button type="primary" @click="router.push('/projects')">{{ t('project.goToProjects') }}</el-button>
     </div>
     <template v-else>
-      <section class="panel workspace-head">
-        <el-button class="back-btn" @click="router.push('/projects')">
-          <el-icon><ArrowLeft /></el-icon>
-          {{ t('project.backToList') }}
-        </el-button>
-        <div class="title-block">
-          <h2>{{ project.name }}</h2>
-          <span v-if="project.code" class="code">({{ project.code }})</span>
-          <el-tag :type="stage.type" size="small" effect="light">{{ stage.label }}</el-tag>
-        </div>
-        <el-select :model-value="projectId" class="switch-select" :placeholder="t('project.switchProject')" @change="switchProject">
-          <el-option v-for="p in projects.projects" :key="p.id" :label="p.short_name || p.name" :value="p.id" />
-        </el-select>
-      </section>
-      <el-tabs :model-value="activeTab" class="workspace-tabs" @tab-change="onTabChange">
-        <el-tab-pane v-for="tab in tabs" :key="tab.name" :label="tab.label" :name="tab.name" />
-      </el-tabs>
+      <div class="workspace-sticky">
+        <section class="panel workspace-head">
+          <el-tooltip :content="t('project.backToList')" placement="top">
+            <el-button class="back-btn" circle :aria-label="t('project.backToList')" @click="router.push('/projects')">
+              <el-icon><ArrowLeft /></el-icon>
+            </el-button>
+          </el-tooltip>
+          <div class="title-block">
+            <h2>{{ project.name }}</h2>
+            <span v-if="project.code" class="code">({{ project.code }})</span>
+            <el-tag :type="stage.type" size="small" effect="light">{{ stage.label }}</el-tag>
+          </div>
+          <el-select :model-value="projectId" class="switch-select" :placeholder="t('project.switchProject')" @change="switchProject">
+            <el-option v-for="p in projects.projects" :key="p.id" :label="p.short_name || p.name" :value="p.id" />
+          </el-select>
+        </section>
+        <el-tabs :model-value="activeTab" class="workspace-tabs" @tab-change="onTabChange">
+          <el-tab-pane v-for="tab in tabs" :key="tab.name" :label="tab.label" :name="tab.name" />
+        </el-tabs>
+      </div>
       <RouterView />
     </template>
   </div>
@@ -117,11 +120,27 @@ function switchProject(id: string) {
   min-height: 400px;
 }
 
+/* ---------- 吸顶工作区头（R6 §7.2） ----------
+   head + tabs 由单个 sticky 容器包裹：避免两个独立 sticky 元素同 top 叠压；
+   桌面 top 跟随顶栏（--topbar-height），移动端计入 MobileTopBar 实际高度（48px + safe-area）；
+   背景 var(--bg) 防内容透出；z-index 低于顶栏（--z-topbar: 10），高于页内 EP 固定列 */
+
+.workspace-sticky {
+  background: var(--bg);
+  position: sticky;
+  top: var(--topbar-height);
+  z-index: calc(var(--z-topbar) - 1);
+}
+
 .workspace-head {
   align-items: center;
   display: flex;
   flex-wrap: wrap;
   gap: var(--space-3);
+}
+
+.back-btn {
+  flex-shrink: 0;
 }
 
 .title-block {
@@ -151,6 +170,10 @@ function switchProject(id: string) {
 }
 
 @media (max-width: 768px) {
+  .workspace-sticky {
+    top: calc(var(--mobile-topbar-height) + var(--safe-area-top));
+  }
+
   .switch-select {
     margin-left: 0;
     max-width: none;

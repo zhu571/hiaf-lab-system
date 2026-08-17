@@ -43,6 +43,18 @@ export function formatDate(ts?: string | number | Date | null, locale?: string):
   }).format(d)
 }
 
+/** 完整日期：含星期（zh-CN：2026年8月17日星期一；en-US：Monday, August 17, 2026），跟随 i18n locale */
+export function formatFullDate(ts?: string | number | Date | null, locale?: string): string {
+  const d = toDate(ts)
+  if (!d) return EMPTY_TEXT
+  return new Intl.DateTimeFormat(resolveLocale(locale), {
+    year: 'numeric',
+    month: 'long',
+    day: 'numeric',
+    weekday: 'long'
+  }).format(d)
+}
+
 /** 时间：HH:mm */
 export function formatTime(ts?: string | number | Date | null, locale?: string): string {
   const d = toDate(ts)
