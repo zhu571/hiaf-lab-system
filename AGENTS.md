@@ -113,8 +113,8 @@ hiaf-lab-system/
 ├── web-ui/                 # Vue 3 前端
 │   ├── src/api/            # API 层：client.ts 统一封装（幂等键/CSRF/401 单飞刷新/错误分类）+ 19 个业务模块
 │   ├── src/components/
-│   │   ├── base/           # 通用基础件（无业务语义、props/slots 驱动）：StatusBadge/StateBlock/FormDialog/ResponsiveTable/AppBreadcrumb
-│   │   └── business/       # 业务复合件（可直读 store/API）：SensorTrendChart/AskDialog/ProjectDashboard 等
+│   │   ├── base/           # 通用基础件（无业务语义、props/slots 驱动）：StatusBadge/StateBlock/FormDialog/ResponsiveTable/AppBreadcrumb/ListPage/CardGrid/KanbanBoard/DashboardPanel
+│   │   └── business/       # 业务复合件（可直读 store/API）：SensorTrendChart/AskDialog/ProjectDashboard/CommandPalette/NotificationCenter/MobileNavDrawer 等
 │   ├── src/composables/    # 组合式函数：useAsyncData/usePolling/usePagination/useTheme 等
 │   ├── src/config/         # navigation.ts 导航单一数据源（NAV_ITEMS + filterNavByRole）
 │   ├── src/i18n/           # 中英双语（zh.ts 完整基准/en.ts 对齐同一 key 结构，keys.test.ts 双向比对防线）
