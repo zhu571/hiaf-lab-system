@@ -59,18 +59,22 @@ func (w *InstrumentWorker) Start() error {
 		w.mu.Unlock()
 		return fmt.Errorf("instrument worker cannot be started")
 	}
-	w.started = true
 	w.mu.Unlock()
 
 	if err := w.reconnect(); err != nil {
 		w.setState(WorkerStateNeedsReconnect)
-		w.mu.Lock()
-		w.started = false
-		w.mu.Unlock()
 		return err
 	}
-	w.setState(WorkerStateRunning)
+	w.mu.Lock()
+	if w.stopped {
+		w.mu.Unlock()
+		w.closeConnection()
+		return fmt.Errorf("instrument worker cannot be started")
+	}
+	w.started = true
+	w.state = WorkerStateRunning
 	go w.run()
+	w.mu.Unlock()
 	return nil
 }
 

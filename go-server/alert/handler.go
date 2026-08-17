@@ -29,7 +29,7 @@ func (h *Handler) Report(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var req ReportRequest
-	if err := decode(r, &req); err != nil {
+	if err := decode(w, r, &req); err != nil {
 		common.WriteError(w, r, http.StatusBadRequest, "bad_request", "请求体解析失败", nil)
 		return
 	}
@@ -44,13 +44,13 @@ func (h *Handler) Report(w http.ResponseWriter, r *http.Request) {
 // Resolve POST /api/v1/alerts/resolve —— 双通道：
 //   - 用户通道：JWT + RequireRoleOrService(admin, maintainer) + CSRF + Idempotency-Key，
 //     必须按 {id} 解除（resolved_by=username；拒绝 source+title，防用户越权批量解除）；
-//   - 内部通道：SERVICE_TOKEN（CSRF/幂等豁免），按 {source,title} 解除（resolved_by=system）。
+//   - 内部通道：SERVICE_TOKEN（CSRF/幂等豁免），按 {id} 或 {source,title} 解除（resolved_by=system）。
 //
 // 匹配不到 active 行 → 幂等 success（detail 由审计记录）。
 func (h *Handler) Resolve(w http.ResponseWriter, r *http.Request) {
 	middleware.SetAuditAction(r.Context(), "alerts.resolve")
 	var req ResolveRequest
-	if err := decode(r, &req); err != nil {
+	if err := decode(w, r, &req); err != nil {
 		common.WriteError(w, r, http.StatusBadRequest, "bad_request", "请求体解析失败", nil)
 		return
 	}
@@ -143,8 +143,8 @@ func (h *Handler) writeError(w http.ResponseWriter, r *http.Request, err error) 
 	}
 }
 
-func decode(r *http.Request, dst any) error {
-	decoder := json.NewDecoder(http.MaxBytesReader(nil, r.Body, 256<<10))
+func decode(w http.ResponseWriter, r *http.Request, dst any) error {
+	decoder := json.NewDecoder(http.MaxBytesReader(w, r.Body, 256<<10))
 	decoder.DisallowUnknownFields()
 	return decoder.Decode(dst)
 }
