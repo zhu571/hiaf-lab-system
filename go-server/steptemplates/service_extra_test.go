@@ -12,6 +12,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/DATA-DOG/go-sqlmock"
 	"github.com/zhu571/hiaf-lab-system/go-server/auth"
 )
 
@@ -407,14 +408,16 @@ func TestSvcGenerate(t *testing.T) {
 		}
 	})
 	t.Run("not configured", func(t *testing.T) {
-		svc, _ := newTestService()
+		svc, mock := newGenerateTestService(t, "u1")
+		expectMembership(mock, "u1")
 		_, err := svc.Generate(context.Background(), "u1", "member", GenerateRequest{Kind: "assembly", Prompt: "x"})
 		if err == nil || !strings.Contains(err.Error(), "未配置") {
 			t.Fatalf("unconfigured: %v", err)
 		}
 	})
 	t.Run("bad kind", func(t *testing.T) {
-		svc, _ := newTestService()
+		svc, mock := newGenerateTestService(t, "u1")
+		expectMembership(mock, "u1")
 		svc.plannerURL = "http://x"
 		svc.plannerToken = "t"
 		_, err := svc.Generate(context.Background(), "u1", "member", GenerateRequest{Kind: "bogus", Prompt: "x"})
@@ -423,24 +426,27 @@ func TestSvcGenerate(t *testing.T) {
 		}
 	})
 	t.Run("empty or long prompt", func(t *testing.T) {
-		svc, _ := newTestService()
+		svc, mock := newGenerateTestService(t, "u1")
 		svc.plannerURL = "http://x"
 		svc.plannerToken = "t"
+		expectMembership(mock, "u1")
 		if _, err := svc.Generate(context.Background(), "u1", "member", GenerateRequest{Kind: "assembly", Prompt: "  "}); !errors.Is(err, ErrInvalidInput) {
 			t.Fatalf("empty prompt: %v", err)
 		}
 		long := strings.Repeat("p", 4001)
+		expectMembership(mock, "u1")
 		if _, err := svc.Generate(context.Background(), "u1", "member", GenerateRequest{Kind: "assembly", Prompt: long}); !errors.Is(err, ErrInvalidInput) {
 			t.Fatalf("long prompt: %v", err)
 		}
 	})
 	t.Run("rate limited", func(t *testing.T) {
-		svc, _ := newTestService()
+		svc, mock := newGenerateTestService(t, "u-rl")
 		for i := 0; i < 10; i++ {
 			if !svc.allowOne("u-rl") {
 				t.Fatalf("call %d allowed", i+1)
 			}
 		}
+		expectMembership(mock, "u-rl")
 		_, err := svc.Generate(context.Background(), "u-rl", "member", GenerateRequest{Kind: "assembly", Prompt: "x"})
 		if err == nil || !strings.Contains(err.Error(), "频繁") {
 			t.Fatalf("rate limited: %v", err)
@@ -448,15 +454,38 @@ func TestSvcGenerate(t *testing.T) {
 	})
 }
 
+func newGenerateTestService(t *testing.T, userID string) (*Service, sqlmock.Sqlmock) {
+	t.Helper()
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		if err := mock.ExpectationsWereMet(); err != nil {
+			t.Error(err)
+		}
+		_ = db.Close()
+	})
+	repo := &fakeStepRepo{}
+	return NewService(repo, db), mock
+}
+
+func expectMembership(mock sqlmock.Sqlmock, userID string) {
+	mock.ExpectQuery(`SELECT EXISTS\(SELECT 1 FROM project_members WHERE user_id=\$1 AND status='active' AND role IN \('member','maintainer','owner'\)\)`).
+		WithArgs(userID).
+		WillReturnRows(sqlmock.NewRows([]string{"exists"}).AddRow(true))
+}
+
 func TestSvcGenerateAgentResponses(t *testing.T) {
-	mock := func(t *testing.T, body string, status int) (*Service, *httptest.Server) {
-		svc := NewService(nil, nil)
+	mock := func(t *testing.T, body string, status int) (*Service, *httptest.Server, sqlmock.Sqlmock) {
+		svc, dbMock := newGenerateTestService(t, "u1")
 		server := startMockPlanner(t, body, status)
 		svc.ConfigurePlanner(server.URL, "tok")
-		return svc, server
+		return svc, server, dbMock
 	}
 	t.Run("invalid status", func(t *testing.T) {
-		svc, server := mock(t, `{"status":"weird","name_suggestion":"t","model":"m"}`, 200)
+		svc, server, dbMock := mock(t, `{"status":"weird","name_suggestion":"t","model":"m"}`, 200)
+		expectMembership(dbMock, "u1")
 		defer server.Close()
 		_, err := svc.Generate(context.Background(), "u1", "member", GenerateRequest{Kind: "assembly", Prompt: "x"})
 		if !errors.Is(err, ErrUpstream) {
@@ -464,7 +493,8 @@ func TestSvcGenerateAgentResponses(t *testing.T) {
 		}
 	})
 	t.Run("clarify", func(t *testing.T) {
-		svc, server := mock(t, `{"status":"clarify","name_suggestion":"t","model":"m","question":"要装配什么？"}`, 200)
+		svc, server, dbMock := mock(t, `{"status":"clarify","name_suggestion":"t","model":"m","question":"要装配什么？"}`, 200)
+		expectMembership(dbMock, "u1")
 		defer server.Close()
 		res, err := svc.Generate(context.Background(), "u1", "member", GenerateRequest{Kind: "assembly", Prompt: "x"})
 		if err != nil {
@@ -475,7 +505,8 @@ func TestSvcGenerateAgentResponses(t *testing.T) {
 		}
 	})
 	t.Run("rejected", func(t *testing.T) {
-		svc, server := mock(t, `{"status":"rejected","name_suggestion":"t","model":"m","reason":"信息不足"}`, 200)
+		svc, server, dbMock := mock(t, `{"status":"rejected","name_suggestion":"t","model":"m","reason":"信息不足"}`, 200)
+		expectMembership(dbMock, "u1")
 		defer server.Close()
 		res, err := svc.Generate(context.Background(), "u1", "member", GenerateRequest{Kind: "assembly", Prompt: "x"})
 		if err != nil {
@@ -486,7 +517,8 @@ func TestSvcGenerateAgentResponses(t *testing.T) {
 		}
 	})
 	t.Run("ok but invalid steps", func(t *testing.T) {
-		svc, server := mock(t, `{"status":"ok","name_suggestion":"t","model":"m","steps":[{"name":"a","step_order":1},{"name":"b","step_order":1}]}`, 200)
+		svc, server, dbMock := mock(t, `{"status":"ok","name_suggestion":"t","model":"m","steps":[{"name":"a","step_order":1},{"name":"b","step_order":1}]}`, 200)
+		expectMembership(dbMock, "u1")
 		defer server.Close()
 		_, err := svc.Generate(context.Background(), "u1", "member", GenerateRequest{Kind: "assembly", Prompt: "x"})
 		if err == nil || !strings.Contains(err.Error(), "校验失败") {
@@ -494,7 +526,8 @@ func TestSvcGenerateAgentResponses(t *testing.T) {
 		}
 	})
 	t.Run("ok with reorder", func(t *testing.T) {
-		svc, server := mock(t, `{"status":"ok","name_suggestion":"t","model":"m","steps":[{"name":"b","step_order":2,"depends_on_order":1},{"name":"a","step_order":1}]}`, 200)
+		svc, server, dbMock := mock(t, `{"status":"ok","name_suggestion":"t","model":"m","steps":[{"name":"b","step_order":2,"depends_on_order":1},{"name":"a","step_order":1}]}`, 200)
+		expectMembership(dbMock, "u1")
 		defer server.Close()
 		res, err := svc.Generate(context.Background(), "u1", "member", GenerateRequest{Kind: "assembly", Prompt: "x"})
 		if err != nil {

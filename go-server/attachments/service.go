@@ -199,10 +199,11 @@ func (s *Service) RemoveLink(attachmentID, linkID, userID, userRole string) erro
 		return err
 	}
 	if !allowed {
-		allowed, err = s.entityAllowed(target.EntityType, target.EntityID, userID, userRole, "write")
-		if err != nil {
-			return err
-		}
+		return ErrForbidden
+	}
+	allowed, err = s.entityAllowed(target.EntityType, target.EntityID, userID, userRole, "write")
+	if err != nil {
+		return err
 	}
 	if !allowed {
 		return ErrForbidden
@@ -235,6 +236,9 @@ func (s *Service) Download(id, userID, userRole string) (*Attachment, *os.File, 
 
 func (s *Service) List(userID, userRole string, params ListParams) (*ListResult, error) {
 	params.EntityType, params.EntityID = strings.TrimSpace(params.EntityType), strings.TrimSpace(params.EntityID)
+	if params.Page < 1 || params.Page > 10000 {
+		return nil, ErrInvalidInput
+	}
 	params.Page, params.PerPage = normalizePage(params.Page, params.PerPage)
 	if !validOptionalEntity(params.EntityType, params.EntityID) {
 		return nil, ErrInvalidInput

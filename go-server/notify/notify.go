@@ -30,6 +30,15 @@ func readPublishToken() string {
 	return strings.TrimSpace(os.Getenv("NTFY_PUBLISH_TOKEN"))
 }
 
+func readMeowAPIKey() string {
+	if file := os.Getenv("MEOW_API_KEY_FILE"); file != "" {
+		if data, err := os.ReadFile(file); err == nil {
+			return strings.TrimSpace(string(data))
+		}
+	}
+	return strings.TrimSpace(os.Getenv("MEOW_API_KEY"))
+}
+
 func Send(topic, title, message, clickURL, priority string, tags []string) error {
 	addr := os.Getenv("NTFY_ADDR")
 	if addr == "" {
@@ -61,7 +70,8 @@ func Send(topic, title, message, clickURL, priority string, tags []string) error
 }
 
 func meowSend(title, body string) error {
-	req, err := http.NewRequest(http.MethodPost, "https://api.chuckfang.com/f064e4e8/"+url.PathEscape(title)+"?msgType=markdown", strings.NewReader(body))
+	key := readMeowAPIKey()
+	req, err := http.NewRequest(http.MethodPost, "https://api.chuckfang.com/"+url.PathEscape(key)+"/"+url.PathEscape(title)+"?msgType=markdown", strings.NewReader(body))
 	if err != nil {
 		return fmt.Errorf("create MeoW request: %w", err)
 	}

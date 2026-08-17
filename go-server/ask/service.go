@@ -693,7 +693,7 @@ func injectRowFilter(sqlText, stripped, col string, ids []string) string {
 	}
 	cond := col + " IN (" + list + ")"
 	if loc := whereKwRe.FindStringIndex(stripped); loc != nil {
-		return sqlText[:loc[1]] + " " + cond + " AND" + sqlText[loc[1]:]
+		return sqlText[:loc[1]] + " " + cond + " AND (" + sqlText[loc[1]:] + ")"
 	}
 	best := -1
 	for _, re := range []*regexp.Regexp{groupByRe, orderByRe, limitRe, offsetRe} {

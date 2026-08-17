@@ -87,6 +87,9 @@ func (s *Service) Generate(ctx context.Context, userID, userRole string, req Gen
 	if userRole == auth.RoleAgent {
 		return nil, ErrAgentRejected
 	}
+	if err := s.requireGenerateAccess(userID); err != nil {
+		return nil, err
+	}
 	if !s.allowOne(userID) {
 		return nil, fmt.Errorf("AI 生成请求过于频繁，请稍后再试")
 	}

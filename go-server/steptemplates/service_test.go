@@ -140,7 +140,8 @@ func TestGenerateNilContextSerializedAsEmptyObject(t *testing.T) {
 	}))
 	defer server.Close()
 
-	svc := NewService(nil, nil)
+	svc, mock := newGenerateTestService(t, "user-1")
+	expectMembership(mock, "user-1")
 	svc.ConfigurePlanner(server.URL, "token")
 
 	_, err := svc.Generate(context.Background(), "user-1", "member", GenerateRequest{
@@ -178,7 +179,8 @@ func TestGenerateUpstreamErrorMarked(t *testing.T) {
 	}))
 	defer server.Close()
 
-	svc := NewService(nil, nil)
+	svc, mock := newGenerateTestService(t, "user-1")
+	expectMembership(mock, "user-1")
 	svc.ConfigurePlanner(server.URL, "token")
 
 	_, err := svc.Generate(context.Background(), "user-1", "member", GenerateRequest{
