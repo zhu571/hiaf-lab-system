@@ -308,6 +308,14 @@ func (h *Handler) NLExecute(w http.ResponseWriter, r *http.Request) {
 	if storeErr != nil {
 		slog.Error("store instrument result failed", "error", storeErr)
 	}
+	if result.Error != nil {
+		common.WriteError(w, r, http.StatusBadGateway, "command_failed", result.Error.Error(), map[string]any{
+			"status":   "error",
+			"err_code": errCode,
+			"response": result.Response,
+		})
+		return
+	}
 
 	common.WriteSuccess(w, r, map[string]any{
 		"status":        "ok",
