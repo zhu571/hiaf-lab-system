@@ -23,7 +23,8 @@ func main() {
 	if err != nil {
 		log.Fatal(err)
 	}
-	is := instruments.NewHandler(instrumentsSvc)
+	// Piezo routes do not use the handler's optional result database.
+	is := instruments.NewHandler(instrumentsSvc, nil)
 	ss := sensors.NewHandler(sensorsSvc)
 
 	r := chi.NewRouter()

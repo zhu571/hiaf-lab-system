@@ -71,8 +71,12 @@ func SourceGate() func(http.Handler) http.Handler {
 			peer := hostOnly(r.RemoteAddr)
 			kind, srcIP := classifySource(peer, r.Header.Get("X-Forwarded-For"), r.Header.Get("X-Lab-Proxy"), proxyIP, lanNets, secret)
 			if kind == sourceKindInternal {
-				// 内网直连剥 XFF：chi RealIP 的“盲信”因此不可被内网伪造利用。
+				// 内网直连剥除代理头：chi RealIP 只能看到真实 RemoteAddr。
 				r.Header.Del("X-Forwarded-For")
+				r.Header.Del("X-Real-IP")
+				r.Header.Del("Cf-Connecting-Ip")
+				r.Header.Del("True-Client-IP")
+				r.Header.Del("X-Client-IP")
 			}
 			ctx := context.WithValue(r.Context(), sourceIPKey, srcIP)
 			ctx = context.WithValue(ctx, sourceKindKey, kind.String())
