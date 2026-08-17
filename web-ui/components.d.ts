@@ -66,6 +66,7 @@ declare module 'vue' {
     ListPage: typeof import('./src/components/base/ListPage.vue')['default']
     MarkdownView: typeof import('./src/components/business/MarkdownView.vue')['default']
     MemberReportPanel: typeof import('./src/components/business/dashboard/MemberReportPanel.vue')['default']
+    MobileNavDrawer: typeof import('./src/components/business/MobileNavDrawer.vue')['default']
     NotificationCenter: typeof import('./src/components/business/NotificationCenter.vue')['default']
     NotificationPanel: typeof import('./src/components/business/NotificationPanel.vue')['default']
     ProjectDashboard: typeof import('./src/components/business/ProjectDashboard.vue')['default']

@@ -66,6 +66,17 @@ afterEach(() => {
 })
 
 describe('SettingsView 语言与密码', () => {
+  it('桌面目录锚点与可见分区一一对应，admin 包含系统更新', async () => {
+    const wrapper = await mountView('admin')
+    const links = wrapper.findAll('.settings-toc a')
+    expect(links.map((link) => link.attributes('href'))).toEqual([
+      '#settings-account',
+      '#settings-update',
+      '#settings-links'
+    ])
+    for (const link of links) expect(wrapper.find(link.attributes('href')!).exists()).toBe(true)
+  })
+
   it('语言切换：onLanguageChange 调 auth.setLanguage（updateProfile）并 toast 成功', async () => {
     vi.mocked(updateProfile).mockResolvedValue(makeUser('member'))
     const wrapper = await mountView('member')

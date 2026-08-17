@@ -1,6 +1,6 @@
 <template>
   <div class="layout" :class="{ 'nav-collapsed': collapsed && !isMobile }">
-    <MobileTopBar v-if="isMobile" @ask="openAskDialog" />
+    <MobileTopBar v-if="isMobile" @ask="openAskDialog" @menu="mobileNavOpen = true" />
     <aside v-if="!isMobile" class="nav">
       <div class="brand">
         <span class="brand-mark">H</span>
@@ -104,11 +104,12 @@
     <AskDialog />
     <!-- R2 全局挂载命令面板（对齐 AskDialog 先例）；移动端不启用——无 Ctrl+K 与桌面顶栏（方案 §3.1），零降级 -->
     <CommandPalette v-if="!isMobile" />
+    <MobileNavDrawer v-if="isMobile" v-model="mobileNavOpen" />
   </div>
 </template>
 
 <script setup lang="ts">
-import { computed, onMounted, watch, type Component } from 'vue'
+import { computed, onMounted, ref, watch, type Component } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import { useLocalStorage } from '@vueuse/core'
@@ -125,6 +126,7 @@ import MobileTopBar from '@/layouts/MobileTopBar.vue'
 import AskDialog from '@/components/business/AskDialog.vue'
 import CommandPalette from '@/components/business/CommandPalette.vue'
 import NotificationCenter from '@/components/business/NotificationCenter.vue'
+import MobileNavDrawer from '@/components/business/MobileNavDrawer.vue'
 import AppBreadcrumb from '@/components/base/AppBreadcrumb.vue'
 
 type NavItem = { label: string; path: string; icon: Component; badge?: 'agentPending' }
@@ -138,6 +140,7 @@ const projects = useProjectStore()
 const { t } = useI18n()
 const { openAskDialog } = useAskDialog()
 const { openPalette } = useCommandPalette()
+const mobileNavOpen = ref(false)
 
 // 侧栏折叠（结构改版 R1 §2.2）：桌面双态 232↔64（--nav-width ↔ --nav-width-collapsed），
 // localStorage 持久化（仅布尔值）；移动端不读取——nav-collapsed class 经 !isMobile 门控，
@@ -166,6 +169,8 @@ watch(
   () => route.path,
   (p) => {
     if (p.startsWith('/agent-candidates')) refreshAgentPending()
+    // R7 审查闭环：路由跳转（含命令面板/通知中心程序化跳转）后关闭移动端抽屉
+    mobileNavOpen.value = false
   }
 )
 

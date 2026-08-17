@@ -1,19 +1,15 @@
 <template>
   <div class="page settings">
-    <section v-if="isMobile" class="panel mobile-quick-links">
-      <h3 class="section-title">{{ t('settings.quickLinks') }}</h3>
-      <div class="quick-card-row">
-        <div class="quick-card" role="button" tabindex="0" @click="router.push('/experiences')" @keydown.enter="router.push('/experiences')">
-          <el-icon><Memo /></el-icon>
-          <span>{{ t('nav.experiences') }}</span>
-        </div>
-        <div class="quick-card" role="button" tabindex="0" @click="router.push('/attachments')" @keydown.enter="router.push('/attachments')">
-          <el-icon><Paperclip /></el-icon>
-          <span>{{ t('nav.attachments') }}</span>
-        </div>
-      </div>
-    </section>
-    <section class="panel settings-card">
+    <nav class="panel settings-toc" :aria-label="t('settings.sections.title')">
+      <a href="#settings-account">{{ t('settings.sections.account') }}</a>
+      <a v-if="auth.isAdmin" href="#settings-update">{{ t('settings.systemUpdate') }}</a>
+      <a href="#settings-links">{{ t('settings.quickLinks') }}</a>
+      <a v-if="isMobile" href="#settings-mobile">{{ t('settings.sections.mobile') }}</a>
+    </nav>
+
+    <div class="settings-content">
+    <section id="settings-account" class="panel settings-card settings-section">
+      <h3 class="section-title">{{ t('settings.sections.account') }}</h3>
       <div class="user-head">
         <span class="avatar">{{ (auth.user?.username || '?').slice(0, 1).toUpperCase() }}</span>
         <div class="user-meta">
@@ -49,7 +45,7 @@
     </section>
 
     <!-- 系统更新卡片 — 仅 admin 可见 -->
-    <section v-if="auth.isAdmin" class="panel update-card">
+    <section v-if="auth.isAdmin" id="settings-update" class="panel update-card settings-section">
       <h3 class="section-title">{{ t('settings.systemUpdate') }}</h3>
 
       <!-- 版本信息 -->
@@ -120,13 +116,28 @@
       />
     </section>
 
-    <section v-if="quickLinks.length" class="panel quick-links">
+    <section id="settings-links" class="panel quick-links settings-section">
       <h3 class="section-title">{{ t('settings.quickLinks') }}</h3>
       <el-link v-for="link in quickLinks" :key="link.path" :underline="false" @click="router.push(link.path)">
         <el-icon style="margin-right:6px"><component :is="link.icon" /></el-icon>
         {{ link.label }}
       </el-link>
     </section>
+
+    <section v-if="isMobile" id="settings-mobile" class="panel mobile-quick-links settings-section">
+      <h3 class="section-title">{{ t('settings.sections.mobile') }}</h3>
+      <div class="quick-card-row">
+        <div class="quick-card" role="button" tabindex="0" @click="router.push('/experiences')" @keydown.enter="router.push('/experiences')">
+          <el-icon><Memo /></el-icon>
+          <span>{{ t('nav.experiences') }}</span>
+        </div>
+        <div class="quick-card" role="button" tabindex="0" @click="router.push('/attachments')" @keydown.enter="router.push('/attachments')">
+          <el-icon><Paperclip /></el-icon>
+          <span>{{ t('nav.attachments') }}</span>
+        </div>
+      </div>
+    </section>
+    </div>
   </div>
 </template>
 
@@ -419,9 +430,40 @@ async function doLogout() {
 
 <style scoped>
 .settings {
+  align-items: start;
+  display: grid;
+  gap: var(--space-5);
+  grid-template-columns: 180px minmax(0, 640px);
   margin: 0 auto;
-  max-width: 640px;
+  max-width: 844px;
   width: 100%;
+}
+
+.settings-toc {
+  display: grid;
+  gap: var(--space-2);
+  padding: var(--space-3);
+  position: sticky;
+  top: calc(var(--topbar-height) + var(--space-6));
+}
+
+.settings-toc a {
+  border-radius: var(--radius-sm);
+  color: var(--text-2);
+  padding: var(--space-2) var(--space-3);
+}
+
+.settings-toc a:hover {
+  background: var(--surface-2);
+  color: var(--brand-600);
+}
+
+.settings-content {
+  min-width: 0;
+}
+
+.settings-section {
+  scroll-margin-top: calc(var(--topbar-height) + var(--space-6));
 }
 
 .settings-card {
@@ -476,6 +518,20 @@ async function doLogout() {
   flex-wrap: wrap;
   gap: 16px;
   margin-top: 20px;
+}
+
+@media (max-width: 768px) {
+  .settings {
+    display: block;
+  }
+
+  .settings-toc {
+    display: none;
+  }
+
+  .settings-section + .settings-section {
+    margin-top: var(--space-4);
+  }
 }
 
 .mobile-quick-links {

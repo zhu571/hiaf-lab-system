@@ -61,6 +61,12 @@ export default {
   },
   mobile: {
     back: '返回',
+    menu: '打开导航菜单',
+    drawer: {
+      title: '全部导航',
+      main: '主要功能',
+      system: '系统功能'
+    },
     title: {
       runDetail: '运行详情',
       dailyReportDetail: '日报详情',
@@ -690,6 +696,11 @@ export default {
   },
   settings: {
     title: '个人设置',
+    sections: {
+      title: '设置目录',
+      account: '账号与安全',
+      mobile: '移动端快捷入口'
+    },
     mustChangePassword: '首次登录需要修改密码',
     language: '语言 / Language',
     theme: '主题',

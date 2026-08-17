@@ -1,8 +1,10 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
+import { nextTick, reactive } from 'vue'
 import { flushPromises, mount } from '@vue/test-utils'
 import { createPinia, setActivePinia } from 'pinia'
 import { ElBadge } from 'element-plus'
 import AppLayout from '@/layouts/AppLayout.vue'
+import MobileNavDrawer from '@/components/business/MobileNavDrawer.vue'
 import { createTestI18n } from '@/test-utils/setup'
 import { useAskDialog } from '@/composables/useAskDialog'
 import { useCommandPalette } from '@/composables/useCommandPalette'
@@ -17,6 +19,9 @@ import type { UserInfo } from '@/api/auth'
 const routeState = vi.hoisted(() => ({
   current: { path: '/', meta: {} as Record<string, unknown>, params: {} as Record<string, string> }
 }))
+const mobileState = vi.hoisted(() => ({ __v_isRef: true, value: false }))
+
+vi.mock('@/composables/useMobile', () => ({ useMobile: () => mobileState }))
 
 vi.mock('@/api/agent', () => ({
   listAgentCandidates: vi.fn()
@@ -87,7 +92,8 @@ async function mountLayout(role: string) {
 beforeEach(() => {
   vi.mocked(listAgentCandidates).mockReset()
   vi.mocked(listProjects).mockResolvedValue([])
-  routeState.current = { path: '/', meta: {}, params: {} }
+  routeState.current = reactive({ path: '/', meta: {}, params: {} })
+  mobileState.value = false
   // 折叠状态走 useLocalStorage 持久化，用例间互不影响须清空
   localStorage.clear()
 })
@@ -198,9 +204,36 @@ describe('AppLayout 顶栏 R2 入口（命令面板 + 通知中心）', () => {
   })
 })
 
+describe('AppLayout 移动导航（R7）', () => {
+  it('底栏仍为 5 项，一级页菜单键打开全量导航抽屉', async () => {
+    mobileState.value = true
+    const wrapper = await mountLayout('admin')
+    expect(wrapper.findAll('.bottom-link')).toHaveLength(5)
+    expect(wrapper.find('.menu-btn').exists()).toBe(true)
+    expect(wrapper.findComponent(MobileNavDrawer).props('modelValue')).toBe(false)
+    await wrapper.find('.menu-btn').trigger('click')
+    expect(wrapper.findComponent(MobileNavDrawer).props('modelValue')).toBe(true)
+    wrapper.unmount()
+  })
+
+  it('R7 审查闭环：程序化路由跳转后抽屉自动关闭', async () => {
+    mobileState.value = true
+    const wrapper = await mountLayout('admin')
+    await wrapper.find('.menu-btn').trigger('click')
+    expect(wrapper.findComponent(MobileNavDrawer).props('modelValue')).toBe(true)
+    // 通知中心/命令面板程序化跳转 → route.path watcher 关闭抽屉
+    //（mutate 同一 routeState.current 对象属性——watcher 捕获旧引用，整体替换不触发）
+    routeState.current.path = '/alerts'
+    await vi.waitFor(() => {
+      expect(wrapper.findComponent(MobileNavDrawer).props('modelValue')).toBe(false)
+    }, { timeout: 2000 })
+    wrapper.unmount()
+  })
+})
+
 describe('AppLayout 面包屑规则表（R1 §2.3）', () => {
   it('一级页（/todos）：单段纯标题，无链接无分隔符', async () => {
-    routeState.current = { path: '/todos', meta: { titleKey: 'nav.todos' }, params: {} }
+    routeState.current = reactive({ path: '/todos', meta: { titleKey: 'nav.todos' }, params: {} })
     const wrapper = await mountLayout('viewer')
     const crumbs = wrapper.findAll('.crumb-item')
     expect(crumbs).toHaveLength(1)
@@ -210,7 +243,7 @@ describe('AppLayout 面包屑规则表（R1 §2.3）', () => {
   })
 
   it('/daily-report：单段「日报」', async () => {
-    routeState.current = { path: '/daily-report', meta: { titleKey: 'nav.dailyReport' }, params: {} }
+    routeState.current = reactive({ path: '/daily-report', meta: { titleKey: 'nav.dailyReport' }, params: {} })
     const wrapper = await mountLayout('viewer')
     expect(wrapper.findAll('.crumb-item')).toHaveLength(1)
     expect(wrapper.find('.crumb-text').text()).toBe('日报')
@@ -218,7 +251,7 @@ describe('AppLayout 面包屑规则表（R1 §2.3）', () => {
   })
 
   it('/daily-report/history：[日报（可点） / 日报历史]', async () => {
-    routeState.current = { path: '/daily-report/history', meta: { titleKey: 'nav.dailyReport' }, params: {} }
+    routeState.current = reactive({ path: '/daily-report/history', meta: { titleKey: 'nav.dailyReport' }, params: {} })
     const wrapper = await mountLayout('viewer')
     expect(wrapper.findAll('.crumb-item')).toHaveLength(2)
     expect(wrapper.find('.crumb-link').text()).toBe('日报')
@@ -227,7 +260,7 @@ describe('AppLayout 面包屑规则表（R1 §2.3）', () => {
   })
 
   it('/daily-reports/:id：[日报（指向历史） / 日报详情]', async () => {
-    routeState.current = { path: '/daily-reports/r1', meta: { titleKey: 'mobile.title.dailyReportDetail' }, params: { id: 'r1' } }
+    routeState.current = reactive({ path: '/daily-reports/r1', meta: { titleKey: 'mobile.title.dailyReportDetail' }, params: { id: 'r1' } })
     const wrapper = await mountLayout('viewer')
     expect(wrapper.findAll('.crumb-item')).toHaveLength(2)
     expect(wrapper.find('.crumb-link').text()).toBe('日报')
@@ -236,7 +269,7 @@ describe('AppLayout 面包屑规则表（R1 §2.3）', () => {
   })
 
   it('/projects：单段「项目」', async () => {
-    routeState.current = { path: '/projects', meta: { titleKey: 'nav.projects' }, params: {} }
+    routeState.current = reactive({ path: '/projects', meta: { titleKey: 'nav.projects' }, params: {} })
     const wrapper = await mountLayout('viewer')
     expect(wrapper.findAll('.crumb-item')).toHaveLength(1)
     expect(wrapper.find('.crumb-text').text()).toBe('项目')
@@ -247,7 +280,7 @@ describe('AppLayout 面包屑规则表（R1 §2.3）', () => {
     vi.mocked(listProjects).mockResolvedValue([
       { id: 'p1', code: 'HIAF', name: 'HIAF气靶', short_name: '', description: '', status: 'active', visibility: 'private' }
     ])
-    routeState.current = { path: '/projects/p1/issues', meta: { titleKey: 'nav.projects' }, params: { id: 'p1' } }
+    routeState.current = reactive({ path: '/projects/p1/issues', meta: { titleKey: 'nav.projects' }, params: { id: 'p1' } })
     const wrapper = await mountLayout('viewer')
     await flushPromises()
     expect(wrapper.findAll('.crumb-item')).toHaveLength(2)
@@ -257,7 +290,7 @@ describe('AppLayout 面包屑规则表（R1 §2.3）', () => {
   })
 
   it('/projects/:id 项目名未加载时降级为单段「项目」', async () => {
-    routeState.current = { path: '/projects/p404', meta: { titleKey: 'nav.projects' }, params: { id: 'p404' } }
+    routeState.current = reactive({ path: '/projects/p404', meta: { titleKey: 'nav.projects' }, params: { id: 'p404' } })
     const wrapper = await mountLayout('viewer')
     expect(wrapper.findAll('.crumb-item')).toHaveLength(1)
     expect(wrapper.find('.crumb-text').text()).toBe('项目')
@@ -265,7 +298,7 @@ describe('AppLayout 面包屑规则表（R1 §2.3）', () => {
   })
 
   it('/experiment-runs/:id：单段「运行详情」', async () => {
-    routeState.current = { path: '/experiment-runs/run1', meta: { titleKey: 'mobile.title.runDetail' }, params: { id: 'run1' } }
+    routeState.current = reactive({ path: '/experiment-runs/run1', meta: { titleKey: 'mobile.title.runDetail' }, params: { id: 'run1' } })
     const wrapper = await mountLayout('viewer')
     expect(wrapper.findAll('.crumb-item')).toHaveLength(1)
     expect(wrapper.find('.crumb-text').text()).toBe('运行详情')
@@ -273,7 +306,7 @@ describe('AppLayout 面包屑规则表（R1 §2.3）', () => {
   })
 
   it('/step-templates：单段「步骤模板」', async () => {
-    routeState.current = { path: '/step-templates', meta: { titleKey: 'mobile.title.stepTemplates' }, params: {} }
+    routeState.current = reactive({ path: '/step-templates', meta: { titleKey: 'mobile.title.stepTemplates' }, params: {} })
     const wrapper = await mountLayout('viewer')
     expect(wrapper.findAll('.crumb-item')).toHaveLength(1)
     expect(wrapper.find('.crumb-text').text()).toBe('步骤模板')

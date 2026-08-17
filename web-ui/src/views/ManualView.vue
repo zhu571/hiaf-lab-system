@@ -7,20 +7,22 @@
       </div>
     </div>
 
-    <nav class="panel toc" :aria-label="ui.tocLabel">
-      <a
-        v-for="(s, i) in sections"
-        :key="s.id"
-        class="toc-chip"
-        :href="'#' + s.id"
-        @click.prevent="scrollTo(s.id)"
-      >
-        <span class="toc-num">{{ i + 1 }}</span>
-        <span>{{ s.title[lang] }}</span>
-      </a>
-    </nav>
+    <div class="manual-layout">
+      <nav class="panel toc" :aria-label="ui.tocLabel">
+        <a
+          v-for="(s, i) in sections"
+          :key="s.id"
+          class="toc-chip"
+          :href="'#' + s.id"
+          @click.prevent="scrollTo(s.id)"
+        >
+          <span class="toc-num">{{ i + 1 }}</span>
+          <span>{{ s.title[lang] }}</span>
+        </a>
+      </nav>
 
-    <section v-for="(s, i) in sections" :id="s.id" :key="s.id" class="panel manual-section">
+      <div class="manual-content">
+      <section v-for="(s, i) in sections" :id="s.id" :key="s.id" class="panel manual-section">
       <header class="section-head">
         <span class="section-num">{{ i + 1 }}</span>
         <h3>{{ s.title[lang] }}</h3>
@@ -43,7 +45,9 @@
           </ul>
         </div>
       </div>
-    </section>
+      </section>
+      </div>
+    </div>
   </div>
 </template>
 
@@ -778,11 +782,22 @@ const sections: ManualSection[] = [
   font-size: 13px;
 }
 
+.manual-layout {
+  align-items: start;
+  display: grid;
+  gap: var(--space-5);
+  grid-template-columns: 220px minmax(0, 1fr);
+}
+
 .toc {
-  display: flex;
-  flex-wrap: wrap;
+  display: grid;
   gap: 8px;
   padding: 14px 16px;
+  position: sticky;
+  /* R7 审查闭环：长目录（22 项）在 768px 视口高度内可滚动达末项 */
+  max-height: calc(100vh - 2 * var(--space-6));
+  overflow-y: auto;
+  top: calc(var(--topbar-height) + var(--space-6));
 }
 
 .toc-chip {
@@ -820,7 +835,11 @@ const sections: ManualSection[] = [
 }
 
 .manual-section {
-  scroll-margin-top: 20px;
+  scroll-margin-top: calc(var(--topbar-height) + var(--space-6));
+}
+
+.manual-content {
+  min-width: 0;
 }
 
 .section-head {
@@ -913,6 +932,16 @@ const sections: ManualSection[] = [
 }
 
 @media (max-width: 768px) {
+  .manual-layout {
+    display: block;
+  }
+
+  .toc {
+    display: flex;
+    flex-wrap: wrap;
+    position: static;
+  }
+
   .section-cols {
     grid-template-columns: 1fr;
   }

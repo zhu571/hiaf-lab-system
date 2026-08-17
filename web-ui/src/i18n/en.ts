@@ -71,6 +71,12 @@ export default {
   mobile: {
     // Mobile top bar (MobileTopBar).
     back: 'Back',
+    menu: 'Open navigation menu',
+    drawer: {
+      title: 'All navigation',
+      main: 'Main',
+      system: 'System'
+    },
     title: {
       runDetail: 'Run Detail',
       dailyReportDetail: 'Daily Report Detail',
@@ -726,6 +732,11 @@ export default {
   },
   settings: {
     title: 'Settings',
+    sections: {
+      title: 'Settings sections',
+      account: 'Account & Security',
+      mobile: 'Mobile shortcuts'
+    },
     mustChangePassword: 'Password change required on first login',
     language: 'Language / 语言',
     theme: 'Theme',
