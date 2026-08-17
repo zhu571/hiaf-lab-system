@@ -693,7 +693,13 @@ func injectRowFilter(sqlText, stripped, col string, ids []string) string {
 	}
 	cond := col + " IN (" + list + ")"
 	if loc := whereKwRe.FindStringIndex(stripped); loc != nil {
-		return sqlText[:loc[1]] + " " + cond + " AND (" + sqlText[loc[1]:] + ")"
+		// LIMIT is a query clause, not part of the boolean expression. Keep the
+		// security parentheses while leaving LIMIT outside for PostgreSQL.
+		end := len(sqlText)
+		if limit := limitRe.FindStringIndex(stripped[loc[1]:]); limit != nil {
+			end = loc[1] + limit[0]
+		}
+		return sqlText[:loc[1]] + " " + cond + " AND (" + sqlText[loc[1]:end] + ")" + sqlText[end:]
 	}
 	best := -1
 	for _, re := range []*regexp.Regexp{groupByRe, orderByRe, limitRe, offsetRe} {
