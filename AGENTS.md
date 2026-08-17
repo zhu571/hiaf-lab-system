@@ -147,12 +147,13 @@ go-server/<module>/
 
 **全库只读例外（ask 模块）**：AI 智能查询系统（`go-server/ask/`）的 `POST /api/v1/ask/execute` 由 SERVICE_TOKEN 调用，在只读事务内 `SET LOCAL ROLE ask_reader` 直读业务表，是上述铁律的全库级只读例外——DB 权限层由迁移 033 的 `ask_reader` 角色 GRANT SELECT 白名单（18 张主表）强制，Go 解析器仅作纵深；仅允许 SELECT 单表，禁写/禁跨表 join/禁多语句。与 agent 模块 `SetExecutor` 桥接先例并列；后续收紧（project_id 过滤）见 `docs/permission-audit.md` D4 风险登记。
 
-**轻量只读例外登记（4 处，代码不动）**：除 ask 全库只读例外外，以下跨模块轻量只读为既有登记豁免：
+**轻量只读例外登记（5 处，代码不动）**：除 ask 全库只读例外外，以下跨模块轻量只读为既有登记豁免：
 
 - `issues/repository.go` `CountRelatedLogs`/`CountLogsByIDs` —— 直读 `logs` 表 COUNT（删除校验用）；
 - `todos/repository.go` `List`/`OpenVisibleForUser` —— `LEFT JOIN users` 取展示字段 display_name；
 - `projects/repository.go:242-249` `UserExists` —— 直读 `users` 表 EXISTS（成员校验用）；
 - `logs/repository.go` `WeeklyReports` —— `JOIN users` 取展示字段 display_name（周报 AI-1 数据源；经 main.go 注入 weekly 模块窄接口，SQL 仍在 logs 包内自有表）。
+- `todos/snapshot.go` —— scheduler 批量聚合场景直读 `issues`/`users`/`project_members` 三表业务字段（status/severity/disabled 等用于过滤聚合），不可改为 HTTP（O(N×M) 成本）。**仅限此一处例外，其他模块不得效仿；若后续调度器改造为注入化，须同步删除此例外。**
 
 **注入化窄接口登记（AI-1 周报链路）**：weekly 模块跨模块只读（daily_reports/issues）与落库（experiences）
 全部经 main.go 构造期注入（`main_bridges.go` `weeklyReportReaderBridge`/`weeklyIssueStatsBridge`/
