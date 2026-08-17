@@ -33,27 +33,27 @@ type SummaryResult struct {
 
 // ReportEntry 是周报 LLM 输入的日报条目（经 main.go 桥接自 logs 模块）。
 type ReportEntry struct {
-	ReportDate string
-	AuthorName string
-	RawText    string
-	Summary    string
+	ReportDate string `json:"report_date"`
+	AuthorName string `json:"author_name"`
+	RawText    string `json:"raw_text"`
+	Summary    string `json:"summary"`
 }
 
 // IssueStats 是周报 LLM 输入的 issue 统计（经 main.go 桥接自 issues 模块）。
 type IssueStats struct {
-	Created          int
-	Resolved         int
-	OpenHighCritical int
+	Created          int `json:"created"`
+	Resolved         int `json:"resolved"`
+	OpenHighCritical int `json:"open_high_critical"`
 }
 
 // SavedSummary 是落库后的周报（经 main.go 桥接自 experiences 模块）。
 // 注：experiences 仅存 title + content（markdown 正文）；一句话 summary 仅用于
 // 即时推送，复用历史周报时 Summary 为空（正文在 Markdown 字段）。
 type SavedSummary struct {
-	ID        string
-	Title     string
-	Markdown  string
-	CreatedAt time.Time
+	ID        string    `json:"id"`
+	Title     string    `json:"title"`
+	Markdown  string    `json:"markdown"`
+	CreatedAt time.Time `json:"created_at"`
 }
 
 // LLMRequest / LLMResponse 是 Go → py-agent /v1/weekly-summary 的契约。
@@ -66,6 +66,7 @@ type LLMRequest struct {
 
 type LLMResponse struct {
 	Status     string   `json:"status"`
+	Model      string   `json:"model"`
 	Title      string   `json:"title"`
 	Summary    string   `json:"summary"`
 	Markdown   string   `json:"markdown"`
