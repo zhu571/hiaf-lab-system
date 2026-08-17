@@ -13,7 +13,7 @@ import (
 // newRunner Windows 本地开发实现：进程内 goroutine 跑真实流水线，注入 fake CmdRunner
 // 让流水线在无 docker 环境端到端执行（detect/dry-run/回滚分派与真实一致）。
 // 承诺：Windows 可编译、可单测、可本地跑流水线逻辑；不承诺 Windows 上跑真实容器部署。
-func newRunner(s *Service, engine string) SessionRunner {
+func newRunner(s *Service, _ string) SessionRunner {
 	return &localRunner{
 		repoRoot:    s.repoRoot,
 		composeFile: s.composeFile,
@@ -109,7 +109,7 @@ func localDevCmdRunner(repoRoot string) CmdRunner {
 		case "git":
 			return realGit.Run(context.Background(), c.Name, c.Args...)
 		case "df":
-			return "Filesystem 1024-blocks Used Available Capacity Mounted on\n/dev/root 12345678 1234567 1234567890 1% /opt\n", "", nil
+			return "Filesystem 1024-blocks Used Available Capacity Mounted on\n/dev/root 12345678 1234567 10981111 1% /opt\n", "", nil
 		case "docker":
 			return "", "docker 不可用（Windows 本地模拟）", errors.New("docker 不可用")
 		default:
