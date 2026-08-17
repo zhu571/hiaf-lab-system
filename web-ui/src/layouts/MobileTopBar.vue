@@ -3,6 +3,9 @@
     <button v-if="showBack" class="back-btn" type="button" :aria-label="t('mobile.back')" @click="goBack">
       <el-icon><ArrowLeft /></el-icon>
     </button>
+    <button v-else class="menu-btn" type="button" :aria-label="t('mobile.menu')" @click="emit('menu')">
+      <el-icon><Menu /></el-icon>
+    </button>
     <h1 class="title">{{ title }}</h1>
     <button class="ask-btn" type="button" :aria-label="t('ask.title')" @click="emit('ask')">
       <el-icon><ChatDotRound /></el-icon>
@@ -14,10 +17,10 @@
 import { computed } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
-import { ArrowLeft, ChatDotRound } from '@element-plus/icons-vue'
+import { ArrowLeft, ChatDotRound, Menu } from '@element-plus/icons-vue'
 import { useProjectStore } from '@/stores/project'
 
-const emit = defineEmits<{ ask: [] }>()
+const emit = defineEmits<{ ask: []; menu: [] }>()
 
 const route = useRoute()
 const router = useRouter()
@@ -64,7 +67,8 @@ function goBack() {
   z-index: var(--z-topbar);
 }
 
-.back-btn {
+.back-btn,
+.menu-btn {
   align-items: center;
   background: transparent;
   border: none;
@@ -98,6 +102,7 @@ function goBack() {
 }
 
 .back-btn:active,
+.menu-btn:active,
 .ask-btn:active {
   background: var(--surface-2);
 }
