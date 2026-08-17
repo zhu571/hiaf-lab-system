@@ -1,0 +1,1 @@
+import{n as a}from"./vendor-BB3r_Ejx.js";function g(u={}){const e=a(1),o=a(u.perPage??10),t=a(0),r=a(!1);function i(n){e.value=n}function l(n){o.value=n,e.value=1}function s(n){t.value=n}function c(){e.value=1,t.value=0}return{page:e,perPage:o,total:t,loading:r,setTotal:s,reset:c,onSizeChange:l,onCurrentChange:i}}export{g as u};

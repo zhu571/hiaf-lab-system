@@ -10,7 +10,7 @@
     <el-alert v-if="error" :title="error" type="error" show-icon :closable="false">
       <el-button size="small" @click="loadInstruments">{{ t('instrument.retry') }}</el-button>
     </el-alert>
-    <div v-loading="loading" ref="cardGridRef" class="card-grid">
+    <CardGrid v-loading="loading" ref="cardGridRef" min="320px">
       <section v-for="ins in instruments" :key="ins.id" class="panel ins-card">
         <header class="ins-head">
           <span class="state-dot" :class="{ pulse: ins.state === 'running' }" :style="{ background: stateColor(ins.state) }" />
@@ -81,7 +81,7 @@
         </div>
       </section>
       <el-empty v-if="!loading && !instruments.length && !error" :description="t('instrument.noInstruments')" class="grid-empty" />
-    </div>
+    </CardGrid>
 
     <!-- 执行结果 / 扫频曲线（常驻） -->
     <section class="panel">
@@ -222,6 +222,7 @@ import { useAuthStore } from '../stores/auth'
 import { showApiError } from '../composables/useNotify'
 import { useMobile } from '../composables/useMobile'
 import ResponsiveTable from '@/components/base/ResponsiveTable.vue'
+import CardGrid from '@/components/base/CardGrid.vue'
 import FormDialog from '@/components/base/FormDialog.vue'
 import InstrumentAiChat, { riskTag, type ExecRecord } from '@/components/business/InstrumentAiChat.vue'
 import { chartPalette, refreshDefaults } from '../utils/chartTheme'
@@ -255,8 +256,8 @@ const error = ref('')
 const expandedId = ref('')
 const detailStatus = ref<InstrumentStatus | null>(null)
 const detailLoading = ref(false)
-// 白名单「执行」后的滚动目标（替代 document.querySelector('.ins-card')，S5）
-const cardGridRef = ref<HTMLElement>()
+// 白名单「执行」后的滚动目标（替代 document.querySelector('.ins-card')，S5；R5 网格收口 CardGrid 后取组件根元素）
+const cardGridRef = ref<InstanceType<typeof CardGrid>>()
 
 const cmdName = ref('')
 const cmdParams = reactive<Record<string, any>>({})
@@ -379,7 +380,7 @@ async function executeFromWhitelist(cmd: WhitelistCommand) {
   cmdName.value = cmd.name
   onCommandPick()
   await nextTick()
-  cardGridRef.value?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+  ;(cardGridRef.value?.$el as HTMLElement | undefined)?.scrollIntoView({ behavior: 'smooth', block: 'start' })
 }
 
 function paramEntries(def: WhitelistCommand): [string, CommandParamDef][] {
@@ -644,11 +645,7 @@ function stateTag(s: string) {
   font-size: 12px;
 }
 
-.card-grid {
-  display: grid;
-  gap: 16px;
-  grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
-}
+/* 网格本体已收口 base/CardGrid（R5）：min 320px + gap --space-4 等值原 .card-grid */
 
 .grid-empty {
   grid-column: 1 / -1;

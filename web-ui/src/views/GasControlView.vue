@@ -12,13 +12,13 @@
     <el-alert v-if="streamError" :title="streamError" type="warning" :closable="false" show-icon />
     <el-alert v-if="tripCode" :title="t('gasControl.a5Trip', { code: tripCode })" type="error" :closable="false" show-icon />
 
-    <section v-loading="loading" class="status-grid">
+    <CardGrid v-loading="loading" mode="auto-fit" min="170px" gap="14px" class="status-grid">
       <article v-for="card in cards" :key="card.pv" class="status-card">
         <span>{{ t(card.labelKey) }}</span>
         <strong :class="{ invalid: point(card.pv).q !== 'good' }">{{ display(card.pv, card.unit) }}</strong>
         <small>{{ point(card.pv).q === 'good' ? card.pv : t('gasControl.dataInvalid') }}</small>
       </article>
-    </section>
+    </CardGrid>
 
     <section class="chart-card">
       <div class="section-title">
@@ -82,6 +82,7 @@ import {
 import { useAuthStore } from '../stores/auth'
 import { useTheme } from '../composables/useTheme'
 import { chartPalette, refreshDefaults } from '../utils/chartTheme'
+import CardGrid from '@/components/base/CardGrid.vue'
 
 // Chart.register 已收口到 utils/chartTheme.ts setupChartDefaults()（美术方案 §3.7，main.ts 调用一次）
 
@@ -289,7 +290,8 @@ async function clearA5() {
 .page-header h1, .section-title h2 { margin: 0; }
 .eyebrow { color: var(--brand-600); font-size: 12px; font-weight: 700; letter-spacing: .12em; margin: 0 0 4px; text-transform: uppercase; }
 .subtitle, .section-title p { color: var(--text-3); margin: 5px 0 0; }
-.status-grid { display: grid; gap: 14px; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); min-height: 130px; }
+/* 网格本体已收口 base/CardGrid（R5）：auto-fit minmax(170px,1fr) + gap 14px 等值原样；此处仅保留 min-height */
+.status-grid { min-height: 130px; }
 .status-card, .chart-card { background: var(--surface); border: 1px solid var(--border); border-radius: 14px; box-shadow: var(--shadow-sm); }
 .status-card { display: grid; gap: 8px; padding: 18px; }
 .status-card span, .status-card small { color: var(--text-3); }

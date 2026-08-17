@@ -6,25 +6,16 @@
     </div>
     <!-- empty 不接线：看板 4 列 + 列内 empty-hint 即空态呈现，保持桌面布局零回归 -->
     <StateBlock :loading="loading && !data" :error="error" :error-text="t('issues.loadFailed')" @retry="run">
-      <div class="board">
-        <section v-for="status in statuses" :key="status" class="panel column">
-          <div class="column-head">
-            <h3><span class="dot" :style="{ background: statusDotColor(status) }" />{{ statusLabel(status) }}</h3>
-            <span class="count">{{ grouped[status].length }}</span>
-          </div>
-          <button
-            v-for="issue in grouped[status]"
-            :key="issue.id"
-            class="issue-card"
-            @click="open(issue.id)"
-          >
-            <strong>{{ issue.title }}</strong>
-            <StatusBadge class="severity-badge" domain="issueSeverity" :value="issue.severity" />
-            <el-tag v-if="issue.ai_generated" class="ai-tag" size="small" type="warning" effect="light">AI</el-tag>
+      <KanbanBoard :columns="boardColumns">
+        <template #card="{ item }">
+          <button class="issue-card" @click="open(item.id)">
+            <strong>{{ item.title }}</strong>
+            <StatusBadge class="severity-badge" domain="issueSeverity" :value="item.severity" />
+            <el-tag v-if="item.ai_generated" class="ai-tag" size="small" type="warning" effect="light">AI</el-tag>
           </button>
-          <p v-if="grouped[status].length === 0" class="empty-hint">{{ t('issues.empty') }}</p>
-        </section>
-      </div>
+        </template>
+        <template #empty>{{ t('issues.empty') }}</template>
+      </KanbanBoard>
     </StateBlock>
     <el-pagination
       v-model:current-page="page"
@@ -65,6 +56,7 @@ import { ElMessage } from 'element-plus'
 import { showApiError } from '../composables/useNotify'
 import StatusBadge from '@/components/base/StatusBadge.vue'
 import StateBlock from '@/components/base/StateBlock.vue'
+import KanbanBoard from '@/components/base/KanbanBoard.vue'
 import FormDialog from '@/components/base/FormDialog.vue'
 import CommentSection from '@/components/business/CommentSection.vue'
 import MarkdownView from '@/components/business/MarkdownView.vue'
@@ -101,6 +93,16 @@ const { data, loading, error, run } = useAsyncData<Issue[]>(async () => {
 
 const grouped = computed(() => Object.fromEntries(statuses.map((s) => [s, (data.value ?? []).filter((item) => item.status === s)])) as Record<string, Issue[]>)
 
+// 看板列数据（R5 KanbanBoard 接入）：列头圆点色对齐 statusMeta 注册表 graphic（issueStatus 域），未命中回退 --info
+const boardColumns = computed(() =>
+  statuses.map((s) => ({
+    key: s,
+    label: statusLabel(s),
+    tone: statusMetaFor('issueStatus', s)?.graphic ?? '--info',
+    items: grouped.value[s]
+  }))
+)
+
 // 切换项目回第一页重拉；首屏加载由 useAsyncData immediate 承担，无需 onMounted
 watch(projectId, () => {
   reset()
@@ -116,11 +118,6 @@ function statusLabel(s: string) {
 function severityLabel(s: string) {
   const m = statusMetaFor('issueSeverity', s)
   return m ? t(m.labelKey) : s
-}
-
-// 列头圆点色对齐 statusMeta 注册表 graphic（issueStatus 域），未命中回退 --info
-function statusDotColor(s: string) {
-  return `var(${statusMetaFor('issueStatus', s)?.graphic ?? '--info'})`
 }
 
 async function open(id: string) {
@@ -169,54 +166,11 @@ async function create() {
 </script>
 
 <style scoped>
-.board {
-  display: grid;
-  gap: 16px;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
-}
+/* 看板骨架（.board/.column/.column-head/.dot/.count/.empty-hint）已收口 base/KanbanBoard（R5） */
 
 .pager {
   justify-content: flex-end;
   margin-top: 14px;
-}
-
-.column {
-  align-content: start;
-  background: var(--surface-2);
-  display: grid;
-  gap: var(--space-3);
-}
-
-.column-head {
-  align-items: center;
-  display: flex;
-  justify-content: space-between;
-}
-
-.column-head h3 {
-  align-items: center;
-  display: flex;
-  font-size: 14px;
-  gap: 8px;
-  letter-spacing: 0.01em;
-}
-
-.dot {
-  border-radius: 50%;
-  height: 8px;
-  width: 8px;
-}
-
-.count {
-  background: var(--surface);
-  border: 1px solid var(--border);
-  border-radius: var(--radius-full);
-  color: var(--text-3);
-  font-size: 12px;
-  font-weight: 600;
-  min-width: 26px;
-  padding: 0 8px;
-  text-align: center;
 }
 
 .issue-card {
@@ -251,20 +205,5 @@ async function create() {
 
 .ai-tag {
   justify-self: start;
-}
-
-.empty-hint {
-  border: 1px dashed var(--border-strong);
-  border-radius: var(--radius-md);
-  color: var(--text-3);
-  font-size: 12px;
-  padding: 16px 0;
-  text-align: center;
-}
-
-@media (max-width: 768px) {
-  .board {
-    grid-template-columns: 1fr;
-  }
 }
 </style>

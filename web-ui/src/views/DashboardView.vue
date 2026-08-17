@@ -11,15 +11,18 @@
       </div>
     </div>
 
-    <section class="panel todo-panel">
-      <div class="panel-head">
-        <span class="panel-icon"><el-icon><Tickets /></el-icon></span>
-        <h3>{{ t('dashboard.todayTodos') }}</h3>
-        <span class="panel-meta">{{ t('dashboard.todosCount', { n: todos.length }) }}</span>
+    <DashboardPanel
+      class="todo-panel"
+      :title="t('dashboard.todayTodos')"
+      :icon="Tickets"
+      :meta="t('dashboard.todosCount', { n: todos.length })"
+      divided
+    >
+      <template #actions>
         <el-button class="todo-more" size="small" text type="primary" @click="router.push('/todos')">
           {{ t('dashboard.todosMore') }}
         </el-button>
-      </div>
+      </template>
       <div class="todo-list">
         <StateBlock
           :loading="loadingTodos && !todosData"
@@ -48,16 +51,16 @@
         <el-input v-model="llmText" :placeholder="t('dashboard.todoLLMPlaceholder')" maxlength="2000" clearable @keyup.enter="parseLLMTodo" />
         <el-button type="success" plain :loading="parsingLLM" @click="parseLLMTodo">{{ t('dashboard.todoLLM') }}</el-button>
       </div>
-    </section>
+    </DashboardPanel>
 
     <div class="dashboard-grid">
       <!-- 左列：设备状态 -->
-      <section class="panel column">
-        <div class="panel-head">
-          <span class="panel-icon"><el-icon><Odometer /></el-icon></span>
-          <h3>{{ t('dashboard.deviceStatus') }}</h3>
-          <span class="panel-meta">{{ t('dashboard.onlineCount', { online: onlineCount, total: instruments.length + 1 }) }}</span>
-        </div>
+      <DashboardPanel
+        :title="t('dashboard.deviceStatus')"
+        :icon="Odometer"
+        :meta="t('dashboard.onlineCount', { online: onlineCount, total: instruments.length + 1 })"
+        divided
+      >
         <div class="card-list">
           <StateBlock
             :loading="loadingInstruments && !instrumentsData"
@@ -104,49 +107,46 @@
             </div>
           </div>
         </div>
-      </section>
+      </DashboardPanel>
 
-      <!-- 中列：综合简报 -->
-      <section class="panel column">
-        <div class="panel-head">
-          <span class="panel-icon"><el-icon><DataAnalysis /></el-icon></span>
-          <h3>{{ t('dashboard.brief') }}</h3>
-          <span class="panel-meta">{{ t('dashboard.last7Days') }}</span>
-        </div>
+      <!-- 中列：综合简报（整块内容由 DashboardPanel 内建 StateBlock 门控：加载/错误态下横向滚动条不渲染） -->
+      <DashboardPanel
+        :title="t('dashboard.brief')"
+        :icon="DataAnalysis"
+        :meta="t('dashboard.last7Days')"
+        divided
+        :loading="loadingReports && !reportsData"
+        :error="reportsError"
+        :error-text="t('dashboard.loadReportsFailed')"
+        @retry="loadReports"
+      >
+        <!-- 简报条恒渲染 7 天卡片，无空态，仅收敛 loading/error -->
         <div class="brief-strip">
-          <!-- 简报条恒渲染 7 天卡片，无空态，仅收敛 loading/error -->
-          <StateBlock
-            :loading="loadingReports && !reportsData"
-            :error="reportsError"
-            :error-text="t('dashboard.loadReportsFailed')"
-            @retry="loadReports"
+          <div
+            v-for="(day, i) in briefDays"
+            :key="day.date"
+            class="brief-card"
+            :class="{ active: day.date === selectedDate }"
+            :style="stagger(i)"
+            @click="selectDate(day.date)"
           >
-            <div
-              v-for="(day, i) in briefDays"
-              :key="day.date"
-              class="brief-card"
-              :class="{ active: day.date === selectedDate }"
-              :style="stagger(i)"
-              @click="selectDate(day.date)"
-            >
-              <div class="brief-top">
-                <span class="brief-date">{{ briefDayLabel(day.date) }}</span>
-                <span class="brief-count">{{ t('dashboard.peopleCount', { n: day.reports.length }) }}</span>
-              </div>
-              <span class="brief-week">{{ weekdayLabel(day.date) }}</span>
-              <p class="brief-summary" :class="{ empty: !day.summary }">{{ day.summary || t('dashboard.noReport') }}</p>
+            <div class="brief-top">
+              <span class="brief-date">{{ briefDayLabel(day.date) }}</span>
+              <span class="brief-count">{{ t('dashboard.peopleCount', { n: day.reports.length }) }}</span>
             </div>
-          </StateBlock>
+            <span class="brief-week">{{ weekdayLabel(day.date) }}</span>
+            <p class="brief-summary" :class="{ empty: !day.summary }">{{ day.summary || t('dashboard.noReport') }}</p>
+          </div>
         </div>
-      </section>
+      </DashboardPanel>
 
       <!-- 右列：团队成员日报 -->
-      <section class="panel column">
-        <div class="panel-head">
-          <span class="panel-icon"><el-icon><Avatar /></el-icon></span>
-          <h3>{{ t('dashboard.teamReports') }}</h3>
-          <span class="panel-meta">{{ t('dashboard.reportsCount', { n: dayReports.length }) }}</span>
-        </div>
+      <DashboardPanel
+        :title="t('dashboard.teamReports')"
+        :icon="Avatar"
+        :meta="t('dashboard.reportsCount', { n: dayReports.length })"
+        divided
+      >
         <div class="date-bar">
           <el-button :icon="ArrowLeft" circle size="small" @click="shiftDate(-1)" />
           <el-date-picker v-model="selectedDate" type="date" value-format="YYYY-MM-DD" :clearable="false" />
@@ -179,7 +179,7 @@
             </div>
           </StateBlock>
         </div>
-      </section>
+      </DashboardPanel>
     </div>
   </div>
 </template>
@@ -197,6 +197,7 @@ import { showApiError } from '../composables/useNotify'
 import { useAsyncData } from '@/composables/useAsyncData'
 import { statusMetaFor } from '@/utils/statusMeta'
 import StateBlock from '@/components/base/StateBlock.vue'
+import DashboardPanel from '@/components/base/DashboardPanel.vue'
 
 const router = useRouter()
 const { t, locale } = useI18n()
@@ -488,14 +489,7 @@ function stagger(i: number) {
   grid-template-columns: repeat(auto-fit, minmax(min(100%, 300px), 1fr));
 }
 
-.panel-head {
-  border-bottom: 1px solid var(--border);
-  padding-bottom: 12px;
-}
-
-.panel-meta {
-  margin-left: auto;
-}
+/* panel-head 下边线 + panel-meta 右推覆写已由 base/DashboardPanel divided 承接（R5） */
 
 .card-list {
   align-content: start;
@@ -726,13 +720,6 @@ function stagger(i: number) {
   margin: -4px -4px -12px;
   overflow-x: auto;
   padding: 4px 4px 16px;
-}
-
-/* StateBlock 骨架/错误态在横向滚动 flex 容器内撑满宽度 */
-
-.brief-strip :deep(.state-block-skeleton),
-.brief-strip :deep(.state-block-error) {
-  flex: 1;
 }
 
 .brief-card {

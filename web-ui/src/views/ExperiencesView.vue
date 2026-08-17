@@ -13,21 +13,17 @@
         <el-input v-model="tagText" :placeholder="t('experiences.tagPlaceholder')" clearable @change="onFilter" />
       </div>
     </section>
-    <div class="board">
-      <section v-for="col in columns" :key="col.status" class="panel column" :data-status="col.status">
-        <div class="column-head">
-          <h3><span class="dot" />{{ t(col.labelKey) }}</h3>
-          <span class="count">{{ grouped[col.status].length }}</span>
-        </div>
-        <article v-for="item in grouped[col.status]" :key="item.id" class="exp-card" @click="open(item)">
+    <KanbanBoard :columns="boardColumns">
+      <template #card="{ item }">
+        <article class="exp-card" @click="open(item)">
           <strong>{{ item.title }}</strong>
           <span class="tags">
             <el-tag v-for="tag in item.tags" :key="tag" size="small" @click.stop="appendTag(tag)">{{ tag }}</el-tag>
           </span>
         </article>
-        <p v-if="grouped[col.status].length === 0" class="empty-hint">{{ t('experiences.empty') }}</p>
-      </section>
-    </div>
+      </template>
+      <template #empty>{{ t('experiences.empty') }}</template>
+    </KanbanBoard>
     <el-pagination
       v-model:current-page="page"
       v-model:page-size="perPage"
@@ -62,6 +58,7 @@ import { useI18n } from 'vue-i18n'
 import { ElMessage } from 'element-plus'
 import { showApiError } from '../composables/useNotify'
 import StatusBadge from '@/components/base/StatusBadge.vue'
+import KanbanBoard from '@/components/base/KanbanBoard.vue'
 import FormDialog from '@/components/base/FormDialog.vue'
 import MarkdownView from '@/components/business/MarkdownView.vue'
 import { archiveExperience, createExperience, listExperiences, publishExperience, type Experience } from '../api/experiences'
@@ -80,9 +77,9 @@ const perPage = ref(20)
 const total = ref(0)
 const draft = reactive({ title: '', content: '', tags: '' })
 const columns = [
-  { status: 'candidate', labelKey: 'experiences.columnCandidate' },
-  { status: 'published', labelKey: 'experiences.columnPublished' },
-  { status: 'archived', labelKey: 'experiences.columnArchived' }
+  { status: 'candidate', labelKey: 'experiences.columnCandidate', tone: '--warn' },
+  { status: 'published', labelKey: 'experiences.columnPublished', tone: '--ok' },
+  { status: 'archived', labelKey: 'experiences.columnArchived', tone: '--info' }
 ]
 
 const projectId = computed(() => projects.current?.id || '')
@@ -94,6 +91,11 @@ const selectedProjectId = computed({
 })
 const grouped = computed(
   () => Object.fromEntries(columns.map((col) => [col.status, items.value.filter((item) => item.status === col.status)])) as Record<string, Experience[]>
+)
+
+// 看板列数据（R5 KanbanBoard 接入）：tone 等值原 [data-status] 圆点色规则（candidate --warn / published --ok / archived --info）
+const boardColumns = computed(() =>
+  columns.map((col) => ({ key: col.status, label: t(col.labelKey), tone: col.tone, items: grouped.value[col.status] }))
 )
 
 onMounted(load)
@@ -187,67 +189,12 @@ async function create() {
   max-width: 240px;
 }
 
-.board {
-  display: grid;
-  gap: 16px;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-}
+/* 看板骨架（.board/.column/.column-head/.dot/[data-status] 圆点色/.count/.empty-hint）已收口
+   base/KanbanBoard（R5）；列圆点色改由列定义 tone 传入 */
 
 .pager {
   justify-content: flex-end;
   margin-top: 14px;
-}
-
-.column {
-  align-content: start;
-  background: var(--surface-2);
-  display: grid;
-  gap: var(--space-3);
-}
-
-.column-head {
-  align-items: center;
-  display: flex;
-  justify-content: space-between;
-}
-
-.column-head h3 {
-  align-items: center;
-  display: flex;
-  font-size: 14px;
-  gap: 8px;
-  letter-spacing: 0.01em;
-}
-
-.dot {
-  background: var(--text-3);
-  border-radius: 50%;
-  height: 8px;
-  width: 8px;
-}
-
-[data-status='candidate'] .dot {
-  background: var(--warn);
-}
-
-[data-status='published'] .dot {
-  background: var(--ok);
-}
-
-[data-status='archived'] .dot {
-  background: var(--info);
-}
-
-.count {
-  background: var(--surface);
-  border: 1px solid var(--border);
-  border-radius: var(--radius-full);
-  color: var(--text-3);
-  font-size: 12px;
-  font-weight: 600;
-  min-width: 26px;
-  padding: 0 8px;
-  text-align: center;
 }
 
 .exp-card {
@@ -278,20 +225,7 @@ async function create() {
   cursor: pointer;
 }
 
-.empty-hint {
-  border: 1px dashed var(--border-strong);
-  border-radius: var(--radius-md);
-  color: var(--text-3);
-  font-size: 12px;
-  padding: 16px 0;
-  text-align: center;
-}
-
 @media (max-width: 768px) {
-  .board {
-    grid-template-columns: 1fr;
-  }
-
   .filters .el-input {
     max-width: none;
     width: 100%;

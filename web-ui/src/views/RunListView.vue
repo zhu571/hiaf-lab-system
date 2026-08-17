@@ -16,7 +16,7 @@
       <!-- 列表错误态收口 StateBlock（结构改版 R3 §4.3）：错误重试 > 内容；加载态仍走 panel v-loading -->
       <StateBlock :error="error ? { message: error } : null" @retry="load">
         <el-empty v-if="!runs.length && !loading" :description="t('runList.empty')" />
-        <div v-else class="run-grid">
+        <CardGrid v-else columns="repeat(3, minmax(0, 1fr))" mobile-columns="1fr">
           <button v-for="run in runs" :key="run.id" class="run-card" @click="open(run)">
             <span class="card-head">
               <strong>{{ run.name }}</strong>
@@ -30,7 +30,7 @@
             </span>
             <span class="time">{{ t('runList.createdAt') }}{{ formatDateTime(run.created_at) }}</span>
           </button>
-        </div>
+        </CardGrid>
         <el-pagination
           v-if="total > 0"
           v-model:current-page="page"
@@ -124,6 +124,7 @@ import { useI18n } from 'vue-i18n'
 import { ElMessage } from 'element-plus'
 import StatusBadge from '@/components/base/StatusBadge.vue'
 import StateBlock from '@/components/base/StateBlock.vue'
+import CardGrid from '@/components/base/CardGrid.vue'
 import FormDialog from '@/components/base/FormDialog.vue'
 import StepItemsEditor from '@/components/business/StepItemsEditor.vue'
 import { applyRunTemplate, createRun, listRuns, type ExperimentRun, type RunPayload } from '../api/runs'
@@ -463,11 +464,7 @@ async function saveAndApplyTemplate() {
   min-height: 240px;
 }
 
-.run-grid {
-  display: grid;
-  gap: 16px;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-}
+/* 网格本体已收口 base/CardGrid（R5）：固定 3 列 + ≤768px 单列，等值原 .run-grid */
 
 .run-card {
   background: var(--surface);
@@ -534,10 +531,6 @@ async function saveAndApplyTemplate() {
 }
 
 @media (max-width: 768px) {
-  .run-grid {
-    grid-template-columns: 1fr;
-  }
-
   .controls .el-select,
   .campaign-input {
     max-width: none;
