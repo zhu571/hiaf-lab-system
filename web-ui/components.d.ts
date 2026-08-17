@@ -10,10 +10,12 @@ declare module 'vue' {
     AppBreadcrumb: typeof import('./src/components/base/AppBreadcrumb.vue')['default']
     AskDialog: typeof import('./src/components/business/AskDialog.vue')['default']
     AskResultPanel: typeof import('./src/components/business/AskResultPanel.vue')['default']
+    BriefPanel: typeof import('./src/components/business/dashboard/BriefPanel.vue')['default']
     CardGrid: typeof import('./src/components/base/CardGrid.vue')['default']
     CommandPalette: typeof import('./src/components/business/CommandPalette.vue')['default']
     CommentSection: typeof import('./src/components/business/CommentSection.vue')['default']
     DashboardPanel: typeof import('./src/components/base/DashboardPanel.vue')['default']
+    DeviceStatusPanel: typeof import('./src/components/business/dashboard/DeviceStatusPanel.vue')['default']
     ElAlert: typeof import('element-plus/es')['ElAlert']
     ElAvatar: typeof import('element-plus/es')['ElAvatar']
     ElBadge: typeof import('element-plus/es')['ElBadge']
@@ -63,6 +65,7 @@ declare module 'vue' {
     KanbanBoard: typeof import('./src/components/base/KanbanBoard.vue')['default']
     ListPage: typeof import('./src/components/base/ListPage.vue')['default']
     MarkdownView: typeof import('./src/components/business/MarkdownView.vue')['default']
+    MemberReportPanel: typeof import('./src/components/business/dashboard/MemberReportPanel.vue')['default']
     NotificationCenter: typeof import('./src/components/business/NotificationCenter.vue')['default']
     NotificationPanel: typeof import('./src/components/business/NotificationPanel.vue')['default']
     ProjectDashboard: typeof import('./src/components/business/ProjectDashboard.vue')['default']
@@ -75,6 +78,7 @@ declare module 'vue' {
     StatusBadge: typeof import('./src/components/base/StatusBadge.vue')['default']
     StepItemsEditor: typeof import('./src/components/business/StepItemsEditor.vue')['default']
     TestDataBatchEditor: typeof import('./src/components/business/TestDataBatchEditor.vue')['default']
+    TodoPanel: typeof import('./src/components/business/dashboard/TodoPanel.vue')['default']
   }
   export interface ComponentCustomProperties {
     vLoading: typeof import('element-plus/es')['ElLoadingDirective']

@@ -225,7 +225,18 @@ export default {
     yesterday: '昨天',
     loadDevicesFailed: '设备列表加载失败',
     loadGasFailed: '气压状态加载失败',
-    loadReportsFailed: '日报加载失败'
+    loadReportsFailed: '日报加载失败',
+    greeting: {
+      morning: '上午好，{name}',
+      afternoon: '下午好，{name}',
+      evening: '晚上好，{name}'
+    },
+    quickActions: {
+      dailyReport: '写日报',
+      todo: '新建待办',
+      ask: 'AI 问答',
+      run: '新建批次'
+    }
   },
   project: {
     backToList: '项目列表',
