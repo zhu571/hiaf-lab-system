@@ -78,7 +78,7 @@ async function submitRegister() {
     registerError.value = t('login.usernameLength')
     return
   }
-  if (registerForm.password.length < 8) {
+  if (new TextEncoder().encode(registerForm.password).length < 10 || !/\p{L}/u.test(registerForm.password) || !/\p{N}/u.test(registerForm.password)) {
     registerError.value = t('login.passwordLength')
     return
   }

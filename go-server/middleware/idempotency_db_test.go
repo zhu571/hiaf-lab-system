@@ -5,7 +5,10 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"sync"
+	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/zhu571/hiaf-lab-system/go-server/common"
 )
@@ -55,5 +58,53 @@ func TestRequireIdempotencyKeyReplay(t *testing.T) {
 	}
 	if ran != 1 {
 		t.Fatalf("replay must not reach handler, got %d runs", ran)
+	}
+}
+
+func TestRequireIdempotencyKeyConcurrentReplay(t *testing.T) {
+	dsn := os.Getenv("TEST_DATABASE_URL")
+	if dsn == "" {
+		t.Skip("TEST_DATABASE_URL is not set")
+	}
+	db, err := sql.Open("postgres", dsn)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	key := "idem-test-concurrent-" + time.Now().Format("150405.000000")
+	db.Exec(`DELETE FROM idempotency_keys WHERE idempotency_key=$1`, key)
+	t.Cleanup(func() { db.Exec(`DELETE FROM idempotency_keys WHERE idempotency_key=$1`, key) })
+	var ran atomic.Int32
+	h := RequireIdempotencyKey(db)(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		ran.Add(1)
+		common.WriteSuccess(w, r, map[string]bool{"ok": true})
+	}))
+	var wg sync.WaitGroup
+	results := make(chan int, 2)
+	for i := 0; i < 2; i++ {
+		wg.Add(1)
+		go func(i int) {
+			defer wg.Done()
+			w := httptest.NewRecorder()
+			r := httptest.NewRequest(http.MethodPost, "/api/v1/admin/invitation-codes/", nil)
+			r = r.WithContext(common.SetRequestID(r.Context(), "idem-concurrent-"+string(rune('a'+i))))
+			r.Header.Set("Idempotency-Key", key)
+			h.ServeHTTP(w, r)
+			results <- w.Code
+		}(i)
+	}
+	wg.Wait()
+	close(results)
+	var success, conflict int
+	for code := range results {
+		if code == http.StatusOK {
+			success++
+		}
+		if code == http.StatusConflict {
+			conflict++
+		}
+	}
+	if ran.Load() != 1 || success != 1 || conflict != 1 {
+		t.Fatalf("concurrent replay: ran=%d success=%d conflict=%d", ran.Load(), success, conflict)
 	}
 }

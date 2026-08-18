@@ -201,6 +201,37 @@ func (r *Repository) RemoveMember(projectID, userID string) error {
 	return nil
 }
 
+func (r *Repository) RemoveMemberSafely(projectID, userID string) error {
+	tx, err := r.db.Begin()
+	if err != nil {
+		return fmt.Errorf("begin remove member: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+	if err := lockProject(tx, projectID); err != nil {
+		return err
+	}
+	member, err := getMember(tx, projectID, userID)
+	if err != nil {
+		return err
+	}
+	if member == nil {
+		return ErrProjectNotFound
+	}
+	if member.Role == RoleOwner {
+		var count int
+		if err := tx.QueryRow(`SELECT COUNT(*) FROM project_members WHERE project_id=$1 AND role='owner' AND status='active'`, projectID).Scan(&count); err != nil {
+			return fmt.Errorf("count project owners: %w", err)
+		}
+		if count <= 1 {
+			return ErrLastOwner
+		}
+	}
+	if _, err := tx.Exec(`DELETE FROM project_members WHERE project_id=$1 AND user_id=$2`, projectID, userID); err != nil {
+		return fmt.Errorf("remove project member: %w", err)
+	}
+	return tx.Commit()
+}
+
 func (r *Repository) UpdateMemberRole(projectID, userID, role string) (*ProjectMember, error) {
 	var m ProjectMember
 	err := r.db.QueryRow(
@@ -213,6 +244,78 @@ func (r *Repository) UpdateMemberRole(projectID, userID, role string) (*ProjectM
 		if err == sql.ErrNoRows {
 			return nil, nil
 		}
+		return nil, fmt.Errorf("update project member role: %w", err)
+	}
+	return &m, nil
+}
+
+func (r *Repository) UpdateMemberRoleSafely(projectID, userID, role string) (*ProjectMember, error) {
+	tx, err := r.db.Begin()
+	if err != nil {
+		return nil, fmt.Errorf("begin update member role: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+	if err := lockProject(tx, projectID); err != nil {
+		return nil, err
+	}
+	member, err := getMember(tx, projectID, userID)
+	if err != nil {
+		return nil, err
+	}
+	if member == nil {
+		return nil, ErrProjectNotFound
+	}
+	if member.Role == RoleOwner && role != RoleOwner {
+		var count int
+		if err := tx.QueryRow(`SELECT COUNT(*) FROM project_members WHERE project_id=$1 AND role='owner' AND status='active'`, projectID).Scan(&count); err != nil {
+			return nil, fmt.Errorf("count project owners: %w", err)
+		}
+		if count <= 1 {
+			return nil, ErrLastOwner
+		}
+	}
+	updated, err := updateMemberRole(tx, projectID, userID, role)
+	if err != nil {
+		return nil, err
+	}
+	if err := tx.Commit(); err != nil {
+		return nil, fmt.Errorf("commit update member role: %w", err)
+	}
+	return updated, nil
+}
+
+func lockProject(tx *sql.Tx, projectID string) error {
+	var id string
+	if err := tx.QueryRow(`SELECT id FROM projects WHERE id=$1 FOR UPDATE`, projectID).Scan(&id); err != nil {
+		if err == sql.ErrNoRows {
+			return ErrProjectNotFound
+		}
+		return fmt.Errorf("lock project: %w", err)
+	}
+	return nil
+}
+
+func getMember(q queryRower, projectID, userID string) (*ProjectMember, error) {
+	var m ProjectMember
+	err := q.QueryRow(`SELECT project_id,user_id,role,status,overrides,muted,joined_at,added_by FROM project_members WHERE project_id=$1 AND user_id=$2`, projectID, userID).
+		Scan(&m.ProjectID, &m.UserID, &m.Role, &m.Status, &m.Overrides, &m.Muted, &m.JoinedAt, &m.AddedBy)
+	if err == sql.ErrNoRows {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("get project member: %w", err)
+	}
+	return &m, nil
+}
+
+func updateMemberRole(q queryRower, projectID, userID, role string) (*ProjectMember, error) {
+	var m ProjectMember
+	err := q.QueryRow(`UPDATE project_members SET role=$3 WHERE project_id=$1 AND user_id=$2 RETURNING project_id,user_id,role,status,overrides,muted,joined_at,added_by`, projectID, userID, role).
+		Scan(&m.ProjectID, &m.UserID, &m.Role, &m.Status, &m.Overrides, &m.Muted, &m.JoinedAt, &m.AddedBy)
+	if err == sql.ErrNoRows {
+		return nil, nil
+	}
+	if err != nil {
 		return nil, fmt.Errorf("update project member role: %w", err)
 	}
 	return &m, nil

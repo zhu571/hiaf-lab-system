@@ -28,24 +28,8 @@ func RequireIdempotencyKey(db *sql.DB) func(http.Handler) http.Handler {
 				return
 			}
 
-			var existingRequestID string
-			err := db.QueryRow(
-				`SELECT request_id FROM idempotency_keys WHERE idempotency_key = $1`,
-				key,
-			).Scan(&existingRequestID)
-			if err == nil {
-				common.WriteError(w, r, http.StatusConflict, "duplicate_idempotency_key",
-					"该 Idempotency-Key 已被使用，请勿重复提交", map[string]any{
-						"existing_request_id": existingRequestID,
-					})
-				return
-			}
-			if err != sql.ErrNoRows {
-				slog.Error("idempotency key lookup failed", "error", err, "key", key)
-			}
-
 			requestID := common.GetRequestID(r.Context())
-			_, err = db.Exec(
+			result, err := db.Exec(
 				`INSERT INTO idempotency_keys (idempotency_key, request_id, created_at)
 				 VALUES ($1, $2, now())
 				 ON CONFLICT (idempotency_key) DO NOTHING`,
@@ -53,9 +37,23 @@ func RequireIdempotencyKey(db *sql.DB) func(http.Handler) http.Handler {
 			)
 			if err != nil {
 				slog.Error("store idempotency key failed", "error", err, "key", key)
+				next.ServeHTTP(w, r)
+				return
+			}
+			rows, err := result.RowsAffected()
+			if err != nil || rows != 0 {
+				next.ServeHTTP(w, r)
+				return
 			}
 
-			next.ServeHTTP(w, r)
+			var existingRequestID string
+			if err := db.QueryRow(`SELECT request_id FROM idempotency_keys WHERE idempotency_key = $1`, key).Scan(&existingRequestID); err != nil {
+				slog.Error("idempotency key lookup failed", "error", err, "key", key)
+				next.ServeHTTP(w, r)
+				return
+			}
+			common.WriteError(w, r, http.StatusConflict, "duplicate_idempotency_key",
+				"该 Idempotency-Key 已被使用，请勿重复提交", map[string]any{"existing_request_id": existingRequestID})
 		})
 	}
 }

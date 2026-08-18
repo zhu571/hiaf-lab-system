@@ -287,6 +287,7 @@ func main() {
 		r.Use(mw.AuthRequired)
 		r.Use(mw.RequireRole(auth.RoleAdmin))
 		r.Use(mw.Audit(db))
+		r.Use(mw.RequireIdempotencyKey(db))
 		r.Get("/", authHandler.AdminListInvitationCodes)
 		r.Post("/", authHandler.AdminCreateInvitationCode)
 		r.Post("/{id}/revoke", authHandler.AdminRevokeInvitationCode)

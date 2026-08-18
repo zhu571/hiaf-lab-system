@@ -46,6 +46,15 @@ func newAuthTestRouter(t *testing.T, db *sql.DB) http.Handler {
 		r.Patch("/{id}", h.AdminUpdateUser)
 		r.Post("/{id}/reset-password", h.AdminResetPassword)
 	})
+	r.Route("/api/v1/admin/invitation-codes", func(r chi.Router) {
+		r.Use(middleware.AuthRequired)
+		r.Use(middleware.RequireRole(RoleAdmin))
+		r.Use(middleware.Audit(db))
+		r.Use(middleware.RequireIdempotencyKey(db))
+		r.Get("/", h.AdminListInvitationCodes)
+		r.Post("/", h.AdminCreateInvitationCode)
+		r.Post("/{id}/revoke", h.AdminRevokeInvitationCode)
+	})
 	return r
 }
 
@@ -684,5 +693,39 @@ func TestHandlerAdminUsers(t *testing.T) {
 		`{"new_password":"ResetPass123"}`)
 	if rec.Code != http.StatusBadRequest {
 		t.Fatalf("reset no idem = %d", rec.Code)
+	}
+}
+
+func TestHandlerInvitationCodesRequireAdminIdempotencyAndAudit(t *testing.T) {
+	db := openAuthHandlerDB(t)
+	router := newAuthTestRouter(t, db)
+	admin := authToken(t, authHandlerAdminID, "auth_h_admin", RoleAdmin)
+	member := authToken(t, authHandlerUserID, "auth_h_user1", RoleMember)
+	path := "/api/v1/admin/invitation-codes/"
+	// 幂等键必须随机唯一：DB 幂等存储跨测试运行残留会误判 409
+	inviteKey := fmt.Sprintf("invite-admin-%d", time.Now().UnixNano())
+	t.Cleanup(func() {
+		// 先删邀请码（外键指向 users），再让外层 cleanup 删用户
+		db.Exec(`DELETE FROM invitation_codes WHERE created_by = $1`, authHandlerAdminID)
+	})
+	if rec := authReq(t, router, http.MethodPost, path, admin, "", `{}`); rec.Code != http.StatusBadRequest {
+		t.Fatalf("missing idem = %d", rec.Code)
+	}
+	if rec := authReq(t, router, http.MethodPost, path, member, "invite-member", `{}`); rec.Code != http.StatusForbidden {
+		t.Fatalf("member access = %d", rec.Code)
+	}
+	rec := authReq(t, router, http.MethodPost, path, admin, inviteKey, `{}`)
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("create invitation = %d body=%s", rec.Code, rec.Body.String())
+	}
+	var envelope struct {
+		RequestID string `json:"request_id"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &envelope); err != nil {
+		t.Fatal(err)
+	}
+	assertAuthAudit(t, db, envelope.RequestID, "admin.invitation_codes.create")
+	if replay := authReq(t, router, http.MethodPost, path, admin, inviteKey, `{}`); replay.Code != http.StatusConflict {
+		t.Fatalf("replay = %d", replay.Code)
 	}
 }

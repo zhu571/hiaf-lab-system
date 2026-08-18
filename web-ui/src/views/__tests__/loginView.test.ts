@@ -108,8 +108,8 @@ describe('LoginView 注册', () => {
 
     // 用户名 1 字符 → usernameLength
     await u.setValue('a')
-    await p.setValue('Test1234!')
-    await c.setValue('Test1234!')
+    await p.setValue('Test12345!')
+    await c.setValue('Test12345!')
     await submitRegisterForm(wrapper)
     expect(wrapper.find('.el-dialog .el-alert').text()).toContain('用户名长度需为 2-32 个字符')
     expect(register).not.toHaveBeenCalled()
@@ -122,14 +122,14 @@ describe('LoginView 注册', () => {
     expect(register).not.toHaveBeenCalled()
 
     // 合法输入 → register + login 依次调用
-    await c.setValue('Test1234!')
+    await c.setValue('Test12345!')
     await dialogInputs[3].setValue('invite-code')
     await submitRegisterForm(wrapper)
-    expect(register).toHaveBeenCalledWith('haofan', 'Test1234!', 'invite-code')
-    expect(login).toHaveBeenCalledWith('haofan', 'Test1234!')
+    expect(register).toHaveBeenCalledWith('haofan', 'Test12345!', 'invite-code')
+    expect(login).toHaveBeenCalledWith('haofan', 'Test12345!')
   })
 
-  it('注册密码不足 8 位：passwordLength 提示，不发请求', async () => {
+  it('注册密码不符合规则：passwordLength 提示，不发请求', async () => {
     const wrapper = await mountView()
     const registerLink = wrapper.findAll('button').find((b) => b.text().trim() === '注册')!
     await registerLink.trigger('click')
@@ -139,7 +139,7 @@ describe('LoginView 注册', () => {
     await dialogInputs[1].setValue('short')
     await dialogInputs[2].setValue('short')
     await submitRegisterForm(wrapper)
-    expect(wrapper.find('.el-dialog .el-alert').text()).toContain('密码至少 8 位')
+    expect(wrapper.find('.el-dialog .el-alert').text()).toContain('密码至少 10 位')
     expect(register).not.toHaveBeenCalled()
   })
 })
