@@ -201,7 +201,7 @@ watch(projectId, async (id) => {
     const [memberRes, logRes, issueRes] = await Promise.allSettled([
       getMembers(id),
       listProjectLogs(id, { per_page: 5 }),
-      listProjectIssues(id, { per_page: 5, sort: 'created', order: 'desc' })
+      listProjectIssues(id, { status: 'open', per_page: 5, sort: 'created', order: 'desc' })
     ])
     if (id !== projectId.value) return
     if (memberRes.status === 'fulfilled') {
