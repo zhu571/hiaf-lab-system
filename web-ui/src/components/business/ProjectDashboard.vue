@@ -49,19 +49,30 @@
       <div class="metric-grid">
         <div class="metric"><strong>{{ members.length }}</strong><span>{{ t('projectDashboard.metricMembers') }}</span></div>
         <div class="metric"><strong>{{ issueTotal }}</strong><span>{{ t('projectDashboard.metricIssues') }}</span></div>
-        <div class="metric"><strong>{{ store.current.log_count || logs.length }}</strong><span>{{ t('projectDashboard.metricLogs') }}</span></div>
+        <div class="metric"><strong>{{ store.current.log_count ?? logs.length }}</strong><span>{{ t('projectDashboard.metricLogs') }}</span></div>
       </div>
       <el-alert v-if="loadError" :title="loadError" type="error" show-icon :closable="false" />
       <div v-loading="loading" class="overview-grid">
         <section class="overview-card">
           <div class="toolbar overview-head">
-            <h3>{{ t('projectDashboard.projectMembers') }}</h3>
+            <h3>{{ t('projectDashboard.projectMembers') }}（{{ members.length }}）</h3>
+            <el-button v-if="canManageMembers" type="primary" size="small" @click="openAddMember">{{ t('projectDashboard.memberManagement.add') }}</el-button>
             <el-button v-if="auth.isAdmin" link type="primary" @click="go('/admin/users')">{{ t('projectDashboard.userManagement') }}</el-button>
           </div>
+          <div v-if="canManageMembers && members.length" class="member-filters">
+            <el-input v-model="memberKeyword" clearable :placeholder="t('projectDashboard.memberManagement.search')" />
+            <el-select v-model="memberRoleFilter" :placeholder="t('projectDashboard.memberManagement.allRoles')" clearable>
+              <el-option v-for="role in memberRoles" :key="role" :label="roleLabel(role)" :value="role" />
+            </el-select>
+          </div>
           <div v-if="members.length" class="member-list">
-            <div v-for="member in members" :key="member.user_id" class="member-row">
-              <span>{{ member.username || member.user_id }}</span>
+            <div v-for="member in filteredMembers" :key="member.user_id" class="member-row">
+              <span>{{ memberName(member) }}</span>
               <el-tag size="small" effect="plain">{{ roleLabel(member.role) }}</el-tag>
+              <span v-if="canManageMembers" class="member-actions">
+                <el-button size="small" @click="openEditMember(member)">{{ t('projectDashboard.memberManagement.editRole') }}</el-button>
+                <el-button size="small" type="danger" plain :disabled="isLastOwner(member)" @click="remove(member)">{{ t('projectDashboard.memberManagement.remove') }}</el-button>
+              </span>
             </div>
           </div>
           <el-empty v-else :image-size="52" :description="t('projectDashboard.noMembers')" />
@@ -97,7 +108,7 @@
         </section>
       </div>
     </div>
-    <el-empty v-else :image-size="52" :description="t('projectDashboard.noProject')" />
+    <el-empty v-else :image-size="52" :description="auth.user ? t('login.waitingForProject') : t('projectDashboard.noProject')" />
     <el-dialog v-model="confirmVisible" :title="confirmTitle" width="min(440px, 92vw)">
       <p v-if="pendingNext" class="confirm-text">{{ t('projectDashboard.confirmSwitchDesc', { label: pendingNext.target.label }) }}</p>
       <el-alert
@@ -114,6 +125,19 @@
         <el-button type="primary" :loading="transitioning" @click="confirmTransition">{{ t('projectDashboard.confirmSwitch') }}</el-button>
       </template>
     </el-dialog>
+    <FormDialog v-model="memberDialog" :title="memberDialogTitle" width="min(460px, 92vw)" :loading="memberSaving" @submit="submitMember">
+      <el-form-item :label="t('projectDashboard.memberManagement.userId')">
+        <el-select v-if="auth.isAdmin && !editingMember" v-model="memberDraft.user_id" filterable clearable class="full-width" :placeholder="t('projectDashboard.memberManagement.userIdPlaceholder')">
+          <el-option v-for="user in availableUsers" :key="user.id" :label="user.display_name || user.username" :value="user.id" />
+        </el-select>
+        <el-input v-else v-model="memberDraft.user_id" :disabled="!!editingMember" :placeholder="t('projectDashboard.memberManagement.userIdPlaceholder')" />
+      </el-form-item>
+      <el-form-item :label="t('projectDashboard.memberManagement.projectRole')">
+        <el-select v-model="memberDraft.role" class="full-width">
+          <el-option v-for="role in memberRoles" :key="role" :label="roleLabel(role)" :value="role" />
+        </el-select>
+      </el-form-item>
+    </FormDialog>
   </section>
 </template>
 
@@ -121,12 +145,14 @@
 import { computed, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
-import { ElMessage } from 'element-plus'
+import { ElMessage, ElMessageBox } from 'element-plus'
 import { showApiError } from '@/composables/useNotify'
 import { formatDateTime } from '@/utils/datetime'
 import { useProjectStore } from '@/stores/project'
 import { useAuthStore } from '@/stores/auth'
-import { getMembers, transitionProject, type ProjectMember } from '@/api/projects'
+import { addMember, getMembers, removeMember, transitionProject, updateMemberRole, type ProjectMember } from '@/api/projects'
+import { listUsers, type UserInfo } from '@/api/auth'
+import FormDialog from '@/components/base/FormDialog.vue'
 import { listProjectLogs, type LogItem } from '@/api/logs'
 import { listProjectIssues, type Issue } from '@/api/issues'
 
@@ -142,9 +168,27 @@ const issueTotal = ref(0)
 const loading = ref(false)
 const loadError = ref('')
 const projectId = computed(() => store.current?.id || '')
+const memberKeyword = ref('')
+const memberRoleFilter = ref('')
+const memberDialog = ref(false)
+const memberSaving = ref(false)
+const editingMember = ref<ProjectMember | null>(null)
+const memberDraft = ref({ user_id: '', role: 'member' })
+const adminUsers = ref<UserInfo[]>([])
+const memberRoles = ['owner', 'maintainer', 'member', 'viewer']
+const currentProjectMember = computed(() => members.value.find((m) => m.user_id === auth.user?.id))
+const canManageMembers = computed(() => auth.isAdmin || ['owner', 'maintainer'].includes(currentProjectMember.value?.role || ''))
+const ownerCount = computed(() => members.value.filter((m) => m.role === 'owner').length)
+const filteredMembers = computed(() => members.value.filter((m) => (!memberKeyword.value || memberName(m).toLowerCase().includes(memberKeyword.value.toLowerCase())) && (!memberRoleFilter.value || m.role === memberRoleFilter.value)))
+const availableUsers = computed(() => adminUsers.value.filter((u) => u.role !== 'agent' && !u.disabled && !members.value.some((m) => m.user_id === u.id)))
+const memberDialogTitle = computed(() => editingMember.value ? t('projectDashboard.memberManagement.editRole') : t('projectDashboard.memberManagement.add'))
 
 watch(projectId, async (id) => {
   members.value = []
+  memberKeyword.value = ''
+  memberRoleFilter.value = ''
+  memberDialog.value = false
+  editingMember.value = null
   logs.value = []
   issues.value = []
   issueTotal.value = 0
@@ -307,6 +351,45 @@ const roleLabel = (role: string) => {
   }
   return map[role] || role
 }
+function memberName(member: ProjectMember) {
+  const user = adminUsers.value.find((u) => u.id === member.user_id)
+  return user?.display_name || user?.username || (member as ProjectMember & { username?: string }).username || member.user_id
+}
+function isLastOwner(member: ProjectMember) { return member.role === 'owner' && ownerCount.value === 1 }
+async function openAddMember() {
+  editingMember.value = null
+  memberDraft.value = { user_id: '', role: 'member' }
+  if (auth.isAdmin && !adminUsers.value.length) {
+    try { adminUsers.value = (await listUsers()).filter((u) => u.role !== 'agent') } catch (err) { showApiError(err, t('projectDashboard.memberManagement.loadFailed')) }
+  }
+  memberDialog.value = true
+}
+function openEditMember(member: ProjectMember) {
+  editingMember.value = member
+  memberDraft.value = { user_id: member.user_id, role: member.role }
+  memberDialog.value = true
+}
+async function submitMember() {
+  const id = projectId.value
+  if (!id || !memberDraft.value.user_id || !memberDraft.value.role || (editingMember.value && memberDraft.value.role === editingMember.value.role)) return
+  memberSaving.value = true
+  try {
+    const result = editingMember.value ? await updateMemberRole(id, memberDraft.value.user_id, memberDraft.value.role) : await addMember(id, memberDraft.value)
+    ElMessage.success(t(editingMember.value ? 'projectDashboard.memberManagement.updateSuccess' : 'projectDashboard.memberManagement.addSuccess', { requestId: result.requestId }))
+    memberDialog.value = false
+    members.value = await getMembers(id)
+  } catch (err) { showApiError(err, t('projectDashboard.memberManagement.loadFailed')) } finally { memberSaving.value = false }
+}
+async function remove(member: ProjectMember) {
+  if (isLastOwner(member)) return
+  try { await ElMessageBox.confirm(t('projectDashboard.memberManagement.removeConfirm', { user: memberName(member), project: store.current?.name || '' }), t('projectDashboard.memberManagement.remove')) } catch { return }
+  try {
+    const result = await removeMember(projectId.value, member.user_id)
+    ElMessage.success(t('projectDashboard.memberManagement.removeSuccess', { requestId: result.requestId }))
+    members.value = await getMembers(projectId.value)
+    if (member.user_id === auth.user?.id) { await store.load(); await router.push('/projects') }
+  } catch (err) { showApiError(err, t('projectDashboard.memberManagement.loadFailed')) }
+}
 const severityLabel = (severity: string) => {
   const map: Record<string, string> = {
     low: t('projectDashboard.severityLow'),
@@ -325,6 +408,12 @@ const go = (path: string) => router.push(path)
   display: grid;
   min-height: 320px;
 }
+
+.member-filters { display: flex; gap: var(--space-2); margin-bottom: var(--space-3); }
+.member-filters .el-input { max-width: 260px; }
+.member-filters .el-select { max-width: 180px; }
+.member-actions { margin-left: auto; }
+.full-width { width: 100%; }
 
 .dash-title {
   display: grid;

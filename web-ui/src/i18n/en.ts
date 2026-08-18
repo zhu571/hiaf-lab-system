@@ -34,7 +34,10 @@ export default {
     registerFailed: 'Registration failed',
     usernameLength: 'Username must be 2-32 characters',
     passwordLength: 'Password must be at least 8 characters',
-    passwordMismatch: 'Passwords do not match'
+    passwordMismatch: 'Passwords do not match',
+    registrationDisabled: 'Self-registration is unavailable. Contact an administrator to create an account.',
+    invitationCode: 'Invitation code', invitationCodePlaceholder: 'Paste the code from an administrator', invitationCodeHelp: 'Ask a lab administrator for a one-time invitation code', invitationCodeRequired: 'Enter an invitation code', invitationCodeInvalid: 'The invitation code is invalid or no longer active. Contact an administrator.',
+    waitingForProject: 'Your account is ready. Ask a project owner or administrator to add you to a project.'
   },
   nav: {
     // Left sidebar navigation (AppLayout).
@@ -422,11 +425,12 @@ export default {
     roleViewer: 'Read-only',
     roleAgent: 'Agent',
     loadFailed: 'Failed to load user list',
-    roleUpdated: 'Role updated',
+    roleUpdated: 'Role updated (request_id: {requestId})',
     roleUpdateFailed: 'Failed to update role',
     confirmResetPwdMsg: 'Are you sure you want to reset the password for &ldquo;{username}&rdquo;? The old password will expire immediately.',
     confirmResetPwdTitle: 'Reset Password',
     resetPwdFailed: 'Failed to reset password',
+    resetPasswordSuccess: 'Password reset (request_id: {requestId})',
     disableWarning: 'This user&rsquo;s current session will expire immediately after disabling.',
     confirmToggleMsg: 'Are you sure you want to {action} user &ldquo;{username}&rdquo;? {warning}',
     confirmToggleTitle: '{action} Confirmation',
@@ -434,7 +438,17 @@ export default {
     toggleFailed: '{action} failed',
     createFailed: 'Failed to create user',
     copied: 'Copied to clipboard',
-    copyFailed: 'Copy failed. Please select and copy manually.'
+    copyFailed: 'Copy failed. Please select and copy manually.',
+    summaryTotal: 'Total users', summaryActive: 'Active', summaryMustChangePassword: 'Password change required', summaryDisabled: 'Disabled',
+    filterRole: 'All system roles', filterStatus: 'All account statuses', clearFilters: 'Clear filters',
+    tablePasswordStatus: 'Password status', mustChangePassword: 'Change required', passwordReady: 'Ready',
+    editUser: 'Edit user', systemRole: 'System role', joinProject: 'Add to project', project: 'Project', projectRole: 'Project role',
+    createAndJoin: 'Add to a project after creation', accountCreated: 'Account created', accountCreatedAndJoined: 'Account created and added to project',
+    joinFailedAfterCreate: 'Account created, but adding it to the project failed. Save the temporary password and retry.', retryJoin: 'Retry adding to project',
+    createRequestId: 'Creation request ID', joinRequestId: 'Membership request ID',
+    unsavedPasswordConfirm: 'The temporary password has not been copied. Close anyway? It cannot be viewed again.',
+    joinSuccess: 'Added to project (request_id: {requestId})', noProjects: 'No projects available',
+    invitationCodes: { title:'Invitation codes', generate:'Generate code', generateTitle:'Generate invitation code', expiresAt:'Expires at', defaultExpiryHint:'Leave blank for 7 days; maximum 30 days', codePrefix:'Code', status:'Status', usedBy:'Used by', statusActive:'Active', statusUsed:'Used', statusExpired:'Expired', statusRevoked:'Revoked', copy:'Copy code', copied:'Invitation code copied', oneTimeWarning:'The full code is shown only once. Copy it now and share it securely.', generateSuccess:'Invitation code generated (request_id: {requestId})', generateFailed:'Failed to generate invitation code', revoke:'Revoke', revokeConfirm:'Revoke invitation code “{prefix}…”? This cannot be undone.', revokeSuccess:'Invitation code revoked (request_id: {requestId})', revokeFailed:'Failed to revoke invitation code', loadFailed:'Failed to load invitation codes', empty:'No invitation codes' }
   },
   gasControl: {
     // GasCell pressure control page (GasControlView).
@@ -1092,7 +1106,17 @@ export default {
     severityLow: 'Low',
     severityMedium: 'Medium',
     severityHigh: 'High',
-    severityCritical: 'Critical'
+    severityCritical: 'Critical',
+    memberManagement: {
+      add: 'Add member', search: 'Search member or user ID', allRoles: 'All project roles', user: 'User', userId: 'User ID',
+      userIdPlaceholder: 'Paste a user ID', userIdHelp: 'Ask an admin or the user for the exact user ID', projectRole: 'Project role',
+      editRole: 'Change role', remove: 'Remove', copyId: 'Copy ID', roleOwnerHelp: 'Can manage the project and members',
+      roleMaintainerHelp: 'Can maintain project data', roleMemberHelp: 'Can contribute to the project', roleViewerHelp: 'Read-only access',
+      addSuccess: 'Member added (request_id: {requestId})', updateSuccess: 'Project role updated (request_id: {requestId})',
+      removeSuccess: 'Member removed (request_id: {requestId})', removeConfirm: 'Remove “{user}” from “{project}”? The account will not be deleted.',
+      removeSelfWarning: 'You will lose access to this project.', lastOwnerHint: 'A project must keep at least one owner',
+      directoryUnavailable: 'User directory unavailable; enter the exact user ID', goToUsers: 'Go to user management', loadFailed: 'Failed to load project members'
+    }
   },
   attachment: {
     // Attachment management page (AttachmentView).

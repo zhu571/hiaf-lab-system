@@ -41,7 +41,8 @@ describe('注册表结构与完整性', () => {
       'experienceStatus',
       'reportStatus',
       'agentCandidateStatus',
-      'onlineStatus'
+      'onlineStatus',
+      'invitationCode'
     ])
   })
 

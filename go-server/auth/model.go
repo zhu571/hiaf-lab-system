@@ -50,8 +50,27 @@ type UserInfo struct {
 
 // RegisterRequest is the body for account creation.
 type RegisterRequest struct {
-	Username string `json:"username"`
-	Password string `json:"password"`
+	Username       string `json:"username"`
+	Password       string `json:"password"`
+	InvitationCode string `json:"invitation_code"`
+}
+
+type InvitationCode struct {
+	ID         string     `json:"id"`
+	CodePrefix string     `json:"code_prefix"`
+	Status     string     `json:"status"`
+	CreatedBy  string     `json:"created_by"`
+	UsedBy     *string    `json:"used_by"`
+	ExpiresAt  time.Time  `json:"expires_at"`
+	UsedAt     *time.Time `json:"used_at"`
+	RevokedAt  *time.Time `json:"revoked_at"`
+	CreatedAt  time.Time  `json:"created_at"`
+}
+type InvitationCodeList struct {
+	Items   []InvitationCode `json:"items"`
+	Total   int              `json:"total"`
+	Page    int              `json:"page"`
+	PerPage int              `json:"per_page"`
 }
 
 // LoginRequest is the body for authentication.

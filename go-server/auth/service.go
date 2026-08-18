@@ -2,7 +2,9 @@ package auth
 
 import (
 	"crypto/rand"
+	"crypto/sha256"
 	"crypto/subtle"
+	"encoding/base64"
 	"encoding/hex"
 	"errors"
 	"fmt"
@@ -17,15 +19,20 @@ import (
 
 // Service errors returned by the auth domain.
 var (
-	ErrInvalidCredentials = errors.New("用户名或密码错误")
-	ErrAccountLocked      = errors.New("账户已锁定，请15分钟后再试")
-	ErrAccountDisabled    = errors.New("账户已停用，请联系管理员")
-	ErrUsernameTaken      = errors.New("用户名已存在")
-	ErrPasswordTooShort   = errors.New("密码至少10位，且需包含字母和数字")
-	ErrInvalidRole        = errors.New("用户角色无效")
-	ErrInvalidLanguage    = errors.New("语言偏好无效")
-	ErrCannotModifySelf   = errors.New("不能通过用户管理修改自己的账户")
-	ErrLastActiveAdmin    = errors.New("不能停用或降级最后一个管理员账户")
+	ErrInvalidCredentials  = errors.New("用户名或密码错误")
+	ErrAccountLocked       = errors.New("账户已锁定，请15分钟后再试")
+	ErrAccountDisabled     = errors.New("账户已停用，请联系管理员")
+	ErrUsernameTaken       = errors.New("用户名已存在")
+	ErrPasswordTooShort    = errors.New("密码至少10位，且需包含字母和数字")
+	ErrInvalidRole         = errors.New("用户角色无效")
+	ErrInvalidLanguage     = errors.New("语言偏好无效")
+	ErrCannotModifySelf    = errors.New("不能通过用户管理修改自己的账户")
+	ErrLastActiveAdmin     = errors.New("不能停用或降级最后一个管理员账户")
+	ErrInvitationRequired  = errors.New("请输入邀请码")
+	ErrInvalidInvitation   = errors.New("邀请码无效或已失效")
+	ErrInvalidExpiry       = errors.New("邀请码有效期无效")
+	ErrInvitationNotFound  = errors.New("邀请码不存在")
+	ErrInvitationNotActive = errors.New("邀请码不可撤销")
 )
 
 const (
@@ -195,9 +202,20 @@ func (s *Service) AdminResetPassword(id, password string) (*AdminResetPasswordRe
 }
 
 // Register creates a new user account.
-func (s *Service) Register(username, password string) (*User, error) {
+func (s *Service) Register(username, password string, invitationCode ...string) (*User, error) {
 	if !validatePassword(password) {
 		return nil, ErrPasswordTooShort
+	}
+	if len(invitationCode) > 0 {
+		code := strings.TrimSpace(invitationCode[0])
+		if code == "" {
+			return nil, ErrInvitationRequired
+		}
+		hash, err := hashPassword(password)
+		if err != nil {
+			return nil, fmt.Errorf("hash password: %w", err)
+		}
+		return s.repo.CreateUserWithInvitation(username, hash, code)
 	}
 
 	taken, err := s.repo.IsUsernameTaken(username)
@@ -214,6 +232,43 @@ func (s *Service) Register(username, password string) (*User, error) {
 	}
 
 	return s.repo.CreateUser(username, hash)
+}
+
+func (s *Service) CreateInvitationCode(adminID string, expiresAt *time.Time) (*InvitationCode, string, error) {
+	now := time.Now()
+	if expiresAt == nil {
+		t := now.Add(7 * 24 * time.Hour)
+		expiresAt = &t
+	}
+	if !expiresAt.After(now) || expiresAt.After(now.Add(30*24*time.Hour)) {
+		return nil, "", ErrInvalidExpiry
+	}
+	raw := make([]byte, 32)
+	if _, err := rand.Read(raw); err != nil {
+		return nil, "", err
+	}
+	code := base64.RawURLEncoding.EncodeToString(raw)
+	sum := sha256.Sum256([]byte(code))
+	i, err := s.repo.CreateInvitation(adminID, hex.EncodeToString(sum[:]), code[:8], *expiresAt)
+	return i, code, err
+}
+func (s *Service) ListInvitationCodes(page, perPage int, status string) (*InvitationCodeList, error) {
+	if page < 1 {
+		page = 1
+	}
+	if perPage < 1 {
+		perPage = 20
+	}
+	if perPage > 100 {
+		return nil, ErrInvalidExpiry
+	}
+	if status != "" && status != "active" && status != "used" && status != "expired" && status != "revoked" {
+		return nil, ErrInvalidExpiry
+	}
+	return s.repo.ListInvitations(page, perPage, status)
+}
+func (s *Service) RevokeInvitationCode(id, adminID string) (*InvitationCode, error) {
+	return s.repo.RevokeInvitation(id, adminID)
 }
 
 // Login authenticates a user and returns token pair.
@@ -268,6 +323,11 @@ func (s *Service) Login(username, password, clientIP string) (*LoginResponse, bo
 	if err := s.repo.StoreRefreshToken(user.ID, refreshToken, family); err != nil {
 		return nil, false, err
 	}
+	if clientIP != "" {
+		if err := s.repo.UpdateLastLogin(user.ID, clientIP); err != nil {
+			return nil, false, err
+		}
+	}
 
 	// S5：last_login_ip 为空（NULL/首登）也视为新 IP，触发告警并更新。
 	newIP := clientIP != "" && user.LastLoginIP != clientIP
@@ -310,10 +370,6 @@ func (s *Service) RefreshAccessToken(rawToken string) (*LoginResponse, error) {
 		return nil, ErrInvalidCredentials
 	}
 
-	if err := s.repo.RevokeRefreshToken(rec.ID, rawToken, rec.UserID, rec.ExpiresAt); err != nil {
-		return nil, err
-	}
-
 	user, err := s.repo.GetByID(rec.UserID)
 	if err != nil {
 		return nil, err
@@ -335,7 +391,7 @@ func (s *Service) RefreshAccessToken(rawToken string) (*LoginResponse, error) {
 		return nil, fmt.Errorf("generate refresh token: %w", err)
 	}
 
-	if err := s.repo.StoreRefreshToken(user.ID, newRefreshToken, rec.Family); err != nil {
+	if err := s.repo.RotateRefreshToken(rec.ID, rawToken, rec.UserID, rec.ExpiresAt, newRefreshToken, rec.Family); err != nil {
 		return nil, err
 	}
 

@@ -51,6 +51,7 @@ var rolePermissions = map[string][]Permission{
 		PermCreateExperience,
 		PermReviewExperience,
 		PermManageExperience,
+		PermManageMembers,
 		PermManageProject,
 	},
 	"owner": {
@@ -114,6 +115,15 @@ func RequireProjectPermission(db *sql.DB, perm Permission) func(http.Handler) ht
 
 			userID := EffectiveUserID(r.Context())
 			if claims.Role == "admin" {
+				allowed, err := HasPermission(db, projectID, userID, perm)
+				if err != nil {
+					common.WriteError(w, r, http.StatusInternalServerError, "internal_error", "项目权限查询失败", nil)
+					return
+				}
+				if !allowed {
+					common.WriteError(w, r, http.StatusForbidden, "permission_denied", "当前用户无权访问该项目", nil)
+					return
+				}
 				ctx := context.WithValue(r.Context(), adminProjectKey, true)
 				ctx = context.WithValue(ctx, projectRoleKey, "admin")
 				next.ServeHTTP(w, r.WithContext(ctx))

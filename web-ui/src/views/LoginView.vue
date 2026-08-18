@@ -29,6 +29,7 @@
         <el-form-item :label="t('login.confirmPassword')">
           <el-input v-model="registerForm.confirm" type="password" autocomplete="new-password" show-password />
         </el-form-item>
+        <el-form-item :label="t('login.invitationCode')"><el-input v-model="registerForm.invitationCode" autocomplete="off" autocapitalize="off" spellcheck="false" :placeholder="t('login.invitationCodePlaceholder')" /><small class="muted">{{ t('login.invitationCodeHelp') }}</small></el-form-item>
         <el-alert v-if="registerError" :title="registerError" type="error" show-icon :closable="false" />
       </el-form>
       <template #footer>
@@ -56,7 +57,7 @@ const form = reactive({ username: '', password: '' })
 const registerDialogVisible = ref(false)
 const registering = ref(false)
 const registerError = ref('')
-const registerForm = reactive({ username: '', password: '', confirm: '' })
+const registerForm = reactive({ username: '', password: '', confirm: '', invitationCode: '' })
 
 async function submit() {
   loading.value = true
@@ -85,16 +86,18 @@ async function submitRegister() {
     registerError.value = t('login.passwordMismatch')
     return
   }
+  if (!registerForm.invitationCode.trim()) { registerError.value = t('login.invitationCodeRequired'); return }
   registering.value = true
   registerError.value = ''
   try {
-    await register(username, registerForm.password)
+    await register(username, registerForm.password, registerForm.invitationCode.trim())
     // 注册成功后直接登录；跳转由调用方负责（authStore.login 不做跳转）
     await auth.login(username, registerForm.password)
     registerDialogVisible.value = false
     await router.push('/')
   } catch (err) {
-    registerError.value = err instanceof Error ? err.message : t('login.registerFailed')
+    const code = err && typeof err === 'object' && 'details' in err ? String((err as {details?:{code?:string}}).details?.code || '') : ''
+    registerError.value = code === 'registration_disabled' ? t('login.registrationDisabled') : code === 'invitation_code_required' ? t('login.invitationCodeRequired') : code === 'invalid_invitation_code' ? t('login.invitationCodeInvalid') : (err instanceof Error ? err.message : t('login.registerFailed'))
   } finally {
     registering.value = false
   }

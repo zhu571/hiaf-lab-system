@@ -99,7 +99,7 @@ func (h *Handler) Register(w http.ResponseWriter, r *http.Request) {
 	}
 	middleware.SetAuditUsername(r.Context(), req.Username)
 
-	user, err := h.svc.Register(req.Username, req.Password)
+	user, err := h.svc.Register(req.Username, req.Password, req.InvitationCode)
 	if err != nil {
 		mapAuthError(w, r, err)
 		return
@@ -108,6 +108,63 @@ func (h *Handler) Register(w http.ResponseWriter, r *http.Request) {
 	go notify.Send("lab-alerts", "新用户注册", fmt.Sprintf("新用户注册: %s", user.Username), "", "default", []string{"partying_face"})
 
 	common.WriteCreated(w, r, toUserInfo(user))
+}
+
+func (h *Handler) AdminListInvitationCodes(w http.ResponseWriter, r *http.Request) {
+	page, _ := strconv.Atoi(r.URL.Query().Get("page"))
+	perPage, _ := strconv.Atoi(r.URL.Query().Get("per_page"))
+	data, err := h.svc.ListInvitationCodes(page, perPage, r.URL.Query().Get("status"))
+	if err != nil {
+		mapAuthError(w, r, err)
+		return
+	}
+	w.Header().Set("Cache-Control", "no-store")
+	common.WriteSuccess(w, r, data)
+}
+
+func (h *Handler) AdminCreateInvitationCode(w http.ResponseWriter, r *http.Request) {
+	if !requireIdempotencyKey(w, r) {
+		return
+	}
+	claims := middleware.GetUserClaims(r.Context())
+	if claims == nil {
+		common.WriteError(w, r, 401, "unauthorized", "未登录", nil)
+		return
+	}
+	var req struct {
+		ExpiresAt *time.Time `json:"expires_at"`
+	}
+	if r.Body != nil {
+		_ = json.NewDecoder(r.Body).Decode(&req)
+	}
+	i, code, err := h.svc.CreateInvitationCode(claims.UserID, req.ExpiresAt)
+	if err != nil {
+		mapAuthError(w, r, err)
+		return
+	}
+	middleware.SetAuditAction(r.Context(), "admin.invitation_codes.create")
+	middleware.SetAuditDetail(r.Context(), map[string]any{"invitation_id": i.ID, "code_prefix": i.CodePrefix, "expires_at": i.ExpiresAt})
+	w.Header().Set("Cache-Control", "no-store")
+	common.WriteCreated(w, r, map[string]any{"invitation": i, "code": code})
+}
+
+func (h *Handler) AdminRevokeInvitationCode(w http.ResponseWriter, r *http.Request) {
+	if !requireIdempotencyKey(w, r) {
+		return
+	}
+	claims := middleware.GetUserClaims(r.Context())
+	if claims == nil {
+		common.WriteError(w, r, 401, "unauthorized", "未登录", nil)
+		return
+	}
+	i, err := h.svc.RevokeInvitationCode(chi.URLParam(r, "id"), claims.UserID)
+	if err != nil {
+		mapAuthError(w, r, err)
+		return
+	}
+	middleware.SetAuditAction(r.Context(), "admin.invitation_codes.revoke")
+	middleware.SetAuditDetail(r.Context(), map[string]any{"invitation_id": i.ID, "code_prefix": i.CodePrefix})
+	common.WriteSuccess(w, r, i)
 }
 
 // Login authenticates a user and returns a token pair.
@@ -502,6 +559,16 @@ func mapAuthError(w http.ResponseWriter, r *http.Request, err error) {
 		common.WriteError(w, r, http.StatusBadRequest, "cannot_modify_self", err.Error(), nil)
 	case errors.Is(err, ErrLastActiveAdmin):
 		common.WriteError(w, r, http.StatusConflict, "last_active_admin", err.Error(), nil)
+	case errors.Is(err, ErrInvitationRequired):
+		common.WriteError(w, r, http.StatusBadRequest, "invitation_code_required", err.Error(), nil)
+	case errors.Is(err, ErrInvalidInvitation):
+		common.WriteError(w, r, http.StatusBadRequest, "invalid_invitation_code", err.Error(), nil)
+	case errors.Is(err, ErrInvalidExpiry):
+		common.WriteError(w, r, http.StatusBadRequest, "invalid_expiry", err.Error(), nil)
+	case errors.Is(err, ErrInvitationNotFound):
+		common.WriteError(w, r, http.StatusNotFound, "invitation_code_not_found", err.Error(), nil)
+	case errors.Is(err, ErrInvitationNotActive):
+		common.WriteError(w, r, http.StatusConflict, "invitation_code_not_active", err.Error(), nil)
 	default:
 		slog.Error("auth request failed", "error", err, "request_id", common.GetRequestID(r.Context()))
 		common.WriteError(w, r, http.StatusInternalServerError, "internal_error", "服务器内部错误", nil)

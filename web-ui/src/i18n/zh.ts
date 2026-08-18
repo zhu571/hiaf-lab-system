@@ -27,7 +27,10 @@ export default {
     registerFailed: '注册失败',
     usernameLength: '用户名长度需为 2-32 个字符',
     passwordLength: '密码至少 8 位',
-    passwordMismatch: '两次输入的密码不一致'
+    passwordMismatch: '两次输入的密码不一致',
+    registrationDisabled: '当前未开放自助注册，请联系管理员创建账号。',
+    invitationCode: '邀请码', invitationCodePlaceholder: '粘贴管理员提供的邀请码', invitationCodeHelp: '请向实验室管理员获取一次性邀请码', invitationCodeRequired: '请输入邀请码', invitationCodeInvalid: '邀请码无效或已失效，请联系管理员',
+    waitingForProject: '账号已创建；请联系项目负责人或管理员加入项目。'
   },
   nav: {
     home: '首页',
@@ -398,11 +401,12 @@ export default {
     roleViewer: '只读',
     roleAgent: 'Agent',
     loadFailed: '用户列表加载失败',
-    roleUpdated: '角色已更新',
+    roleUpdated: '角色已更新（request_id: {requestId}）',
     roleUpdateFailed: '角色更新失败',
     confirmResetPwdMsg: '确定重置用户「{username}」的密码吗？旧密码将立即失效。',
     confirmResetPwdTitle: '重置密码',
     resetPwdFailed: '重置密码失败',
+    resetPasswordSuccess: '密码已重置（request_id: {requestId}）',
     disableWarning: '停用后该用户的登录态将立即失效。',
     confirmToggleMsg: '确定{action}用户「{username}」吗？{warning}',
     confirmToggleTitle: '{action}确认',
@@ -410,7 +414,17 @@ export default {
     toggleFailed: '{action}失败',
     createFailed: '创建用户失败',
     copied: '已复制到剪贴板',
-    copyFailed: '复制失败，请手动选择复制'
+    copyFailed: '复制失败，请手动选择复制',
+    summaryTotal: '总用户', summaryActive: '活跃', summaryMustChangePassword: '待改密', summaryDisabled: '已停用',
+    filterRole: '全部系统角色', filterStatus: '全部账号状态', clearFilters: '清空筛选',
+    tablePasswordStatus: '密码状态', mustChangePassword: '待首次改密', passwordReady: '已设置',
+    editUser: '编辑用户', systemRole: '系统角色', joinProject: '加入项目', project: '项目', projectRole: '项目角色',
+    createAndJoin: '创建后加入项目', accountCreated: '账号已创建', accountCreatedAndJoined: '账号已创建并加入项目',
+    joinFailedAfterCreate: '账号已创建，但加入项目失败。请保存临时密码后重试加入。', retryJoin: '重试加入项目',
+    createRequestId: '创建请求 ID', joinRequestId: '加入项目请求 ID',
+    unsavedPasswordConfirm: '尚未复制临时密码，确认关闭？关闭后无法再次查看。',
+    joinSuccess: '已加入项目（request_id: {requestId}）', noProjects: '暂无可选项目',
+    invitationCodes: { title:'邀请码', generate:'生成邀请码', generateTitle:'生成邀请码', expiresAt:'到期时间', defaultExpiryHint:'留空则 7 天后过期，最长 30 天', codePrefix:'邀请码', status:'状态', usedBy:'使用者', statusActive:'可用', statusUsed:'已使用', statusExpired:'已过期', statusRevoked:'已撤销', copy:'复制邀请码', copied:'邀请码已复制', oneTimeWarning:'完整邀请码仅显示一次，请立即复制并安全发送', generateSuccess:'邀请码已生成（request_id: {requestId}）', generateFailed:'生成邀请码失败', revoke:'撤销', revokeConfirm:'确认撤销邀请码“{prefix}…”？撤销后无法恢复。', revokeSuccess:'邀请码已撤销（request_id: {requestId}）', revokeFailed:'撤销邀请码失败', loadFailed:'邀请码加载失败', empty:'暂无邀请码' }
   },
   gasControl: {
     title: '气压控制',
@@ -1050,7 +1064,17 @@ export default {
     severityLow: '低',
     severityMedium: '中',
     severityHigh: '高',
-    severityCritical: '严重'
+    severityCritical: '严重',
+    memberManagement: {
+      add: '添加成员', search: '搜索成员或用户 ID', allRoles: '全部项目角色', user: '用户', userId: '用户 ID',
+      userIdPlaceholder: '粘贴用户 ID', userIdHelp: '请向管理员或用户本人获取准确的用户 ID', projectRole: '项目角色',
+      editRole: '修改角色', remove: '移除', copyId: '复制 ID', roleOwnerHelp: '可管理项目和成员',
+      roleMaintainerHelp: '可维护项目业务数据', roleMemberHelp: '可参与项目工作', roleViewerHelp: '只读访问',
+      addSuccess: '成员已添加（request_id: {requestId}）', updateSuccess: '项目角色已更新（request_id: {requestId}）',
+      removeSuccess: '成员已移除（request_id: {requestId}）', removeConfirm: '确认将“{user}”移出项目“{project}”？账号本身不会被删除。',
+      removeSelfWarning: '移除后你将失去当前项目访问权限。', lastOwnerHint: '项目必须至少保留一位负责人',
+      directoryUnavailable: '无可用用户目录，请输入准确的用户 ID', goToUsers: '前往用户管理', loadFailed: '项目成员加载失败'
+    }
   },
   attachment: {
     title: '附件管理',
