@@ -26,7 +26,7 @@
           <el-tab-pane v-for="tab in tabs" :key="tab.name" :label="tab.label" :name="tab.name" />
         </el-tabs>
       </div>
-      <RouterView />
+      <RouterView :key="projectId" />
     </template>
   </div>
 </template>
