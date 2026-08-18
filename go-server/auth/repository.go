@@ -531,6 +531,16 @@ func (r *Repository) RevokeRefreshToken(id, rawToken, userID string, expiresAt t
 	if n, err := result.RowsAffected(); err != nil {
 		return fmt.Errorf("revoke refresh token: check delete: %w", err)
 	} else if n != 1 {
+		var revokedUserID string
+		err := tx.QueryRow(`
+			SELECT user_id FROM revoked_tokens
+			WHERE token_lookup = encode(digest($1, 'sha256'), 'hex')`, rawToken).Scan(&revokedUserID)
+		if err == sql.ErrNoRows || (err == nil && revokedUserID == userID) {
+			return tx.Commit()
+		}
+		if err != nil {
+			return fmt.Errorf("revoke refresh token: check blacklist: %w", err)
+		}
 		return errors.New("refresh token not found")
 	}
 	if _, err := tx.Exec(

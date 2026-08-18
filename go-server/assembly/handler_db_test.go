@@ -29,6 +29,7 @@ const (
 	asmHViewerID   = "00000000-0000-0000-0000-00000000bc03"
 	asmHOutsiderID = "00000000-0000-0000-0000-00000000bc04"
 	asmHAgentID    = "00000000-0000-0000-0000-00000000bc05"
+	asmHAdminID    = "00000000-0000-0000-0000-00000000bc06"
 
 	asmHProjectID  = "c0000000-0000-4000-8000-00000000cc01"
 	asmHTemplateID = "c0000000-0000-4000-8000-00000000cc02"
@@ -93,6 +94,7 @@ func openAsmHandlerDB(t *testing.T) *sql.DB {
 		{asmHViewerID, "asm_h_viewer", "viewer"},
 		{asmHOutsiderID, "asm_h_outsider", "member"},
 		{asmHAgentID, "asm_h_agent", "agent"},
+		{asmHAdminID, "asm_h_admin", "admin"},
 	} {
 		if _, err := db.Exec(
 			`INSERT INTO users (id, username, password_hash, display_name, role, must_change_pw, disabled)
@@ -136,15 +138,15 @@ func openAsmHandlerDB(t *testing.T) *sql.DB {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() {
-		db.Exec(`DELETE FROM audit_log WHERE user_id IN ($1,$2,$3,$4,$5)`,
-			asmHOwnerID, asmHMemberID, asmHViewerID, asmHOutsiderID, asmHAgentID)
+		db.Exec(`DELETE FROM audit_log WHERE user_id IN ($1,$2,$3,$4,$5,$6)`,
+			asmHOwnerID, asmHMemberID, asmHViewerID, asmHOutsiderID, asmHAgentID, asmHAdminID)
 		db.Exec(`DELETE FROM pending_agent_tasks WHERE id = $1`, asmHTaskID)
 		db.Exec(`DELETE FROM daily_reports WHERE id = $1`, asmHReportID)
 		db.Exec(`DELETE FROM assembly_steps WHERE project_id = $1`, asmHProjectID)
 		db.Exec(`DELETE FROM project_members WHERE project_id = $1`, asmHProjectID)
 		db.Exec(`DELETE FROM projects WHERE id = $1`, asmHProjectID)
-		db.Exec(`DELETE FROM users WHERE id IN ($1,$2,$3,$4,$5)`,
-			asmHOwnerID, asmHMemberID, asmHViewerID, asmHOutsiderID, asmHAgentID)
+		db.Exec(`DELETE FROM users WHERE id IN ($1,$2,$3,$4,$5,$6)`,
+			asmHOwnerID, asmHMemberID, asmHViewerID, asmHOutsiderID, asmHAgentID, asmHAdminID)
 	})
 	return db
 }
@@ -242,7 +244,7 @@ func TestHandlerAsmCreate(t *testing.T) {
 		t.Fatalf("unknown field = %d body=%s", rec.Code, rec.Body.String())
 	}
 	// 404：项目不存在（admin 绕过）
-	admin := asmToken(t, asmHOwnerID, "asm_h_owner", auth.RoleAdmin)
+	admin := asmToken(t, asmHAdminID, "asm_h_admin", auth.RoleAdmin)
 	rec = asmReq(t, router, http.MethodPost, "/api/v1/projects/c0000000-0000-4000-8000-00000000cfff/assembly", admin, uniqueAsmKey(), `{"name":"x"}`)
 	if rec.Code != http.StatusNotFound || asmErrorCode(t, rec) != "project_not_found" {
 		t.Fatalf("missing project = %d body=%s", rec.Code, rec.Body.String())
