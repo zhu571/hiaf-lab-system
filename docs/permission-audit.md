@@ -381,3 +381,6 @@ Agent system prompt 明确：
 - 风险：AI 智能查询系统 `POST /api/v1/ask/chat` 允许任何登录用户经自然语言查询全部项目数据（viewer 亦可），与各模块 `RequireProjectPermission`（main.go 项目路由）存在张力。
 - 现状缓释：DB 层 `ask_reader` 仅 GRANT SELECT 18 张业务主表（迁移 033），users/audit_log 等在 DB 层即不可读；execute 只读事务 + `SET LOCAL ROLE ask_reader` + 表名白名单 + LIMIT 200/256KB 封顶；所有 ask 写 audit_log（action=ask.chat / ask.execute，actor_type=user/system）；chat 限流 10 次/分/用户。
 - 后续收紧方案（独立迭代）：Go 执行层解析 SQL 并强制注入 `project_id IN (用户有权项目)`，对无 project_id 的表按用户项目成员关系过滤。
+# 邀请码（039）
+
+`/api/v1/admin/invitation-codes` 的列表、生成和撤销仅允许 `admin`；写操作沿用 JWT、CSRF、`Idempotency-Key` 和 Audit，且不加入 SourceGate 公网写白名单。数据库只保存 SHA-256 hash，完整码仅在生成响应返回一次；审计只记录 ID、前缀和有效期，不记录明文或 hash。自助注册在 `ALLOW_REGISTER=true` 时必须提供有效邀请码，消费与用户创建原子提交。

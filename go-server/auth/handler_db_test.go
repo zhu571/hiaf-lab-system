@@ -325,6 +325,16 @@ func TestHandlerLoginIPRateLimit(t *testing.T) {
 func TestHandlerRegister(t *testing.T) {
 	db := openAuthHandlerDB(t)
 	router := newAuthTestRouter(t, db)
+	svc := NewService(NewRepository(db), []byte(authHandlerTestSecret))
+	newInvitation := func() string {
+		t.Helper()
+		i, code, err := svc.CreateInvitationCode(authHandlerAdminID, nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(func() { db.Exec(`DELETE FROM invitation_codes WHERE id = $1`, i.ID) })
+		return code
+	}
 
 	// 默认关闭 → 403 registration_disabled
 	rec := authReq(t, router, http.MethodPost, "/api/v1/auth/register", "", "",
@@ -335,9 +345,16 @@ func TestHandlerRegister(t *testing.T) {
 
 	// 开启后：201 成功
 	t.Setenv("ALLOW_REGISTER", "true")
-	username := uniqueAuthUsername("reg_h")
+	// 开启后无邀请码 → 400 invitation_code_required
 	rec = authReq(t, router, http.MethodPost, "/api/v1/auth/register", "", "",
-		`{"username":"`+username+`","password":"Test1234abcd"}`)
+		`{"username":"reg_no_code","password":"Test1234abcd"}`)
+	if rec.Code != http.StatusBadRequest || decodeAuthError(t, rec) != "invitation_code_required" {
+		t.Fatalf("register without invitation = %d body=%s", rec.Code, rec.Body.String())
+	}
+	username := uniqueAuthUsername("reg_h")
+	code := newInvitation()
+	rec = authReq(t, router, http.MethodPost, "/api/v1/auth/register", "", "",
+		`{"username":"`+username+`","password":"Test1234abcd","invitation_code":"`+code+`"}`)
 	if rec.Code != http.StatusCreated {
 		t.Fatalf("register = %d body=%s", rec.Code, rec.Body.String())
 	}
@@ -346,8 +363,9 @@ func TestHandlerRegister(t *testing.T) {
 	t.Cleanup(func() { db.Exec(`DELETE FROM users WHERE username = $1`, username) })
 
 	// 重复用户名 → 409 username_taken
+	duplicateCode := newInvitation()
 	rec = authReq(t, router, http.MethodPost, "/api/v1/auth/register", "", "",
-		`{"username":"`+username+`","password":"Test1234abcd"}`)
+		`{"username":"`+username+`","password":"Test1234abcd","invitation_code":"`+duplicateCode+`"}`)
 	if rec.Code != http.StatusConflict || decodeAuthError(t, rec) != "username_taken" {
 		t.Fatalf("duplicate = %d body=%s", rec.Code, rec.Body.String())
 	}
@@ -359,8 +377,9 @@ func TestHandlerRegister(t *testing.T) {
 	for i := 0; i < 5; i++ {
 		u := uniqueAuthUsername("reg_lim")
 		rateUsers = append(rateUsers, u)
+		code := newInvitation()
 		rec = authReq(t, limitRouter, http.MethodPost, "/api/v1/auth/register", "", "",
-			`{"username":"`+u+`","password":"Test1234abcd"}`)
+			`{"username":"`+u+`","password":"Test1234abcd","invitation_code":"`+code+`"}`)
 		if rec.Code != http.StatusCreated {
 			t.Fatalf("rate register %d = %d body=%s", i+1, rec.Code, rec.Body.String())
 		}

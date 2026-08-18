@@ -118,6 +118,17 @@ describe('audit.ts', () => {
 })
 
 describe('auth.ts', () => {
+  it('register：携带邀请码；管理端邀请码 API 使用约定路径', async () => {
+    await authApi.register('alice', 'StrongPass123', 'invite')
+    expect(lastRequestConfig()).toEqual({ url: '/auth/register', method: 'POST', data: { username: 'alice', password: 'StrongPass123', invitation_code: 'invite' } })
+    await authApi.listInvitationCodes({ status: 'active' })
+    expect(lastRequestConfig()).toEqual({ url: '/admin/invitation-codes', params: { status: 'active' } })
+    await authApi.createInvitationCode({})
+    expect(mocks.requestWithMeta).toHaveBeenCalledWith(expect.objectContaining({ url: '/admin/invitation-codes', method: 'POST' }))
+    await authApi.revokeInvitationCode('ic-1')
+    expect(mocks.requestWithMeta).toHaveBeenLastCalledWith(expect.objectContaining({ url: '/admin/invitation-codes/ic-1/revoke', method: 'POST' }))
+  })
+
   it('login：POST /auth/login，成功后 setCSRFToken 联动（csrf_token 更新）', async () => {
     mocks.request.mockResolvedValue({ csrf_token: 'csrf-1', must_change_password: false, user: { id: 'u-1' } })
     const data = await authApi.login('alice', 'secret')
@@ -210,6 +221,15 @@ describe('projects.ts', () => {
   it('listProjects：status 过滤参数透传', async () => {
     await projectsApi.listProjects('active')
     expect(lastRequestConfig()).toEqual({ url: '/projects', params: { status: 'active' } })
+  })
+
+  it('member writes use requestWithMeta and correct routes', async () => {
+    await projectsApi.addMember('p-1', { user_id: 'u-1', role: 'member' })
+    expect(mocks.requestWithMeta).toHaveBeenLastCalledWith({ url: '/projects/p-1/members', method: 'POST', data: { user_id: 'u-1', role: 'member' } })
+    await projectsApi.updateMemberRole('p-1', 'u-1', 'viewer')
+    expect(mocks.requestWithMeta).toHaveBeenLastCalledWith({ url: '/projects/p-1/members/u-1', method: 'PATCH', data: { role: 'viewer' } })
+    await projectsApi.removeMember('p-1', 'u-1')
+    expect(mocks.requestWithMeta).toHaveBeenLastCalledWith({ url: '/projects/p-1/members/u-1', method: 'DELETE' })
   })
 })
 

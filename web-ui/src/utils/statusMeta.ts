@@ -58,6 +58,7 @@ export type StatusDomain =
   | 'reportStatus'
   | 'agentCandidateStatus'
   | 'onlineStatus'
+  | 'invitationCode'
 
 const FAMILY: Record<StatusTone, { graphic: string; text: string; soft: string }> = {
   success: { graphic: '--ok', text: '--ok-text', soft: '--ok-soft' },
@@ -156,7 +157,8 @@ export const STATUS_META: Record<StatusDomain, Record<string, StatusMeta>> = {
   onlineStatus: {
     online: meta('success', 'common.online'),
     offline: meta('info', 'common.offline')
-  }
+  },
+  invitationCode: { active: meta('success', 'adminUsers.invitationCodes.statusActive'), used: meta('info', 'adminUsers.invitationCodes.statusUsed'), expired: meta('warning', 'adminUsers.invitationCodes.statusExpired'), revoked: meta('danger', 'adminUsers.invitationCodes.statusRevoked') }
 }
 
 /** 按 domain 查注册表；未命中返回 undefined（调用方走未命中降级） */

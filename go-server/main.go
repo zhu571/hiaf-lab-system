@@ -283,6 +283,14 @@ func main() {
 		r.Patch("/{id}", authHandler.AdminUpdateUser)
 		r.Post("/{id}/reset-password", authHandler.AdminResetPassword)
 	})
+	r.Route("/api/v1/admin/invitation-codes", func(r chi.Router) {
+		r.Use(mw.AuthRequired)
+		r.Use(mw.RequireRole(auth.RoleAdmin))
+		r.Use(mw.Audit(db))
+		r.Get("/", authHandler.AdminListInvitationCodes)
+		r.Post("/", authHandler.AdminCreateInvitationCode)
+		r.Post("/{id}/revoke", authHandler.AdminRevokeInvitationCode)
+	})
 	// 自动化规则（C9 规则引擎一期）— admin only，写操作需审计+幂等
 	r.Route("/api/v1/admin/automation", func(r chi.Router) {
 		r.Use(mw.AuthRequired)
@@ -637,12 +645,12 @@ func main() {
 	//   report/resolve 双通道 —— 内部 SERVICE_TOKEN（白名单见 service_token.go，
 	//   CSRF/幂等 IsServiceCall 豁免）→ AuthRequired 放行；resolve 用户通道
 	//   JWT + RequireRoleOrService(admin, maintainer) + CSRF + Idempotency-Key。
-	//   report 不挂 Idempotency-Key（聚合窗口 + 部分唯一索引天然幂等，先例 ask/execute）。
+	//   report/resolve 均要求 Idempotency-Key。
 	//   list/detail 全员 JWT 可读。不挂 AgentContext（report/resolve 拒收 agent 代理头）。
 	r.Route("/api/v1/alerts", func(r chi.Router) {
 		r.Use(mw.AuthRequired)
 		r.Use(mw.Audit(db))
-		r.Post("/report", alertHandler.Report)
+		r.With(mw.RequireIdempotencyKey(db)).Post("/report", alertHandler.Report)
 		r.With(mw.RequireRoleOrService(auth.RoleAdmin, auth.RoleMaintainer),
 			mw.RequireIdempotencyKey(db)).Post("/resolve", alertHandler.Resolve)
 		r.Get("/", alertHandler.List)

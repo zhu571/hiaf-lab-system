@@ -118,6 +118,9 @@ func TestFindRevokedRefreshToken(t *testing.T) {
 	if err != nil || rev == nil {
 		t.Fatalf("revoked token should be found by FindRevokedRefreshToken: rev=%v err=%v", rev, err)
 	}
+	if err := r.RevokeRefreshToken(rec.ID, raw, "00000000-0000-0000-0000-00000000c002", rec.ExpiresAt); err == nil {
+		t.Fatal("another user must not revoke this token")
+	}
 
 	// 同一 token 重复撤销 → 幂等不报错（主表行已删、黑名单唯一索引 ON CONFLICT DO NOTHING）
 	if err := r.RevokeRefreshToken(rec.ID, raw, rec.UserID, rec.ExpiresAt); err != nil {

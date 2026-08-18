@@ -101,9 +101,9 @@ describe('LoginView 注册', () => {
     const registerLink = wrapper.findAll('button').find((b) => b.text().trim() === '注册')!
     await registerLink.trigger('click')
     await flushPromises()
-    // 对话框内 3 个输入框：用户名/密码/确认密码
+    // 对话框内 4 个输入框：用户名/密码/确认密码/邀请码
     const dialogInputs = wrapper.findAll('.el-dialog input')
-    expect(dialogInputs).toHaveLength(3)
+    expect(dialogInputs).toHaveLength(4)
     const [u, p, c] = dialogInputs
 
     // 用户名 1 字符 → usernameLength
@@ -123,8 +123,9 @@ describe('LoginView 注册', () => {
 
     // 合法输入 → register + login 依次调用
     await c.setValue('Test1234!')
+    await dialogInputs[3].setValue('invite-code')
     await submitRegisterForm(wrapper)
-    expect(register).toHaveBeenCalledWith('haofan', 'Test1234!')
+    expect(register).toHaveBeenCalledWith('haofan', 'Test1234!', 'invite-code')
     expect(login).toHaveBeenCalledWith('haofan', 'Test1234!')
   })
 

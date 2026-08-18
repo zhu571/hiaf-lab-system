@@ -133,3 +133,10 @@ func TestWeakPasswordRejectedAtService(t *testing.T) {
 		t.Fatalf("AdminCreateUser weak password: got %v, want ErrPasswordTooShort", err)
 	}
 }
+
+func TestRegisterRequiresInvitationWhenProvided(t *testing.T) {
+	svc := NewService(nil, nil)
+	if _, err := svc.Register("user1", "StrongPass123", " "); !errors.Is(err, ErrInvitationRequired) {
+		t.Fatalf("empty invitation: got %v, want ErrInvitationRequired", err)
+	}
+}

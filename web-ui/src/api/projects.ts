@@ -1,4 +1,4 @@
-import { request } from './client'
+import { request, requestWithMeta } from './client'
 
 export type Project = {
   id: string
@@ -20,6 +20,9 @@ export type ProjectMember = {
   username?: string
   role: string
   status: string
+  muted: boolean
+  joined_at: string
+  added_by: string
 }
 
 export function listProjects(status = '') {
@@ -43,3 +46,15 @@ export function listMembers(id: string) {
 }
 
 export const getMembers = listMembers
+
+export function addMember(projectId: string, data: { user_id: string; role: string }) {
+  return requestWithMeta<ProjectMember>({ url: `/projects/${projectId}/members`, method: 'POST', data })
+}
+
+export function updateMemberRole(projectId: string, userId: string, role: string) {
+  return requestWithMeta<ProjectMember>({ url: `/projects/${projectId}/members/${userId}`, method: 'PATCH', data: { role } })
+}
+
+export function removeMember(projectId: string, userId: string) {
+  return requestWithMeta<{ success: boolean }>({ url: `/projects/${projectId}/members/${userId}`, method: 'DELETE' })
+}

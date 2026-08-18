@@ -90,7 +90,7 @@ CSRF 豁免路径（`/api/v1/auth/*`）；写端点 handler 级校验 Idempotenc
 
 ### `POST /api/v1/auth/register`（默认关闭）
 
-请求：`{username, password}`。`ALLOW_REGISTER!=true` 时返回 403 `registration_disabled`；
+请求：`{username, password, invitation_code}`。`ALLOW_REGISTER!=true` 时返回 403 `registration_disabled`；开启时缺码返回 400 `invitation_code_required`，无效/已用/过期/撤销统一返回 400 `invalid_invitation_code`。邀请码消费与用户创建在同一事务完成。
 用户已存在 → 409 `username_taken`；IP 限流 5 次/小时 → 429。响应 201：`UserInfo`。
 
 ### `POST /api/v1/auth/login`
@@ -313,7 +313,7 @@ Body：`{action, ignore_warnings?, reason?}`。响应：`{project, warnings}`。
 | 方法 | 路径 | 权限 | 说明 |
 |------|------|------|------|
 | GET | `/api/v1/projects/{id}/members` | `PermRead`（viewer 也可读） | 响应 `[ProjectMember{project_id, user_id, role, status, muted, joined_at, added_by}]`（projects/handler.go:131-174） |
-| POST | `/api/v1/projects/{id}/members` | `PermManageMembers`（仅 owner；admin 直通） | Body `{user_id, role}`；响应 201；404 `user_not_found`；审计 `projects.members.add` |
+| POST | `/api/v1/projects/{id}/members` | `PermManageMembers`（owner/maintainer；admin 直通） | Body `{user_id, role}`；响应 201；404 `user_not_found`；审计 `projects.members.add` |
 | PATCH | `/api/v1/projects/{id}/members/{userID}` | `PermManageMembers` | Body `{role}`；审计 `projects.members.update` |
 | DELETE | `/api/v1/projects/{id}/members/{userID}` | `PermManageMembers` | 响应 200 `{success: true}`；400 `last_owner`（不可移除最后 owner） |
 

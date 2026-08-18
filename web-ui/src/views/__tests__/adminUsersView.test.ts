@@ -13,6 +13,9 @@ vi.mock('@/api/auth', () => ({
   createUser: vi.fn(),
   updateUser: vi.fn(),
   resetPassword: vi.fn(),
+  listInvitationCodes: vi.fn().mockResolvedValue({ items: [], total: 0, page: 1, per_page: 20 }),
+  createInvitationCode: vi.fn(),
+  revokeInvitationCode: vi.fn(),
   login: vi.fn(),
   refresh: vi.fn(),
   me: vi.fn(),
@@ -80,7 +83,7 @@ describe('AdminUsersView 用户列表', () => {
     vi.mocked(listUsers)
       .mockRejectedValueOnce(new Error('boom'))
       .mockResolvedValueOnce([makeUser({ id: 'user_02', username: 'zhangsan', role: 'viewer' })])
-    vi.mocked(updateUser).mockResolvedValue(makeUser({ id: 'user_02', disabled: true }))
+    vi.mocked(updateUser).mockResolvedValue({ data: makeUser({ id: 'user_02', disabled: true }), requestId: 'req-1' })
     const wrapper = await mountView()
     await flushPromises()
     expect(wrapper.find('.state-block-error').exists()).toBe(true)

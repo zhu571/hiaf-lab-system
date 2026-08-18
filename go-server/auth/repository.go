@@ -1,8 +1,12 @@
 package auth
 
 import (
+	"crypto/sha256"
 	"database/sql"
+	"encoding/hex"
+	"errors"
 	"fmt"
+	"github.com/lib/pq"
 	"time"
 )
 
@@ -42,6 +46,114 @@ func (r *Repository) CreateUserWithProfile(username, passwordHash, displayName, 
 		user.LockedUntil = &lockedUntil.Time
 	}
 	return &user, nil
+}
+
+func (r *Repository) CreateUserWithInvitation(username, passwordHash, code string) (*User, error) {
+	s := sha256.Sum256([]byte(code))
+	tx, err := r.db.Begin()
+	if err != nil {
+		return nil, err
+	}
+	defer tx.Rollback()
+	var id string
+	var expires time.Time
+	var used, revoked sql.NullTime
+	err = tx.QueryRow(`SELECT id,expires_at,used_at,revoked_at FROM invitation_codes WHERE code_hash=$1 FOR UPDATE`, hex.EncodeToString(s[:])).Scan(&id, &expires, &used, &revoked)
+	if err == sql.ErrNoRows || (err == nil && (used.Valid || revoked.Valid || !expires.After(time.Now()))) {
+		return nil, ErrInvalidInvitation
+	}
+	if err != nil {
+		return nil, fmt.Errorf("lock invitation: %w", err)
+	}
+	u, err := insertUser(tx, username, passwordHash, "", RoleMember)
+	if err != nil {
+		var pe *pq.Error
+		if errors.As(err, &pe) && pe.Code == "23505" {
+			return nil, ErrUsernameTaken
+		}
+		return nil, err
+	}
+	if _, err = tx.Exec(`UPDATE invitation_codes SET used_at=now(),used_by=$2,updated_at=now() WHERE id=$1`, id, u.ID); err != nil {
+		return nil, err
+	}
+	if err = tx.Commit(); err != nil {
+		return nil, err
+	}
+	return u, nil
+}
+func insertUser(tx *sql.Tx, username, passwordHash, displayName, role string) (*User, error) {
+	var u User
+	var locked sql.NullTime
+	err := tx.QueryRow(`INSERT INTO users(username,password_hash,display_name,role) VALUES($1,$2,$3,$4) RETURNING id,username,password_hash,display_name,role,must_change_pw,failed_attempts,token_version,locked_until,created_at,updated_at,disabled,language`, username, passwordHash, displayName, role).Scan(&u.ID, &u.Username, &u.PasswordHash, &u.DisplayName, &u.Role, &u.MustChangePW, &u.FailedAttempts, &u.TokenVersion, &locked, &u.CreatedAt, &u.UpdatedAt, &u.Disabled, &u.Language)
+	if locked.Valid {
+		u.LockedUntil = &locked.Time
+	}
+	return &u, err
+}
+func (r *Repository) CreateInvitation(adminID, hash, prefix string, expires time.Time) (*InvitationCode, error) {
+	var i InvitationCode
+	err := r.db.QueryRow(`INSERT INTO invitation_codes(code_hash,code_prefix,created_by,expires_at) VALUES($1,$2,$3,$4) RETURNING id,code_prefix,created_by,expires_at,created_at`, hash, prefix, adminID, expires).Scan(&i.ID, &i.CodePrefix, &i.CreatedBy, &i.ExpiresAt, &i.CreatedAt)
+	if err != nil {
+		return nil, err
+	}
+	i.Status = "active"
+	return &i, nil
+}
+func (r *Repository) ListInvitations(page, perPage int, status string) (*InvitationCodeList, error) {
+	where := ""
+	args := []any{}
+	if status != "" {
+		where = " WHERE CASE WHEN used_at IS NOT NULL THEN 'used' WHEN revoked_at IS NOT NULL THEN 'revoked' WHEN expires_at <= now() THEN 'expired' ELSE 'active' END = $1"
+		args = append(args, status)
+	}
+	var total int
+	if err := r.db.QueryRow("SELECT count(*) FROM invitation_codes"+where, args...).Scan(&total); err != nil {
+		return nil, err
+	}
+	limitPos := len(args) + 1
+	offsetPos := len(args) + 2
+	args = append(args, perPage, (page-1)*perPage)
+	rows, err := r.db.Query(`SELECT id,code_prefix,created_by,used_by,expires_at,used_at,revoked_at,created_at,CASE WHEN used_at IS NOT NULL THEN 'used' WHEN revoked_at IS NOT NULL THEN 'revoked' WHEN expires_at <= now() THEN 'expired' ELSE 'active' END FROM invitation_codes`+where+` ORDER BY created_at DESC LIMIT $`+fmt.Sprint(limitPos)+` OFFSET $`+fmt.Sprint(offsetPos), args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []InvitationCode{}
+	for rows.Next() {
+		var i InvitationCode
+		var used sql.NullString
+		if err := rows.Scan(&i.ID, &i.CodePrefix, &i.CreatedBy, &used, &i.ExpiresAt, &i.UsedAt, &i.RevokedAt, &i.CreatedAt, &i.Status); err != nil {
+			return nil, err
+		}
+		if used.Valid {
+			i.UsedBy = &used.String
+		}
+		items = append(items, i)
+	}
+	return &InvitationCodeList{Items: items, Total: total, Page: page, PerPage: perPage}, rows.Err()
+}
+func (r *Repository) RevokeInvitation(id, adminID string) (*InvitationCode, error) {
+	var i InvitationCode
+	var used sql.NullString
+	err := r.db.QueryRow(`UPDATE invitation_codes SET revoked_at=now(),revoked_by=$2,updated_at=now() WHERE id=$1 AND used_at IS NULL AND revoked_at IS NULL AND expires_at > now() RETURNING id,code_prefix,created_by,used_by,expires_at,used_at,revoked_at,created_at`, id, adminID).Scan(&i.ID, &i.CodePrefix, &i.CreatedBy, &used, &i.ExpiresAt, &i.UsedAt, &i.RevokedAt, &i.CreatedAt)
+	if err == sql.ErrNoRows {
+		var exists bool
+		if e := r.db.QueryRow(`SELECT EXISTS(SELECT 1 FROM invitation_codes WHERE id=$1)`, id).Scan(&exists); e != nil {
+			return nil, e
+		}
+		if !exists {
+			return nil, ErrInvitationNotFound
+		}
+		return nil, ErrInvitationNotActive
+	}
+	if err != nil {
+		return nil, err
+	}
+	if used.Valid {
+		i.UsedBy = &used.String
+	}
+	i.Status = "revoked"
+	return &i, nil
 }
 
 // GetByUsername fetches a user by username.
@@ -300,6 +412,15 @@ func (r *Repository) ResetFailedAttempts(username string) error {
 	return nil
 }
 
+// UpdateLastLogin records the source address and time of a successful login.
+func (r *Repository) UpdateLastLogin(userID, ip string) error {
+	_, err := r.db.Exec(
+		`UPDATE users SET last_login_ip = $2, last_login_at = now() WHERE id = $1`,
+		userID, ip,
+	)
+	return err
+}
+
 // IsUsernameTaken reports whether the username already exists.
 func (r *Repository) IsUsernameTaken(username string) (bool, error) {
 	var exists bool
@@ -335,6 +456,43 @@ func (r *Repository) StoreRefreshToken(userID, rawToken, family string) error {
 	return nil
 }
 
+// RotateRefreshToken revokes the old token and stores its replacement atomically.
+func (r *Repository) RotateRefreshToken(id, rawToken, userID string, expiresAt time.Time, newRawToken, family string) error {
+	tx, err := r.db.Begin()
+	if err != nil {
+		return fmt.Errorf("rotate refresh token: begin tx: %w", err)
+	}
+	defer tx.Rollback()
+	result, err := tx.Exec(`DELETE FROM refresh_tokens WHERE id = $1 AND user_id = $2`, id, userID)
+	if err != nil {
+		return fmt.Errorf("rotate refresh token: delete: %w", err)
+	}
+	if n, err := result.RowsAffected(); err != nil {
+		return fmt.Errorf("rotate refresh token: check delete: %w", err)
+	} else if n != 1 {
+		return errors.New("refresh token not found")
+	}
+	if _, err := tx.Exec(
+		`INSERT INTO revoked_tokens (token_lookup, user_id, expires_at)
+		 VALUES (encode(digest($1, 'sha256'), 'hex'), $2, $3)
+		 ON CONFLICT (token_lookup) DO NOTHING`,
+		rawToken, userID, expiresAt,
+	); err != nil {
+		return fmt.Errorf("rotate refresh token: blacklist: %w", err)
+	}
+	if _, err := tx.Exec(
+		`INSERT INTO refresh_tokens (user_id, token_hash, family, expires_at)
+		 VALUES ($1, crypt($2, gen_salt('bf')), $3, now() + interval '30 days')`,
+		userID, newRawToken, family,
+	); err != nil {
+		return fmt.Errorf("rotate refresh token: store: %w", err)
+	}
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("rotate refresh token: commit: %w", err)
+	}
+	return nil
+}
+
 // FindRefreshToken looks up a raw token by comparing it with stored bcrypt hashes.
 func (r *Repository) FindRefreshToken(rawToken string) (*RefreshTokenRecord, error) {
 	var rec RefreshTokenRecord
@@ -366,8 +524,24 @@ func (r *Repository) RevokeRefreshToken(id, rawToken, userID string, expiresAt t
 	}
 	defer tx.Rollback()
 
-	if _, err := tx.Exec(`DELETE FROM refresh_tokens WHERE id = $1`, id); err != nil {
+	result, err := tx.Exec(`DELETE FROM refresh_tokens WHERE id = $1 AND user_id = $2`, id, userID)
+	if err != nil {
 		return fmt.Errorf("revoke refresh token: delete: %w", err)
+	}
+	if n, err := result.RowsAffected(); err != nil {
+		return fmt.Errorf("revoke refresh token: check delete: %w", err)
+	} else if n != 1 {
+		var revokedUserID string
+		err := tx.QueryRow(`
+			SELECT user_id FROM revoked_tokens
+			WHERE token_lookup = encode(digest($1, 'sha256'), 'hex')`, rawToken).Scan(&revokedUserID)
+		if err == sql.ErrNoRows || (err == nil && revokedUserID == userID) {
+			return tx.Commit()
+		}
+		if err != nil {
+			return fmt.Errorf("revoke refresh token: check blacklist: %w", err)
+		}
+		return errors.New("refresh token not found")
 	}
 	if _, err := tx.Exec(
 		`INSERT INTO revoked_tokens (token_lookup, user_id, expires_at)
