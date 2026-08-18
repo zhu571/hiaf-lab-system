@@ -402,6 +402,10 @@ function onThemeChange(value: string | number | boolean) {
 }
 
 async function submit() {
+  if (new TextEncoder().encode(form.newPassword).length < 10 || !/\p{L}/u.test(form.newPassword) || !/\p{N}/u.test(form.newPassword)) {
+    ElMessage.error(t('settings.passwordRule'))
+    return
+  }
   if (form.newPassword !== form.confirm) {
     ElMessage.error(t('settings.passwordMismatch'))
     return

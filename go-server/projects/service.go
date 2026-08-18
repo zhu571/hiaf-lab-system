@@ -254,46 +254,14 @@ func (s *Service) AddMember(projectID string, req AddMemberRequest, addedBy stri
 }
 
 func (s *Service) RemoveMember(projectID, userID string) error {
-	member, err := s.repo.GetMember(projectID, userID)
-	if err != nil {
-		return err
-	}
-	if member == nil {
-		return ErrProjectNotFound
-	}
-	if member.Role == RoleOwner {
-		count, err := s.repo.CountOwners(projectID)
-		if err != nil {
-			return err
-		}
-		if count <= 1 {
-			return ErrLastOwner
-		}
-	}
-	return s.repo.RemoveMember(projectID, userID)
+	return s.repo.RemoveMemberSafely(projectID, userID)
 }
 
 func (s *Service) UpdateMemberRole(projectID, userID string, req UpdateMemberRequest) (*ProjectMember, error) {
 	if !validProjectRole(req.Role) {
 		return nil, ErrInvalidInput
 	}
-	member, err := s.repo.GetMember(projectID, userID)
-	if err != nil {
-		return nil, err
-	}
-	if member == nil {
-		return nil, ErrProjectNotFound
-	}
-	if member.Role == RoleOwner && req.Role != RoleOwner {
-		count, err := s.repo.CountOwners(projectID)
-		if err != nil {
-			return nil, err
-		}
-		if count <= 1 {
-			return nil, ErrLastOwner
-		}
-	}
-	updated, err := s.repo.UpdateMemberRole(projectID, userID, req.Role)
+	updated, err := s.repo.UpdateMemberRoleSafely(projectID, userID, req.Role)
 	if err != nil {
 		return nil, err
 	}

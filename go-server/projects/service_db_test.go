@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"sync"
 	"testing"
 	"time"
 
@@ -107,6 +108,45 @@ func openProjectsTestDB(t *testing.T) *sql.DB {
 		db.Exec(`DELETE FROM users WHERE id IN ($1,$2,$3,$4)`, dbAdminUserID, dbOwnerUserID, dbMemberUserID, dbOutsiderUserID)
 	})
 	return db
+}
+
+func TestConcurrentOwnerDemotionKeepsOneOwner(t *testing.T) {
+	db := openProjectsTestDB(t)
+	if _, err := db.Exec(`UPDATE project_members SET role='owner' WHERE project_id=$1 AND user_id IN ($2,$3)`, dbDraftProjectID, dbOwnerUserID, dbMemberUserID); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		db.Exec(`UPDATE project_members SET role='owner' WHERE project_id=$1 AND user_id=$2`, dbDraftProjectID, dbOwnerUserID)
+		db.Exec(`UPDATE project_members SET role='member' WHERE project_id=$1 AND user_id=$2`, dbDraftProjectID, dbMemberUserID)
+	})
+	svc := NewService(NewRepository(db), nil, nil)
+	var wg sync.WaitGroup
+	errs := make(chan error, 2)
+	for _, userID := range []string{dbOwnerUserID, dbMemberUserID} {
+		wg.Add(1)
+		go func(id string) {
+			defer wg.Done()
+			_, err := svc.UpdateMemberRole(dbDraftProjectID, id, UpdateMemberRequest{Role: RoleMember})
+			errs <- err
+		}(userID)
+	}
+	wg.Wait()
+	close(errs)
+	var success, lastOwner int
+	for err := range errs {
+		if err == nil {
+			success++
+		}
+		if errors.Is(err, ErrLastOwner) {
+			lastOwner++
+		}
+	}
+	if success != 1 || lastOwner != 1 {
+		t.Fatalf("concurrent owner demotion: success=%d last_owner=%d", success, lastOwner)
+	}
+	if count, err := NewRepository(db).CountOwners(dbDraftProjectID); err != nil || count != 1 {
+		t.Fatalf("owners after demotion: count=%d err=%v", count, err)
+	}
 }
 
 func uniqueProjectCode(t *testing.T) string {

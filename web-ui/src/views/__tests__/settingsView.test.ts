@@ -96,16 +96,16 @@ describe('SettingsView 语言与密码', () => {
     const pwInputs = wrapper.findAll('input[type="password"]')
     expect(pwInputs.length).toBe(3)
     await pwInputs[0].setValue('Old1234!')
-    await pwInputs[1].setValue('New1234!')
+    await pwInputs[1].setValue('NewPass123!')
     await pwInputs[2].setValue('Mismatch!')
     await form.trigger('submit')
     await flushPromises()
     expect(changePassword).not.toHaveBeenCalled()
     // 一致 → 提交
-    await pwInputs[2].setValue('New1234!')
+    await pwInputs[2].setValue('NewPass123!')
     await form.trigger('submit')
     await flushPromises()
-    expect(changePassword).toHaveBeenCalledWith('Old1234!', 'New1234!')
+    expect(changePassword).toHaveBeenCalledWith('Old1234!', 'NewPass123!')
   })
 
   it('admin 显示系统更新卡片与版本信息；非 admin 隐藏', async () => {
