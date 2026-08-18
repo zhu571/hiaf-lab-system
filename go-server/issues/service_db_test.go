@@ -315,22 +315,23 @@ func TestDBIssueListGet(t *testing.T) {
 	db := openIssuesSvcDB(t)
 	svc := issuesSvc(db, projects.StatusActive, issueRoles(), nil)
 
-	// 种子：open（member 作者）+ in_progress（assignee=member）+ resolved
+	// 种子：四种状态，验证未传 status 时返回全部
 	open := seedIssue(t, db, "open", "", "")
 	inProg := seedIssue(t, db, "in_progress", "", issuesDBMemberID)
 	resolved := seedIssue(t, db, "resolved", "", "")
+	closed := seedIssue(t, db, "closed", "", "")
 	t.Cleanup(func() {
-		db.Exec(`DELETE FROM issue_project_links WHERE issue_id IN ($1,$2,$3)`, open, inProg, resolved)
-		db.Exec(`DELETE FROM issues WHERE id IN ($1,$2,$3)`, open, inProg, resolved)
+		db.Exec(`DELETE FROM issue_project_links WHERE issue_id IN ($1,$2,$3,$4)`, open, inProg, resolved, closed)
+		db.Exec(`DELETE FROM issues WHERE id IN ($1,$2,$3,$4)`, open, inProg, resolved, closed)
 	})
 
-	// 默认只列 open
+	// 未传 status：不按状态过滤
 	list, err := svc.List(issuesDBProjectID, issuesDBMemberID, auth.RoleMember, IssueListParams{})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if list.Total != 1 || list.Items[0].ID != open {
-		t.Fatalf("default list: %+v", list)
+	if list.Total != 4 {
+		t.Fatalf("unfiltered list total = %d, want 4", list.Total)
 	}
 	// 各状态过滤 + search
 	inProgList, err := svc.List(issuesDBProjectID, issuesDBMemberID, auth.RoleMember, IssueListParams{Status: StatusInProgress})

@@ -159,10 +159,7 @@ func (s *Service) List(projectID, userID, userRole string, params IssueListParam
 	if params.PerPage > 100 {
 		params.PerPage = 100
 	}
-	if params.Status == "" {
-		params.Status = StatusOpen
-	}
-	if !validStatus(params.Status) || !validOptionalSeverity(params.Severity) || !validSort(params.Sort) || !validOrder(params.Order) {
+	if (params.Status != "" && !validStatus(params.Status)) || !validOptionalSeverity(params.Severity) || !validSort(params.Sort) || !validOrder(params.Order) {
 		return nil, ErrInvalidInput
 	}
 	ok, err := s.access.HasProjectPermission(projectID, userID, middleware.PermRead)

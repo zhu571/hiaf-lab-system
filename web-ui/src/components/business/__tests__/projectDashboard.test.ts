@@ -92,7 +92,7 @@ describe('ProjectDashboard 挂载冒烟', () => {
 
     expect(vi.mocked(getMembers)).toHaveBeenLastCalledWith('proj_02')
     expect(vi.mocked(listProjectLogs)).toHaveBeenLastCalledWith('proj_02', { per_page: 5 })
-    expect(vi.mocked(listProjectIssues)).toHaveBeenLastCalledWith('proj_02', { per_page: 5, sort: 'created', order: 'desc' })
+    expect(vi.mocked(listProjectIssues)).toHaveBeenLastCalledWith('proj_02', { status: 'open', per_page: 5, sort: 'created', order: 'desc' })
   })
 })
 
