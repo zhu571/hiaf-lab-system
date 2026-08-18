@@ -178,6 +178,9 @@ services:
       # 10.144.144.0/24 白名单 → 写操作被拒；现已通过 SOURCE_GATE_LAN_CIDR 放行，
       # GET 读请求白名单放行故健康检查不受影响。
       SOURCE_GATE_ENABLED: "${SOURCE_GATE_ENABLED:-true}"
+      # 自助注册开关（2026-08-18 邀请码上线）：compose 必须显式透传 .env 才会进容器，
+      # 否则容器内 ALLOW_REGISTER 为空 = 注册始终关闭。开启注册 = true + 邀请码校验防外人。
+      ALLOW_REGISTER: "${ALLOW_REGISTER:-false}"
       # 内网网段列表（逗号分隔）：EasyTier + docker 服务网段（py-agent 容器互调必须放行；2026-08-15 事故：漏配 172.18.0.0/16 → claim 全拒）
       SOURCE_GATE_LAN_CIDR: "${SOURCE_GATE_LAN_CIDR:-10.144.144.0/24,172.18.0.0/16}"
       # 公网来源门共享秘密（group-access 2026-08-12）：Caddy 与 server 两端一致，≥32 字符
