@@ -143,7 +143,7 @@
 
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
-import { useRouter } from 'vue-router'
+import { useRoute, useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { showApiError } from '@/composables/useNotify'
@@ -157,6 +157,7 @@ import { listProjectLogs, type LogItem } from '@/api/logs'
 import { listProjectIssues, type Issue } from '@/api/issues'
 
 const router = useRouter()
+const route = useRoute()
 const store = useProjectStore()
 const auth = useAuthStore()
 const { t } = useI18n()
@@ -167,7 +168,7 @@ const issues = ref<Issue[]>([])
 const issueTotal = ref(0)
 const loading = ref(false)
 const loadError = ref('')
-const projectId = computed(() => store.current?.id || '')
+const projectId = computed(() => String(route.params.id || ''))
 const memberKeyword = ref('')
 const memberRoleFilter = ref('')
 const memberDialog = ref(false)

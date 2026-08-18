@@ -1,10 +1,14 @@
 import { describe, it, expect, vi, afterEach } from 'vitest'
 import { flushPromises, mount } from '@vue/test-utils'
 import { createPinia, setActivePinia } from 'pinia'
+import { reactive } from 'vue'
 import ProjectDashboard from '@/components/business/ProjectDashboard.vue'
 import { createTestI18n } from '@/test-utils/setup'
 import { useAuthStore } from '@/stores/auth'
 import { useProjectStore } from '@/stores/project'
+import { getMembers } from '@/api/projects'
+import { listProjectLogs } from '@/api/logs'
+import { listProjectIssues } from '@/api/issues'
 
 // ProjectDashboard 组件测试（测试方案 §3.2 🟢 smoke）：挂载不崩 + 阶段流程/指标/成员区块。
 
@@ -29,8 +33,10 @@ vi.mock('@/api/issues', () => ({
   listProjectIssues: vi.fn().mockResolvedValue({ items: [], total: 0, page: 1 })
 }))
 
+const route = reactive({ params: { id: 'proj_01' } })
+
 vi.mock('vue-router', () => ({
-  useRoute: () => ({ params: { id: 'proj_01' } }),
+  useRoute: () => route,
   useRouter: () => ({ push: vi.fn() })
 }))
 
@@ -64,8 +70,33 @@ describe('ProjectDashboard 挂载冒烟', () => {
     expect(wrapper.text()).toContain('项目成员')
     expect(wrapper.text()).toContain('haofan')
   })
+
+  it('路由切换先于 store 同步时按路由项目加载', async () => {
+    route.params.id = 'proj_02'
+    const pinia = createPinia()
+    setActivePinia(pinia)
+    const store = useProjectStore(pinia)
+    store.projects = [
+      { id: 'proj_01', code: 'P01', name: '项目一', short_name: '项目一', description: '', status: 'active', visibility: 'internal' },
+      { id: 'proj_02', code: 'P02', name: '项目二', short_name: '项目二', description: '', status: 'active', visibility: 'internal' }
+    ]
+    store.currentId = 'proj_01'
+
+    mount(ProjectDashboard, {
+      global: {
+        plugins: [createTestI18n(), pinia],
+        stubs: { teleport: true, RouterLink: { template: '<a><slot /></a>' }, ElSelect: true }
+      }
+    })
+    await flushPromises()
+
+    expect(vi.mocked(getMembers)).toHaveBeenLastCalledWith('proj_02')
+    expect(vi.mocked(listProjectLogs)).toHaveBeenLastCalledWith('proj_02', { per_page: 5 })
+    expect(vi.mocked(listProjectIssues)).toHaveBeenLastCalledWith('proj_02', { per_page: 5, sort: 'created', order: 'desc' })
+  })
 })
 
 afterEach(() => {
+  route.params.id = 'proj_01'
   vi.restoreAllMocks()
 })
