@@ -33,3 +33,10 @@ type Request struct {
 	Force          bool   `json:"force"`
 	TranslatedText string `json:"translated_text"`
 }
+
+type Response struct {
+	Status         string `json:"status"`
+	TranslatedText string `json:"translated_text"`
+	Model          string `json:"model"`
+	PromptVersion  string `json:"prompt_version"`
+}

@@ -39,7 +39,12 @@ func (h *Handler) Translation(w http.ResponseWriter, r *http.Request) {
 	if strings.HasPrefix(r.URL.Path, "/api/v1/daily-reports/") {
 		kind = "daily_report"
 	}
-	middleware.SetAuditAction(r.Context(), "content_translation.requested")
+	action := "content_translation.requested"
+	if req.TranslatedText != "" {
+		action = "content_translation.edited"
+	}
+	middleware.SetAuditAction(r.Context(), action)
+	middleware.SetAuditDetail(r.Context(), map[string]any{"field": req.Field, "target_locale": req.TargetLocale, "force": req.Force, "translated_text_hash": translations.Hash(req.TranslatedText)})
 	value, err := h.svc.Translation(r.Context(), kind, chi.URLParam(r, "id"), middleware.EffectiveUserID(r.Context()), claims.Role, req)
 	if err != nil {
 		h.writeError(w, r, err, nil)
