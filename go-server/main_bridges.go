@@ -51,6 +51,33 @@ type candidateExecutor struct {
 	experiences *experiences.Service
 }
 
+type translationSourceReader struct{ repo *logs.Repository }
+
+func (r translationSourceReader) Source(_ context.Context, entity, id, field string) (string, error) {
+	if entity == "log" {
+		item, err := r.repo.GetByID(id)
+		if err != nil || item == nil {
+			return "", err
+		}
+		if field == "content" {
+			return item.Content, nil
+		}
+	}
+	if entity == "daily_report" {
+		item, err := r.repo.GetReportByID(id)
+		if err != nil || item == nil {
+			return "", err
+		}
+		if field == "raw_text" {
+			return item.RawText, nil
+		}
+		if field == "summary" {
+			return item.Summary, nil
+		}
+	}
+	return "", fmt.Errorf("unsupported translation source %s.%s", entity, field)
+}
+
 // reportReaderBridge 经 logs 模块 service 读日报当前值（trace 用）。
 // 无权限/不存在时降级为 nil（trace 容忍 report 段为空），其他错误上抛。
 type reportReaderBridge struct {

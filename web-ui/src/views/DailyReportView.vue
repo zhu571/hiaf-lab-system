@@ -15,6 +15,12 @@
         </div>
       </div>
       <el-input v-model="rawText" type="textarea" :rows="8" :placeholder="t('dailyReport.editorPlaceholder')" />
+      <p class="muted">{{ t('translation.original') }}</p>
+      <div class="translation-editor">
+        <div class="toolbar"><strong>{{ t('translation.english') }}</strong><span v-if="report?.translations?.raw_text?.en?.status">{{ t(`translation.${report.translations.raw_text.en.status}`) }}</span></div>
+        <el-input v-model="rawTranslation" type="textarea" :rows="5" :placeholder="t('translation.missing')" />
+        <div class="toolbar"><span class="muted">{{ t('translation.technicalHint') }}</span><span><el-button size="small" @click="saveTranslation">{{ t('translation.save') }}</el-button><el-button size="small" @click="regenerateTranslation">{{ t('translation.regenerate') }}</el-button></span></div>
+      </div>
       <div class="ai-row">
         <el-button type="primary" plain :disabled="!canAiOrganize" :loading="aiLoading" @click="organizeWithAI">
           {{ aiLoading ? t('dailyReport.aiOrganizing') : t('dailyReport.aiOrganize') }}
@@ -151,7 +157,7 @@ import { Paperclip } from '@element-plus/icons-vue'
 import StatusBadge from '@/components/base/StatusBadge.vue'
 import ResponsiveTable from '@/components/base/ResponsiveTable.vue'
 import FormDialog from '@/components/base/FormDialog.vue'
-import { aiParseReport, createLog, submitReport, todayReport, updateLog, updateReport, type DailyReport, type LogItem } from '../api/logs'
+import { aiParseReport, createLog, submitReport, todayReport, updateLog, updateReport, saveReportTranslation, requestReportTranslation, type DailyReport, type LogItem } from '../api/logs'
 import { useProjectStore } from '../stores/project'
 import { useAuthStore } from '../stores/auth'
 import { uploadAttachment } from '../api/attachments'
@@ -207,6 +213,7 @@ async function uploadAllPending() {
 const report = ref<DailyReport | null>(null)
 const rawText = ref('')
 const summaryText = ref('')
+const rawTranslation = ref('')
 const logDialog = ref(false)
 const editingLogId = ref('')
 const warningDialog = ref(false)
@@ -232,6 +239,9 @@ const tableRows = computed(() => [...(report.value?.logs || []), ...aiDrafts.val
 const canAiOrganize = computed(
   () => !!report.value && report.value.content_status === 'draft' && rawText.value.trim() !== '' && !aiLoading.value
 )
+function syncTranslation() { rawTranslation.value = report.value?.translations?.raw_text?.en?.text || '' }
+async function saveTranslation() { if (!report.value || !rawTranslation.value.trim()) return; await saveReportTranslation(report.value.id, { field: 'raw_text', target_locale: 'en', translated_text: rawTranslation.value }); report.value = await todayReport(); syncTranslation(); ElMessage.success(t('translation.save')) }
+async function regenerateTranslation() { if (!report.value) return; await requestReportTranslation(report.value.id, { field: 'raw_text', target_locale: 'en', force: true }); ElMessage.info(t('translation.pending')) }
 
 function projectName(id: string) {
   return projects.projects.find((p) => p.id === id)?.name || id
@@ -327,6 +337,7 @@ function removeDraft(row: AiDraftRow) {
 onMounted(async () => {
   await projects.load()
   report.value = await todayReport()
+  syncTranslation()
   rawText.value = report.value.raw_text
   summaryText.value = report.value.summary || ''
   logDraft.project_id = projects.current?.id || ''
@@ -421,6 +432,7 @@ async function submit(force: boolean) {
   display: grid;
   gap: 14px;
 }
+.translation-editor { display: grid; gap: 8px; }
 
 .warning-list {
   display: grid;

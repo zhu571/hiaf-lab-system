@@ -24,7 +24,7 @@
       <el-table-column :label="t('dailyHistory.author')" width="140" show-overflow-tooltip>
         <template #default="{ row }">{{ row.author_name || row.author_id }}</template>
       </el-table-column>
-      <el-table-column prop="summary" :label="t('dailyHistory.summary')" show-overflow-tooltip />
+      <el-table-column :label="t('dailyHistory.summary')" show-overflow-tooltip><template #default="{ row }">{{ localized(row, 'summary').text }}<small v-if="localized(row, 'summary').isFallback"> ({{ t('translation.original') }})</small></template></el-table-column>
       <el-table-column :label="t('dailyHistory.status')" width="120" show-overflow-tooltip>
         <template #default="{ row }">
           <StatusBadge domain="reportStatus" :value="row.content_status" />
@@ -35,7 +35,7 @@
       </template>
       <template #card="{ row }">
         <div class="report-card" @click="openDetail(row)">
-          <span class="card-title">{{ row.summary || '—' }}</span>
+          <span class="card-title">{{ localized(row, 'summary').text || '—' }}</span>
           <div class="card-fields">
             <span>{{ formatDate(row.report_date) }}</span>
             <span>{{ row.author_name || row.author_id }}</span>
@@ -69,8 +69,9 @@ import ResponsiveTable from '@/components/base/ResponsiveTable.vue'
 import StatusBadge from '@/components/base/StatusBadge.vue'
 import { formatDate } from '@/utils/datetime'
 import { listReports, type DailyReport } from '@/api/logs'
+import { resolveLocalizedText } from '@/utils/contentLanguage'
 
-const { t } = useI18n()
+const { t, locale } = useI18n()
 const router = useRouter()
 const date = ref('')
 const status = ref('')
@@ -87,6 +88,7 @@ const statuses = computed(() => [
 // 加载失败不再 toast，error 交给 ListPage 内 StateBlock 展示并重试
 const { data, loading, error, run } = useAsyncData(loadReports)
 const reports = computed(() => data.value?.items ?? [])
+function localized(row: DailyReport, field: 'summary') { return resolveLocalizedText(row[field], row.translations?.[field], locale.value) }
 
 function openDetail(row: DailyReport) {
   router.push(`/daily-reports/${row.id}`)

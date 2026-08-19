@@ -25,6 +25,11 @@
 /api/v1/{module}/{resource}
 ```
 
+### 2.3.2 翻译旁路（一期）
+
+日志和日报保留原文字段，并可附 `translations`：字段键为 `content`、`raw_text` 或 `summary`，variant 状态为 `ready/pending/failed/stale/missing`。只有 `ready` 且 hash 匹配的译文可展示。
+`POST/PATCH /api/v1/logs/{id}/translations` 与 `/api/v1/daily-reports/{id}/translations` 接收 `{field,target_locale,force?,translated_text?}`；POST 按需入队，PATCH 保存人工译文。两者均需对象既有权限、CSRF、`Idempotency-Key` 和审计。
+
 ### 2.2 通用请求头
 
 | Header | 必填 | 说明 |
