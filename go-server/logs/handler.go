@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
+	"unicode/utf8"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/zhu571/hiaf-lab-system/go-server/common"
@@ -49,14 +50,14 @@ func (h *Handler) UpdateReportRawText(w http.ResponseWriter, r *http.Request) {
 		common.WriteError(w, r, http.StatusUnauthorized, "unauthorized", "未登录", nil)
 		return
 	}
-	var req CreateDailyReportRequest
+	var req UpdateDailyReportRequest
 	if r.Body != nil {
 		if err := json.NewDecoder(r.Body).Decode(&req); err != nil && !errors.Is(err, io.EOF) {
 			common.WriteError(w, r, http.StatusBadRequest, "bad_request", "请求体解析失败", nil)
 			return
 		}
 	}
-	report, err := h.svc.UpdateReportRawText(chi.URLParam(r, "id"), middleware.EffectiveUserID(r.Context()), req.RawText)
+	report, err := h.svc.UpdateReport(chi.URLParam(r, "id"), middleware.EffectiveUserID(r.Context()), req)
 	if err != nil {
 		h.writeError(w, r, err, nil)
 		return
@@ -176,9 +177,16 @@ func (h *Handler) AiParseReport(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	middleware.SetAuditDetail(r.Context(), map[string]any{
-		"report_id": chi.URLParam(r, "id"),
-		"status":    result.Status,
-		"log_count": len(result.Logs),
+		"report_id":         chi.URLParam(r, "id"),
+		"status":            result.Status,
+		"log_count":         len(result.Logs),
+		"summary_generated": result.Summary != nil,
+		"summary_length": func() int {
+			if result.Summary == nil {
+				return 0
+			}
+			return utf8.RuneCountInString(*result.Summary)
+		}(),
 	})
 	common.WriteSuccess(w, r, result)
 }

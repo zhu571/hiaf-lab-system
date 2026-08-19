@@ -75,6 +75,11 @@ type CreateDailyReportRequest struct {
 	RawText    string `json:"raw_text,omitempty"`
 }
 
+type UpdateDailyReportRequest struct {
+	RawText *string `json:"raw_text,omitempty"`
+	Summary *string `json:"summary,omitempty"`
+}
+
 type CreateLogRequest struct {
 	DailyReportID *string `json:"daily_report_id,omitempty"`
 	Category      string  `json:"category"`
@@ -142,6 +147,7 @@ type AiParseLogEntry struct {
 type AiParseResult struct {
 	Status        string            `json:"status"`
 	Logs          []AiParseLogEntry `json:"logs"`
+	Summary       *string           `json:"summary"`
 	Question      *string           `json:"question"`
 	Reason        *string           `json:"reason"`
 	Model         string            `json:"model,omitempty"`

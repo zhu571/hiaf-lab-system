@@ -196,7 +196,7 @@ SERVICE_TOKEN 调用（todos scheduler 拉全量日报）：必须显式传 `use
 
 ### `PATCH /api/v1/daily-reports/{id}`
 
-仅作者本人。Body：`{raw_text}`（空 body 允许，即只获取）。响应：`DailyReport`。403 `ErrNotReportOwner`。
+仅作者本人。Body：`{raw_text?, summary?}`，两字段均可省略（空 body 允许，即只获取）；显式 `summary: ""` 清空摘要。`raw_text` ≤4000、`summary` ≤1000 Unicode 字符。响应：`DailyReport`。403 `ErrNotReportOwner`。
 
 ### `POST /api/v1/daily-reports/{id}/submit`
 
@@ -205,13 +205,13 @@ SERVICE_TOKEN 调用（todos scheduler 拉全量日报）：必须显式传 `use
 
 ### `POST /api/v1/daily-reports/{id}/ai-parse`
 
-把日报 raw_text 交给 py-agent 整理为结构化日志草稿。**结果不落库**，仅返回给前端由用户逐条编辑确认后走 `POST /api/v1/projects/{id}/logs` 入库。
+把日报 raw_text、已关联日志交给 py-agent 整理为结构化日志草稿和事实摘要。**结果不落库**，日志仅返回给前端由用户逐条编辑确认后走 `POST /api/v1/projects/{id}/logs` 入库；摘要由日报 PATCH 保存。
 
 要求：`Idempotency-Key` 头（组级中间件强制）；仅日报作者本人（admin 除外）且日报为 `draft` 状态；agent 角色被 middleware 白名单拦截（403 `agent_action_forbidden`）。每用户限流 10 次/分钟（429，全库唯一限流点之一）。
 
 请求体：无（`projects` 由服务端按当前用户 `create_log` 权限注入，不透传前端）。
 
-响应（三态，对齐 py-agent `/v1/daily-parse`）：
+响应（三态，对齐 py-agent `/v1/daily-parse`；`ok` 的 `summary` 非空且 ≤1000 字符，其他状态为 `null`）：
 
 ```json
 {

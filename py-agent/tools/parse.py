@@ -77,8 +77,11 @@ class Parser:
         )
         return validate_candidates(_json_array(str(result)), existing_issues, project_ids)
 
-    def parse_daily_logs(self, raw_text, projects, report_date):
+    def parse_daily_logs(self, raw_text, projects, report_date, linked_logs=None):
         ensure_safe(raw_text)
+        linked_logs = linked_logs or []
+        for log in linked_logs:
+            ensure_safe(log["content"])
         query = json.dumps({
             "trusted_context": {
                 "report_date": report_date,
@@ -87,7 +90,10 @@ class Parser:
                     for project in projects
                 ],
             },
-            "untrusted_inputs": [{"type": "daily_report", "content": raw_text}],
+            "untrusted_inputs": {
+                "daily_report": raw_text,
+                "linked_logs": linked_logs,
+            },
         }, ensure_ascii=False)
         result = self.agent.run(
             query, tools=[], use_skills=False, max_retry=3, result_format="str",
@@ -235,12 +241,19 @@ def validate_daily_logs(item, allowed_projects):
                 "category": category, "project_id": project_id,
                 "content": content, "occurred_at": occurred_at,
             })
+    summary = item.get("summary")
+    if status == "ok":
+        if not isinstance(summary, str) or not 1 <= len(summary.strip()) <= 1000:
+            raise ParseError("daily parse summary is invalid")
+        summary = summary.strip()
+    else:
+        summary = None
     return {
-        "status": status, "logs": out,
+        "status": status, "logs": out, "summary": summary,
         "question": str(item.get("question", "")).strip() or None,
         "reason": str(item.get("reason", "")).strip() or None,
-        "model": MODEL, "prompt_version": "1.0",
-    }
+        "model": MODEL, "prompt_version": "1.1",
+        }
 
 
 def validate_candidates(items, existing_issues, project_ids):

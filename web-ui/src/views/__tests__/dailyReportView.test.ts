@@ -11,6 +11,7 @@ import type { DailyReport, LogItem } from '@/api/logs'
 
 vi.mock('@/api/logs', () => ({
   todayReport: vi.fn(),
+  updateReport: vi.fn(),
   updateReportRawText: vi.fn(),
   submitReport: vi.fn(),
   aiParseReport: vi.fn(),
@@ -26,7 +27,7 @@ vi.mock('@/api/projects', () => ({
   listProjects: vi.fn().mockResolvedValue([])
 }))
 
-import { todayReport, updateReportRawText, aiParseReport, createLog } from '@/api/logs'
+import { todayReport, updateReport, updateReportRawText, aiParseReport, createLog } from '@/api/logs'
 
 function makeReport(overrides: Partial<DailyReport> = {}): DailyReport {
   return {
@@ -83,6 +84,7 @@ async function mountView(role = 'member') {
 beforeEach(() => {
   vi.mocked(todayReport).mockReset()
   vi.mocked(updateReportRawText).mockReset()
+  vi.mocked(updateReport).mockImplementation(async (_id, data) => makeReport(data as Partial<DailyReport>))
   vi.mocked(aiParseReport).mockReset()
   vi.mocked(createLog).mockReset()
 })
@@ -103,14 +105,14 @@ describe('DailyReportView 日报编辑', () => {
 
   it('保存草稿：updateReportRawText 提交后 toast 成功', async () => {
     vi.mocked(todayReport).mockResolvedValue(makeReport({ raw_text: '' }))
-    vi.mocked(updateReportRawText).mockResolvedValue(makeReport({ raw_text: '新内容' }))
+    vi.mocked(updateReport).mockResolvedValue(makeReport({ raw_text: '新内容' }))
     const wrapper = await mountView('member')
     const textarea = wrapper.find('textarea')
     await textarea.setValue('新内容')
     const saveBtn = wrapper.findAll('button').find((b) => b.text().trim() === '保存原文')!
     await saveBtn.trigger('click')
     await flushPromises()
-    expect(updateReportRawText).toHaveBeenCalledWith('report_01', '新内容')
+    expect(updateReport).toHaveBeenCalledWith('report_01', { raw_text: '新内容', summary: '' })
   })
 
   it('AI 整理：草稿行渲染 + 确认单条草稿调 createLog 并刷新', async () => {
@@ -145,5 +147,19 @@ describe('DailyReportView 日报编辑', () => {
       'proj_01',
       expect.objectContaining({ daily_report_id: 'report_01', category: 'test', content: '抽真空完成', source: 'agent' })
     )
+  })
+
+  it('摘要：显示已有内容，单独生成只保存 summary 不加入日志草稿', async () => {
+    vi.mocked(todayReport).mockResolvedValue(makeReport({ raw_text: '完成测试', summary: '旧摘要' }))
+    vi.mocked(aiParseReport).mockResolvedValue({ data: {
+      status: 'ok', logs: [makeLog({ content: '不应加入草稿' })], summary: '完成测试并记录结果。', question: null, reason: null
+    }, requestId: 'req_2' } as never)
+    const wrapper = await mountView('member')
+    expect(wrapper.findAll('textarea').some((item) => item.element.value === '旧摘要')).toBe(true)
+    const button = wrapper.findAll('button').find((b) => b.text().includes('重新生成摘要'))!
+    await button.trigger('click')
+    await flushPromises()
+    expect(updateReport).toHaveBeenCalledWith('report_01', { summary: '完成测试并记录结果。' })
+    expect(wrapper.findAll('textarea').some((item) => item.element.value === '不应加入草稿')).toBe(false)
   })
 })

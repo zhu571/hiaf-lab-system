@@ -23,6 +23,7 @@ def ok_item(**overrides):
         ],
         "question": None,
         "reason": None,
+        "summary": "完成装配匹配电路。",
     }
     item.update(overrides)
     return item
@@ -114,8 +115,8 @@ class ValidateDailyParseRequestTests(unittest.TestCase):
         return body
 
     def test_valid(self):
-        raw_text, projects, report_date = validate_daily_parse(self.base())
-        self.assertEqual((raw_text, report_date), ("今天装配了匹配电路", "2026-08-06"))
+        raw_text, projects, report_date, linked_logs = validate_daily_parse(self.base())
+        self.assertEqual((raw_text, report_date, linked_logs), ("今天装配了匹配电路", "2026-08-06", []))
         self.assertEqual(projects, [{"id": "p1", "name": "靶站"}])
 
     def test_raw_text_bounds(self):
@@ -143,7 +144,7 @@ class ValidateDailyParseRequestTests(unittest.TestCase):
 
 
 class FakeParser:
-    result = {"status": "ok", "logs": [], "question": None, "reason": None}
+    result = {"status": "ok", "logs": [], "summary": "完成工作。", "question": None, "reason": None}
     error = None
 
     def parse_daily_logs(self, *_args):

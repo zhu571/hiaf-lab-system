@@ -28,8 +28,12 @@ export function todayReport() {
   return request<DailyReport>({ url: '/daily-reports/today', method: 'POST', data: {} })
 }
 
+export function updateReport(id: string, data: { raw_text?: string; summary?: string }) {
+  return request<DailyReport>({ url: `/daily-reports/${id}`, method: 'PATCH', data })
+}
+
 export function updateReportRawText(id: string, raw_text: string) {
-  return request<DailyReport>({ url: `/daily-reports/${id}`, method: 'PATCH', data: { raw_text } })
+  return updateReport(id, { raw_text })
 }
 
 export function submitReport(id: string, force = false) {
@@ -67,6 +71,7 @@ export type AiParseLogEntry = {
 export type AiParseResult = {
   status: 'ok' | 'clarify' | 'rejected'
   logs: AiParseLogEntry[]
+  summary: string | null
   question: string | null
   reason: string | null
   model?: string

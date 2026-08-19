@@ -18,7 +18,7 @@ import (
 const aiParseOKBody = `{"status":"ok","logs":[
 	{"category":"assembly","project_id":"prj_1","content":"装配匹配电路","occurred_at":"2026-08-06T09:00:00+08:00"},
 	{"category":"test","project_id":"prj_1","content":"测低温传感器","occurred_at":"2026-08-06T14:00:00+08:00"}
-],"question":null,"reason":null,"model":"deepseek-v4-pro","prompt_version":"1.0"}`
+],"summary":"完成装配并开展传感器测试。","question":null,"reason":null,"model":"deepseek-v4-pro","prompt_version":"1.1"}`
 
 func aiParseService(t *testing.T, report DailyReport, upstream http.HandlerFunc) *Service {
 	t.Helper()
@@ -246,6 +246,10 @@ func TestAiParseHandlerErrorMapping(t *testing.T) {
 			w.Header().Set("Content-Type", "application/json")
 			_, _ = w.Write([]byte(`{"status":"ok","logs":[{"category":"nope","project_id":"prj_1","content":"x","occurred_at":"2026-08-06T09:00:00+08:00"}]}`))
 		}, http.StatusBadRequest, "ai_parse_failed"},
+		{"py 200 missing summary fails closed", testReport("usr_1", ReportStatusDraft, "worked"), "report_1", func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(strings.Replace(aiParseOKBody, `"summary":"完成装配并开展传感器测试。"`, `"summary":""`, 1)))
+		}, http.StatusBadRequest, "ai_parse_failed"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -285,5 +289,8 @@ func TestAiParseHandlerOK(t *testing.T) {
 	}
 	if body.Data.Status != "ok" || len(body.Data.Logs) != 2 {
 		t.Fatalf("unexpected data: %+v", body.Data)
+	}
+	if body.Data.Summary == nil || *body.Data.Summary == "" {
+		t.Fatalf("summary missing: %+v", body.Data)
 	}
 }

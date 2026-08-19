@@ -75,13 +75,26 @@ def validate_daily_parse(data):
     raw_text = data.get("raw_text")
     projects = data.get("projects")
     report_date = data.get("report_date")
+    linked_logs = data.get("linked_logs", [])
     check(isinstance(raw_text, str) and 1 <= len(raw_text.strip()) <= 4000, "raw_text is invalid")
     check(isinstance(projects, list) and 1 <= len(projects) <= 50, "projects is invalid")
     for project in projects:
         check(isinstance(project, dict) and isinstance(project.get("id"), str) and isinstance(project.get("name"), str),
               "project is invalid")
     check(isinstance(report_date, str) and REPORT_DATE.match(report_date), "report_date is invalid")
-    return raw_text.strip(), projects, report_date
+    check(isinstance(linked_logs, list) and len(linked_logs) <= 20, "linked_logs is invalid")
+    for log in linked_logs:
+        check(isinstance(log, dict), "linked_log is invalid")
+        check(isinstance(log.get("project_id"), str) and log["project_id"].strip(), "linked_log project is invalid")
+        check(isinstance(log.get("category"), str) and log["category"] in {
+            "general", "assembly", "test", "cryo", "rf", "vacuum", "beam", "data_analysis"
+        }, "linked_log category is invalid")
+        check(isinstance(log.get("content"), str) and 1 <= len(log["content"].strip()) <= 2000, "linked_log content is invalid")
+        check(isinstance(log.get("occurred_at"), str) and re.match(
+            r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:\d{2})$", log["occurred_at"]
+        ), "linked_log occurred_at is invalid")
+        check(log.get("content_status") in {"draft", "confirmed", "locked"}, "linked_log status is invalid")
+    return raw_text.strip(), projects, report_date, linked_logs
 
 
 def validate_todo_add(data):
@@ -233,8 +246,8 @@ def create_app(interpreter, planner, parser, todo_planner, token, ask_engine=Non
         return await asyncio.to_thread(planner.plan, kind, prompt, context)
 
     async def do_daily_parse(validated, _data):
-        raw_text, projects, report_date = validated
-        return await asyncio.to_thread(parser.parse_daily_logs, raw_text, projects, report_date)
+        raw_text, projects, report_date, linked_logs = validated
+        return await asyncio.to_thread(parser.parse_daily_logs, raw_text, projects, report_date, linked_logs)
 
     async def do_todo_add(validated, _data):
         raw_text, user_id = validated
