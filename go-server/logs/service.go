@@ -62,6 +62,7 @@ type logRepository interface {
 	GetLatestReportBefore(authorID, beforeDate string) (*DailyReport, error)
 	ListReports(params ReportListParams) ([]DailyReport, int, error)
 	UpdateReport(id, rawText string) error
+	UpdateReportFields(id string, rawText, summary *string) error
 	SubmitReport(id, qualityStatus string) (*DailyReport, error)
 	CreateLog(projectID, authorID string, req CreateLogRequest, occurredAt time.Time) (*Log, error)
 	GetByID(id string) (*Log, error)
@@ -173,6 +174,10 @@ func (s *Service) GetReportByID(id, userID, userRole string) (*DailyReport, erro
 }
 
 func (s *Service) UpdateReportRawText(id, userID, rawText string) (*DailyReport, error) {
+	return s.UpdateReport(id, userID, UpdateDailyReportRequest{RawText: &rawText})
+}
+
+func (s *Service) UpdateReport(id, userID string, req UpdateDailyReportRequest) (*DailyReport, error) {
 	report, err := s.repo.GetReportByID(id)
 	if err != nil {
 		return nil, err
@@ -186,7 +191,16 @@ func (s *Service) UpdateReportRawText(id, userID, rawText string) (*DailyReport,
 	if report.ContentStatus != ReportStatusDraft {
 		return nil, ErrAlreadySubmitted
 	}
-	if err := s.repo.UpdateReport(id, rawText); err != nil {
+	if req.RawText != nil && utf8.RuneCountInString(*req.RawText) > 4000 {
+		return nil, fmt.Errorf("%w: 日报内容过长（上限 4000 字符）", ErrInvalidInput)
+	}
+	if req.Summary != nil && utf8.RuneCountInString(*req.Summary) > 1000 {
+		return nil, fmt.Errorf("%w: 摘要过长（上限 1000 字符）", ErrInvalidInput)
+	}
+	if req.RawText == nil && req.Summary == nil {
+		return s.withReportLogs(report)
+	}
+	if err := s.repo.UpdateReportFields(id, req.RawText, req.Summary); err != nil {
 		return nil, err
 	}
 	updated, err := s.repo.GetReportByID(id)
@@ -487,6 +501,7 @@ func (s *Service) AiParse(ctx context.Context, id, userID, userRole string) (*Ai
 		"raw_text":    report.RawText,
 		"projects":    allowed,
 		"report_date": report.ReportDate,
+		"linked_logs": linkedReportLogs(report.Logs),
 	})
 	if err != nil {
 		return nil, err
@@ -527,12 +542,33 @@ func (s *Service) AiParse(ctx context.Context, id, userID, userRole string) (*Ai
 		if err := validateAiParseLogs(result.Logs, allowed); err != nil {
 			return nil, err
 		}
-	} else if result.Status == "clarify" && (result.Question == nil || strings.TrimSpace(*result.Question) == "") {
-		return nil, ErrAiParseFailed
-	} else if result.Status == "rejected" && (result.Reason == nil || strings.TrimSpace(*result.Reason) == "") {
-		return nil, ErrAiParseFailed
+		if result.Summary == nil || utf8.RuneCountInString(strings.TrimSpace(*result.Summary)) < 1 || utf8.RuneCountInString(*result.Summary) > 1000 {
+			return nil, ErrAiParseFailed
+		}
+	} else {
+		result.Summary = nil
+		if result.Status == "clarify" && (result.Question == nil || strings.TrimSpace(*result.Question) == "") {
+			return nil, ErrAiParseFailed
+		}
+		if result.Status == "rejected" && (result.Reason == nil || strings.TrimSpace(*result.Reason) == "") {
+			return nil, ErrAiParseFailed
+		}
 	}
 	return &result, nil
+}
+
+func linkedReportLogs(items []Log) []map[string]any {
+	logs := make([]map[string]any, 0, len(items))
+	for _, item := range items {
+		if item.ContentStatus == LogStatusVoided {
+			continue
+		}
+		logs = append(logs, map[string]any{
+			"project_id": item.ProjectID, "category": item.Category, "content": item.Content,
+			"occurred_at": item.OccurredAt.Format(time.RFC3339), "content_status": item.ContentStatus,
+		})
+	}
+	return logs
 }
 
 // validateAiParseLogs 对 py-agent 响应做二次校验（防御上游被绕过/配置错误，fail closed）。

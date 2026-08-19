@@ -181,11 +181,15 @@ func buildReportWhere(params ReportListParams) (string, []any) {
 }
 
 func (r *Repository) UpdateReport(id, rawText string) error {
+	return r.UpdateReportFields(id, &rawText, nil)
+}
+
+func (r *Repository) UpdateReportFields(id string, rawText, summary *string) error {
 	res, err := r.db.Exec(
 		`UPDATE daily_reports
-		 SET raw_text = $2, updated_at = now()
+		 SET raw_text = COALESCE($2, raw_text), summary = COALESCE($3, summary), updated_at = now()
 		 WHERE id = $1 AND content_status = 'draft'`,
-		id, rawText,
+		id, rawText, summary,
 	)
 	if err != nil {
 		return fmt.Errorf("update daily report: %w", err)

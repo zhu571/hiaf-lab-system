@@ -2,7 +2,7 @@
   <div class="page">
     <div class="toolbar">
       <h2>{{ t('dailyReport.title') }}</h2>
-      <el-button v-if="canSubmit" type="primary" :disabled="!report" @click="submit(false)">{{ t('dailyReport.submit') }}</el-button>
+      <el-button v-if="canSubmit" type="primary" :disabled="!report" :loading="submitLoading" @click="submit(false)">{{ t('dailyReport.submit') }}</el-button>
     </div>
     <section class="panel editor-panel">
       <div class="toolbar">
@@ -20,6 +20,19 @@
           {{ aiLoading ? t('dailyReport.aiOrganizing') : t('dailyReport.aiOrganize') }}
         </el-button>
       </div>
+    </section>
+    <section class="panel">
+      <div class="toolbar">
+        <div>
+          <h3>{{ t('dailyReport.summary') }}</h3>
+          <p class="muted">{{ t('dailyReport.summaryHint') }}</p>
+        </div>
+        <el-button plain :disabled="!canAiOrganize" :loading="aiLoading" @click="generateSummary">
+          {{ aiLoading ? t('dailyReport.summaryGenerating') : t(summaryText.trim() ? 'dailyReport.regenerateSummary' : 'dailyReport.generateSummary') }}
+        </el-button>
+      </div>
+      <el-input v-model="summaryText" type="textarea" :rows="3" maxlength="1000" show-word-limit
+        :disabled="!report || report.content_status !== 'draft'" :placeholder="summaryText ? '' : '—'" />
     </section>
     <section class="panel">
       <div class="toolbar">
@@ -110,7 +123,7 @@
       </div>
       <template #footer>
         <el-button @click="warningDialog = false">{{ t('dailyReport.backToEdit') }}</el-button>
-        <el-button type="warning" @click="submit(true)">{{ t('dailyReport.ignoreSubmit') }}</el-button>
+        <el-button type="warning" :loading="submitLoading" @click="submit(true)">{{ t('dailyReport.ignoreSubmit') }}</el-button>
       </template>
     </el-dialog>
 
@@ -138,7 +151,7 @@ import { Paperclip } from '@element-plus/icons-vue'
 import StatusBadge from '@/components/base/StatusBadge.vue'
 import ResponsiveTable from '@/components/base/ResponsiveTable.vue'
 import FormDialog from '@/components/base/FormDialog.vue'
-import { aiParseReport, createLog, submitReport, todayReport, updateLog, updateReportRawText, type DailyReport, type LogItem } from '../api/logs'
+import { aiParseReport, createLog, submitReport, todayReport, updateLog, updateReport, type DailyReport, type LogItem } from '../api/logs'
 import { useProjectStore } from '../stores/project'
 import { useAuthStore } from '../stores/auth'
 import { uploadAttachment } from '../api/attachments'
@@ -150,7 +163,7 @@ const canSubmit = computed(() => auth.user?.role !== 'viewer')
 const projects = projectStore
 
 // Attachments
-type PendingFile = { file: File; name: string; size: number; uploaded: boolean }
+type PendingFile = { file: File; name: string; size: number; uploaded: boolean; uploading: boolean }
 const pendingFiles = ref<PendingFile[]>([])
 
 function formatSize(bytes: number) {
@@ -161,7 +174,7 @@ function formatSize(bytes: number) {
 
 async function onFileSelect(uploadFile: any) {
   const file = uploadFile.raw as File
-  const entry: PendingFile = { file, name: file.name, size: file.size, uploaded: false }
+  const entry: PendingFile = { file, name: file.name, size: file.size, uploaded: false, uploading: false }
   pendingFiles.value.push(entry)
 
   // Upload immediately if today's report already exists
@@ -173,12 +186,15 @@ async function onFileSelect(uploadFile: any) {
 }
 
 async function uploadPendingFile(pf: PendingFile) {
-  if (!report.value?.id) return
+  if (!report.value?.id || pf.uploaded || pf.uploading) return
+  pf.uploading = true
   try {
     await uploadAttachment(pf.file, 'daily_report', report.value.id)
     pf.uploaded = true
   } catch {
     ElMessage.warning(t('dailyReport.uploadFailed', { name: pf.name }))
+  } finally {
+    pf.uploading = false
   }
 }
 
@@ -190,6 +206,7 @@ async function uploadAllPending() {
 }
 const report = ref<DailyReport | null>(null)
 const rawText = ref('')
+const summaryText = ref('')
 const logDialog = ref(false)
 const editingLogId = ref('')
 const warningDialog = ref(false)
@@ -208,6 +225,7 @@ type AiDraftRow = {
 }
 const aiDrafts = ref<AiDraftRow[]>([])
 const aiLoading = ref(false)
+const submitLoading = ref(false)
 let aiDraftSeq = 0
 const categories = ['general', 'assembly', 'test', 'cryo', 'rf', 'vacuum', 'beam', 'data_analysis']
 const tableRows = computed(() => [...(report.value?.logs || []), ...aiDrafts.value])
@@ -224,13 +242,17 @@ async function organizeWithAI() {
   aiLoading.value = true
   try {
     // 后端从已保存的 raw_text 取数：先落盘当前编辑内容，避免整理到旧文本或空文本
-    if (rawText.value !== report.value.raw_text) {
-      report.value = await updateReportRawText(report.value.id, rawText.value)
-    }
+    report.value = await updateReport(report.value.id, { raw_text: rawText.value, summary: summaryText.value })
+    rawText.value = report.value.raw_text
+    summaryText.value = report.value.summary || ''
     const { data } = await aiParseReport(report.value.id)
     if (data.status === 'ok') {
-      for (const log of data.logs) {
-        aiDrafts.value.push({ _draft: true, key: ++aiDraftSeq, confirming: false, ...log })
+      aiDrafts.value = data.logs.map((log) => ({ _draft: true, key: ++aiDraftSeq, confirming: false, ...log }))
+      if (!summaryText.value.trim() && data.summary) {
+        summaryText.value = data.summary
+        report.value = await updateReport(report.value.id, { summary: summaryText.value })
+      } else if (summaryText.value.trim()) {
+        ElMessage.info(t('dailyReport.summaryPreserved'))
       }
     } else if (data.status === 'clarify') {
       await ElMessageBox.alert(data.question || '', t('dailyReport.aiClarifyTitle'))
@@ -244,6 +266,31 @@ async function organizeWithAI() {
       : e?.status === 429 ? 'aiRateLimited'
       : e?.status === 409 ? 'aiDuplicate'
       : 'aiFailed'
+    const message = t(`dailyReport.${key}`)
+    ElMessage.error(e?.requestId ? `${message}（request_id: ${e.requestId}）` : message)
+  } finally {
+    aiLoading.value = false
+  }
+}
+
+async function generateSummary() {
+  if (!report.value) return
+  aiLoading.value = true
+  try {
+    report.value = await updateReport(report.value.id, { raw_text: rawText.value, summary: summaryText.value })
+    const { data } = await aiParseReport(report.value.id)
+    if (data.status === 'ok' && data.summary) {
+      summaryText.value = data.summary
+      report.value = await updateReport(report.value.id, { summary: summaryText.value })
+      ElMessage.success(t('dailyReport.summaryGenerated'))
+    } else if (data.status === 'clarify') {
+      await ElMessageBox.alert(data.question || '', t('dailyReport.aiClarifyTitle'))
+    } else if (data.status === 'rejected') {
+      await ElMessageBox.alert(data.reason || '', t('dailyReport.aiRejectedTitle'))
+    }
+  } catch (err) {
+    const e = err as (Error & { requestId?: string; status?: number }) | undefined
+    const key = e?.status === 502 ? 'aiUpstreamDown' : e?.status === 429 ? 'aiRateLimited' : e?.status === 409 ? 'aiDuplicate' : 'aiFailed'
     const message = t(`dailyReport.${key}`)
     ElMessage.error(e?.requestId ? `${message}（request_id: ${e.requestId}）` : message)
   } finally {
@@ -281,13 +328,25 @@ onMounted(async () => {
   await projects.load()
   report.value = await todayReport()
   rawText.value = report.value.raw_text
+  summaryText.value = report.value.summary || ''
   logDraft.project_id = projects.current?.id || ''
+  await uploadAllPending()
 })
 
-async function saveRaw() {
+async function saveDraft() {
   if (!report.value) return
-  report.value = await updateReportRawText(report.value.id, rawText.value)
-  ElMessage.success(t('dailyReport.saved'))
+  report.value = await updateReport(report.value.id, { raw_text: rawText.value, summary: summaryText.value })
+  rawText.value = report.value.raw_text
+  summaryText.value = report.value.summary || ''
+}
+
+async function saveRaw() {
+  try {
+    await saveDraft()
+    ElMessage.success(t('dailyReport.saved'))
+  } catch (err) {
+    showApiError(err, t('dailyReport.saveFailed'))
+  }
 }
 
 function openAddLog() {
@@ -330,16 +389,29 @@ async function confirmLog(id: string) {
 }
 
 async function submit(force: boolean) {
-  if (!report.value) return
-  const result = await submitReport(report.value.id, force)
-  report.value = result.report
-  if (result.warnings.length > 0 && result.blocked) {
-    warnings.value = result.warnings as typeof warnings.value
-    warningDialog.value = true
-    return
+  if (!report.value || submitLoading.value) return
+  submitLoading.value = true
+  try {
+    try {
+      await saveDraft()
+    } catch (err) {
+      showApiError(err, t('dailyReport.saveFailed'))
+      return
+    }
+    const result = await submitReport(report.value.id, force)
+    report.value = result.report
+    if (result.warnings.length > 0 && result.blocked) {
+      warnings.value = result.warnings as typeof warnings.value
+      warningDialog.value = true
+      return
+    }
+    warningDialog.value = false
+    ElMessage.success(t('dailyReport.submitted'))
+  } catch (err) {
+    showApiError(err, t('dailyReport.submitFailed'))
+  } finally {
+    submitLoading.value = false
   }
-  warningDialog.value = false
-  ElMessage.success(t('dailyReport.submitted'))
 }
 </script>
 

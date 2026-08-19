@@ -313,6 +313,20 @@ func (f *fakeRepo) UpdateReport(id, rawText string) error {
 	return nil
 }
 
+func (f *fakeRepo) UpdateReportFields(id string, rawText, summary *string) error {
+	report := f.reports[id]
+	if report == nil || report.ContentStatus != ReportStatusDraft {
+		return errors.New("not found")
+	}
+	if rawText != nil {
+		report.RawText = *rawText
+	}
+	if summary != nil {
+		report.Summary = *summary
+	}
+	return nil
+}
+
 func (f *fakeRepo) SubmitReport(id, qualityStatus string) (*DailyReport, error) {
 	report := f.reports[id]
 	if report == nil || report.ContentStatus != ReportStatusDraft {

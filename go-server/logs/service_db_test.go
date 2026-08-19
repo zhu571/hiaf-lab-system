@@ -286,10 +286,20 @@ func TestDBUpdateReportRawText(t *testing.T) {
 	if raw != "1. 完成了装配与测试；2. 校准了流量计" {
 		t.Fatalf("persisted raw text: %q", raw)
 	}
+	// 部分更新：只传摘要保留原文，显式空串可清空摘要。
+	summary := "摘要"
+	updated, err = svc.UpdateReport(logsDBReportA, logsDBUserA, UpdateDailyReportRequest{Summary: &summary})
+	if err != nil || updated.Summary != "摘要" || updated.RawText != "1. 完成了装配与测试；2. 校准了流量计" {
+		t.Fatalf("summary-only update: %+v, %v", updated, err)
+	}
+	emptySummary := ""
+	if _, err = svc.UpdateReport(logsDBReportA, logsDBUserA, UpdateDailyReportRequest{Summary: &emptySummary}); err != nil {
+		t.Fatal(err)
+	}
 	// 恢复种子 raw_text（种子 ON CONFLICT DO NOTHING 不重置可变字段，
 	// 不恢复会与 TestDBGetReportByDateLatest 的原文断言产生测试顺序耦合）
 	t.Cleanup(func() {
-		db.Exec(`UPDATE daily_reports SET raw_text = '今天完成了装配与测试' WHERE id = $1`, logsDBReportA)
+		db.Exec(`UPDATE daily_reports SET raw_text = '今天完成了装配与测试', summary = '' WHERE id = $1`, logsDBReportA)
 	})
 }
 
