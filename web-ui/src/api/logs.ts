@@ -1,4 +1,8 @@
 import { request, requestWithMeta } from './client'
+import type { FieldTranslations } from '@/utils/contentLanguage'
+
+export type TranslationSidecar = Record<string, FieldTranslations>
+export type TranslationRequest = { field: string; target_locale: 'zh' | 'en'; force?: boolean; translated_text?: string }
 
 export type DailyReport = {
   id: string
@@ -10,6 +14,7 @@ export type DailyReport = {
   content_status: string
   quality_status: string
   logs?: LogItem[]
+  translations?: TranslationSidecar
 }
 
 export type LogItem = {
@@ -22,6 +27,7 @@ export type LogItem = {
   source: string
   content_status: string
   created_at?: string
+  translations?: TranslationSidecar
 }
 
 export function todayReport() {
@@ -51,6 +57,10 @@ export function listReports(params: Record<string, string | number> = {}) {
 export function getReport(id: string) {
   return request<DailyReport>({ url: `/daily-reports/${id}` })
 }
+export function requestReportTranslation(id: string, data: TranslationRequest) { return request<unknown>({ url: `/daily-reports/${id}/translations`, method: 'POST', data }) }
+export function saveReportTranslation(id: string, data: TranslationRequest) { return request<unknown>({ url: `/daily-reports/${id}/translations`, method: 'PATCH', data }) }
+export function requestLogTranslation(id: string, data: TranslationRequest) { return request<unknown>({ url: `/logs/${id}/translations`, method: 'POST', data }) }
+export function saveLogTranslation(id: string, data: TranslationRequest) { return request<unknown>({ url: `/logs/${id}/translations`, method: 'PATCH', data }) }
 
 export function reportByDate(date: string) {
   return request<DailyReport>({ url: '/daily-reports/by-date', params: { date } })

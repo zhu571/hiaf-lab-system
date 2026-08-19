@@ -18,6 +18,7 @@ import (
 
 	"github.com/zhu571/hiaf-lab-system/go-server/middleware"
 	"github.com/zhu571/hiaf-lab-system/go-server/projects"
+	"github.com/zhu571/hiaf-lab-system/go-server/translations"
 )
 
 var (
@@ -82,6 +83,7 @@ type Service struct {
 	parserToken string
 	rlMu        sync.Mutex
 	rlCalls     map[string][]time.Time
+	translation *translations.Service
 }
 
 func NewService(repo logRepository, timezone string, access ProjectAccessChecker) *Service {
@@ -92,6 +94,102 @@ func NewService(repo logRepository, timezone string, access ProjectAccessChecker
 		client:   &http.Client{Timeout: 60 * time.Second},
 		rlCalls:  map[string][]time.Time{},
 	}
+}
+
+func (s *Service) SetTranslations(t *translations.Service) { s.translation = t }
+
+func (s *Service) Translation(ctx context.Context, kind, id, userID, role string, req translations.Request) (any, error) {
+	if s.translation == nil {
+		return nil, ErrUpstream
+	}
+	if req.Field == "" || (req.TargetLocale != "zh" && req.TargetLocale != "en") {
+		return nil, ErrInvalidInput
+	}
+	if kind == "log" {
+		item, err := s.GetLog(id, userID, role)
+		if err != nil {
+			return nil, err
+		}
+		if req.Field != "content" {
+			return nil, ErrInvalidInput
+		}
+		if req.TranslatedText != "" || req.Force {
+			canAny, err := s.access.HasProjectPermission(item.ProjectID, userID, middleware.PermUpdateAnyLog)
+			if err != nil {
+				return nil, err
+			}
+			canOwn, err := s.access.HasProjectPermission(item.ProjectID, userID, middleware.PermUpdateOwnLog)
+			if err != nil {
+				return nil, err
+			}
+			if !canAny && (!canOwn || item.AuthorID != userID) {
+				return nil, ErrForbidden
+			}
+		}
+		if req.TranslatedText != "" {
+			if err := s.translation.SaveManual("log", id, req.Field, item.Content, req.TargetLocale, req.TranslatedText, userID); err != nil {
+				return nil, ErrInvalidInput
+			}
+		} else if err := s.translation.Ensure("log", id, req.Field, item.Content, req.TargetLocale, userID, req.Force); err != nil {
+			return nil, err
+		}
+		return item.Translations, nil
+	}
+	report, err := s.GetReportByID(id, userID, role)
+	if err != nil {
+		return nil, err
+	}
+	var source string
+	if req.Field == "raw_text" {
+		source = report.RawText
+	} else if req.Field == "summary" {
+		source = report.Summary
+	} else {
+		return nil, ErrInvalidInput
+	}
+	if req.TranslatedText != "" {
+		if report.AuthorID != userID && role != "admin" {
+			return nil, ErrNotReportOwner
+		}
+		if err := s.translation.SaveManual("daily_report", id, req.Field, source, req.TargetLocale, req.TranslatedText, userID); err != nil {
+			return nil, ErrInvalidInput
+		}
+	} else if err := s.translation.Ensure("daily_report", id, req.Field, source, req.TargetLocale, userID, req.Force); err != nil {
+		return nil, err
+	}
+	return report.Translations, nil
+}
+
+func (s *Service) attachLogTranslations(ctx context.Context, items []Log) error {
+	if s.translation == nil || len(items) == 0 {
+		return nil
+	}
+	ids := make([]string, 0, len(items))
+	sources := map[string]string{}
+	for _, item := range items {
+		ids = append(ids, item.ID)
+		sources[item.ID+":content"] = item.Content
+	}
+	side, err := s.translation.Sidecar(ctx, "log", ids, []string{"content"}, sources)
+	if err != nil {
+		return err
+	}
+	for i := range items {
+		items[i].Translations = translations.Sidecar{"content": side[items[i].ID+":content"]}
+	}
+	return nil
+}
+func (s *Service) attachReportTranslations(ctx context.Context, report *DailyReport) error {
+	if s.translation == nil || report == nil {
+		return nil
+	}
+	sources := map[string]string{report.ID + ":raw_text": report.RawText, report.ID + ":summary": report.Summary}
+	side, err := s.translation.Sidecar(ctx, "daily_report", []string{report.ID}, []string{"raw_text", "summary"}, sources)
+	if err != nil {
+		return err
+	}
+	report.Translations = translations.Sidecar{"raw_text": side[report.ID+":raw_text"], "summary": side[report.ID+":summary"]}
+	return nil
 }
 
 func (s *Service) ConfigureParser(url, token string) {
@@ -207,6 +305,14 @@ func (s *Service) UpdateReport(id, userID string, req UpdateDailyReportRequest) 
 	if err != nil {
 		return nil, err
 	}
+	if s.translation != nil {
+		if req.RawText != nil {
+			_ = s.translation.EnsureAuto("daily_report", id, "raw_text", updated.RawText, userID)
+		}
+		if req.Summary != nil && updated.Summary != "" {
+			_ = s.translation.EnsureAuto("daily_report", id, "summary", updated.Summary, userID)
+		}
+	}
 	return s.withReportLogs(updated)
 }
 
@@ -226,7 +332,25 @@ func (s *Service) ListReports(params ReportListParams) ([]DailyReport, int, erro
 			return nil, 0, ErrInvalidInput
 		}
 	}
-	return s.repo.ListReports(params)
+	items, total, err := s.repo.ListReports(params)
+	if err != nil || s.translation == nil {
+		return items, total, err
+	}
+	ids := make([]string, 0, len(items))
+	sources := map[string]string{}
+	for _, item := range items {
+		ids = append(ids, item.ID)
+		sources[item.ID+":raw_text"] = item.RawText
+		sources[item.ID+":summary"] = item.Summary
+	}
+	side, err := s.translation.Sidecar(context.Background(), "daily_report", ids, []string{"raw_text", "summary"}, sources)
+	if err != nil {
+		return nil, 0, err
+	}
+	for i := range items {
+		items[i].Translations = translations.Sidecar{"raw_text": side[items[i].ID+":raw_text"], "summary": side[items[i].ID+":summary"]}
+	}
+	return items, total, nil
 }
 
 func (s *Service) CreateLog(projectID, userID, userRole string, req CreateLogRequest) (*Log, error) {
@@ -344,6 +468,12 @@ func (s *Service) SubmitReport(id, userID, userRole string, force bool) (*Submit
 		return nil, ErrAlreadySubmitted
 	}
 	updated.Logs = items
+	if s.translation != nil {
+		_ = s.translation.EnsureAuto("daily_report", updated.ID, "raw_text", updated.RawText, userID)
+		if updated.Summary != "" {
+			_ = s.translation.EnsureAuto("daily_report", updated.ID, "summary", updated.Summary, userID)
+		}
+	}
 	return &SubmitResult{Report: *updated, Warnings: warnings, Blocked: false}, nil
 }
 
@@ -375,6 +505,9 @@ func (s *Service) ListLogs(projectID, userID, userRole string, params LogListPar
 	if page < 1 {
 		page = 1
 	}
+	if err := s.attachLogTranslations(context.Background(), items); err != nil {
+		return nil, err
+	}
 	return &LogListResult{Items: items, Total: total, Page: page}, nil
 }
 
@@ -393,6 +526,11 @@ func (s *Service) GetLog(id, userID, userRole string) (*Log, error) {
 	if !ok {
 		return nil, ErrForbidden
 	}
+	items := []Log{*item}
+	if err := s.attachLogTranslations(context.Background(), items); err != nil {
+		return nil, err
+	}
+	*item = items[0]
 	return item, nil
 }
 
@@ -453,6 +591,12 @@ func (s *Service) UpdateLog(id, userID, userRole string, req UpdateLogRequest) (
 	if updated == nil {
 		return nil, ErrLogNotDraft
 	}
+	if s.translation != nil && req.Content != nil {
+		_ = s.translation.EnsureAuto("log", id, "content", updated.Content, userID)
+	}
+	if s.translation != nil && req.ContentStatus != nil && *req.ContentStatus == LogStatusConfirmed {
+		_ = s.translation.EnsureAuto("log", id, "content", updated.Content, userID)
+	}
 	return updated, nil
 }
 
@@ -462,6 +606,13 @@ func (s *Service) withReportLogs(report *DailyReport) (*DailyReport, error) {
 	}
 	items, err := s.repo.GetLogsByReport(report.ID)
 	if err != nil {
+		return nil, err
+	}
+	report.Logs = items
+	if err := s.attachReportTranslations(context.Background(), report); err != nil {
+		return nil, err
+	}
+	if err := s.attachLogTranslations(context.Background(), items); err != nil {
 		return nil, err
 	}
 	report.Logs = items

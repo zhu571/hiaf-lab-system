@@ -88,7 +88,7 @@
                 <el-tag size="small" effect="plain">{{ log.category }}</el-tag>
                 <time>{{ formatDateTime(log.occurred_at) }}</time>
               </div>
-              <p>{{ log.content }}</p>
+              <p>{{ localized(log).text }}</p>
             </article>
           </div>
           <el-empty v-else :image-size="52" :description="t('projectDashboard.noLogs')" />
@@ -155,15 +155,17 @@ import { listUsers, type UserInfo } from '@/api/auth'
 import FormDialog from '@/components/base/FormDialog.vue'
 import { listProjectLogs, type LogItem } from '@/api/logs'
 import { listProjectIssues, type Issue } from '@/api/issues'
+import { resolveLocalizedText } from '@/utils/contentLanguage'
 
 const router = useRouter()
 const route = useRoute()
 const store = useProjectStore()
 const auth = useAuthStore()
-const { t } = useI18n()
+const { t, locale } = useI18n()
 
 const members = ref<ProjectMember[]>([])
 const logs = ref<LogItem[]>([])
+function localized(log: LogItem) { return resolveLocalizedText(log.content, log.translations?.content, locale.value) }
 const issues = ref<Issue[]>([])
 const issueTotal = ref(0)
 const loading = ref(false)

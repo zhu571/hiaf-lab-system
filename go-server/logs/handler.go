@@ -13,6 +13,7 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/zhu571/hiaf-lab-system/go-server/common"
 	"github.com/zhu571/hiaf-lab-system/go-server/middleware"
+	"github.com/zhu571/hiaf-lab-system/go-server/translations"
 )
 
 type Handler struct {
@@ -21,6 +22,30 @@ type Handler struct {
 
 func NewHandler(svc *Service) *Handler {
 	return &Handler{svc: svc}
+}
+
+func (h *Handler) Translation(w http.ResponseWriter, r *http.Request) {
+	claims := middleware.GetUserClaims(r.Context())
+	if claims == nil {
+		common.WriteError(w, r, 401, "unauthorized", "未登录", nil)
+		return
+	}
+	var req translations.Request
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		common.WriteError(w, r, 400, "bad_request", "请求体解析失败", nil)
+		return
+	}
+	kind := "log"
+	if strings.HasPrefix(r.URL.Path, "/api/v1/daily-reports/") {
+		kind = "daily_report"
+	}
+	middleware.SetAuditAction(r.Context(), "content_translation.requested")
+	value, err := h.svc.Translation(r.Context(), kind, chi.URLParam(r, "id"), middleware.EffectiveUserID(r.Context()), claims.Role, req)
+	if err != nil {
+		h.writeError(w, r, err, nil)
+		return
+	}
+	common.WriteSuccess(w, r, value)
 }
 
 func (h *Handler) GetOrCreateTodayReport(w http.ResponseWriter, r *http.Request) {

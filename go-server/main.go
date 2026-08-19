@@ -38,6 +38,7 @@ import (
 	"github.com/zhu571/hiaf-lab-system/go-server/system"
 	"github.com/zhu571/hiaf-lab-system/go-server/testdata"
 	"github.com/zhu571/hiaf-lab-system/go-server/todos"
+	"github.com/zhu571/hiaf-lab-system/go-server/translations"
 	"github.com/zhu571/hiaf-lab-system/go-server/weekly"
 )
 
@@ -99,6 +100,10 @@ func main() {
 	projectsSvc := projects.NewService(projectsRepo, issuesRepo, logsRepo)
 	projectsHandler := projects.NewHandler(projectsSvc)
 	logsSvc := logs.NewService(logsRepo, "Asia/Shanghai", logs.ProjectAccessAdapter{DB: db, Repo: projectsRepo})
+	translationSvc := translations.NewService(translations.NewRepository(db))
+	translationSvc.SetSourceReader(translationSourceReader{repo: logsRepo})
+	translationSvc.AutoConfigure()
+	logsSvc.SetTranslations(translationSvc)
 	if err := logsSvc.AutoConfigure(); err != nil {
 		slog.Warn("logs ai-parse autoconfigure failed", "error", err)
 	}
@@ -361,6 +366,10 @@ func main() {
 			r.Patch("/", logsHandler.UpdateReportRawText)
 			r.Post("/submit", logsHandler.SubmitReport)
 			r.Post("/ai-parse", logsHandler.AiParseReport)
+			r.Post("/translations", logsHandler.Translation)
+			r.Patch("/translations", logsHandler.Translation)
+			r.Post("/translations/", logsHandler.Translation)
+			r.Patch("/translations/", logsHandler.Translation)
 		})
 	})
 	r.Route("/api/v1/projects", func(r chi.Router) {
@@ -497,6 +506,8 @@ func main() {
 		r.Route("/{id}", func(r chi.Router) {
 			r.Get("/", logsHandler.GetLog)
 			r.Patch("/", logsHandler.UpdateLog)
+			r.Post("/translations", logsHandler.Translation)
+			r.Patch("/translations", logsHandler.Translation)
 		})
 	})
 	r.Route("/api/v1/issues", func(r chi.Router) {
@@ -684,6 +695,7 @@ func main() {
 	// 优雅关闭：SIGINT/SIGTERM → scheduler 不再起新批、在途批完成（≤30s），HTTP 10s 内排空。
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
+	translationSvc.Start(ctx)
 	if os.Getenv("TODOS_SCHEDULER_ENABLED") != "false" {
 		sched := todos.NewScheduler(todosSvc, loc, time.Now)
 		// 连续失败告警收敛到告警中心（warning/todos），由 alert 模块聚合去重后推送。

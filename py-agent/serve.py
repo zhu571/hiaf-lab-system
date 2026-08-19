@@ -17,6 +17,7 @@ from tools.parse import InstrumentInterpreter, ParseError, Parser
 from tools.stepplan import StepPlanner
 from tools.todoplan import TodoPlanner
 from tools.weekly import WeeklySummarizer
+from tools.translation import FIELDS, LOCALES, SOURCE_LOCALES, Translator, validate_translation
 
 
 def read_token():
@@ -177,6 +178,17 @@ def validate_weekly_request(data):
         check(isinstance(value, int) and not isinstance(value, bool) and value >= 0, "issue_stats value is invalid")
     return week_start, week_end, reports, issue_stats
 
+def validate_translation_request(data):
+    check(_size_ok(data), "request too large")
+    source = data.get("source_text")
+    source_locale, target, field = data.get("source_locale"), data.get("target_locale"), data.get("field")
+    terms = data.get("protected_terms", [])
+    check(isinstance(source, str) and 1 <= len(source.strip()) <= 4000, "source_text is invalid")
+    check(source_locale in SOURCE_LOCALES and target in LOCALES and field in FIELDS, "translation locale or field is invalid")
+    check(isinstance(terms, list) and len(terms) <= 100, "protected_terms is invalid")
+    check(all(isinstance(term, str) and 0 < len(term) <= 128 for term in terms), "protected_term is invalid")
+    return source.strip(), source_locale, target, field, terms
+
 
 def validate_experience_extract(data):
     """经验候选提取：issues 1-50 条，字段长度收紧（与 Go 侧 limitIssues 上限对齐）。
@@ -205,7 +217,7 @@ def validate_experience_extract(data):
     return issues
 
 
-def create_app(interpreter, planner, parser, todo_planner, token, ask_engine=None, weekly=None, extractor=None):
+def create_app(interpreter, planner, parser, todo_planner, token, ask_engine=None, weekly=None, extractor=None, translator=None):
     def make_endpoint(validate, handler, parse_error_code):
         """端点工厂：统一 Bearer 鉴权、JSON 解析（64KB 上限）、三态异常映射（400/422/502）。
 
@@ -290,6 +302,11 @@ def create_app(interpreter, planner, parser, todo_planner, token, ask_engine=Non
             timeout=ExperienceExtractor.TOTAL_TIMEOUT,
         )
 
+    async def do_translation(validated, _data):
+        if translator is None:
+            raise RuntimeError("translator is not configured")
+        return await asyncio.to_thread(translator.translate, *validated)
+
     return Starlette(routes=[
         Route("/health", health),
         Route("/v1/interpret", make_endpoint(validate_request, do_interpret, "interpretation_failed"), methods=["POST"]),
@@ -300,6 +317,7 @@ def create_app(interpreter, planner, parser, todo_planner, token, ask_engine=Non
         Route("/v1/ask", make_endpoint(validate_ask, do_ask, "ask_failed"), methods=["POST"]),
         Route("/v1/weekly-summary", make_endpoint(validate_weekly_request, do_weekly, "weekly_summary_failed"), methods=["POST"]),
         Route("/v1/experience-extract", make_endpoint(validate_experience_extract, do_experience_extract, "experience_extract_failed"), methods=["POST"]),
+        Route("/v1/translate", make_endpoint(validate_translation_request, do_translation, "translation_failed"), methods=["POST"]),
     ])
 
 
@@ -314,5 +332,6 @@ if __name__ == "__main__":
         ask_engine=AskEngine(api_key),
         weekly=WeeklySummarizer(api_key),
         extractor=ExperienceExtractor(api_key),
+        translator=Translator(api_key),
     )
     uvicorn.run(app, host="0.0.0.0", port=8001)

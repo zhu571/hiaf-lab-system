@@ -1,6 +1,7 @@
 package logs
 
 import "time"
+import "github.com/zhu571/hiaf-lab-system/go-server/translations"
 
 const (
 	ReportStatusDraft     = "draft"
@@ -33,31 +34,33 @@ const (
 )
 
 type DailyReport struct {
-	ID            string    `json:"id"`
-	ReportDate    string    `json:"report_date"`
-	AuthorID      string    `json:"author_id"`
-	AuthorName    string    `json:"author_name,omitempty"`
-	RawText       string    `json:"raw_text"`
-	Summary       string    `json:"summary"`
-	ContentStatus string    `json:"content_status"`
-	QualityStatus string    `json:"quality_status"`
-	CreatedAt     time.Time `json:"created_at"`
-	UpdatedAt     time.Time `json:"updated_at"`
-	Logs          []Log     `json:"logs,omitempty"`
+	ID            string               `json:"id"`
+	ReportDate    string               `json:"report_date"`
+	AuthorID      string               `json:"author_id"`
+	AuthorName    string               `json:"author_name,omitempty"`
+	RawText       string               `json:"raw_text"`
+	Summary       string               `json:"summary"`
+	ContentStatus string               `json:"content_status"`
+	QualityStatus string               `json:"quality_status"`
+	CreatedAt     time.Time            `json:"created_at"`
+	UpdatedAt     time.Time            `json:"updated_at"`
+	Logs          []Log                `json:"logs,omitempty"`
+	Translations  translations.Sidecar `json:"translations,omitempty"`
 }
 
 type Log struct {
-	ID            string    `json:"id"`
-	ProjectID     string    `json:"project_id"`
-	AuthorID      string    `json:"author_id"`
-	OccurredAt    time.Time `json:"occurred_at"`
-	Category      string    `json:"category"`
-	Content       string    `json:"content"`
-	Source        string    `json:"source"`
-	ContentStatus string    `json:"content_status"`
-	CreatedAt     time.Time `json:"created_at"`
-	UpdatedAt     time.Time `json:"updated_at"`
-	RunID         *string   `json:"run_id,omitempty"`
+	ID            string               `json:"id"`
+	ProjectID     string               `json:"project_id"`
+	AuthorID      string               `json:"author_id"`
+	OccurredAt    time.Time            `json:"occurred_at"`
+	Category      string               `json:"category"`
+	Content       string               `json:"content"`
+	Source        string               `json:"source"`
+	ContentStatus string               `json:"content_status"`
+	CreatedAt     time.Time            `json:"created_at"`
+	UpdatedAt     time.Time            `json:"updated_at"`
+	RunID         *string              `json:"run_id,omitempty"`
+	Translations  translations.Sidecar `json:"translations,omitempty"`
 }
 
 // WeeklyReportEntry 是周报取数的日报条目（AI-1）：供 main.go 注入的 weekly 窄接口
