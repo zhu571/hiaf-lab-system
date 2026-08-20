@@ -17,7 +17,7 @@
       <el-input v-model="rawText" type="textarea" :rows="8" :placeholder="t('dailyReport.editorPlaceholder')" />
       <p class="muted">{{ t('translation.original') }}</p>
       <div class="translation-editor">
-        <div class="toolbar"><strong>{{ t('translation.english') }}</strong><span v-if="report?.translations?.raw_text?.en?.status">{{ t(`translation.${report.translations.raw_text.en.status}`) }}</span></div>
+        <div class="toolbar"><strong>{{ locale === 'zh' ? t('translation.chinese') : t('translation.english') }}</strong><span v-if="translationVariant?.status">{{ t(`translation.${translationVariant.status}`) }}</span></div>
         <el-input v-model="rawTranslation" type="textarea" :rows="5" :placeholder="t('translation.missing')" />
         <div class="toolbar"><span class="muted">{{ t('translation.technicalHint') }}</span><span><el-button size="small" @click="saveTranslation">{{ t('translation.save') }}</el-button><el-button size="small" @click="regenerateTranslation">{{ t('translation.regenerate') }}</el-button></span></div>
       </div>
@@ -39,6 +39,7 @@
       </div>
       <el-input v-model="summaryText" type="textarea" :rows="3" maxlength="1000" show-word-limit
         :disabled="!report || report.content_status !== 'draft'" :placeholder="summaryText ? '' : '—'" />
+      <p v-if="localizedSummary.isFallback === false && localizedSummary.text !== summaryText" class="muted">{{ localizedSummary.text }}</p>
     </section>
     <section class="panel">
       <div class="toolbar">
@@ -161,8 +162,10 @@ import { aiParseReport, createLog, submitReport, todayReport, updateLog, updateR
 import { useProjectStore } from '../stores/project'
 import { useAuthStore } from '../stores/auth'
 import { uploadAttachment } from '../api/attachments'
+import { usePolling } from '../composables/usePolling'
+import { resolveLocalizedText } from '../utils/contentLanguage'
 
-const { t } = useI18n()
+const { t, locale } = useI18n()
 const projectStore = useProjectStore()
 const auth = useAuthStore()
 const canSubmit = computed(() => auth.user?.role !== 'viewer')
@@ -239,9 +242,23 @@ const tableRows = computed(() => [...(report.value?.logs || []), ...aiDrafts.val
 const canAiOrganize = computed(
   () => !!report.value && report.value.content_status === 'draft' && rawText.value.trim() !== '' && !aiLoading.value
 )
-function syncTranslation() { rawTranslation.value = report.value?.translations?.raw_text?.en?.text || '' }
-async function saveTranslation() { if (!report.value || !rawTranslation.value.trim()) return; await saveReportTranslation(report.value.id, { field: 'raw_text', target_locale: 'en', translated_text: rawTranslation.value }); report.value = await todayReport(); syncTranslation(); ElMessage.success(t('translation.save')) }
-async function regenerateTranslation() { if (!report.value) return; await requestReportTranslation(report.value.id, { field: 'raw_text', target_locale: 'en', force: true }); ElMessage.info(t('translation.pending')) }
+const targetLocale = computed(() => locale.value === 'zh' ? 'zh' : 'en')
+const translationVariant = computed(() => report.value?.translations?.raw_text?.[targetLocale.value])
+const localizedSummary = computed(() => resolveLocalizedText(summaryText.value, report.value?.translations?.summary, locale.value))
+const dirty = computed(() => !!report.value && (rawText.value !== report.value.raw_text || summaryText.value !== report.value.summary || rawTranslation.value !== (translationVariant.value?.text || '')))
+function syncTranslation() { rawTranslation.value = translationVariant.value?.text || '' }
+async function saveTranslation() { if (!report.value || !rawTranslation.value.trim()) return; await saveReportTranslation(report.value.id, { field: 'raw_text', target_locale: targetLocale.value, translated_text: rawTranslation.value }); report.value = await todayReport(); syncTranslation(); ElMessage.success(t('translation.save')) }
+async function regenerateTranslation() {
+  if (!report.value) return
+  if (translationVariant.value?.text && !(await ElMessageBox.confirm(t('translation.overwriteConfirm'), t('translation.regenerate'), { type: 'warning' }).then(() => true).catch(() => false))) return
+  await requestReportTranslation(report.value.id, { field: 'raw_text', target_locale: targetLocale.value, force: true }); ElMessage.info(t('translation.pending'))
+}
+
+const { start: startTranslationPolling } = usePolling(async () => {
+  if (!report.value) return
+  const latest = await todayReport()
+  if (!dirty.value) { report.value = latest; rawText.value = latest.raw_text; summaryText.value = latest.summary || ''; syncTranslation() }
+}, 5000)
 
 function projectName(id: string) {
   return projects.projects.find((p) => p.id === id)?.name || id
@@ -342,6 +359,7 @@ onMounted(async () => {
   summaryText.value = report.value.summary || ''
   logDraft.project_id = projects.current?.id || ''
   await uploadAllPending()
+  startTranslationPolling()
 })
 
 async function saveDraft() {

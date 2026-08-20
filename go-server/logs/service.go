@@ -113,6 +113,7 @@ func (s *Service) Translation(ctx context.Context, kind, id, userID, role string
 		if req.Field != "content" {
 			return nil, ErrInvalidInput
 		}
+		middleware.SetAuditDetail(ctx, map[string]any{"field": req.Field, "target_locale": req.TargetLocale, "force": req.Force, "source_hash": translations.Hash(item.Content), "translated_text_hash": translations.Hash(req.TranslatedText)})
 		if req.TranslatedText != "" || req.Force {
 			canAny, err := s.access.HasProjectPermission(item.ProjectID, userID, middleware.PermUpdateAnyLog)
 			if err != nil {
@@ -147,6 +148,7 @@ func (s *Service) Translation(ctx context.Context, kind, id, userID, role string
 	} else {
 		return nil, ErrInvalidInput
 	}
+	middleware.SetAuditDetail(ctx, map[string]any{"field": req.Field, "target_locale": req.TargetLocale, "force": req.Force, "source_hash": translations.Hash(source), "translated_text_hash": translations.Hash(req.TranslatedText)})
 	if req.TranslatedText != "" {
 		if report.AuthorID != userID && role != "admin" {
 			return nil, ErrNotReportOwner

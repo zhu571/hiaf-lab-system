@@ -23,6 +23,7 @@ type Service struct {
 	mu         sync.Mutex
 	sources    map[string]string
 	reader     SourceReader
+	audit      func(context.Context, string, map[string]any) error
 }
 
 type SourceReader interface {
@@ -33,6 +34,9 @@ func NewService(repo *Repository) *Service {
 	return &Service{repo: repo, client: &http.Client{Timeout: 180 * time.Second}, stop: make(chan struct{}), sources: map[string]string{}}
 }
 func (s *Service) SetSourceReader(reader SourceReader) { s.reader = reader }
+func (s *Service) SetAuditWriter(writer func(context.Context, string, map[string]any) error) {
+	s.audit = writer
+}
 func (s *Service) AutoConfigure() {
 	s.url = strings.TrimRight(os.Getenv("PY_AGENT_INTERPRET_URL"), "/")
 	if p := os.Getenv("PY_AGENT_INTERNAL_TOKEN_FILE"); p != "" {
@@ -140,25 +144,6 @@ func (s *Service) Sidecar(ctx context.Context, entity string, ids []string, fiel
 	}
 	out := map[string]FieldTranslations{}
 	for _, id := range ids {
-		for _, field := range fields {
-			source := sources[id+":"+field]
-			if source == "" {
-				continue
-			}
-			locale := DetectLocale(source)
-			targets := []string{"zh", "en"}
-			if locale == "zh" {
-				targets = []string{"en"}
-			}
-			if locale == "en" {
-				targets = []string{"zh"}
-			}
-			for _, target := range targets {
-				_ = s.Ensure(entity, id, field, source, target, "", false)
-			}
-		}
-	}
-	for _, id := range ids {
 		for _, f := range fields {
 			source := sources[id+":"+f]
 			v := FieldTranslations{SourceLocale: DetectLocale(source), SourceHash: Hash(source), Zh: Variant{Status: StatusMissing}, En: Variant{Status: StatusMissing}}
@@ -203,15 +188,18 @@ func (s *Service) run(ctx context.Context) {
 		source, _ = s.reader.Source(ctx, x.EntityType, x.EntityID, x.FieldName)
 	}
 	if source == "" {
-		_ = s.repo.Fail(x.ID, "source_unavailable", false)
+		_ = s.repo.Fail(x.ID, x.ClaimToken, "source_unavailable", false)
 		return
 	}
 	text, model, prompt, e := s.Translate(ctx, source, x)
 	if e != nil {
-		_ = s.repo.Fail(x.ID, "provider_unavailable", x.Attempts < 3)
+		_ = s.repo.Fail(x.ID, x.ClaimToken, "provider_unavailable", x.Attempts < 3)
 		return
 	}
-	_ = s.repo.Complete(x.ID, x.SourceHash, text, model, prompt)
+	_ = s.repo.Complete(x.ID, x.ClaimToken, x.SourceHash, text, model, prompt)
+	if s.audit != nil {
+		_ = s.audit(ctx, "content_translation.generated", map[string]any{"translation_id": x.ID, "status": StatusReady, "model": model, "prompt_version": prompt})
+	}
 }
 func (s *Service) Translate(ctx context.Context, source string, x *row) (string, string, string, error) {
 	payload, _ := json.Marshal(map[string]any{"source_text": source, "source_locale": x.SourceLocale, "target_locale": x.TargetLocale, "field": x.EntityType + "." + x.FieldName, "protected_terms": ProtectedTerms(source)})
@@ -229,7 +217,7 @@ func (s *Service) Translate(ctx context.Context, source string, x *row) (string,
 	if resp.StatusCode != 200 {
 		return "", "", "", errors.New("translation upstream")
 	}
-	var v struct{ Status, TranslatedText, Model, PromptVersion string }
+	var v Response
 	if e = json.NewDecoder(resp.Body).Decode(&v); e != nil || v.Status != "ok" || strings.TrimSpace(v.TranslatedText) == "" {
 		return "", "", "", errors.New("invalid translation")
 	}

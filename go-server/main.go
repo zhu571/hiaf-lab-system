@@ -101,6 +101,9 @@ func main() {
 	projectsHandler := projects.NewHandler(projectsSvc)
 	logsSvc := logs.NewService(logsRepo, "Asia/Shanghai", logs.ProjectAccessAdapter{DB: db, Repo: projectsRepo})
 	translationSvc := translations.NewService(translations.NewRepository(db))
+	translationSvc.SetAuditWriter(func(ctx context.Context, action string, detail map[string]any) error {
+		return mw.WriteSystemAudit(ctx, db, action, detail)
+	})
 	translationSvc.SetSourceReader(translationSourceReader{repo: logsRepo})
 	translationSvc.AutoConfigure()
 	logsSvc.SetTranslations(translationSvc)
