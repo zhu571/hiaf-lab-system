@@ -816,7 +816,11 @@ func rawTextHasMatchingLog(rawText string, items []Log) bool {
 	for _, item := range items {
 		if item.RawSnippet != nil && *item.RawSnippet != "" {
 			strict = true
-			counts[*item.RawSnippet]++
+			// 与 containsRawTextSegment 一致：裁掉首尾分隔符后再计数
+			snip := strings.Trim(*item.RawSnippet, "。！？；\r\n")
+			if snip != "" {
+				counts[snip]++
+			}
 		}
 	}
 	if strict {
@@ -855,8 +859,14 @@ func containsRawTextSegment(rawText, snippet string) bool {
 	if n := utf8.RuneCountInString(snippet); n < 1 || n > 4000 {
 		return false
 	}
+	// 容忍模型在 snippet 首尾带上分隔符（如句号）：先裁掉分隔符再比较，
+	// 仍要求与某个完整分段完全相等（短子串/改写不会通过）。
+	trimmed := strings.Trim(snippet, "。！？；\r\n")
+	if trimmed == "" {
+		return false
+	}
 	for _, segment := range rawTextSegments(rawText) {
-		if snippet == segment {
+		if trimmed == segment {
 			return true
 		}
 	}

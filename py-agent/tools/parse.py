@@ -205,6 +205,11 @@ def _raw_text_segments(raw_text):
     return [part.strip() for part in re.split(r"[。！？；\r\n]", raw_text) if part.strip()]
 
 
+def _trim_segment_separators(s):
+    """容忍模型在 snippet 首尾带上分隔符（如句号）：裁掉首尾的。！？；\\r\\n 后再比较。"""
+    return s.strip("。！？；\r\n").strip()
+
+
 def validate_daily_logs(item, allowed_projects, raw_text):
     status = item.get("status")
     if status not in {"ok", "clarify", "rejected"}:
@@ -234,7 +239,7 @@ def validate_daily_logs(item, allowed_projects, raw_text):
                 raise ParseError("daily parse log category or project is invalid")
             if not 1 <= len(content) <= 2000:
                 raise ParseError("daily parse log content length is invalid")
-            if not 1 <= len(raw_snippet) <= 4000 or raw_snippet not in _raw_text_segments(raw_text):
+            if not 1 <= len(raw_snippet) <= 4000 or _trim_segment_separators(raw_snippet) not in _raw_text_segments(raw_text):
                 raise ParseError("daily parse log raw_snippet is invalid")
             if not RFC3339.match(occurred_at):
                 raise ParseError("daily parse log occurred_at is invalid")

@@ -40,6 +40,19 @@ class ValidateDailyLogsTests(unittest.TestCase):
         self.assertEqual(result["model"], "deepseek-v4-pro")
         self.assertEqual(result["prompt_version"], "1.2")
 
+    def test_snippet_with_trailing_period_accepted(self):
+        # 模型常在 snippet 末尾带句号（分隔符），校验应容忍
+        result = validate_daily_logs(
+            ok_item(logs=[dict(ok_item()["logs"][0], raw_snippet="今天装配了匹配电路。")]),
+            {"p1"}, "今天装配了匹配电路")
+        self.assertEqual(result["status"], "ok")
+
+    def test_snippet_short_substring_rejected(self):
+        with self.assertRaises(ParseError):
+            validate_daily_logs(
+                ok_item(logs=[dict(ok_item()["logs"][0], raw_snippet="装配了匹配电路")]),
+                {"p1"}, "今天装配了匹配电路")
+
     def test_invalid_status(self):
         with self.assertRaises(ParseError):
             validate_daily_logs(ok_item(status="done"), {"p1"}, "今天装配了匹配电路")
