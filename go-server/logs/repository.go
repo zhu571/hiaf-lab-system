@@ -247,10 +247,10 @@ func (r *Repository) CreateLog(projectID, authorID string, req CreateLogRequest,
 
 	var out Log
 	err := scanLog(r.db.QueryRow(
-		`INSERT INTO logs (project_id, author_id, occurred_at, category, content, source)
-		 VALUES ($1, $2, $3, $4, $5, $6)
-		 RETURNING id, project_id, author_id, occurred_at, category, content, source, content_status, created_at, updated_at`,
-		projectID, authorID, occurredAt, category, req.Content, source,
+		`INSERT INTO logs (project_id, author_id, occurred_at, category, content, raw_snippet, source)
+		 VALUES ($1, $2, $3, $4, $5, $6, $7)
+		 RETURNING id, project_id, author_id, occurred_at, category, content, raw_snippet, source, content_status, created_at, updated_at`,
+		projectID, authorID, occurredAt, category, req.Content, req.RawSnippet, source,
 	), &out)
 	if err != nil {
 		return nil, fmt.Errorf("create log: %w", err)
@@ -261,7 +261,7 @@ func (r *Repository) CreateLog(projectID, authorID string, req CreateLogRequest,
 func (r *Repository) GetByID(id string) (*Log, error) {
 	var out Log
 	err := scanLog(r.db.QueryRow(
-		`SELECT id, project_id, author_id, occurred_at, category, content, source, content_status, created_at, updated_at
+		`SELECT id, project_id, author_id, occurred_at, category, content, raw_snippet, source, content_status, created_at, updated_at
 		 FROM logs
 		 WHERE id = $1`,
 		id,
@@ -292,7 +292,7 @@ func (r *Repository) List(projectID string, params LogListParams) ([]Log, int, e
 
 	args = append(args, params.PerPage, (params.Page-1)*params.PerPage)
 	rows, err := r.db.Query(
-		`SELECT id, project_id, author_id, occurred_at, category, content, source, content_status, created_at, updated_at
+		`SELECT id, project_id, author_id, occurred_at, category, content, raw_snippet, source, content_status, created_at, updated_at
 		 FROM logs `+where+fmt.Sprintf(` ORDER BY occurred_at DESC LIMIT $%d OFFSET $%d`, len(args)-1, len(args)),
 		args...,
 	)
@@ -318,7 +318,7 @@ func (r *Repository) UpdateLog(id string, req UpdateLogRequest, occurredAt *time
 		     content_status = COALESCE($5, content_status),
 		     updated_at = now()
 		 WHERE id = $1 AND content_status = 'draft'
-		 RETURNING id, project_id, author_id, occurred_at, category, content, source, content_status, created_at, updated_at`,
+		 RETURNING id, project_id, author_id, occurred_at, category, content, raw_snippet, source, content_status, created_at, updated_at`,
 		id, repoStringPtrValue(req.Category), req.Content, occurredAt, req.ContentStatus,
 	), &out)
 	if err != nil {
@@ -370,7 +370,7 @@ func (r *Repository) LinkLogToReport(reportID, logID string) error {
 
 func (r *Repository) GetLogsByReport(reportID string) ([]Log, error) {
 	rows, err := r.db.Query(
-		`SELECT l.id, l.project_id, l.author_id, l.occurred_at, l.category, l.content, l.source, l.content_status, l.created_at, l.updated_at
+		`SELECT l.id, l.project_id, l.author_id, l.occurred_at, l.category, l.content, l.raw_snippet, l.source, l.content_status, l.created_at, l.updated_at
 		 FROM logs l
 		 JOIN daily_report_log_links link ON link.log_id = l.id
 		 WHERE link.daily_report_id = $1
@@ -492,7 +492,7 @@ func scanDailyReports(rows *sql.Rows) ([]DailyReport, error) {
 func scanLog(row rowScanner, item *Log) error {
 	return row.Scan(
 		&item.ID, &item.ProjectID, &item.AuthorID, &item.OccurredAt, &item.Category,
-		&item.Content, &item.Source, &item.ContentStatus, &item.CreatedAt, &item.UpdatedAt,
+		&item.Content, &item.RawSnippet, &item.Source, &item.ContentStatus, &item.CreatedAt, &item.UpdatedAt,
 	)
 }
 

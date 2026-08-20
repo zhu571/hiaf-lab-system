@@ -55,6 +55,7 @@ type Log struct {
 	OccurredAt    time.Time            `json:"occurred_at"`
 	Category      string               `json:"category"`
 	Content       string               `json:"content"`
+	RawSnippet    *string              `json:"raw_snippet,omitempty"`
 	Source        string               `json:"source"`
 	ContentStatus string               `json:"content_status"`
 	CreatedAt     time.Time            `json:"created_at"`
@@ -87,6 +88,7 @@ type CreateLogRequest struct {
 	DailyReportID *string `json:"daily_report_id,omitempty"`
 	Category      string  `json:"category"`
 	Content       string  `json:"content"`
+	RawSnippet    *string `json:"raw_snippet,omitempty"`
 	OccurredAt    *string `json:"occurred_at,omitempty"`
 	Source        string  `json:"source,omitempty"`
 }
@@ -143,6 +145,7 @@ type AiParseLogEntry struct {
 	Category   string `json:"category"`
 	ProjectID  string `json:"project_id"`
 	Content    string `json:"content"`
+	RawSnippet string `json:"raw_snippet"`
 	OccurredAt string `json:"occurred_at"`
 }
 

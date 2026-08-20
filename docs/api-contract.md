@@ -227,17 +227,20 @@ SERVICE_TOKEN 调用（todos scheduler 拉全量日报）：必须显式传 `use
         "category": "assembly",
         "project_id": "prj_rf_001",
         "content": "装配匹配电路",
+        "raw_snippet": "今天装配了匹配电路",
         "occurred_at": "2026-08-06T09:00:00+08:00"
       }
     ],
     "question": null,
     "reason": null,
     "model": "deepseek-v4-pro",
-    "prompt_version": "1.0"
+    "prompt_version": "1.2"
   },
   "request_id": "req_001"
 }
 ```
+
+`status=ok` 的每条日志必须包含 `raw_snippet`：它是日报原文按 `。！？；` 或换行分隔、仅裁掉首尾 Unicode 空白后的完整非空分段（1–4000 Unicode 字符），逐字保留大小写和其余字符；逗号（，）、顿号（、）、英文句点（.）不是分隔符，短子串或改写均无效，重复分段按出现次数覆盖。有效分段超过 20 个时返回 `clarify`，不静默漏段。
 
 `status=clarify` 时 `question` 非空、`logs` 为空；`status=rejected` 时 `reason` 非空、`logs` 为空。
 
@@ -271,7 +274,8 @@ SERVICE_TOKEN 调用（todos scheduler 拉全量日报）：必须显式传 `use
 
 ### `POST /api/v1/projects/{id}/logs`
 
-请求：`{category, content, occurred_at?, source?, daily_report_id?}`（main.go:368，`PermCreateLog` member+）。
+请求：`{category, content, occurred_at?, source?, daily_report_id?, raw_snippet?}`（main.go:368，`PermCreateLog` member+）。
+`raw_snippet` 是 AI 日志的来源证据，必须是关联日报当前 `raw_text` 按 `。！？；` 或换行分隔、仅裁掉首尾 Unicode 空白后的一个完整非空分段（1–4000 Unicode 字符）；提供时 `daily_report_id` 必填且后端会校验。数据库字段可空，手工及历史日志可不提供。
 响应 201：`Log`。错误：400 `log_project_missing`、`project_lifecycle_blocked`。
 
 ### `GET /api/v1/logs/{id}`
@@ -281,6 +285,7 @@ SERVICE_TOKEN 调用（todos scheduler 拉全量日报）：必须显式传 `use
 ### `PATCH /api/v1/logs/{id}`
 
 Body：`{category?, content?, occurred_at?, content_status?}`。只允许作者、项目管理员、admin 修改。
+`raw_snippet` 不在 PATCH 契约中，创建后不可修改。
 Agent 只能修改自己创建且未人工确认的草稿。错误：400 `log_voided`、403 `log_not_draft`/`log_owner_mismatch`。
 
 ## 3.4 项目模块（已实现）

@@ -230,6 +230,7 @@ type AiDraftRow = {
   category: string
   project_id: string
   content: string
+  raw_snippet: string
   occurred_at: string
   confirming: boolean
 }
@@ -333,6 +334,7 @@ async function confirmDraft(row: AiDraftRow) {
       daily_report_id: report.value.id,
       category: row.category,
       content: row.content,
+      raw_snippet: row.raw_snippet,
       occurred_at: row.occurred_at,
       source: 'agent'
     })

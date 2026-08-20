@@ -121,8 +121,8 @@ describe('DailyReportView 日报编辑', () => {
       data: {
         status: 'ok',
         logs: [
-          { category: 'test', project_id: 'proj_01', content: '抽真空完成', occurred_at: '2026-08-14T09:00:00+08:00' },
-          { category: 'rf', project_id: 'proj_01', content: 'RF 匹配通过', occurred_at: '2026-08-14T09:30:00+08:00' }
+          { category: 'test', project_id: 'proj_01', content: '抽真空完成', raw_snippet: '抽真空完成', occurred_at: '2026-08-14T09:00:00+08:00' },
+          { category: 'rf', project_id: 'proj_01', content: 'RF 匹配通过', raw_snippet: 'RF 匹配通过', occurred_at: '2026-08-14T09:30:00+08:00' }
         ],
         question: null,
         reason: null
@@ -145,7 +145,7 @@ describe('DailyReportView 日报编辑', () => {
     await flushPromises()
     expect(createLog).toHaveBeenCalledWith(
       'proj_01',
-      expect.objectContaining({ daily_report_id: 'report_01', category: 'test', content: '抽真空完成', source: 'agent' })
+      expect.objectContaining({ daily_report_id: 'report_01', category: 'test', content: '抽真空完成', raw_snippet: '抽真空完成', source: 'agent' })
     )
   })
 

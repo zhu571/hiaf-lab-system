@@ -386,6 +386,9 @@ func (s *Service) CreateLog(projectID, userID, userRole string, req CreateLogReq
 	}
 
 	var report *DailyReport
+	if req.RawSnippet != nil && (req.DailyReportID == nil || strings.TrimSpace(*req.DailyReportID) == "") {
+		return nil, ErrInvalidInput
+	}
 	if req.DailyReportID != nil && strings.TrimSpace(*req.DailyReportID) != "" {
 		report, err = s.repo.GetReportByID(strings.TrimSpace(*req.DailyReportID))
 		if err != nil {
@@ -396,6 +399,9 @@ func (s *Service) CreateLog(projectID, userID, userRole string, req CreateLogReq
 		}
 		if report.AuthorID != userID {
 			return nil, ErrNotReportOwner
+		}
+		if req.RawSnippet != nil && !containsRawTextSegment(report.RawText, *req.RawSnippet) {
+			return nil, ErrInvalidInput
 		}
 	}
 
@@ -692,7 +698,7 @@ func (s *Service) AiParse(ctx context.Context, id, userID, userRole string) (*Ai
 		return nil, fmt.Errorf("%w: AI 返回无效状态: %s", ErrUpstream, result.Status)
 	}
 	if result.Status == "ok" {
-		if err := validateAiParseLogs(result.Logs, allowed); err != nil {
+		if err := validateAiParseLogs(result.Logs, allowed, report.RawText); err != nil {
 			return nil, err
 		}
 		if result.Summary == nil || utf8.RuneCountInString(strings.TrimSpace(*result.Summary)) < 1 || utf8.RuneCountInString(*result.Summary) > 1000 {
@@ -725,7 +731,7 @@ func linkedReportLogs(items []Log) []map[string]any {
 }
 
 // validateAiParseLogs 对 py-agent 响应做二次校验（防御上游被绕过/配置错误，fail closed）。
-func validateAiParseLogs(items []AiParseLogEntry, allowed []middleware.ProjectSummary) error {
+func validateAiParseLogs(items []AiParseLogEntry, allowed []middleware.ProjectSummary, rawText string) error {
 	if len(items) < 1 || len(items) > 20 {
 		return ErrAiParseFailed
 	}
@@ -738,6 +744,9 @@ func validateAiParseLogs(items []AiParseLogEntry, allowed []middleware.ProjectSu
 			return ErrAiParseFailed
 		}
 		if n := utf8.RuneCountInString(strings.TrimSpace(item.Content)); n < 1 || n > 2000 {
+			return ErrAiParseFailed
+		}
+		if !containsRawTextSegment(rawText, item.RawSnippet) {
 			return ErrAiParseFailed
 		}
 		if _, err := time.Parse(time.RFC3339, strings.TrimSpace(item.OccurredAt)); err != nil {
@@ -802,10 +811,52 @@ func submitWarnings(report DailyReport, items []Log) []SubmitWarning {
 }
 
 func rawTextHasMatchingLog(rawText string, items []Log) bool {
+	strict := false
+	counts := make(map[string]int)
+	for _, item := range items {
+		if item.RawSnippet != nil && *item.RawSnippet != "" {
+			strict = true
+			counts[*item.RawSnippet]++
+		}
+	}
+	if strict {
+		for _, segment := range rawTextSegments(rawText) {
+			if counts[segment] == 0 {
+				return false
+			}
+			counts[segment]--
+		}
+		return true
+	}
 	normalized := strings.ToLower(rawText)
 	for _, item := range items {
 		content := strings.TrimSpace(item.Content)
 		if content != "" && strings.Contains(normalized, strings.ToLower(content)) {
+			return true
+		}
+	}
+	return false
+}
+
+func rawTextSegments(rawText string) []string {
+	parts := strings.FieldsFunc(rawText, func(r rune) bool {
+		return r == '。' || r == '！' || r == '？' || r == '；' || r == '\r' || r == '\n'
+	})
+	segments := make([]string, 0, len(parts))
+	for _, part := range parts {
+		if part = strings.TrimSpace(part); part != "" {
+			segments = append(segments, part)
+		}
+	}
+	return segments
+}
+
+func containsRawTextSegment(rawText, snippet string) bool {
+	if n := utf8.RuneCountInString(snippet); n < 1 || n > 4000 {
+		return false
+	}
+	for _, segment := range rawTextSegments(rawText) {
+		if snippet == segment {
 			return true
 		}
 	}

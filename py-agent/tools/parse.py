@@ -100,7 +100,7 @@ class Parser:
             metadata={"extra_body": {"thinking": {"type": "disabled"}}},
         )
         allowed = {project["id"] for project in projects}
-        return validate_daily_logs(_json_object(str(result)), allowed)
+        return validate_daily_logs(_json_object(str(result)), allowed, raw_text)
 
 
 def _json_array(text):
@@ -201,7 +201,11 @@ def validate_interpretation(item, allowed_commands):
     }
 
 
-def validate_daily_logs(item, allowed_projects):
+def _raw_text_segments(raw_text):
+    return [part.strip() for part in re.split(r"[。！？；\r\n]", raw_text) if part.strip()]
+
+
+def validate_daily_logs(item, allowed_projects, raw_text):
     status = item.get("status")
     if status not in {"ok", "clarify", "rejected"}:
         raise ParseError("daily parse status is invalid")
@@ -221,14 +225,17 @@ def validate_daily_logs(item, allowed_projects):
             project_id = entry.get("project_id")
             content = entry.get("content")
             occurred_at = entry.get("occurred_at")
-            if not isinstance(content, str) or not isinstance(occurred_at, str):
-                raise ParseError("daily parse log content or occurred_at must be strings")
+            raw_snippet = entry.get("raw_snippet")
+            if not isinstance(content, str) or not isinstance(occurred_at, str) or not isinstance(raw_snippet, str):
+                raise ParseError("daily parse log content, occurred_at or raw_snippet must be strings")
             content = content.strip()
             occurred_at = occurred_at.strip()
             if category not in DAILY_LOG_CATEGORIES or project_id not in allowed_projects:
                 raise ParseError("daily parse log category or project is invalid")
             if not 1 <= len(content) <= 2000:
                 raise ParseError("daily parse log content length is invalid")
+            if not 1 <= len(raw_snippet) <= 4000 or raw_snippet not in _raw_text_segments(raw_text):
+                raise ParseError("daily parse log raw_snippet is invalid")
             if not RFC3339.match(occurred_at):
                 raise ParseError("daily parse log occurred_at is invalid")
             try:
@@ -239,7 +246,7 @@ def validate_daily_logs(item, allowed_projects):
                 raise ParseError("daily parse log occurred_at is invalid")
             out.append({
                 "category": category, "project_id": project_id,
-                "content": content, "occurred_at": occurred_at,
+                "content": content, "occurred_at": occurred_at, "raw_snippet": raw_snippet,
             })
     summary = item.get("summary")
     if status == "ok":
@@ -252,7 +259,7 @@ def validate_daily_logs(item, allowed_projects):
         "status": status, "logs": out, "summary": summary,
         "question": str(item.get("question", "")).strip() or None,
         "reason": str(item.get("reason", "")).strip() or None,
-        "model": MODEL, "prompt_version": "1.1",
+        "model": MODEL, "prompt_version": "1.2",
         }
 
 

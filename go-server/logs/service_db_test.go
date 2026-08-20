@@ -5,6 +5,7 @@ import (
 	"errors"
 	"os"
 	"testing"
+	"time"
 
 	_ "github.com/lib/pq"
 	"github.com/zhu571/hiaf-lab-system/go-server/middleware"
@@ -473,11 +474,19 @@ func TestDBCreateLog(t *testing.T) {
 	if _, err := noAccess.CreateLog(logsDBProject, logsDBUserA, "member", CreateLogRequest{Content: "x"}); !errors.Is(err, ErrForbidden) {
 		t.Fatalf("no access: got %v", err)
 	}
+	rawSnippet := "今天完成了装配与测试"
+	if _, err := svc.CreateLog(logsDBProject, logsDBUserA, "member", CreateLogRequest{Content: "x", RawSnippet: &rawSnippet}); !errors.Is(err, ErrInvalidInput) {
+		t.Fatalf("snippet without report: got %v, want ErrInvalidInput", err)
+	}
+	shortSnippet := "完成了装配"
+	if _, err := svc.CreateLog(logsDBProject, logsDBUserA, "member", CreateLogRequest{Content: "x", DailyReportID: ptrString(logsDBReportA), RawSnippet: &shortSnippet}); !errors.Is(err, ErrInvalidInput) {
+		t.Fatalf("partial snippet: got %v, want ErrInvalidInput", err)
+	}
 
 	// 成功创建 + 日报链接
 	reportID := logsDBReportA
 	item, err := svc.CreateLog(logsDBProject, logsDBUserA, "member", CreateLogRequest{
-		Category: "rf", Content: "RF 匹配网络调谐", DailyReportID: &reportID,
+		Category: "rf", Content: "RF 匹配网络调谐", DailyReportID: &reportID, RawSnippet: &rawSnippet,
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -486,8 +495,30 @@ func TestDBCreateLog(t *testing.T) {
 		db.Exec(`DELETE FROM daily_report_log_links WHERE log_id = $1`, item.ID)
 		db.Exec(`DELETE FROM logs WHERE id = $1`, item.ID)
 	})
-	if item.Content != "RF 匹配网络调谐" || item.Category != "rf" || item.Source != SourceManual || item.ContentStatus != LogStatusDraft {
+	if item.Content != "RF 匹配网络调谐" || item.RawSnippet == nil || *item.RawSnippet != rawSnippet || item.Category != "rf" || item.Source != SourceManual || item.ContentStatus != LogStatusDraft {
 		t.Fatalf("created log: %+v", item)
+	}
+	byID, err := NewRepository(db).GetByID(item.ID)
+	if err != nil || byID.RawSnippet == nil || *byID.RawSnippet != rawSnippet {
+		t.Fatalf("GetByID raw snippet: item=%+v err=%v", byID, err)
+	}
+	listed, _, err := NewRepository(db).List(logsDBProject, LogListParams{Status: LogStatusDraft})
+	if err != nil {
+		t.Fatal(err)
+	}
+	found := false
+	for _, listedItem := range listed {
+		if listedItem.ID == item.ID && listedItem.RawSnippet != nil && *listedItem.RawSnippet == rawSnippet {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("List did not preserve raw snippet: %+v", listed)
+	}
+	newContent := "编辑后的日志内容"
+	updated, err := svc.UpdateLog(item.ID, logsDBUserA, "member", UpdateLogRequest{Content: &newContent})
+	if err != nil || updated.RawSnippet == nil || *updated.RawSnippet != rawSnippet {
+		t.Fatalf("UpdateLog changed raw snippet: item=%+v err=%v", updated, err)
 	}
 	var linkCount int
 	if err := db.QueryRow(`SELECT COUNT(*) FROM daily_report_log_links WHERE log_id = $1`, item.ID).Scan(&linkCount); err != nil {
@@ -495,6 +526,28 @@ func TestDBCreateLog(t *testing.T) {
 	}
 	if linkCount != 1 {
 		t.Fatalf("report link = %d, want 1", linkCount)
+	}
+	linked, err := NewRepository(db).GetLogsByReport(reportID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	found = false
+	for _, linkedItem := range linked {
+		if linkedItem.ID == item.ID && linkedItem.RawSnippet != nil && *linkedItem.RawSnippet == rawSnippet {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("GetLogsByReport did not preserve raw snippet: %+v", linked)
+	}
+	if _, err := db.Exec(`UPDATE daily_reports SET raw_text = '原文已修改' WHERE id = $1`, reportID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := svc.CreateLog(logsDBProject, logsDBUserA, "member", CreateLogRequest{Content: "x", DailyReportID: &reportID, RawSnippet: &rawSnippet}); !errors.Is(err, ErrInvalidInput) {
+		t.Fatalf("stale snippet: got %v, want ErrInvalidInput", err)
+	}
+	if _, err := db.Exec(`UPDATE daily_reports SET raw_text = '今天完成了装配与测试' WHERE id = $1`, reportID); err != nil {
+		t.Fatal(err)
 	}
 
 	// 日报不存在 / 日报非本人 → 错误（日志本身已创建，但返回错误）
@@ -735,4 +788,43 @@ func TestDBRawTextMatching(t *testing.T) {
 	if rawTextHasMatchingLog("完全没有相关内容", items) {
 		t.Fatal("unrelated raw text must not match")
 	}
+	one := "测试了一下qpig两个rf之间的电阻是4.4M欧姆"
+	two := "RF匹配通过"
+	strict := []Log{{Content: "测试了q-pig两个rf之间的电阻为4.4M欧姆", RawSnippet: &one}, {Content: "改写后的内容", RawSnippet: &two}}
+	if !rawTextHasMatchingLog(one+"。"+two+"。", strict) {
+		t.Fatal("exact snippets should cover rewritten log content")
+	}
+	report := DailyReport{RawText: one + "。" + two + "。", ReportDate: "2026-08-20", Summary: "完成测试"}
+	for i := range strict {
+		strict[i].ContentStatus = LogStatusConfirmed
+		strict[i].OccurredAt = time.Date(2026, 8, 20, 9, 0, 0, 0, time.FixedZone("CST", 8*60*60))
+	}
+	for _, warning := range submitWarnings(report, strict) {
+		if warning.Code == "raw_text_without_matching_log" {
+			t.Fatalf("complete snippets produced unexpected warning: %+v", warning)
+		}
+	}
+	if rawTextHasMatchingLog(one+"。"+two+"。遗漏第三段", strict) {
+		t.Fatal("missing segment must not be covered")
+	}
+	report.RawText += "遗漏第三段"
+	foundWarning := false
+	for _, warning := range submitWarnings(report, strict) {
+		foundWarning = foundWarning || warning.Code == "raw_text_without_matching_log"
+	}
+	if !foundWarning {
+		t.Fatal("missing segment must produce raw_text_without_matching_log")
+	}
+	duplicate := "完成测试"
+	if rawTextHasMatchingLog("完成测试。完成测试。", []Log{{RawSnippet: &duplicate}}) {
+		t.Fatal("one snippet must not cover two duplicate segments")
+	}
+	if !rawTextHasMatchingLog("完成测试。完成测试。", []Log{{RawSnippet: &duplicate}, {RawSnippet: &duplicate}}) {
+		t.Fatal("two snippets should cover two duplicate segments")
+	}
+	if rawTextHasMatchingLog(one+"。"+two, []Log{{RawSnippet: &one}, {Content: two}}) {
+		t.Fatal("nil snippet must not downgrade or add strict coverage")
+	}
 }
+
+func ptrString(value string) *string { return &value }
