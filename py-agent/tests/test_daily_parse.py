@@ -1,3 +1,4 @@
+import json
 import sys
 import unittest
 from pathlib import Path
@@ -19,6 +20,7 @@ def ok_item(**overrides):
                 "project_id": "p1",
                 "content": "装配匹配电路",
                 "occurred_at": "2026-08-06T09:00:00+08:00",
+                "raw_snippet": "今天装配了匹配电路",
             }
         ],
         "question": None,
@@ -31,73 +33,95 @@ def ok_item(**overrides):
 
 class ValidateDailyLogsTests(unittest.TestCase):
     def test_ok_passthrough(self):
-        result = validate_daily_logs(ok_item(), {"p1"})
+        result = validate_daily_logs(ok_item(), {"p1"}, "今天装配了匹配电路")
         self.assertEqual(result["status"], "ok")
         self.assertEqual(result["logs"][0]["category"], "assembly")
+        self.assertEqual(result["logs"][0]["raw_snippet"], "今天装配了匹配电路")
         self.assertEqual(result["model"], "deepseek-v4-pro")
+        self.assertEqual(result["prompt_version"], "1.2")
 
     def test_invalid_status(self):
         with self.assertRaises(ParseError):
-            validate_daily_logs(ok_item(status="done"), {"p1"})
+            validate_daily_logs(ok_item(status="done"), {"p1"}, "今天装配了匹配电路")
 
     def test_invalid_category(self):
         with self.assertRaises(ParseError):
-            validate_daily_logs(ok_item(logs=[dict(ok_item()["logs"][0], category="rf_matching")]), {"p1"})
+            validate_daily_logs(ok_item(logs=[dict(ok_item()["logs"][0], category="rf_matching")]), {"p1"}, "今天装配了匹配电路")
 
     def test_project_out_of_scope(self):
         with self.assertRaises(ParseError):
-            validate_daily_logs(ok_item(), {"other"})
+            validate_daily_logs(ok_item(), {"other"}, "今天装配了匹配电路")
 
     def test_logs_count_bounds(self):
         entry = ok_item()["logs"][0]
         with self.assertRaises(ParseError):
-            validate_daily_logs(ok_item(logs=[]), {"p1"})
+            validate_daily_logs(ok_item(logs=[]), {"p1"}, "今天装配了匹配电路")
         with self.assertRaises(ParseError):
-            validate_daily_logs(ok_item(logs=[entry] * 21), {"p1"})
-        self.assertEqual(len(validate_daily_logs(ok_item(logs=[entry] * 20), {"p1"})["logs"]), 20)
+            validate_daily_logs(ok_item(logs=[entry] * 21), {"p1"}, "今天装配了匹配电路")
+        self.assertEqual(len(validate_daily_logs(ok_item(logs=[entry] * 20), {"p1"}, "今天装配了匹配电路")["logs"]), 20)
 
     def test_content_too_long(self):
         with self.assertRaises(ParseError):
-            validate_daily_logs(ok_item(logs=[dict(ok_item()["logs"][0], content="x" * 2001)]), {"p1"})
+            validate_daily_logs(ok_item(logs=[dict(ok_item()["logs"][0], content="x" * 2001)]), {"p1"}, "今天装配了匹配电路")
 
     def test_non_string_content_rejected(self):
         entry = ok_item()["logs"][0]
         with self.assertRaises(ParseError):
-            validate_daily_logs(ok_item(logs=[dict(entry, content={"x": 1})]), {"p1"})
+            validate_daily_logs(ok_item(logs=[dict(entry, content={"x": 1})]), {"p1"}, "今天装配了匹配电路")
         with self.assertRaises(ParseError):
-            validate_daily_logs(ok_item(logs=[dict(entry, occurred_at=123)]), {"p1"})
+            validate_daily_logs(ok_item(logs=[dict(entry, occurred_at=123)]), {"p1"}, "今天装配了匹配电路")
 
     def test_occurred_at_must_be_rfc3339(self):
         entry = ok_item()["logs"][0]
         with self.assertRaises(ParseError):
-            validate_daily_logs(ok_item(logs=[dict(entry, occurred_at="昨天上午")]), {"p1"})
+            validate_daily_logs(ok_item(logs=[dict(entry, occurred_at="昨天上午")]), {"p1"}, "今天装配了匹配电路")
         with self.assertRaises(ParseError):
-            validate_daily_logs(ok_item(logs=[dict(entry, occurred_at="2026-08-06 09:00:00")]), {"p1"})
+            validate_daily_logs(ok_item(logs=[dict(entry, occurred_at="2026-08-06 09:00:00")]), {"p1"}, "今天装配了匹配电路")
         with self.assertRaises(ParseError):
-            validate_daily_logs(ok_item(logs=[dict(entry, occurred_at="2026-08-06T09:00:00")]), {"p1"})
+            validate_daily_logs(ok_item(logs=[dict(entry, occurred_at="2026-08-06T09:00:00")]), {"p1"}, "今天装配了匹配电路")
         # 与 Go 侧 time.RFC3339 对齐：空格分隔、+0800 无冒号偏移都会被 Go 拒绝，必须在此拦下
         with self.assertRaises(ParseError):
-            validate_daily_logs(ok_item(logs=[dict(entry, occurred_at="2026-08-06 09:00:00+08:00")]), {"p1"})
+            validate_daily_logs(ok_item(logs=[dict(entry, occurred_at="2026-08-06 09:00:00+08:00")]), {"p1"}, "今天装配了匹配电路")
         with self.assertRaises(ParseError):
-            validate_daily_logs(ok_item(logs=[dict(entry, occurred_at="2026-08-06T09:00:00+0800")]), {"p1"})
-        result = validate_daily_logs(ok_item(logs=[dict(entry, occurred_at="2026-08-06T09:00:00Z")]), {"p1"})
+            validate_daily_logs(ok_item(logs=[dict(entry, occurred_at="2026-08-06T09:00:00+0800")]), {"p1"}, "今天装配了匹配电路")
+        result = validate_daily_logs(ok_item(logs=[dict(entry, occurred_at="2026-08-06T09:00:00Z")]), {"p1"}, "今天装配了匹配电路")
         self.assertEqual(result["logs"][0]["occurred_at"], "2026-08-06T09:00:00Z")
 
     def test_clarify_requires_question(self):
         with self.assertRaises(ParseError):
-            validate_daily_logs({"status": "clarify", "logs": [], "question": "", "reason": None}, {"p1"})
-        result = validate_daily_logs({"status": "clarify", "logs": [], "question": "哪个项目？", "reason": None}, {"p1"})
+            validate_daily_logs({"status": "clarify", "logs": [], "question": "", "reason": None}, {"p1"}, "原文")
+        result = validate_daily_logs({"status": "clarify", "logs": [], "question": "哪个项目？", "reason": None}, {"p1"}, "原文")
         self.assertEqual(result["question"], "哪个项目？")
         self.assertEqual(result["logs"], [])
 
     def test_rejected_requires_reason(self):
         with self.assertRaises(ParseError):
-            validate_daily_logs({"status": "rejected", "logs": [], "question": None, "reason": " "}, {"p1"})
-        result = validate_daily_logs({"status": "rejected", "logs": [], "question": None, "reason": "与工作无关"}, {"p1"})
+            validate_daily_logs({"status": "rejected", "logs": [], "question": None, "reason": " "}, {"p1"}, "原文")
+        result = validate_daily_logs({"status": "rejected", "logs": [], "question": None, "reason": "与工作无关"}, {"p1"}, "原文")
         self.assertEqual(result["reason"], "与工作无关")
+
+    def test_raw_snippet_must_be_complete_original_segment(self):
+        raw_text = "  测试了一下qpig两个rf之间的电阻是4.4M欧姆。\nRF 匹配通过！"
+        entry = ok_item()["logs"][0]
+        valid = dict(entry, raw_snippet="测试了一下qpig两个rf之间的电阻是4.4M欧姆")
+        self.assertEqual(validate_daily_logs(ok_item(logs=[valid]), {"p1"}, raw_text)["logs"][0]["raw_snippet"], valid["raw_snippet"])
+        for bad in (None, 1, "电阻是4.4M欧姆", "测试了q-pig两个rf之间的电阻为4.4M欧姆", ""):
+            with self.subTest(raw_snippet=bad), self.assertRaises(ParseError):
+                validate_daily_logs(ok_item(logs=[dict(entry, raw_snippet=bad)]), {"p1"}, raw_text)
+
+    def test_duplicate_raw_segments_are_valid(self):
+        entry = dict(ok_item()["logs"][0], raw_snippet="完成测试")
+        result = validate_daily_logs(ok_item(logs=[entry, entry]), {"p1"}, "完成测试。完成测试。")
+        self.assertEqual([log["raw_snippet"] for log in result["logs"]], ["完成测试", "完成测试"])
 
 
 class ParseDailyLogsInjectionTests(unittest.TestCase):
+    def test_raw_text_is_passed_to_validator(self):
+        parser = object.__new__(Parser)
+        parser.agent = type("Agent", (), {"run": lambda *_args, **_kwargs: json.dumps(ok_item(), ensure_ascii=False)})()
+        result = parser.parse_daily_logs("今天装配了匹配电路", [{"id": "p1", "name": "靶站"}], "2026-08-06")
+        self.assertEqual(result["logs"][0]["raw_snippet"], "今天装配了匹配电路")
+
     def test_injection_rejected_before_model_call(self):
         parser = object.__new__(Parser)  # ensure_safe 在 agent.run 之前触发，无需真实 LightAgent
         with self.assertRaises(ParseError):

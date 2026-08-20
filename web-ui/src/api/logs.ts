@@ -24,6 +24,7 @@ export type LogItem = {
   occurred_at: string
   category: string
   content: string
+  raw_snippet?: string
   source: string
   content_status: string
   created_at?: string
@@ -66,7 +67,7 @@ export function reportByDate(date: string) {
   return request<DailyReport>({ url: '/daily-reports/by-date', params: { date } })
 }
 
-export function createLog(projectId: string, data: { daily_report_id?: string; category: string; content: string; occurred_at?: string; source?: string }) {
+export function createLog(projectId: string, data: { daily_report_id?: string; category: string; content: string; raw_snippet?: string; occurred_at?: string; source?: string }) {
   return request<LogItem>({ url: `/projects/${projectId}/logs`, method: 'POST', data })
 }
 
@@ -75,6 +76,7 @@ export type AiParseLogEntry = {
   category: string
   project_id: string
   content: string
+  raw_snippet: string
   occurred_at: string
 }
 

@@ -338,7 +338,7 @@ func (f *fakeRepo) SubmitReport(id, qualityStatus string) (*DailyReport, error) 
 }
 
 func (f *fakeRepo) CreateLog(projectID, authorID string, req CreateLogRequest, occurredAt time.Time) (*Log, error) {
-	item := Log{ID: "log_new", ProjectID: projectID, AuthorID: authorID, OccurredAt: occurredAt, Category: CategoryGeneral, Content: req.Content, Source: SourceManual, ContentStatus: LogStatusDraft}
+	item := Log{ID: "log_new", ProjectID: projectID, AuthorID: authorID, OccurredAt: occurredAt, Category: CategoryGeneral, Content: req.Content, RawSnippet: req.RawSnippet, Source: SourceManual, ContentStatus: LogStatusDraft}
 	f.logs[item.ID] = cloneLog(item)
 	return cloneLog(item), nil
 }

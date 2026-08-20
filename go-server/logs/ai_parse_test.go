@@ -16,9 +16,9 @@ import (
 )
 
 const aiParseOKBody = `{"status":"ok","logs":[
-	{"category":"assembly","project_id":"prj_1","content":"装配匹配电路","occurred_at":"2026-08-06T09:00:00+08:00"},
-	{"category":"test","project_id":"prj_1","content":"测低温传感器","occurred_at":"2026-08-06T14:00:00+08:00"}
-],"summary":"完成装配并开展传感器测试。","question":null,"reason":null,"model":"deepseek-v4-pro","prompt_version":"1.1"}`
+	{"category":"assembly","project_id":"prj_1","content":"装配匹配电路","raw_snippet":"worked","occurred_at":"2026-08-06T09:00:00+08:00"},
+	{"category":"test","project_id":"prj_1","content":"测低温传感器","raw_snippet":"worked","occurred_at":"2026-08-06T14:00:00+08:00"}
+],"summary":"完成装配并开展传感器测试。","question":null,"reason":null,"model":"deepseek-v4-pro","prompt_version":"1.2"}`
 
 func aiParseService(t *testing.T, report DailyReport, upstream http.HandlerFunc) *Service {
 	t.Helper()
@@ -47,7 +47,7 @@ func aiParseOKUpstream(t *testing.T, body string) (http.HandlerFunc, *map[string
 
 func TestAiParseOKPassthrough(t *testing.T) {
 	upstream, got := aiParseOKUpstream(t, aiParseOKBody)
-	svc := aiParseService(t, testReport("usr_1", ReportStatusDraft, "今天装配了匹配电路"), upstream)
+	svc := aiParseService(t, testReport("usr_1", ReportStatusDraft, "worked"), upstream)
 
 	result, err := svc.AiParse(context.Background(), "report_1", "usr_1", "member")
 	if err != nil {
@@ -59,8 +59,11 @@ func TestAiParseOKPassthrough(t *testing.T) {
 	if result.Logs[0].Category != CategoryAssembly || result.Logs[0].ProjectID != "prj_1" {
 		t.Fatalf("unexpected first log: %+v", result.Logs[0])
 	}
+	if result.Logs[0].RawSnippet != "worked" || result.PromptVersion != "1.2" {
+		t.Fatalf("raw snippet or prompt version was not preserved: %+v", result)
+	}
 	// projects 由服务端注入，report_date 取日报日期
-	if (*got)["raw_text"] != "今天装配了匹配电路" || (*got)["report_date"] != "2026-07-14" {
+	if (*got)["raw_text"] != "worked" || (*got)["report_date"] != "2026-07-14" {
 		t.Fatalf("unexpected upstream payload: %v", *got)
 	}
 	projects, ok := (*got)["projects"].([]any)
@@ -141,6 +144,8 @@ func TestAiParseUpstreamMapping(t *testing.T) {
 		{"py 200 out-of-scope project", http.StatusOK, `{"status":"ok","logs":[{"category":"assembly","project_id":"prj_x","content":"x","occurred_at":"2026-08-06T09:00:00+08:00"}]}`, ErrAiParseFailed},
 		{"py 200 invalid category", http.StatusOK, `{"status":"ok","logs":[{"category":"rf_matching","project_id":"prj_1","content":"x","occurred_at":"2026-08-06T09:00:00+08:00"}]}`, ErrAiParseFailed},
 		{"py 200 invalid occurred_at", http.StatusOK, `{"status":"ok","logs":[{"category":"assembly","project_id":"prj_1","content":"x","occurred_at":"昨天上午"}]}`, ErrAiParseFailed},
+		{"py 200 short raw snippet", http.StatusOK, `{"status":"ok","logs":[{"category":"assembly","project_id":"prj_1","content":"x","raw_snippet":"ork","occurred_at":"2026-08-06T09:00:00+08:00"}]}`, ErrAiParseFailed},
+		{"py 200 unrelated raw snippet", http.StatusOK, `{"status":"ok","logs":[{"category":"assembly","project_id":"prj_1","content":"x","raw_snippet":"other","occurred_at":"2026-08-06T09:00:00+08:00"}]}`, ErrAiParseFailed},
 		{"py 200 empty logs", http.StatusOK, `{"status":"ok","logs":[]}`, ErrAiParseFailed},
 		{"py 200 clarify without question", http.StatusOK, `{"status":"clarify","logs":[],"question":"","reason":null}`, ErrAiParseFailed},
 		{"py 200 rejected without reason", http.StatusOK, `{"status":"rejected","logs":[],"question":null,"reason":" "}`, ErrAiParseFailed},
