@@ -85,6 +85,7 @@ func TestBuildRunnerCmdShellEngine(t *testing.T) {
 
 // TestDockerRunnerSpawnViaFake 用 fake CmdRunner 验证 Spawn 组装 `docker run -d`、
 // 镜像内 lab-update 预检通过并返回容器名（R11）。
+// TestDockerRunnerSpawnViaFake 镜像内 precheck + 主 run 不带 --rm 的黄金用例。
 func TestDockerRunnerSpawnViaFake(t *testing.T) {
 	fake := &fakeCmdRunner{fn: func(c Call) (string, string, error) {
 		if hasArg(c.Args, "inspect") {
@@ -118,6 +119,50 @@ func TestDockerRunnerSpawnViaFake(t *testing.T) {
 				t.Errorf("runner 主容器不应带 --rm: %v", c.Args)
 			}
 		}
+	}
+}
+
+// TestDockerRunnerSpawnInjectsGitSSHCommand 配置 GitHome（R2/17）时，
+// 主 run 必须注入 GIT_SSH_COMMAND，用绝对路径显式指 deploy key（2026-08-22 实测：
+// ssh 的 ~ 不读 HOME 而读 passwd 家目录，容器内 HOME=GitHome 仍 Permission denied）。
+func TestDockerRunnerSpawnInjectsGitSSHCommand(t *testing.T) {
+	fake := &fakeCmdRunner{fn: func(c Call) (string, string, error) {
+		if hasArg(c.Args, "inspect") {
+			return "running 0\n", "", nil
+		}
+		return "", "", nil
+	}}
+	r := &dockerRunner{cmds: fake, cfg: RunnerSpawnConfig{
+		RepoRoot:    "/opt/hiaf-lab-system",
+		ComposeFile: "deploy/docker-compose.yml",
+		RunnerImage: "img",
+		Engine:      "go",
+		GitHome:     "/opt/hiaf-lab-system/.hermes/runner-home",
+	}}
+	sess := &UpdateSession{ID: "upd_abcdef1234", logFile: "/l.log", doneFile: "/l.done"}
+	if _, err := r.Spawn(context.Background(), sess); err != nil {
+		t.Fatalf("Spawn: %v", err)
+	}
+	// 找主 run（LAB 容器名）的 env 断言 GIT_SSH_COMMAND 存在且指绝对路径 key。
+	var found bool
+	for _, c := range fake.callsSnapshot() {
+		if hasArg(c.Args, "run") && hasArg(c.Args, "lab-updater-upd_abcdef1234") {
+			for _, a := range c.Args {
+				if strings.HasPrefix(a, "GIT_SSH_COMMAND=") {
+					if !strings.Contains(a, "-i /opt/hiaf-lab-system/.hermes/runner-home/.ssh/id_ed25519") ||
+						!strings.Contains(a, "UserKnownHostsFile=/opt/hiaf-lab-system/.hermes/runner-home/.ssh/known_hosts") {
+						t.Errorf("GIT_SSH_COMMAND 应含绝对路径 key 与 known_hosts: %q", a)
+					}
+					found = true
+				}
+				if strings.HasPrefix(a, "HOME=") && a != "HOME=/opt/hiaf-lab-system/.hermes/runner-home" {
+					t.Errorf("HOME 应为 runner-home: %q", a)
+				}
+			}
+		}
+	}
+	if !found {
+		t.Errorf("主 run 应注入 GIT_SSH_COMMAND: %v", callNames(fake.callsSnapshot()))
 	}
 }
 

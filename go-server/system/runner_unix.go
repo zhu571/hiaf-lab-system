@@ -298,6 +298,10 @@ func buildRunnerCmd(cfg RunnerSpawnConfig) []string {
 			"-v", filepath.Join(cfg.GitHome, ".gitconfig")+":"+filepath.Join(cfg.GitHome, ".gitconfig")+":ro",
 			"-v", filepath.Join(cfg.GitHome, ".ssh")+":"+filepath.Join(cfg.GitHome, ".ssh")+":ro",
 			"-e", "HOME="+cfg.GitHome,
+			// R2/R17：ssh 的 ~ 不读 HOME 而读 passwd 家目录（容器内 passwd 未必有对应 uid），
+			// 必须用 GIT_SSH_COMMAND + 绝对路径显式指 deploy key 和 known_hosts，
+			// 否则 git fetch 永远找不到 key（2026-08-22 实测：HOME=GitHome 仍 Permission denied）。
+			"-e", "GIT_SSH_COMMAND=ssh -o BatchMode=yes -o StrictHostKeyChecking=accept-new -o IdentitiesOnly=yes -i "+filepath.Join(cfg.GitHome, ".ssh", "id_ed25519")+" -o UserKnownHostsFile="+filepath.Join(cfg.GitHome, ".ssh", "known_hosts"),
 		)
 	}
 	if cfg.RunUID > 0 && cfg.RunGID > 0 {
