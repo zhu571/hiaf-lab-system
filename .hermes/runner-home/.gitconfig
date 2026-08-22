@@ -1,5 +1,9 @@
 # 更新 runner 专用最小 git 配置（作为 runner 容器 HOME 挂载，随仓库分发，非机密）。
 # StrictHostKeyChecking=accept-new：known_hosts 缺条目时首次连接自动信任（TOFU）；
 # 需要严格防中间人时，先用 ssh-keyscan 补全 .ssh/known_hosts 再改为 yes。
+#
+# 注意：本文件是仓库内的模板，运行时会被 runner_unix.go 根据实际 GitHome 路径
+# 重写为带显式 -i / UserKnownHostsFile 的配置（ssh 的 ~ 不读 HOME 而读 passwd 家目录，
+# 必须用绝对路径指 key）。此处保留 TOFU 基线，具体路径由 runner 注入。
 [core]
 	sshCommand = ssh -o BatchMode=yes -o StrictHostKeyChecking=accept-new
