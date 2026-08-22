@@ -29,7 +29,9 @@ RUN CGO_ENABLED=0 go build -o /lab-update ./cmd/update-runner
 FROM alpine:3.20
 
 # docker-cli-compose: runner 容器内执行 docker compose；coreutils: update.sh 使用 stdbuf。
-RUN apk add --no-cache ca-certificates tzdata docker-cli docker-cli-compose git curl bash coreutils
+# openssh-client: git 走 SSH 远程（git@github.com）必须有 ssh 二进制，git 包不携带它
+# （2026-08-20 gascell 事故根因之一：fetch 报 cannot run ssh）。
+RUN apk add --no-cache ca-certificates tzdata docker-cli docker-cli-compose git curl bash coreutils openssh-client
 
 # 容器内以 UID 1000 运行、无 HOME，写不了 global git config；
 # 仓库属主与容器 UID 不一致会触发 git dubious ownership，构建期写入 system 级配置。

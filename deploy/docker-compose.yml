@@ -194,17 +194,27 @@ services:
       PY_AGENT_INTERPRET_URL: http://py-agent-interpret:8001
       PY_AGENT_INTERNAL_TOKEN_FILE: /run/secrets/agent_password
       KEYSIGHT_33210A_ADDR: ${KEYSIGHT_33210A_ADDR:-}
-      REPO_ROOT: /opt/hiaf-lab-system
+      # R6：仓库宿主路径单一来源（gascell 实际在 /home/gascell/hiaf-lab-system，
+      # 在 .env 设 REPO_ROOT 即整体生效，server/runner 同路径挂载）。
+      REPO_ROOT: ${REPO_ROOT:-/opt/hiaf-lab-system}
       UPDATE_ENGINE: ${UPDATE_ENGINE:-go}
       UPDATE_FLAGS: ${UPDATE_FLAGS:-}
+      # R12：更新分支（pull/回滚/behind 统一来源，与 update.sh 的 UPDATE_BRANCH 一致）
+      UPDATE_BRANCH: ${UPDATE_BRANCH:-main}
+      # R15：shell 引擎入口脚本路径（相对仓库；空 = .hermes/update.sh）
+      UPDATE_SCRIPT_PATH: ${UPDATE_SCRIPT_PATH:-}
+      # R10：更新看门狗预算——server 看门狗与 runner 流水线读同一个值，双层同步放宽
+      UPDATE_UPDATE_TIMEOUT: ${UPDATE_UPDATE_TIMEOUT:-30m}
       UPDATE_RUN_UID: ${UPDATE_RUN_UID:-1000}
       UPDATE_RUN_GID: ${UPDATE_RUN_GID:-1000}
       UPDATE_DOCKER_GID: ${UPDATE_DOCKER_GID:-993}
+      # R2/R17：git 凭据家目录，默认指向仓库内专用 deploy-key 目录
+      #（.hermes/runner-home，模板随仓库分发，真实 key 由运维放入）
       UPDATE_GIT_HOME: ${UPDATE_GIT_HOME:-}
       # 必须是宿主机绝对路径（runner 容器经 docker.sock 以该路径挂载，容器内外路径一致）
-      UPDATE_BACKUP_DIR: ${UPDATE_BACKUP_DIR:-/opt/hiaf-lab-system/.hermes/backups}
+      UPDATE_BACKUP_DIR: ${UPDATE_BACKUP_DIR:-${REPO_ROOT:-/opt/hiaf-lab-system}/.hermes/backups}
       # 会话日志目录：server 写 marker/tail 日志，runner 容器以同路径挂载写入
-      UPDATE_LOG_DIR: ${UPDATE_LOG_DIR:-/opt/hiaf-lab-system/.hermes/updates}
+      UPDATE_LOG_DIR: ${UPDATE_LOG_DIR:-${REPO_ROOT:-/opt/hiaf-lab-system}/.hermes/updates}
       # ntfy 地址：runner 容器以 --network host 运行（宿主机网络栈），
       # 必须用宿主可达地址（ntfy 发布 127.0.0.1:8085），不能用 compose 网络内的 ntfy:80。
       UPDATE_NTFY_URL: ${UPDATE_NTFY_URL:-http://localhost:8085/lab-system}
@@ -228,12 +238,13 @@ services:
     ports:
       - "8000:8000"
     volumes:
-      # 仓库只读挂载；server 不写仓库，更新由 runner 容器以可写方式自行挂载执行
+      # 仓库只读挂载；server 不写仓库，更新由 runner 容器以可写方式自行挂载执行。
+      # R6：路径与 REPO_ROOT env 同源（.env 改一处即整体生效）。
       - /var/run/docker.sock:/var/run/docker.sock
-      - /opt/hiaf-lab-system:/opt/hiaf-lab-system:ro
+      - ${REPO_ROOT:-/opt/hiaf-lab-system}:${REPO_ROOT:-/opt/hiaf-lab-system}:ro
       # 更新日志/备份目录以相同路径 rw 挂载（子路径覆盖在 ro 仓库挂载之上），与 runner 容器共享
-      - /opt/hiaf-lab-system/.hermes/updates:/opt/hiaf-lab-system/.hermes/updates
-      - /opt/hiaf-lab-system/.hermes/backups:/opt/hiaf-lab-system/.hermes/backups
+      - ${REPO_ROOT:-/opt/hiaf-lab-system}/.hermes/updates:${REPO_ROOT:-/opt/hiaf-lab-system}/.hermes/updates
+      - ${REPO_ROOT:-/opt/hiaf-lab-system}/.hermes/backups:${REPO_ROOT:-/opt/hiaf-lab-system}/.hermes/backups
       # ntfy 共享 auth-file（ntfy CLI 与 lab-ntfy 服务读写同一 SQLite，见 init_ntfy.sh 属主说明）
       - ntfy-etc:/etc/ntfy
       # server 容器内 ntfy CLI 默认读 /etc/ntfy/server.yml 定位 auth-file，

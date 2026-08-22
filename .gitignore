@@ -81,7 +81,19 @@ temp/
 go-server/go-server
 
 # Hermes agent workspace (plans, audit logs, local notes)
+# .hermes/ 无斜杠前缀 = 任意层级匹配（含 go-server/*/.hermes 等测试残留）；
+# 仅放行根目录 runner-home 的模板文件（R2/R17），真实私钥绝不入库。
 .hermes/
+!/.hermes/
+/.hermes/*
+!/.hermes/runner-home/
+/.hermes/runner-home/*
+!/.hermes/runner-home/README.md
+!/.hermes/runner-home/.gitconfig
+!/.hermes/runner-home/.ssh/
+/.hermes/runner-home/.ssh/*
+!/.hermes/runner-home/.ssh/known_hosts
+!/.hermes/runner-home/.ssh/id_ed25519.example
 
 # Playwright E2E
 web-ui/test-results/

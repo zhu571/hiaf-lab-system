@@ -28,6 +28,19 @@ func run() int {
 	}
 	defer log.Close()
 
+	// R8：与宿主机 update.sh 争用同一把仓库共享锁（.hermes/updates/lab-update.lock），
+	// 防止 Web 触发更新与手工脚本并发操作同一仓库/compose 项目。
+	// 拿不到锁也要写 done marker，让 server 侧 SSE 正常收尾并给出原因。
+	release, err := system.AcquireUpdateLock(cfg.RepoRoot)
+	if err != nil {
+		log.Linef("[ERROR] %v", err)
+		_ = system.WriteDoneMarker(cfg.DoneFile, system.DoneMarker{
+			ExitCode: 1, EndedAt: time.Now().UTC().Format(time.RFC3339),
+		})
+		return 1
+	}
+	defer release()
+
 	// 网络保护与 update.sh 对齐：禁止交互式凭据提示 + 低网速超时兜底。
 	env := []string{
 		"GIT_TERMINAL_PROMPT=0",
@@ -53,6 +66,7 @@ func parseFlags(args []string) *system.UpdateConfig {
 		repo       = fs.String("repo", envOr("UPDATE_REPO_ROOT", "/opt/hiaf-lab-system"), "仓库根目录")
 		compose    = fs.String("compose-file", envOr("UPDATE_COMPOSE_FILE", "deploy/docker-compose.yml"), "compose 文件（相对仓库）")
 		project    = fs.String("project", envOr("UPDATE_PROJECT", ""), "compose 项目名")
+		branch     = fs.String("branch", envOr("UPDATE_BRANCH", "main"), "更新分支")
 		force      = fs.Bool("force", false, "跳过变更检测，全量重建")
 		dryRun     = fs.Bool("dry-run", false, "仅检测变更，不执行实际操作")
 		noRollback = fs.Bool("no-rollback", false, "失败时不回滚")
@@ -65,6 +79,7 @@ func parseFlags(args []string) *system.UpdateConfig {
 		RepoRoot:        *repo,
 		ComposeFile:     *compose,
 		ProjectName:     *project,
+		Branch:          *branch,
 		SessionID:       *session,
 		LogFile:         envOr("UPDATE_LOG_FILE", ""),
 		DoneFile:        envOr("UPDATE_DONE_FILE", ""),

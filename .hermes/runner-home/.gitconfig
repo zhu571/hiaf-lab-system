@@ -1,0 +1,5 @@
+# 更新 runner 专用最小 git 配置（作为 runner 容器 HOME 挂载，随仓库分发，非机密）。
+# StrictHostKeyChecking=accept-new：known_hosts 缺条目时首次连接自动信任（TOFU）；
+# 需要严格防中间人时，先用 ssh-keyscan 补全 .ssh/known_hosts 再改为 yes。
+[core]
+	sshCommand = ssh -o BatchMode=yes -o StrictHostKeyChecking=accept-new

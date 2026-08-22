@@ -57,29 +57,42 @@ type Service struct {
 	runnerImage string
 	ntfyURL     string
 	backupDir   string
-	gitHome     string
-	runUID      int
-	runGID      int
-	dockerGID   int
-	force       bool
-	dryRun      bool
-	noRollback  bool
+	// gitHome 默认指向仓库内专用 deploy-key 目录（R2/R17：只含 deploy key +
+	// known_hosts 的最小凭据家，不挂用户家目录）。
+	gitHome    string
+	branch     string // 更新分支（R12：UPDATE_BRANCH，默认 main）
+	runUID     int
+	runGID     int
+	dockerGID  int
+	force      bool
+	dryRun     bool
+	noRollback bool
 }
 
 func NewService(repoRoot string) *Service {
+	// R2：UPDATE_GIT_HOME 默认值对齐设计 §12 —— 仓库内专用 runner 凭据家目录，
+	// 其中的模板结构（.gitconfig/.ssh/known_hosts）随仓库分发，真实 key 由运维放入。
+	gitHomeDefault := filepath.Join(repoRoot, ".hermes", "runner-home")
+	scriptPath := envOrStr("UPDATE_SCRIPT_PATH", filepath.Join(repoRoot, ".hermes", "update.sh"))
+	if !filepath.IsAbs(scriptPath) {
+		scriptPath = filepath.Join(repoRoot, scriptPath)
+	}
 	s := &Service{
-		repoRoot:    repoRoot,
-		scriptPath:  filepath.Join(repoRoot, ".hermes", "update.sh"),
-		sessions:    make(map[string]*UpdateSession),
-		logDir:      envOrStr("UPDATE_LOG_DIR", defaultLogDir()),
-		maxSubs:     defaultMaxSubs,
-		timeout:     defaultTimeout,
+		repoRoot:   repoRoot,
+		scriptPath: scriptPath,
+		sessions:   make(map[string]*UpdateSession),
+		logDir:     envOrStr("UPDATE_LOG_DIR", defaultLogDir()),
+		maxSubs:    defaultMaxSubs,
+		// R10：server 看门狗与 runner 流水线读同一个 UPDATE_UPDATE_TIMEOUT，
+		// 双层预算不再各自为政（调大时两层同步放宽）。
+		timeout:     envOrDuration("UPDATE_UPDATE_TIMEOUT", defaultTimeout),
 		composeFile: "deploy/docker-compose.yml",
 		projectName: envOrStr("UPDATE_PROJECT", ""),
 		runnerImage: envOrStr("UPDATE_RUNNER_IMAGE", ""),
 		ntfyURL:     envOrStr("UPDATE_NTFY_URL", "http://localhost:8085/lab-system"),
 		backupDir:   envOrStr("UPDATE_BACKUP_DIR", ""),
-		gitHome:     envOrStr("UPDATE_GIT_HOME", ""),
+		gitHome:     envOrStr("UPDATE_GIT_HOME", gitHomeDefault),
+		branch:      envOrStr("UPDATE_BRANCH", "main"),
 		runUID:      envOrInt("UPDATE_RUN_UID", 0),
 		runGID:      envOrInt("UPDATE_RUN_GID", 0),
 		dockerGID:   envOrInt("UPDATE_DOCKER_GID", 0),
@@ -174,6 +187,16 @@ func envOrInt(key string, def int) int {
 	return def
 }
 
+// envOrDuration 解析时长 env（非法或缺失回退默认）。
+func envOrDuration(key string, def time.Duration) time.Duration {
+	if v := os.Getenv(key); v != "" {
+		if d, err := time.ParseDuration(v); err == nil {
+			return d
+		}
+	}
+	return def
+}
+
 // GetVersion 获取当前与远程版本信息。git 不可用/网络不可达时降级返回空值。
 // 结果缓存 versionCacheTTL：每次请求都跑 3 个 git 子进程（含 5s 网络超时）太贵。
 func (s *Service) GetVersion() (*VersionInfo, error) {
@@ -186,7 +209,8 @@ func (s *Service) GetVersion() (*VersionInfo, error) {
 	latest := s.gitLsRemote()
 	behind := 0
 	if current != "" && latest != "" {
-		behind = s.gitRevListCount(current, "origin/main")
+		// R12：behind 按配置分支的本地远程 ref 计数（UPDATE_BRANCH，默认 main）。
+		behind = s.gitRevListCount(current, "origin/"+s.branch)
 	}
 	info := &VersionInfo{
 		Current:      current,
@@ -220,11 +244,16 @@ func (s *Service) gitRevParse(rev string) string {
 }
 
 // gitLsRemote 查询远程 origin/HEAD，网络不可达时返回空字符串。
+// R2：配置了 gitHome（deploy-key 目录）时透传 HOME，让 server 容器内的
+// ls-remote 与 runner 一样能用到 deploy key（版本页 latest 不再恒为空）。
 func (s *Service) gitLsRemote() string {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 	cmd := exec.CommandContext(ctx, "git", "-C", s.repoRoot, "ls-remote", "origin", "HEAD")
 	cmd.Env = append(os.Environ(), "GIT_TERMINAL_PROMPT=0")
+	if s.gitHome != "" {
+		cmd.Env = append(cmd.Env, "HOME="+s.gitHome)
+	}
 	out, err := cmd.Output()
 	if err != nil {
 		slog.Warn("git ls-remote failed", "error", err)
@@ -491,6 +520,9 @@ func (s *Service) tailSessionLog(session *UpdateSession, startOffset int64) {
 	}
 	if err != nil {
 		slog.Error("打开更新日志文件失败", "session", session.ID, "error", err)
+		// R11：该失败路径必须 ingestError，否则 SSE 订阅者只收到一个裸 done exit -1，
+		// 拿不到任何原因（典型：旧镜像 runner 启动即退出、日志文件从未创建）。
+		session.ingestError("打开更新日志文件失败: " + err.Error())
 		s.finish(session, -1, false)
 		return
 	}
