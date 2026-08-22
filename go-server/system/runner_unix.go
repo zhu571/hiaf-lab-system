@@ -49,12 +49,83 @@ func (r *dockerRunner) Spawn(ctx context.Context, sess *UpdateSession) (RunnerID
 		}
 		cfg.RunnerImage = img
 	}
+	// R11：go 引擎预检镜像内 lab-update 二进制存在，防旧 server 镜像自举死锁
+	//（docker run -d 会成功，容器随即 127 退出，用户只看到「打开更新日志文件失败」）。
+	if cfg.Engine != "shell" {
+		if err := r.checkRunnerBinary(ctx, cfg.RunnerImage); err != nil {
+			return "", err
+		}
+	}
 	args := buildRunnerCmd(cfg)
 	_, stderr, err := r.cmds.Run(ctx, "docker", args...)
 	if err != nil {
 		return "", fmt.Errorf("%w: %v %s", ErrScriptStartFailed, err, strings.TrimSpace(stderr))
 	}
-	return RunnerID("lab-updater-" + sess.ID), nil
+	id := RunnerID("lab-updater-" + sess.ID)
+	// R11：`docker run -d` 成功不代表容器真的跑起来（entrypoint 可能立即退出）。
+	// 轮询确认进入 Running；已退出则 docker logs 回读失败原因。不使用 --rm：
+	// 退出容器需保留供回读，收尾由 Kill / Reap 兜底清理。
+	if err := r.confirmRunning(ctx, id); err != nil {
+		return "", err
+	}
+	return id, nil
+}
+
+// checkRunnerBinary 校验镜像内 /usr/local/bin/lab-update 可执行（一次性探测容器）。
+func (r *dockerRunner) checkRunnerBinary(ctx context.Context, image string) error {
+	out, stderr, err := r.cmds.Run(ctx, "docker", "run", "--rm", "--entrypoint", "sh", image,
+		"-c", "test -x /usr/local/bin/lab-update")
+	if err != nil {
+		detail := strings.TrimSpace(stderr)
+		if detail == "" {
+			detail = strings.TrimSpace(out)
+		}
+		if detail == "" {
+			detail = err.Error()
+		}
+		return fmt.Errorf("%w: runner 镜像 %s 内缺少 /usr/local/bin/lab-update（旧镜像自举死锁？请先手工重建 server 镜像再触发更新）: %s", ErrScriptStartFailed, image, detail)
+	}
+	return nil
+}
+
+// confirmRunning 轮询容器状态：进入 Running 才算 Spawn 成功；
+// 已退出则回读 docker logs 尾部给出真实失败原因并清理容器。
+// 用 State.Status 而非 Running 布尔：created 状态（docker run 返回与 start 完成
+// 之间的窗口）Running=false 且 ExitCode=0，按「已退出」误杀会把刚创建的容器 rm 掉。
+func (r *dockerRunner) confirmRunning(ctx context.Context, id RunnerID) error {
+	deadline := time.Now().Add(10 * time.Second)
+	for time.Now().Before(deadline) {
+		out, _, err := r.cmds.Run(ctx, "docker", "inspect",
+			"-f", "{{.State.Status}} {{.State.ExitCode}}", string(id))
+		if err == nil {
+			fields := strings.Fields(out)
+			if len(fields) >= 1 {
+				switch fields[0] {
+				case "running", "paused", "restarting": // 已进入运行态
+					return nil
+				case "created": // 尚未 start 完成：继续轮询
+				default: // exited / dead / removing：启动即失败
+					logs, _, _ := r.cmds.Run(ctx, "docker", "logs", "--tail", "30", string(id))
+					detail := strings.TrimSpace(logs)
+					_, _, _ = r.cmds.Run(ctx, "docker", "rm", "-f", string(id))
+					code := "?"
+					if len(fields) >= 2 {
+						code = fields[1]
+					}
+					if detail == "" {
+						detail = "无输出（exit code " + code + "）"
+					}
+					return fmt.Errorf("%w: runner 容器启动即退出（exit %s）: %s", ErrScriptStartFailed, code, detail)
+				}
+			}
+		}
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-time.After(500 * time.Millisecond):
+		}
+	}
+	return fmt.Errorf("%w: runner 容器状态确认超时", ErrScriptStartFailed)
 }
 
 // resolveImage 用 compose config --images server 解析当前 server 镜像名（runner 复用旧镜像）。
@@ -150,10 +221,19 @@ func (r *dockerRunner) Reap(ctx context.Context, protect map[RunnerID]bool) erro
 			continue
 		}
 		parts := strings.Fields(insp)
-		if len(parts) < 3 || parts[1] != "true" {
-			continue // inspect 失败或已不在运行，交给 docker 自身清理
+		if len(parts) < 3 {
+			continue // inspect 输出异常，交给 docker 自身清理
 		}
 		name := strings.TrimPrefix(parts[0], "/")
+		if name == "" {
+			continue
+		}
+		if parts[1] != "true" {
+			// R11：spawn 不再带 --rm，正常退出的 runner 容器由这里兜底清理
+			//（会话日志/marker 已落共享目录，容器日志无保留价值）。
+			r.cmds.Run(ctx, "docker", "rm", "-f", name)
+			continue
+		}
 		started, perr := time.Parse(time.RFC3339, parts[2])
 		if perr != nil || time.Since(started) < orphanReapAge {
 			continue // 启动时间不可解析或未超阈值：保持观望
@@ -175,6 +255,14 @@ func (c RunnerSpawnConfig) composeFileAbs() string {
 	return filepath.Join(c.RepoRoot, c.ComposeFile)
 }
 
+// scriptPath 返回 shell 引擎入口脚本绝对路径（R15：UPDATE_SCRIPT_PATH 可覆盖）。
+func (c RunnerSpawnConfig) scriptPath() string {
+	if c.ScriptPath != "" {
+		return c.ScriptPath
+	}
+	return filepath.Join(c.RepoRoot, ".hermes", "update.sh")
+}
+
 func (c RunnerSpawnConfig) project() string {
 	if c.ProjectName != "" {
 		return c.ProjectName
@@ -189,9 +277,11 @@ func (c RunnerSpawnConfig) project() string {
 // buildRunnerCmd 组装 `docker run -d` 参数（纯函数，可单测）。
 // 仓库以宿主绝对路径挂载（git/secrets/migrations/构建上下文一致），git 凭据只读透传。
 // shell 引擎复用同一 runner 容器（I1），entrypoint 换成 bash update.sh。
+// 不带 --rm：spawn 后需轮询确认容器真正运行、失败时 docker logs 回读（R11），
+// 退出容器由 Kill/Reap 兜底清理。
 func buildRunnerCmd(cfg RunnerSpawnConfig) []string {
 	args := []string{
-		"run", "-d", "--rm",
+		"run", "-d",
 		"--name", "lab-updater-" + cfg.SessionID,
 		"--network", "host",
 		"-v", "/var/run/docker.sock:/var/run/docker.sock",
@@ -225,6 +315,8 @@ func buildRunnerCmd(cfg RunnerSpawnConfig) []string {
 		"-e", "UPDATE_COMPOSE_FILE="+cfg.ComposeFile,
 		"-e", "UPDATE_NTFY_URL="+cfg.NtfyURL,
 		"-e", "UPDATE_BACKUP_DIR="+cfg.BackupDir,
+		// R12/R10：分支与更新看门狗预算透传 runner，双引擎/双层看门狗同源对齐。
+		"-e", "UPDATE_BRANCH="+cfg.Branch,
 		// 告警中心上报闭环：runner 容器以 --network host 运行，server 地址必须用
 		// 宿主可达地址（server 发布 8000:8000，compose DNS 名 server:8000 不解析）；
 		// service token 走仓库 rw 挂载下的 deploy/secrets/service_token.txt。
@@ -232,9 +324,12 @@ func buildRunnerCmd(cfg RunnerSpawnConfig) []string {
 		"-e", "SERVICE_TOKEN_FILE="+filepath.Join(cfg.RepoRoot, "deploy", "secrets", "service_token.txt"),
 		"-e", "GIT_TERMINAL_PROMPT=0",
 	)
+	if cfg.UpdateTimeout > 0 {
+		args = append(args, "-e", "UPDATE_UPDATE_TIMEOUT="+cfg.UpdateTimeout.String())
+	}
 	args = append(args, cfg.RunnerImage)
 	if cfg.Engine == "shell" {
-		args = append(args, "bash", filepath.Join(cfg.RepoRoot, ".hermes", "update.sh"))
+		args = append(args, "bash", cfg.scriptPath())
 	} else {
 		args = append(args, "lab-update", "--session", cfg.SessionID, "--repo", cfg.RepoRoot)
 	}

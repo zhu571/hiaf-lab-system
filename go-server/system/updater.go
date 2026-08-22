@@ -10,8 +10,11 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"regexp"
+	"sort"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -29,12 +32,23 @@ type UpdateConfig struct {
 	// RunnerImage 为空时在预检里用 `compose config --images server` 解析。
 	RunnerImage string
 
+	// Branch 更新分支（R12：默认 main，UPDATE_BRANCH 覆盖；pull/回滚/behind 统一来源）。
+	Branch string
+
 	UpdateTimeout   time.Duration // 更新阶段看门狗
 	RollbackTimeout time.Duration // 回滚阶段独立预算
 
 	Force      bool
 	DryRun     bool
 	NoRollback bool
+}
+
+// branch 返回更新分支（空值回退 main）。
+func (c *UpdateConfig) branch() string {
+	if c.Branch != "" {
+		return c.Branch
+	}
+	return "main"
 }
 
 // composeAbs 返回 compose 文件绝对路径。
@@ -95,11 +109,13 @@ type Pipeline struct {
 	newSHA     string
 	backupFile string
 	affected   *Affected
+	// healthRetryDelay 健康检查轮次间隔（R14：慢启动服务重试窗口；测试可置 0 加速）。
+	healthRetryDelay time.Duration
 }
 
 // NewPipeline 构造流水线。
 func NewPipeline(cfg *UpdateConfig, cmds CmdRunner, log *Logger) *Pipeline {
-	return &Pipeline{cfg: cfg, cmds: cmds, log: log}
+	return &Pipeline{cfg: cfg, cmds: cmds, log: log, healthRetryDelay: 5 * time.Second}
 }
 
 // steps 返回 7 步流水线（标题、失败语义、回滚策略都是数据）。
@@ -116,8 +132,14 @@ func (p *Pipeline) steps() []Step {
 }
 
 // Run 执行完整流水线，返回进程退出码；defer 内写 done marker（I3 契约）。
+// 成功（含无变更提前退出且非 dry-run）时落 deployed-sha 标记（R4 部署事实源）。
 func (p *Pipeline) Run(ctx context.Context) (code int) {
 	defer func() {
+		if code == 0 && !p.cfg.DryRun && p.newSHA != "" {
+			if err := writeDeployedSHA(p.cfg.RepoRoot, p.newSHA); err != nil {
+				p.log.Linef("[WARN]  写已部署版本标记失败: %v", err)
+			}
+		}
 		m := DoneMarker{ExitCode: code, OldSHA: p.oldSHA, NewSHA: p.newSHA, EndedAt: nowUTC()}
 		if err := WriteDoneMarker(p.cfg.DoneFile, m); err != nil {
 			p.log.Linef("[ERROR] 写 done marker 失败: %v", err)
@@ -166,7 +188,8 @@ func (p *Pipeline) Run(ctx context.Context) (code int) {
 
 // ---------- 步骤实现 ----------
 
-// stepPreflight 步骤 1：docker/compose/git 可用、磁盘、secrets、runner 镜像、项目名断言。
+// stepPreflight 步骤 1：docker/compose/git 可用、仓库有效性、SSH 凭据自检、磁盘、
+// secrets、runner 镜像、项目名断言、compose 服务表差集告警。
 func (p *Pipeline) stepPreflight(ctx context.Context) error {
 	if _, _, err := p.cmds.Run(ctx, "docker", "version"); err != nil {
 		return errors.New("Docker 未安装或不在 PATH")
@@ -176,6 +199,17 @@ func (p *Pipeline) stepPreflight(ctx context.Context) error {
 	}
 	if _, _, err := p.cmds.Run(ctx, "git", "-C", p.cfg.RepoRoot, "version"); err != nil {
 		return errors.New("git 不可用")
+	}
+	// R6：RepoRoot 不是有效 git 仓库 = 路径错配（compose 挂载漂移时 docker 会自动
+	// 建空目录），在开头报清晰错误，而不是后续步骤报「缺少 secret 文件」等误导信息。
+	if _, err := p.gitRun(ctx, "-C", p.cfg.RepoRoot, "rev-parse", "--git-dir"); err != nil {
+		return fmt.Errorf("仓库路径错配: %s 不是有效 git 仓库（检查 REPO_ROOT / 仓库挂载路径）", p.cfg.RepoRoot)
+	}
+
+	// R2：origin 为 SSH 远程时预检 deploy key 可用，凭据问题在步骤 1 就以可操作
+	// 报错暴露，而不是步骤 3 的裸 exit status 128。
+	if err := p.checkGitSSH(ctx); err != nil {
+		return err
 	}
 
 	if avail, err := p.diskFreeKB(ctx); err == nil && avail < 2097152 {
@@ -200,6 +234,7 @@ func (p *Pipeline) stepPreflight(ctx context.Context) error {
 
 	p.assertProjectName(ctx)
 	p.assertRepoWritable()
+	p.warnServicesDrift(ctx)
 	return nil
 }
 
@@ -236,7 +271,7 @@ func (p *Pipeline) stepRecord(ctx context.Context) error {
 	}
 	if err := p.cmds.RunStream(ctx, f, "docker", p.composeArgs("exec", "-T", "postgres", "pg_dump", "-U", "lab", "lab")...); err != nil {
 		_ = f.Close()
-		p.log.Linef("[WARN]  数据库备份失败（postgres 未运行？），继续…")
+		p.log.Linef("[WARN]  数据库备份失败（postgres 未运行？），继续…: %s", sanitizeOutput(err.Error()))
 		p.backupFile = ""
 		return nil
 	}
@@ -248,26 +283,31 @@ func (p *Pipeline) stepRecord(ctx context.Context) error {
 }
 
 // stepPull 步骤 3：git fetch + pull --ff-only；失败时 --force 继续，否则中止（不回滚）。
+// 「无变更跳过」以 deployed-sha 标记为部署事实源：HEAD 与标记不一致（上次更新
+// 未完成）时不得假成功跳过（R4）。
 func (p *Pipeline) stepPull(ctx context.Context) error {
-	if _, _, err := p.cmds.Run(ctx, "git", "-C", p.cfg.RepoRoot, "fetch", "origin"); err != nil {
+	if _, err := p.gitRun(ctx, "-C", p.cfg.RepoRoot, "fetch", "origin"); err != nil {
 		return fmt.Errorf("git fetch 失败: %w", err)
 	}
 	before := p.gitRevParse(ctx, "HEAD")
 
-	if _, _, err := p.cmds.Run(ctx, "git", "-C", p.cfg.RepoRoot, "pull", "--ff-only", "origin", "main"); err == nil {
+	if _, err := p.gitRun(ctx, "-C", p.cfg.RepoRoot, "pull", "--ff-only", "origin", p.cfg.branch()); err == nil {
 		p.newSHA = p.gitRevParse(ctx, "HEAD")
 		p.log.Linef("[UPDATE] 已更新: %s → %s", shortSHA(before), shortSHA(p.newSHA))
 	} else if p.cfg.Force {
 		p.log.Linef("[WARN]  git pull 失败，但 --force 模式继续（使用当前 HEAD）")
 		p.newSHA = before
 	} else {
-		p.log.Linef("[ERROR] git pull 失败，中止。请手动解决冲突。")
+		p.log.Linef("[ERROR] git pull 失败，中止。请依次检查：网络连通、GitHub 凭据（.hermes/runner-home/README.md）、本地是否偏离分支。")
 		return errors.New("git pull 失败")
 	}
 
 	if before == p.newSHA && !p.cfg.Force {
-		p.log.Linef("[UPDATE] 代码无变更，跳过更新。")
-		return errNoChanges
+		if p.deployedAligned() {
+			p.log.Linef("[UPDATE] 代码无变更，跳过更新。")
+			return errNoChanges
+		}
+		p.log.Linef("[WARN]  无新提交，但 HEAD 与已部署版本不一致（上次更新未完成），继续部署。")
 	}
 	return nil
 }
@@ -278,15 +318,23 @@ func (p *Pipeline) stepDetect(ctx context.Context) error {
 	if err != nil {
 		return fmt.Errorf("git diff 失败: %w", err)
 	}
-	if len(changed) == 0 && !p.cfg.Force {
-		p.log.Linef("[UPDATE] 无文件变更，跳过构建。")
-		return errNoChanges
-	}
 
-	aff := DetectServices(changed)
-	if p.cfg.Force {
+	var aff Affected
+	switch {
+	case len(changed) == 0 && p.cfg.Force:
 		aff = Affected{All: true}
 		p.log.Linef("[UPDATE] --force: 强制全量重建")
+	case len(changed) == 0:
+		// R4：diff 为空 ≠ 已部署。HEAD 与已部署标记不一致说明上次更新中断在构建
+		// 之前（pull 已前进、镜像未重建），必须全量对齐而不是假成功退出。
+		if p.deployedAligned() {
+			p.log.Linef("[UPDATE] 无文件变更，跳过构建。")
+			return errNoChanges
+		}
+		aff = Affected{All: true}
+		p.log.Linef("[WARN]  无文件变更，但 HEAD 与已部署版本不一致（上次更新未完成），执行全量对齐重建。")
+	default:
+		aff = DetectServices(changed)
 	}
 	p.affected = &aff
 
@@ -319,20 +367,31 @@ func (p *Pipeline) stepDetect(ctx context.Context) error {
 	return nil
 }
 
-// stepBuild 步骤 5：按依赖顺序构建（epics-gateway → ioc → py-agent-interpret → server；
-// py-agent 与 py-agent-interpret 共用镜像，不重复构建）。
+// stepBuild 步骤 5：先预检构建所需 base 镜像（R7），再按依赖顺序构建
+// （epics-gateway → ioc → py-agent-interpret → server；py-agent 与 py-agent-interpret
+// 共用镜像，不重复构建）。构建输出行流转发（R3）；失败时仓库退回 OLD_SHA（R4）。
 func (p *Pipeline) stepBuild(ctx context.Context) error {
+	if err := p.checkBaseImages(ctx); err != nil {
+		return p.revertOnBuildFailure(err)
+	}
+	if err := p.doBuild(ctx); err != nil {
+		return p.revertOnBuildFailure(err)
+	}
+	return nil
+}
+
+// doBuild 执行实际构建命令（build --pull 全量或按受影响服务）。
+func (p *Pipeline) doBuild(ctx context.Context) error {
 	if p.affected.All {
 		p.log.Linef("[WARN] compose 文件或 Dockerfile 变更，执行全量重建")
-		_, _, err := p.cmds.Run(ctx, "docker", p.composeArgs("build", "--pull",
+		return p.streamLogged(ctx, "docker", p.composeArgs("build", "--pull",
 			"server", "py-agent", "py-agent-interpret", "epics-gateway", "ioc", "migrate")...)
-		return err
 	}
 
 	for _, svc := range []string{"epics-gateway", "ioc", "py-agent-interpret"} {
 		if p.affectedHas(svc) {
 			p.log.Linef("[UPDATE] 构建 %s …", svc)
-			if _, _, err := p.cmds.Run(ctx, "docker", p.composeArgs("build", svc)...); err != nil {
+			if err := p.streamLogged(ctx, "docker", p.composeArgs("build", svc)...); err != nil {
 				return err
 			}
 		}
@@ -340,7 +399,7 @@ func (p *Pipeline) stepBuild(ctx context.Context) error {
 
 	if p.affectedHas("server") {
 		p.log.Linef("[UPDATE] 构建 server（含前端）…")
-		if _, _, err := p.cmds.Run(ctx, "docker", p.composeArgs("build", "server")...); err != nil {
+		if err := p.streamLogged(ctx, "docker", p.composeArgs("build", "server")...); err != nil {
 			return err
 		}
 	}
@@ -351,11 +410,24 @@ func (p *Pipeline) stepBuild(ctx context.Context) error {
 	return nil
 }
 
-// stepDeploy 步骤 6：滚动更新 + 迁移 + server/py-agent。
+// revertOnBuildFailure 构建失败时把仓库退回 OLD_SHA 并回到分支（R4）：保证 HEAD
+// 永远与正在运行的镜像一致。否则 pull 已前进、build 失败后，下次更新会因
+// 「代码无变更」假成功跳过，新代码永远不被部署。不重建任何服务（非回滚）。
+func (p *Pipeline) revertOnBuildFailure(err error) error {
+	if p.oldSHA != "" && p.newSHA != "" && p.oldSHA != p.newSHA {
+		p.log.Linef("[WARN]  构建未完成，仓库回退到 %s（保持 HEAD 与运行镜像一致，下次更新重新拉取）", shortSHA(p.oldSHA))
+		p.returnToBranchAt(context.Background(), p.oldSHA)
+	}
+	return err
+}
+
+// stepDeploy 步骤 6：滚动更新 + 迁移。顺序与 update.sh 对齐（R5/I4 契约）：
+// postgres 检查 → migrate → epics/ioc/interpret → server → py-agent。
+// migrate 必须先于所有业务容器重启：避免新代码对旧 schema 运行一个窗口。
 func (p *Pipeline) stepDeploy(ctx context.Context) error {
 	restart := func(svc string, maxWait int) error {
 		p.log.Linef("[UPDATE] 重启 %s …", svc)
-		if _, _, err := p.cmds.Run(ctx, "docker", p.composeArgs("up", "-d", "--no-deps", svc)...); err != nil {
+		if _, err := p.runLogged(ctx, "docker", p.composeArgs("up", "-d", "--no-deps", svc)...); err != nil {
 			return err
 		}
 		if err := p.sleep(ctx, 2*time.Second); err != nil {
@@ -374,19 +446,9 @@ func (p *Pipeline) stepDeploy(ctx context.Context) error {
 		return fmt.Errorf("%s 健康检查超时", svc)
 	}
 
-	for _, svc := range []string{"epics-gateway", "ioc", "py-agent-interpret"} {
-		if !p.affectedHas(svc) {
-			continue
-		}
-		if err := restart(svc, 30); err != nil {
-			p.log.Linef("[ERROR] %s 重启失败: %v", svc, err)
-			return err
-		}
-	}
-
 	if state, _ := p.serviceState(ctx, "postgres"); state != "healthy" {
 		p.log.Linef("[WARN] postgres 不健康，尝试重启…")
-		if _, _, err := p.cmds.Run(ctx, "docker", p.composeArgs("up", "-d", "postgres")...); err != nil {
+		if _, err := p.runLogged(ctx, "docker", p.composeArgs("up", "-d", "postgres")...); err != nil {
 			return err
 		}
 		if err := p.sleep(ctx, 5*time.Second); err != nil {
@@ -396,11 +458,21 @@ func (p *Pipeline) stepDeploy(ctx context.Context) error {
 
 	if p.affectedHas("migrate") {
 		p.log.Linef("[UPDATE] 运行数据库迁移 …")
-		if _, _, err := p.cmds.Run(ctx, "docker", p.composeArgs("run", "--rm", "migrate")...); err != nil {
+		if err := p.streamLogged(ctx, "docker", p.composeArgs("run", "--rm", "migrate")...); err != nil {
 			p.log.Linef("[ERROR] 迁移失败！")
 			return err
 		}
 		p.log.Linef("[UPDATE] 迁移成功")
+	}
+
+	for _, svc := range []string{"epics-gateway", "ioc", "py-agent-interpret"} {
+		if !p.affectedHas(svc) {
+			continue
+		}
+		if err := restart(svc, 30); err != nil {
+			p.log.Linef("[ERROR] %s 重启失败: %v", svc, err)
+			return err
+		}
 	}
 
 	if p.affectedHas("server") {
@@ -425,27 +497,57 @@ func (p *Pipeline) stepDeploy(ctx context.Context) error {
 	return nil
 }
 
-// stepHealth 步骤 7：全栈健康检查。
+// stepHealth 步骤 7：全栈健康检查（服务状态 + schema 版本 + 前端 embed 产物）。
+// 服务状态给 3 轮重试窗口（R14：慢启动服务如 py-agent start_period 30s 在边界
+// 上可能被单轮误杀）；附加验证（R9）失败同样计入不健康触发回滚。
 func (p *Pipeline) stepHealth(ctx context.Context) error {
-	allHealthy := true
 	var bad []string
-	for _, svc := range healthCheckServices {
-		state, err := p.serviceState(ctx, svc)
-		if err == nil && (state == "healthy" || state == "running") {
-			p.log.Linef("  OK  %s: %s", svc, state)
-			continue
+	for round := 1; round <= healthRetryRounds; round++ {
+		bad = nil
+		for _, svc := range healthCheckServices {
+			state, err := p.serviceState(ctx, svc)
+			if err == nil && (state == "healthy" || state == "running") {
+				if round == 1 || round == healthRetryRounds {
+					p.log.Linef("  OK  %s: %s", svc, state)
+				}
+				continue
+			}
+			stateStr := "missing"
+			if err == nil {
+				stateStr = state
+			}
+			if round == healthRetryRounds {
+				p.log.Linef("  BAD %s: %s", svc, stateStr)
+			} else {
+				p.log.Linef("  ... %s: %s（等待重试 %d/%d）", svc, stateStr, round+1, healthRetryRounds)
+			}
+			bad = append(bad, svc)
 		}
-		if err != nil {
-			p.log.Linef("  BAD %s: %s", svc, "missing")
-		} else {
-			p.log.Linef("  BAD %s: %s", svc, state)
+		if len(bad) == 0 {
+			break
 		}
-		allHealthy = false
-		bad = append(bad, svc)
+		if round < healthRetryRounds {
+			if err := p.sleep(ctx, p.healthRetryDelay); err != nil {
+				return err
+			}
+		}
+	}
+
+	var failures []string
+	if len(bad) > 0 {
+		failures = append(failures, bad...)
+	} else {
+		// 附加验证仅在全部服务健康后执行（都依赖 postgres/server 就绪）。
+		if !p.verifySchemaVersion(ctx) {
+			failures = append(failures, "schema版本")
+		}
+		if len(failures) == 0 && !p.verifyFrontendEmbed(ctx) {
+			failures = append(failures, "前端产物")
+		}
 	}
 
 	p.log.Linef("")
-	if allHealthy {
+	if len(failures) == 0 {
 		p.log.Linef("==========================================")
 		p.log.Linef("  更新成功！%s → %s", shortSHA(p.oldSHA), shortSHA(p.newSHA))
 		p.log.Linef("==========================================")
@@ -453,8 +555,58 @@ func (p *Pipeline) stepHealth(ctx context.Context) error {
 			fmt.Sprintf("Updated %s → %s", shortSHA(p.oldSHA), shortSHA(p.newSHA)))
 		return nil
 	}
-	p.log.Linef("[ERROR] 部分服务不健康，请检查！")
-	return fmt.Errorf("不健康服务: %v", bad)
+	p.log.Linef("[ERROR] 部分服务不健康或附加验证失败，请检查！")
+	return fmt.Errorf("不健康项: %v", failures)
+}
+
+// verifySchemaVersion 核对 migrations 文件数与 schema_migrations 最大版本（R9，
+// 移植 update.sh 附加验证 1）。migrations 目录缺失/为空时跳过（本地开发仓库）。
+func (p *Pipeline) verifySchemaVersion(ctx context.Context) bool {
+	files, _ := filepath.Glob(filepath.Join(p.cfg.RepoRoot, "migrations", "*.up.sql"))
+	if len(files) == 0 {
+		p.log.Linef("[WARN]  未发现 migrations/*.up.sql，跳过 schema 版本核对")
+		return true
+	}
+	expected := strconv.Itoa(len(files))
+	p.log.Linef("验证数据库 schema 版本 …")
+	out, _, err := p.cmds.Run(ctx, "docker", p.composeArgs("exec", "-T", "postgres", "psql", "-U", "lab",
+		"-tAc", "SELECT version FROM schema_migrations ORDER BY version DESC LIMIT 1")...)
+	actual := strings.TrimSpace(out)
+	if err != nil || actual == "" {
+		p.log.Linef("[ERROR] schema 版本读取失败（postgres 未就绪？）")
+		return false
+	}
+	if actual != expected {
+		p.log.Linef("[ERROR] schema 版本不匹配: 期望 %s，实际 %s（迁移未跑完？）", expected, actual)
+		return false
+	}
+	p.log.Linef("schema 版本 OK: %s", actual)
+	return true
+}
+
+// verifyFrontendEmbed 核对 server 容器内 embed 的前端产物非空，并与工作区
+// web-ui/dist 对比（R9，移植 update.sh 附加验证 2，防白屏回归——AGENTS.md PR 清单项）。
+func (p *Pipeline) verifyFrontendEmbed(ctx context.Context) bool {
+	p.log.Linef("验证前端产物（server 容器内 embed 的 static）…")
+	out, _, err := p.cmds.Run(ctx, "docker", p.composeArgs("exec", "-T", "server", "sh", "-c",
+		"ls /app/static/assets/*.js 2>/dev/null | head -1")...)
+	if err != nil || strings.TrimSpace(out) == "" {
+		p.log.Linef("[ERROR] server 容器内未发现前端静态产物（/app/static/assets/*.js 为空，疑似白屏风险）")
+		return false
+	}
+	embedded := filepath.Base(strings.TrimSpace(strings.Fields(out)[0]))
+	p.log.Linef("容器内产物: %s", embedded)
+	local, gerr := filepath.Glob(filepath.Join(p.cfg.RepoRoot, "web-ui", "dist", "assets", "*.js"))
+	if gerr != nil || len(local) == 0 {
+		p.log.Linef("[WARN]  工作区无 web-ui/dist 产物，跳过对比（容器内产物已验证非空）")
+		return true
+	}
+	if filepath.Base(local[0]) != embedded {
+		p.log.Linef("[ERROR] 前端产物不一致: 容器 %s vs 工作区 %s（embed/构建过期？）", embedded, filepath.Base(local[0]))
+		return false
+	}
+	p.log.Linef("前端产物与工作区 web-ui/dist 一致")
+	return true
 }
 
 // ---------- 回滚 ----------
@@ -471,7 +623,7 @@ func (p *Pipeline) rollback(ctx context.Context) {
 	}
 	oldShort := shortSHA(p.oldSHA)
 	p.log.Linef("[UPDATE] 恢复代码到 %s …", oldShort)
-	if _, _, err := p.cmds.Run(ctx, "git", "-C", p.cfg.RepoRoot, "checkout", p.oldSHA); err != nil {
+	if _, err := p.gitRun(ctx, "-C", p.cfg.RepoRoot, "checkout", p.oldSHA); err != nil {
 		p.log.Linef("[ERROR] git checkout %s 失败: %v", p.oldSHA, err)
 		return
 	}
@@ -491,7 +643,7 @@ func (p *Pipeline) rollback(ctx context.Context) {
 		// 更新失败额外上报告警中心（保留上方 ntfy 直发；告警中心统一聚合去重）。
 		p.reportAlert(ctx, "系统更新失败-迁移变更阻塞",
 			fmt.Sprintf("Rollback to %s blocked: schema may have changed. Manual migrate down required.", oldShort))
-		// 仓库停在 OLD_SHA（与当前运行的旧镜像一致）；若切回 main，
+		// 仓库停在 OLD_SHA（与当前运行的旧镜像一致）；若切回分支，
 		// 工作区是新代码而运行的是旧镜像，下次更新的 diff 检测会空转。
 		p.returnToBranchAt(ctx, p.oldSHA)
 		return
@@ -504,11 +656,11 @@ func (p *Pipeline) rollback(ctx context.Context) {
 	p.log.Linef("[UPDATE] 用旧代码重建受影响服务 …")
 	for _, svc := range p.rollbackServices() {
 		p.log.Linef("[UPDATE] 回滚重建 %s …", svc)
-		if _, _, err := p.cmds.Run(ctx, "docker", p.composeArgs("build", svc)...); err != nil {
+		if err := p.streamLogged(ctx, "docker", p.composeArgs("build", svc)...); err != nil {
 			p.log.Linef("[ERROR] 回滚构建 %s 失败: %v", svc, err)
 			continue
 		}
-		if _, _, err := p.cmds.Run(ctx, "docker", p.composeArgs("up", "-d", "--no-deps", svc)...); err != nil {
+		if _, err := p.runLogged(ctx, "docker", p.composeArgs("up", "-d", "--no-deps", svc)...); err != nil {
 			p.log.Linef("[ERROR] 回滚重启 %s 失败: %v", svc, err)
 		}
 	}
@@ -519,8 +671,8 @@ func (p *Pipeline) rollback(ctx context.Context) {
 	p.reportAlert(ctx, "系统更新失败-已回滚",
 		fmt.Sprintf("Rollback to %s after update %s failed", oldShort, shortSHA(p.newSHA)))
 
-	// 同上：仓库与运行的旧镜像保持一致（OLD_SHA），但必须回到 main 分支，
-	// 否则脱离 HEAD 状态下下次 `git pull --ff-only origin main` 仍能走但状态非分支态，
+	// 同上：仓库与运行的旧镜像保持一致（OLD_SHA），但必须回到分支，
+	// 否则脱离 HEAD 状态下下次 `git pull --ff-only origin <branch>` 仍能走但状态非分支态，
 	// 且与 update.sh（checkout 分支后 reset）行为不一致（§9.1）。
 	p.returnToBranchAt(ctx, p.oldSHA)
 
@@ -528,14 +680,14 @@ func (p *Pipeline) rollback(ctx context.Context) {
 	p.log.Linef("[WARN] 请检查服务状态并排查失败原因。")
 }
 
-// returnToBranchAt 切回 main 分支并把工作区/分支指针硬重置到指定 commit：
+// returnToBranchAt 切回更新分支并把工作区/分支指针硬重置到指定 commit：
 // 回滚后仓库停在该 commit（与运行中的旧镜像一致），同时保持在分支上，
-// 下次更新 `git pull --ff-only origin main` 直接快进，避免脱离 HEAD 的脆弱状态。
+// 下次更新 `git pull --ff-only origin <branch>` 直接快进，避免脱离 HEAD 的脆弱状态。
 func (p *Pipeline) returnToBranchAt(ctx context.Context, sha string) {
-	if _, _, err := p.cmds.Run(ctx, "git", "-C", p.cfg.RepoRoot, "checkout", "main"); err != nil {
-		p.log.Linef("[WARN]  git checkout main 失败（可能不在 main 分支）: %v", err)
+	if _, err := p.gitRun(ctx, "-C", p.cfg.RepoRoot, "checkout", p.cfg.branch()); err != nil {
+		p.log.Linef("[WARN]  git checkout %s 失败（可能不在该分支）: %v", p.cfg.branch(), err)
 	}
-	p.cmds.Run(ctx, "git", "-C", p.cfg.RepoRoot, "reset", "--hard", sha)
+	_, _ = p.gitRun(ctx, "-C", p.cfg.RepoRoot, "reset", "--hard", sha)
 }
 
 // rollbackServices 返回回滚重建的服务列表：ALL 时用全量列表，否则用受影响列表。
@@ -563,8 +715,429 @@ func (p *Pipeline) affectedHas(svc string) bool {
 	return p.affected.Has(svc)
 }
 
+// gitTimeout 单条 git 命令上限（对齐 update.sh 的 GIT_TIMEOUT=120s）。R13：SSH
+// 半开连接等场景下不能干等外层 30min 看门狗，git 命令逐条自带短超时。
+const gitTimeout = 120 * time.Second
+
+// healthRetryRounds 健康检查轮数（R14）。
+const healthRetryRounds = 3
+
+// gitRun 执行 git 命令：套单命令超时（R13）+ 失败时 stderr 尾部落日志（R3）。
+func (p *Pipeline) gitRun(ctx context.Context, args ...string) (string, error) {
+	gctx, cancel := context.WithTimeout(ctx, gitTimeout)
+	defer cancel()
+	return p.runLogged(gctx, "git", args...)
+}
+
+// runLogged 执行命令；失败时把 stderr 尾部（脱敏）写进会话日志（R3）。
+func (p *Pipeline) runLogged(ctx context.Context, name string, args ...string) (string, error) {
+	stdout, stderr, err := p.cmds.Run(ctx, name, args...)
+	if err != nil {
+		p.logCmdTail(name, args, stderr)
+	}
+	return stdout, err
+}
+
+// streamLogged 执行长命令（compose build/migrate/回滚重建），stdout+stderr 按
+// 行实时转发进会话日志（R3）：分钟级构建期间流水线不再静默，镜像源 403、
+// 编译错误等失败原因随行流直接可见。命令结束后 flush 残留的半行。
+func (p *Pipeline) streamLogged(ctx context.Context, name string, args ...string) error {
+	w := &logLineWriter{log: p.log}
+	err := p.cmds.RunTee(ctx, w, name, args...)
+	w.flush()
+	if err != nil {
+		return fmt.Errorf("%w（详细输出见上方行流日志）", err)
+	}
+	return nil
+}
+
+// logCmdTail 把失败命令的 stderr 尾部脱敏后写进会话日志（R3：失败原因不再蒸发）。
+// 命令行回显同样脱敏：参数本身可能携带凭据（如带 token 的 URL 参数），
+// 反例实测发现只脱敏输出尾部时命令回显行是泄漏点。
+func (p *Pipeline) logCmdTail(name string, args []string, stderr string) {
+	lines := tailLines(sanitizeOutput(stderr), 12)
+	if len(lines) == 0 {
+		return
+	}
+	p.log.Linef("[UPDATE] %s 失败，输出尾部:", sanitizeOutput(strings.TrimSpace(name+" "+strings.Join(args, " "))))
+	for _, ln := range lines {
+		p.log.Linef("  | %s", ln)
+	}
+}
+
+var (
+	urlCredRe = regexp.MustCompile(`(?i)([a-z][a-z0-9+.-]*://[^/@:\s]+:)[^@/\s]+@`)
+	bearerRe  = regexp.MustCompile(`(?i)(authorization:\s*(?:bearer|token|basic)\s+)[^\s]+`)
+)
+
+// sanitizeOutput 脱敏命令输出：遮蔽 URL 内嵌凭据与 Authorization 头，
+// 防止 token/密码随 stderr 尾部/行流落进会话日志（R3）。
+func sanitizeOutput(s string) string {
+	s = urlCredRe.ReplaceAllString(s, "$1***@")
+	return bearerRe.ReplaceAllString(s, "$1***")
+}
+
+// tailLines 返回 s 的末尾至多 n 个非空行（保持原序）。
+func tailLines(s string, n int) []string {
+	lines := strings.Split(strings.TrimRight(s, "\n"), "\n")
+	var out []string
+	for i := len(lines) - 1; i >= 0 && len(out) < n; i-- {
+		if ln := strings.TrimSpace(lines[i]); ln != "" {
+			out = append(out, ln)
+		}
+	}
+	for i, j := 0, len(out)-1; i < j; i, j = i+1, j-1 {
+		out[i], out[j] = out[j], out[i]
+	}
+	return out
+}
+
+// logLineWriter 把子进程合并输出按行写入 Logger（跨 chunk 缓存半行，
+// 长行不被拆断；并发安全以兼容 stdin/err 双流写）。
+type logLineWriter struct {
+	log *Logger
+	mu  sync.Mutex
+	buf []byte
+}
+
+func (w *logLineWriter) Write(b []byte) (int, error) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	w.buf = append(w.buf, b...)
+	for {
+		i := bytes.IndexByte(w.buf, '\n')
+		if i < 0 {
+			break
+		}
+		line := strings.TrimRight(string(w.buf[:i]), "\r")
+		w.buf = w.buf[i+1:]
+		if line != "" {
+			w.log.Linef("  | %s", sanitizeOutput(line))
+		}
+	}
+	return len(b), nil
+}
+
+// flush 输出残留的半行（进程末尾无换行的最后一段输出）。
+func (w *logLineWriter) flush() {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	if len(w.buf) == 0 {
+		return
+	}
+	line := strings.TrimSpace(string(w.buf))
+	w.buf = nil
+	if line != "" {
+		w.log.Linef("  | %s", sanitizeOutput(line))
+	}
+}
+
+// ---------- deployed-sha 标记（R4 部署事实源） ----------
+
+// deployedSHAFile 是已部署版本标记文件：位于仓库共享目录，Go 引擎与 update.sh
+// 双引擎读写同一文件（R4）。部署成功/确认无变更时写入 HEAD。
+func deployedSHAFile(repoRoot string) string {
+	return filepath.Join(repoRoot, ".hermes", "updates", "deployed-sha")
+}
+
+func readDeployedSHA(repoRoot string) (string, bool) {
+	data, err := os.ReadFile(deployedSHAFile(repoRoot))
+	if err != nil {
+		return "", false
+	}
+	sha := strings.TrimSpace(string(data))
+	if sha == "" {
+		return "", false
+	}
+	return sha, true
+}
+
+func writeDeployedSHA(repoRoot, sha string) error {
+	if sha == "" {
+		return nil
+	}
+	if err := os.MkdirAll(filepath.Join(repoRoot, ".hermes", "updates"), 0o755); err != nil {
+		return err
+	}
+	return os.WriteFile(deployedSHAFile(repoRoot), []byte(sha), 0o644)
+}
+
+// deployedAligned 判断 HEAD（newSHA）是否与已部署标记一致。
+// 标记缺失视为不一致（R4 反例）：删掉 deployed-sha 后触发更新必须全量对齐重建
+// 自愈，而不是「跳过 + 重写标记」把 HEAD 超前镜像的状态永久掩盖成空转。
+// 代价是升级到本版本后的首次无变更触发会做一次全量重建（一次性，随后落标记）。
+func (p *Pipeline) deployedAligned() bool {
+	sha, ok := readDeployedSHA(p.cfg.RepoRoot)
+	return ok && sha == p.newSHA
+}
+
+// ---------- SSH 凭据自检（R2） ----------
+
+// checkGitSSH 在 origin 为 SSH 协议时用 `ssh -o BatchMode=yes -T git@<host>` 预检
+// deploy key 可用性：GitHub 认证成功时退出码仍为 1，但 stderr 含
+// "successfully authenticated"，因此以报文而非退出码判定。StrictHostKeyChecking
+// 取 accept-new，与 runner-home/.gitconfig 的 core.sshCommand 一致（TOFU）：仓库
+// 分发的 known_hosts 模板只含注释，裸 BatchMode（默认 ask）会因主机钥确认直接
+// 假失败，而实际 git fetch 走 accept-new 本可成功。网络不可达不拦截（留给 fetch
+// 报详细错误），凭据/主机钥变更问题给出可操作指引。
+func (p *Pipeline) checkGitSSH(ctx context.Context) error {
+	out, err := p.gitRun(ctx, "-C", p.cfg.RepoRoot, "remote", "get-url", "origin")
+	if err != nil || strings.TrimSpace(out) == "" {
+		return nil // 拿不到 origin URL 不在此拦截，留给 fetch 报具体错误
+	}
+	host := sshHostOf(strings.TrimSpace(out))
+	if host == "" {
+		return nil // https 等非 SSH 协议无需凭据自检
+	}
+	_, serr, runErr := p.cmds.Run(ctx, "ssh", "-o", "BatchMode=yes", "-o", "StrictHostKeyChecking=accept-new", "-o", "ConnectTimeout=10", "-T", "git@"+host)
+	msg := sanitizeOutput(serr)
+	if strings.Contains(msg, "successfully authenticated") {
+		p.log.Linef("[UPDATE] SSH 凭据自检通过 (git@%s)", host)
+		return nil
+	}
+	if runErr != nil && strings.Contains(runErr.Error(), "executable file not found") {
+		return fmt.Errorf("runner 镜像缺少 ssh 客户端（openssh-client），无法走 SSH 远程；请重建 server 镜像后重试（deploy/Dockerfile 已包含 openssh-client）")
+	}
+	for _, kw := range []string{"timed out", "Could not resolve", "Connection refused", "Network is unreachable", "Connection closed"} {
+		if strings.Contains(msg, kw) {
+			p.log.Linef("[WARN]  SSH 连接 %s 失败（网络不可达？），交由 git fetch 报详细错误", host)
+			return nil
+
+		}
+	}
+	p.log.Linef("[ERROR] SSH 凭据自检失败 (git@%s):", host)
+	for _, ln := range tailLines(msg, 5) {
+		p.log.Linef("  | %s", ln)
+	}
+	return fmt.Errorf("GitHub SSH 凭据不可用（git@%s）：请按 .hermes/runner-home/README.md 配置 deploy key（UPDATE_GIT_HOME 默认 .hermes/runner-home，需含 .ssh/id_ed25519 与 known_hosts）", host)
+}
+
+// sshHostOf 从 git remote URL 提取 SSH 主机；非 SSH 形式返回空。
+func sshHostOf(origin string) string {
+	if after, ok := strings.CutPrefix(origin, "ssh://"); ok {
+		// ssh://git@host[:port]/path
+		if at := strings.Index(after, "@"); at >= 0 {
+			after = after[at+1:]
+		}
+		if c := strings.IndexAny(after, ":/"); c >= 0 {
+			return after[:c]
+		}
+		return after
+	}
+	// scp 语法 git@host:path
+	if at := strings.Index(origin, "@"); at >= 0 {
+		rest := origin[at+1:]
+		if c := strings.Index(rest, ":"); c > 0 && !strings.Contains(rest[:c], "/") {
+			return rest[:c]
+		}
+	}
+	return ""
+}
+
+// ---------- base 镜像预检（R7） ----------
+
+// checkBaseImages 构建前预检受影响服务所需 base 镜像：解析 compose 的 build/image
+// 定义 + Dockerfile FROM 行，逐个 docker image inspect。本地缺失时先尝试 docker pull
+// （输出行流转发）：在线环境直接补齐，不误伤「新 base 版本本地未缓存、但 registry
+// 可达」的正常更新；拉取也失败（镜像源 403 等）才报「离线导入」指引中止——把
+// 分钟级中段构建失败变成开头的清晰失败。
+func (p *Pipeline) checkBaseImages(ctx context.Context) error {
+	data, err := os.ReadFile(p.cfg.composeAbs())
+	if err != nil {
+		return nil // compose 文件不可读：不在此拦截，交给后续 compose 命令报错
+	}
+	specs := parseComposeServices(string(data))
+	collect := func(svc string, wanted map[string]bool) {
+		for _, s := range specs {
+			if s.Service != svc {
+				continue
+			}
+			for _, img := range s.baseImages(p.cfg.composeAbs()) {
+				wanted[img] = true
+			}
+		}
+	}
+	wanted := map[string]bool{}
+	if p.affected != nil && p.affected.All {
+		for _, s := range specs {
+			collect(s.Service, wanted)
+		}
+	} else {
+		for _, svc := range fullServiceList {
+			if p.affectedHas(svc) {
+				collect(svc, wanted)
+			}
+		}
+	}
+	if len(wanted) == 0 {
+		return nil
+	}
+
+	var missing []string
+	for img := range wanted {
+		if _, _, err := p.cmds.Run(ctx, "docker", "image", "inspect", img); err == nil {
+			continue
+		}
+		p.log.Linef("[UPDATE] base 镜像 %s 本地缺失，尝试拉取 …", img)
+		if perr := p.streamLogged(ctx, "docker", "pull", img); perr == nil {
+			continue
+		}
+		missing = append(missing, img)
+	}
+	if len(missing) > 0 {
+		sort.Strings(missing)
+		p.log.Linef("[ERROR] 基础镜像缺失: %s", strings.Join(missing, ", "))
+		p.log.Linef("[ERROR] 镜像源拉取可能被拒（如 daocloud mirror 403）。请按 deploy/scripts/README.md 离线导入（docker save / docker load）后再触发更新。")
+		return fmt.Errorf("基础镜像缺失: %s", strings.Join(missing, ", "))
+	}
+	p.log.Linef("[UPDATE] base 镜像预检通过（%d 个）", len(wanted))
+	return nil
+}
+
+// composeServiceSpec 是 parseComposeServices 解析出的单服务构建/镜像定义。
+type composeServiceSpec struct {
+	Service    string
+	HasBuild   bool
+	Context    string // 相对 compose 文件目录
+	Dockerfile string // 相对 context；空 = 默认 Dockerfile
+	Image      string // image: 直接引用的外部镜像（非构建）
+}
+
+// baseImages 返回该服务的 base 镜像集合：build 服务取 Dockerfile 全部 FROM；
+// image 服务取 image 本身。Dockerfile 不可读/无 FROM 时返回空（预检放行）。
+func (s composeServiceSpec) baseImages(composeAbsPath string) []string {
+	if !s.HasBuild {
+		if s.Image != "" {
+			return []string{s.Image}
+		}
+		return nil
+	}
+	ctxDir := s.Context
+	if !filepath.IsAbs(ctxDir) {
+		ctxDir = filepath.Join(filepath.Dir(composeAbsPath), ctxDir)
+	}
+	df := s.Dockerfile
+	if df == "" {
+		df = "Dockerfile"
+	}
+	dfPath := df
+	if !filepath.IsAbs(dfPath) {
+		dfPath = filepath.Join(ctxDir, df)
+	}
+	data, err := os.ReadFile(dfPath)
+	if err != nil {
+		return nil
+	}
+	return dockerfileFromImages(string(data))
+}
+
+var fromRe = regexp.MustCompile(`(?mi)^FROM[ \t]+(?:--platform=\S+[ \t]+)?([^\s]+)`)
+
+// dockerfileFromImages 提取 Dockerfile 全部 FROM 基础镜像（含多阶段），去重。
+func dockerfileFromImages(text string) []string {
+	var out []string
+	seen := map[string]bool{}
+	for _, m := range fromRe.FindAllStringSubmatch(text, -1) {
+		img := strings.Trim(m[1], `"'`)
+		if img == "" || seen[img] {
+			continue
+		}
+		seen[img] = true
+		out = append(out, img)
+	}
+	return out
+}
+
+// parseComposeServices 手写解析 compose 顶层 services 的 image:/build: 定义
+// （两级缩进约定，仅服务于 base 镜像预检；完整解析仍以 docker compose 为准）。
+func parseComposeServices(text string) []composeServiceSpec {
+	var out []composeServiceSpec
+	inServices := false
+	cur := -1
+	inBuildBlock := false
+	for _, raw := range strings.Split(text, "\n") {
+		ln := strings.TrimRight(raw, " \t\r")
+		if ln == "" || strings.HasPrefix(strings.TrimSpace(ln), "#") {
+			continue
+		}
+		indent := len(ln) - len(strings.TrimLeft(ln, " "))
+		trimmed := strings.TrimSpace(ln)
+		if indent == 0 {
+			inServices = trimmed == "services:"
+			inBuildBlock = false
+			continue
+		}
+		if !inServices || indent < 2 {
+			inBuildBlock = false
+			continue
+		}
+		if indent == 2 {
+			inBuildBlock = false
+			if name, ok := strings.CutSuffix(trimmed, ":"); ok && !strings.Contains(name, " ") {
+				out = append(out, composeServiceSpec{Service: name})
+				cur = len(out) - 1
+			}
+			continue
+		}
+		if cur < 0 {
+			continue
+		}
+		key, val, _ := strings.Cut(trimmed, ":")
+		val = strings.Trim(strings.TrimSpace(val), `"'`)
+		switch {
+		case inBuildBlock && key == "context" && val != "":
+			out[cur].Context = val
+		case inBuildBlock && key == "dockerfile" && val != "":
+			out[cur].Dockerfile = val
+		case key == "image" && val != "":
+			out[cur].Image = val
+		case key == "build":
+			out[cur].HasBuild = true
+			if val != "" { // 简写：build: <context>
+				out[cur].Context = val
+				inBuildBlock = false
+			} else {
+				inBuildBlock = true
+			}
+		default:
+			if indent <= 4 {
+				inBuildBlock = false // 遇到同级其它键，退出 build 块
+			}
+		}
+	}
+	return out
+}
+
+// warnServicesDrift 把 compose 实际服务表与硬编码健康检查/全量构建列表比对差集
+// 告警（R15：设计 §5 兜底校验，warn 不阻断，防止 compose 加新服务后硬编码表漏检）。
+func (p *Pipeline) warnServicesDrift(ctx context.Context) {
+	out, _, err := p.cmds.Run(ctx, "docker", p.composeArgs("config", "--services")...)
+	if err != nil {
+		return
+	}
+	known := map[string]bool{}
+	for _, svc := range healthCheckServices {
+		known[svc] = true
+	}
+	for _, svc := range fullServiceList {
+		known[svc] = true
+	}
+	actual := map[string]bool{}
+	for _, svc := range parseComposeLines([]byte(out)) {
+		actual[svc] = true
+		if !known[svc] {
+			p.log.Linef("[WARN]  compose 服务 %q 不在更新系统硬编码列表内（健康检查/构建可能漏掉它，请同步 healthCheckServices/fullServiceList）", svc)
+		}
+	}
+	for _, svc := range append(append([]string{}, healthCheckServices...), fullServiceList...) {
+		if !actual[svc] {
+			p.log.Linef("[WARN]  硬编码服务 %q 不在 compose 服务表中（列表可能过期）", svc)
+		}
+	}
+}
+
 func (p *Pipeline) gitRevParse(ctx context.Context, rev string) string {
-	out, _, err := p.cmds.Run(ctx, "git", "-C", p.cfg.RepoRoot, "rev-parse", rev)
+	out, err := p.gitRun(ctx, "-C", p.cfg.RepoRoot, "rev-parse", rev)
 	if err != nil {
 		return ""
 	}
@@ -572,7 +1145,7 @@ func (p *Pipeline) gitRevParse(ctx context.Context, rev string) string {
 }
 
 func (p *Pipeline) gitDiffNameOnly(ctx context.Context, oldSHA, newSHA string) ([]string, error) {
-	out, _, err := p.cmds.Run(ctx, "git", "-C", p.cfg.RepoRoot, "diff", "--name-only", oldSHA, newSHA)
+	out, err := p.gitRun(ctx, "-C", p.cfg.RepoRoot, "diff", "--name-only", oldSHA, newSHA)
 	if err != nil {
 		return nil, err
 	}
@@ -682,7 +1255,8 @@ func (p *Pipeline) sleep(ctx context.Context, d time.Duration) error {
 	}
 }
 
-// notify 发送 ntfy 通知。runner 镜像（alpine）没有 curl，用 Go net/http 直发，5s 超时。
+// notify 发送 ntfy 通知。镜像虽已含 curl，但保留 Go net/http 直发：无 shell 拼接
+// 注入面、少一次子进程开销（历史注释「runner 镜像没有 curl」已过时，R15 修正）。
 func (p *Pipeline) notify(ctx context.Context, title, priority, tags, body string) {
 	if p.cfg.NtfyURL == "" {
 		return

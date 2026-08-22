@@ -486,3 +486,28 @@ rollback(oldSHA, affected) {
 | 5 测试覆盖 | 84 | ①缺 logger_test；②缺 I2/I3 契约测试；③detect 无 golden 全矩阵；④缺 fake-docker 端到端（回滚/迁移阻塞路径）；⑤缺恢复 alive/dead 两态；⑥缺 Trigger 并发/竞态 | ①-④§13 新增 logger_test/contract_test/golden/fake-docker 端到端；⑤§13 runner_test 两态；⑥§13 handler_test 并发单例 | 96 |
 
 评分口径：每维在整改项全部落地（对应章节已具化为验收项/测试项）后按"失分点是否被消除"计分。v0.2 各维 ≥95，剩余扣分为刻意保留的非目标项（如 Windows 不跑真实容器部署、迁移机制不引入原生 down）与必须人工介入的操作（DB 迁移 down），不属本方案可消除项。
+
+---
+
+## 附录 B：2026-08-22 R1-R17 修复落地记录（zcode_update_review 复审整改）
+
+对照 `.hermes/reviews/zcode_update_review.md`（gascell 2026-08-20 双故障：无 GitHub SSH 凭据 + daocloud 403）逐项修复后的实现态，与 §3-§13 的差异以此为准：
+
+| 项 | 落地 |
+|----|------|
+| R1 | `deploy/Dockerfile` apk 增加 `openssh-client`（git 包不携带 ssh 二进制） |
+| R2/R17 | `UPDATE_GIT_HOME` 默认 `<REPO_ROOT>/.hermes/runner-home`（专用最小凭据家：.gitconfig + .ssh/{id_ed25519,known_hosts}，模板随仓库分发、真实 key 被 .gitignore 排除，见该目录 README）；步骤 1 增加 SSH 凭据自检（`ssh -o BatchMode=yes -o StrictHostKeyChecking=accept-new -T git@github.com`，accept-new 与 .gitconfig 的 core.sshCommand 同为 TOFU——known_hosts 模板只含注释，裸 BatchMode 会因主机钥确认假失败；以报文非退出码判定）；server 的 gitLsRemote 同样透传 HOME |
+| R3 | 失败命令 stderr 尾部（脱敏：URL 凭据/Authorization，命令行回显同样脱敏——参数可能携带凭据）落会话日志；build/migrate 改 `RunTee` 行流转发（CmdRunner 接口新增 RunTee） |
+| R4 | 新增 `<REPO_ROOT>/.hermes/updates/deployed-sha` 部署事实源（双引擎共用）；「无变更跳过」（步骤 3/4）前校验 HEAD == deployed_sha，标记缺失视为不一致（删标记后触发必须全量对齐重建自愈，不得跳过+重写标记掩盖空转；升级后首次无变更触发一次性全量重建）；不等则全量对齐重建；build 失败时仓库 checkout 回 OLD_SHA |
+| R5 | `stepDeploy` 顺序对齐 update.sh：postgres 检查 → migrate → epics/ioc/interpret → server → py-agent；测试断言 migrate 先于任何业务容器 `up -d` |
+| R6 | compose 全部 `/opt/hiaf-lab-system` 改 `${REPO_ROOT:-/opt/hiaf-lab-system}`（含挂载与 UPDATE_BACKUP_DIR/LOG_DIR 嵌套默认）；步骤 1 增加 `git rev-parse --git-dir` 仓库路径断言 |
+| R7 | 步骤 5 前置 base 镜像预检：解析 compose build/image + Dockerfile FROM，`docker image inspect` 逐个校验；本地缺失先 `docker pull`（行流转发，在线环境不误伤新 base 版本），拉取也失败（镜像源 403 等）才报「按 deploy/scripts/README.md 离线导入」并中止 |
+| R8 | 更新锁移至 `<REPO_ROOT>/.hermes/updates/lab-update.lock`：update.sh（flock）与 lab-update（`system.AcquireUpdateLock`，syscall.Flock）统一争用 |
+| R9 | stepHealth 移植 update.sh 两项附加验证：schema 版本核对（migrations 文件数 vs schema_migrations）与 server 容器内前端 embed 产物核对（含工作区 dist 漂移），失败计入不健康触发回滚 |
+| R10 | server 看门狗读 `UPDATE_UPDATE_TIMEOUT`（与 runner 同源），且 spawn 时透传 runner |
+| R11 | Spawn 前预检镜像内 `/usr/local/bin/lab-update`（防旧镜像自举死锁）；`docker run -d` 后轮询确认 Running，已退出则 `docker logs` 回读原因并清理（不再 `--rm`，退出容器由 Kill/Reap 兜底清理）；日志打开失败路径补 ingestError |
+| R12 | 分支统一读 `UPDATE_BRANCH`（默认 main）：pull/回滚 returnToBranchAt/behind/runner 透传 |
+| R13 | git 命令套 120s 单命令超时（`Pipeline.gitRun`，对齐 update.sh GIT_TIMEOUT） |
+| R14 | stepHealth 3 轮重试窗口（默认轮间隔 5s，Pipeline.healthRetryDelay） |
+| R15 | 过时注释修正；`compose config --services` 与硬编码列表双向差集告警（warn 不阻断）；`UPDATE_SCRIPT_PATH` 落地（server env → spawnConfig → shell 引擎 entrypoint） |
+| R16 | update.sh fetch 前凭据自检 + 报错改为可操作指引（不再误导为「手动解决冲突」） |

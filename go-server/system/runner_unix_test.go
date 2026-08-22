@@ -11,26 +11,28 @@ import (
 
 func TestBuildRunnerCmdGoEngine(t *testing.T) {
 	cfg := RunnerSpawnConfig{
-		SessionID:   "upd_abc1234567",
-		RepoRoot:    "/opt/hiaf-lab-system",
-		ComposeFile: "deploy/docker-compose.yml",
-		ProjectName: "deploy",
-		LogFile:     "/updates/lab-update-upd_abc1234567.log",
-		DoneFile:    "/updates/lab-update-upd_abc1234567.done",
-		LogDir:      "/updates",
-		RunnerImage: "deploy-server",
-		NtfyURL:     "http://localhost:8085/lab-system",
-		BackupDir:   "/backups",
-		RunUID:      1000,
-		RunGID:      1000,
-		DockerGID:   993,
-		Engine:      "go",
-		Flags:       []string{"--force"},
+		SessionID:     "upd_abc1234567",
+		RepoRoot:      "/opt/hiaf-lab-system",
+		ComposeFile:   "deploy/docker-compose.yml",
+		ProjectName:   "deploy",
+		LogFile:       "/updates/lab-update-upd_abc1234567.log",
+		DoneFile:      "/updates/lab-update-upd_abc1234567.done",
+		LogDir:        "/updates",
+		RunnerImage:   "deploy-server",
+		NtfyURL:       "http://localhost:8085/lab-system",
+		BackupDir:     "/backups",
+		Branch:        "main",
+		UpdateTimeout: 30 * time.Minute,
+		RunUID:        1000,
+		RunGID:        1000,
+		DockerGID:     993,
+		Engine:        "go",
+		Flags:         []string{"--force"},
 	}
 	args := buildRunnerCmd(cfg)
 
 	for _, want := range []string{
-		"run", "-d", "--rm",
+		"run", "-d",
 		"lab-updater-upd_abc1234567", // 容器名 = 白名单 session id
 		"--network", "host",
 		"/var/run/docker.sock:/var/run/docker.sock",
@@ -45,6 +47,10 @@ func TestBuildRunnerCmdGoEngine(t *testing.T) {
 			t.Errorf("go 引擎 docker run 缺参数 %q: %v", want, args)
 		}
 	}
+	// R11：不使用 --rm——退出容器需保留供失败时 docker logs 回读，由 Kill/Reap 清理
+	if hasArg(args, "--rm") {
+		t.Errorf("docker run 不应带 --rm（R11）: %v", args)
+	}
 	if !hasArg(args, "-e") || !hasArg(args, "UPDATE_DONE_FILE=/updates/lab-update-upd_abc1234567.done") {
 		t.Errorf("缺少 UPDATE_DONE_FILE env: %v", args)
 	}
@@ -53,6 +59,13 @@ func TestBuildRunnerCmdGoEngine(t *testing.T) {
 	}
 	if !hasArg(args, "SERVICE_TOKEN_FILE=/opt/hiaf-lab-system/deploy/secrets/service_token.txt") {
 		t.Errorf("缺少 SERVICE_TOKEN_FILE env（告警中心上报闭环）: %v", args)
+	}
+	// R12/R10：分支与看门狗预算透传 runner
+	if !hasArg(args, "UPDATE_BRANCH=main") {
+		t.Errorf("缺少 UPDATE_BRANCH env（R12）: %v", args)
+	}
+	if !hasArg(args, "UPDATE_UPDATE_TIMEOUT=30m0s") {
+		t.Errorf("缺少 UPDATE_UPDATE_TIMEOUT env（R10）: %v", args)
 	}
 }
 
@@ -70,9 +83,15 @@ func TestBuildRunnerCmdShellEngine(t *testing.T) {
 	}
 }
 
-// TestDockerRunnerSpawnViaFake 用 fake CmdRunner 验证 Spawn 组装 `docker run -d` 并返回容器名。
+// TestDockerRunnerSpawnViaFake 用 fake CmdRunner 验证 Spawn 组装 `docker run -d`、
+// 镜像内 lab-update 预检通过并返回容器名（R11）。
 func TestDockerRunnerSpawnViaFake(t *testing.T) {
-	fake := &fakeCmdRunner{fn: func(c Call) (string, string, error) { return "", "", nil }}
+	fake := &fakeCmdRunner{fn: func(c Call) (string, string, error) {
+		if hasArg(c.Args, "inspect") {
+			return "running 0\n", "", nil // spawn 后容器进入运行态
+		}
+		return "", "", nil
+	}}
 	r := &dockerRunner{cmds: fake, cfg: RunnerSpawnConfig{
 		RepoRoot:    "/r",
 		ComposeFile: "deploy/docker-compose.yml",
@@ -88,8 +107,117 @@ func TestDockerRunnerSpawnViaFake(t *testing.T) {
 		t.Errorf("Spawn id = %q", id)
 	}
 	calls := fake.callsSnapshot()
-	if len(calls) != 1 || calls[0].Name != "docker" || !hasArg(calls[0].Args, "run") {
-		t.Errorf("Spawn 应执行 docker run: %v", calls)
+	// 第一步先探测镜像内 lab-update 存在（R11 自举死锁预防）；
+	// 命令形如 `run --rm --entrypoint sh img -c "test -x /usr/local/bin/lab-update"`。
+	if len(calls) == 0 || !strings.Contains(strings.Join(calls[0].Args, " "), "/usr/local/bin/lab-update") {
+		t.Errorf("Spawn 应先预检镜像内 lab-update: %v", callNames(calls))
+	}
+	for _, c := range calls {
+		if hasArg(c.Args, "run") && hasArg(c.Args, "--rm") {
+			if hasArg(c.Args, "lab-updater-") { // 主 run 不带 --rm；预检探测容器可用 --rm
+				t.Errorf("runner 主容器不应带 --rm: %v", c.Args)
+			}
+		}
+	}
+}
+
+// TestDockerRunnerSpawnBinaryMissing 镜像内缺 lab-update（旧镜像自举死锁）→ Spawn
+// 直接失败并提示重建镜像，不进入 docker run 主流程（R11）。
+func TestDockerRunnerSpawnBinaryMissing(t *testing.T) {
+	fake := &fakeCmdRunner{fn: func(c Call) (string, string, error) {
+		if strings.Contains(strings.Join(c.Args, " "), "/usr/local/bin/lab-update") && hasArg(c.Args, "--entrypoint") {
+			return "", "sh: test: not found", context.DeadlineExceeded
+		}
+		return "", "", nil
+	}}
+	r := &dockerRunner{cmds: fake, cfg: RunnerSpawnConfig{
+		RepoRoot:    "/r",
+		ComposeFile: "deploy/docker-compose.yml",
+		RunnerImage: "oldimg",
+		Engine:      "go",
+	}}
+	sess := &UpdateSession{ID: "upd_abc1234567", logFile: "/l.log", doneFile: "/l.done"}
+	_, err := r.Spawn(context.Background(), sess)
+	if err == nil {
+		t.Fatal("镜像缺 lab-update 应 Spawn 失败")
+	}
+	if !strings.Contains(err.Error(), "lab-update") || !strings.Contains(err.Error(), "重建") {
+		t.Errorf("错误应提示重建镜像: %v", err)
+	}
+	for _, c := range fake.callsSnapshot() {
+		if hasArg(c.Args, "lab-updater-upd_abc1234567") {
+			t.Errorf("预检失败后不应派发主容器: %v", c.Args)
+		}
+	}
+}
+
+// TestDockerRunnerSpawnContainerExited docker run -d 成功但容器立即退出（旧镜像
+// entrypoint 127）→ Spawn 失败并回读 docker logs 写明原因、rm 残留容器（R11）。
+func TestDockerRunnerSpawnContainerExited(t *testing.T) {
+	fake := &fakeCmdRunner{fn: func(c Call) (string, string, error) {
+		switch {
+		case hasArg(c.Args, "inspect"):
+			return "exited 127\n", "", nil
+		case hasArg(c.Args, "logs"):
+			return "lab-update: not found\n", "", nil
+		default:
+			return "", "", nil
+		}
+	}}
+	r := &dockerRunner{cmds: fake, cfg: RunnerSpawnConfig{
+		RepoRoot:    "/r",
+		ComposeFile: "deploy/docker-compose.yml",
+		RunnerImage: "img",
+		Engine:      "go",
+	}}
+	sess := &UpdateSession{ID: "upd_abc1234567", logFile: "/l.log", doneFile: "/l.done"}
+	_, err := r.Spawn(context.Background(), sess)
+	if err == nil {
+		t.Fatal("容器启动即退出应 Spawn 失败")
+	}
+	if !strings.Contains(err.Error(), "127") || !strings.Contains(err.Error(), "lab-update: not found") {
+		t.Errorf("错误应含退出码与容器日志: %v", err)
+	}
+	calls := fake.callsSnapshot()
+	if !containsCall(calls, "docker", "logs", "lab-updater-upd_abc1234567") {
+		t.Errorf("应 docker logs 回读失败原因: %v", callNames(calls))
+	}
+	if !containsCall(calls, "docker", "rm", "-f", "lab-updater-upd_abc1234567") {
+		t.Errorf("应清理退出容器: %v", callNames(calls))
+	}
+}
+
+// TestDockerRunnerSpawnCreatedStatePolls R11 回归：docker run 返回与 start 完成
+// 之间的 created 窗口（Status=created、ExitCode=0）不得被误判「启动即退出」rm 掉，
+// 应继续轮询直到进入运行态。
+func TestDockerRunnerSpawnCreatedStatePolls(t *testing.T) {
+	inspects := 0
+	fake := &fakeCmdRunner{fn: func(c Call) (string, string, error) {
+		if hasArg(c.Args, "inspect") {
+			inspects++
+			if inspects == 1 {
+				return "created 0\n", "", nil
+			}
+			return "running 0\n", "", nil
+		}
+		return "", "", nil
+	}}
+	r := &dockerRunner{cmds: fake, cfg: RunnerSpawnConfig{
+		RepoRoot:    "/r",
+		ComposeFile: "deploy/docker-compose.yml",
+		RunnerImage: "img",
+		Engine:      "go",
+	}}
+	sess := &UpdateSession{ID: "upd_abc1234567", logFile: "/l.log", doneFile: "/l.done"}
+	id, err := r.Spawn(context.Background(), sess)
+	if err != nil {
+		t.Fatalf("created 态应继续轮询而非误判失败: %v", err)
+	}
+	if id != RunnerID("lab-updater-upd_abc1234567") {
+		t.Errorf("Spawn id = %q", id)
+	}
+	if containsCall(fake.callsSnapshot(), "docker", "rm") {
+		t.Error("created 态容器不应被 rm（那是误杀刚创建的容器）")
 	}
 }
 
@@ -140,12 +268,13 @@ func TestBuildRunnerCmdContainerNameFromSession(t *testing.T) {
 }
 
 // TestDockerRunnerReap 孤儿回收：超阈值的 lab-updater-* 容器（不在受保护名单）被 kill+rm；
-// 受保护（仍存活 session）与未超阈值的容器不受影响。
+// 受保护（仍存活 session）与未超阈值的容器不受影响；已退出的容器直接 rm 兜底清理
+// （R11：spawn 不再 --rm，正常退出的容器由此回收）。
 func TestDockerRunnerReap(t *testing.T) {
 	fake := &fakeCmdRunner{fn: func(c Call) (string, string, error) {
 		switch {
 		case hasArg(c.Args, "ps"):
-			return "cid-orphan\ncid-young\ncid-protected\n", "", nil
+			return "cid-orphan\ncid-young\ncid-protected\ncid-exited\n", "", nil
 		case hasArg(c.Args, "inspect"):
 			name := "lab-updater-upd_xxxx"
 			if hasArg(c.Args, "cid-young") {
@@ -154,12 +283,19 @@ func TestDockerRunnerReap(t *testing.T) {
 			if hasArg(c.Args, "cid-protected") {
 				name = "lab-updater-upd_protect"
 			}
+			if hasArg(c.Args, "cid-exited") {
+				name = "lab-updater-upd_exited0"
+			}
 			// orphan/protected 启动于 1 小时前（超阈值），young 为 1 分钟前（不超阈值）
 			started := time.Now().Add(-time.Hour).UTC().Format(time.RFC3339)
 			if hasArg(c.Args, "cid-young") {
 				started = time.Now().Add(-time.Minute).UTC().Format(time.RFC3339)
 			}
-			return name + " true " + started, "", nil
+			running := "true"
+			if hasArg(c.Args, "cid-exited") {
+				running = "false"
+			}
+			return name + " " + running + " " + started, "", nil
 		default:
 			return "", "", nil
 		}
@@ -171,9 +307,13 @@ func TestDockerRunnerReap(t *testing.T) {
 	}
 	calls := fake.callsSnapshot()
 	killNames := map[string]bool{}
+	rmNames := map[string]bool{}
 	for _, c := range calls {
 		if hasArg(c.Args, "kill") && len(c.Args) > 0 {
 			killNames[c.Args[len(c.Args)-1]] = true
+		}
+		if hasArg(c.Args, "rm") && len(c.Args) > 0 {
+			rmNames[c.Args[len(c.Args)-1]] = true
 		}
 	}
 	if !killNames["lab-updater-upd_xxxx"] {
@@ -184,6 +324,12 @@ func TestDockerRunnerReap(t *testing.T) {
 	}
 	if killNames["lab-updater-upd_young0"] {
 		t.Errorf("未超阈值容器不应被 kill: %v", callNames(calls))
+	}
+	if !rmNames["lab-updater-upd_exited0"] {
+		t.Errorf("已退出容器应被 rm 兜底清理（R11）: %v", callNames(calls))
+	}
+	if killNames["lab-updater-upd_exited0"] {
+		t.Errorf("已退出容器无需 kill: %v", callNames(calls))
 	}
 }
 

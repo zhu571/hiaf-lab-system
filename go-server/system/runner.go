@@ -1,6 +1,9 @@
 package system
 
-import "context"
+import (
+	"context"
+	"time"
+)
 
 // RunnerID 标识一个 runner：容器名 lab-updater-<session>（unix，go/shell 双引擎共用）、
 // 或本地占位 local:<session>（windows 进程内开发实现）。
@@ -35,11 +38,17 @@ type RunnerSpawnConfig struct {
 	NtfyURL     string
 	BackupDir   string
 	GitHome     string // runner 内 git HOME（只读挂载 .gitconfig/.ssh）
-	RunUID      int
-	RunGID      int
-	DockerGID   int // --group-add，访问宿主机 docker.sock
-	Engine      string
-	Flags       []string
+	// ScriptPath shell 引擎脚本路径（R15：UPDATE_SCRIPT_PATH；空 = <repo>/.hermes/update.sh）。
+	ScriptPath string
+	// Branch 更新分支（R12：UPDATE_BRANCH，透传给 runner 内 lab-update）。
+	Branch string
+	// UpdateTimeout 更新阶段看门狗（R10：与 server 看门狗同源，透传给 runner）。
+	UpdateTimeout time.Duration
+	RunUID        int
+	RunGID        int
+	DockerGID     int // --group-add，访问宿主机 docker.sock
+	Engine        string
+	Flags         []string
 }
 
 // updateFlags 把 Service 的布尔 flag 转成 lab-update 入参（--force/--dry-run/--no-rollback）。
@@ -60,18 +69,21 @@ func (s *Service) updateFlags() []string {
 // spawnConfig 组装 dockerRunner 派发参数（session 相关字段由 Spawn 填充）。
 func (s *Service) spawnConfig() RunnerSpawnConfig {
 	return RunnerSpawnConfig{
-		RepoRoot:    s.repoRoot,
-		ComposeFile: s.composeFile,
-		ProjectName: s.projectName,
-		LogDir:      s.logDir,
-		RunnerImage: s.runnerImage,
-		NtfyURL:     s.ntfyURL,
-		BackupDir:   s.backupDir,
-		GitHome:     s.gitHome,
-		RunUID:      s.runUID,
-		RunGID:      s.runGID,
-		DockerGID:   s.dockerGID,
-		Engine:      s.engine,
-		Flags:       s.updateFlags(),
+		RepoRoot:      s.repoRoot,
+		ComposeFile:   s.composeFile,
+		ProjectName:   s.projectName,
+		LogDir:        s.logDir,
+		RunnerImage:   s.runnerImage,
+		NtfyURL:       s.ntfyURL,
+		BackupDir:     s.backupDir,
+		GitHome:       s.gitHome,
+		ScriptPath:    s.scriptPath,
+		Branch:        s.branch,
+		UpdateTimeout: s.timeout,
+		RunUID:        s.runUID,
+		RunGID:        s.runGID,
+		DockerGID:     s.dockerGID,
+		Engine:        s.engine,
+		Flags:         s.updateFlags(),
 	}
 }

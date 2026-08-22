@@ -14,14 +14,17 @@ set -euo pipefail
 # UPDATE_ENGINE=go（独立 runner 容器），本脚本仅作宿主机兜底。
 # ============================================================
 
-# 并发锁：同一时刻只允许一个更新进程
-exec 9>"${UPDATE_LOCK_FILE:-/tmp/lab-update.lock}"
-flock -n 9 || { echo "another update in progress"; exit 1; }
-
+# 并发锁（R8）：锁文件放在仓库共享目录，与 Web 触发的 runner（lab-update 的
+# syscall.Flock）争用同一把锁，防止 Web 更新与宿主机手工脚本并发操作同一仓库。
+# 锁必须在 REPO_ROOT 解析之后获取，路径才能落在共享目录。
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 REPO_ROOT="$(dirname "$SCRIPT_DIR")"
 COMPOSE_FILE="$REPO_ROOT/deploy/docker-compose.yml"
 cd "$REPO_ROOT"
+
+mkdir -p "$REPO_ROOT/.hermes/updates" 2>/dev/null || true
+exec 9>"${UPDATE_LOCK_FILE:-$REPO_ROOT/.hermes/updates/lab-update.lock}"
+flock -n 9 || { echo "another update in progress"; exit 1; }
 
 FORCE=false
 DRY_RUN=false
@@ -72,6 +75,30 @@ GIT_TIMEOUT=120                        # 单条 git 命令上限（秒）
 BRANCH="${UPDATE_BRANCH:-$(git rev-parse --abbrev-ref HEAD)}"
 NTFY_URL="${UPDATE_NTFY_URL:-http://localhost:8085/lab-system}"
 
+# ---- 已部署版本标记（R4）：部署事实源，Go 引擎与 update.sh 双引擎共用 ----
+# pull 前进了 HEAD 而构建/部署未完成时，标记与 HEAD 不一致；
+# 下次更新不得因「代码无变更」假成功跳过，必须继续走构建。
+DEPLOYED_SHA_FILE="$REPO_ROOT/.hermes/updates/deployed-sha"
+deployed_sha() { tr -d '[:space:]' < "$DEPLOYED_SHA_FILE" 2>/dev/null || true; }
+mark_deployed() {
+  mkdir -p "$REPO_ROOT/.hermes/updates" 2>/dev/null || true
+  git rev-parse HEAD > "$DEPLOYED_SHA_FILE" 2>/dev/null || true
+}
+# 构建失败时把仓库退回 OLD_SHA（R4）：保证 HEAD 永远与正在运行的镜像一致。
+revert_to_old() {
+  err "构建未完成，仓库回退到 $OLD_SHORT（保持 HEAD 与运行镜像一致，下次更新重新拉取）"
+  git checkout "$BRANCH" 2>/dev/null || true
+  git reset --hard "$OLD_SHA" 2>/dev/null || true
+}
+# deployed_matches <sha>：标记存在且等于 sha 才算「已部署与 HEAD 一致」；
+# 标记缺失视为不一致（R4 反例）：删掉标记后触发必须全量对齐重建自愈，
+# 而不是「跳过 + 重写标记」把 HEAD 超前镜像的状态永久掩盖成空转。
+# 代价是升级到本版本后的首次无变更触发做一次全量重建（一次性，随后落标记）。
+deployed_matches() {
+  local d; d="$(deployed_sha)"
+  [ -n "$d" ] && [ "$d" = "$1" ]
+}
+
 # ---- 回滚函数 ----
 rollback() {
   # 回滚路径上任何一步失败都不应中断后续步骤（尤其是通知），
@@ -104,8 +131,11 @@ rollback() {
       -H "Priority: urgent" \
       -H "Tags: warning,skull" \
       -d "Rollback to $OLD_SHORT blocked: schema may have changed. Manual migrate down required." >/dev/null 2>&1 || true
-    # 回滚被阻塞（未执行），工作区切回分支上的新代码
+    # 回滚被阻塞（未执行）：仓库停在 OLD_SHA 并回到分支（与 Go 引擎 returnToBranchAt
+    # 对齐，I4 双引擎语义一致）。若留在分支新代码上，工作区是新代码而容器跑旧镜像，
+    # 与运行镜像一致的不变量被破坏；下次更新的 diff 检测语义也随之漂移。
     git checkout "$BRANCH" 2>/dev/null || true
+    git reset --hard "$OLD_SHA" 2>/dev/null || true
     set -e
     exit 1
   fi
@@ -186,6 +216,31 @@ fi
 # ---- 步骤 3：拉取代码 ----
 log "===== 步骤 3/7：git pull ====="
 
+# 凭据自检（R16）：SSH 远程时先用 BatchMode 验证 deploy key 可用。
+# GitHub 认证成功时 ssh -T 退出码为 1，但报文含 successfully authenticated，
+# 因此以报文判定；失败时给出可操作指引，而不是 fetch 的裸 exit 128。
+# StrictHostKeyChecking=accept-new 与 runner-home/.gitconfig 的 core.sshCommand
+# 一致（TOFU）：仓库分发的 known_hosts 模板只含注释，裸 BatchMode（默认 ask）
+# 会因主机钥确认直接假失败，而实际 git fetch 走 accept-new 本可成功。
+ORIGIN_URL="$(git remote get-url origin 2>/dev/null || echo "")"
+case "$ORIGIN_URL" in
+  git@*|ssh://*)
+    SSH_HOST="$(echo "$ORIGIN_URL" | sed -E 's#^(ssh://)?git@([^:/]+).*#\2#')"
+    if command -v ssh &>/dev/null; then
+      SSH_MSG="$(ssh -o BatchMode=yes -o StrictHostKeyChecking=accept-new -o ConnectTimeout=10 -T "git@$SSH_HOST" 2>&1 || true)"
+      if echo "$SSH_MSG" | grep -q "successfully authenticated"; then
+        log "SSH 凭据自检通过 (git@$SSH_HOST)"
+      else
+        err "GitHub SSH 凭据不可用 (git@$SSH_HOST): $SSH_MSG"
+        err "请按 .hermes/runner-home/README.md 配置 deploy key，或设置 UPDATE_GIT_HOME 指向含 .ssh/ 的凭据目录。"
+        exit 1
+      fi
+    else
+      warn "宿主机无 ssh 客户端，跳过凭据自检（fetch 失败时再排查）"
+    fi
+    ;;
+esac
+
 timeout "$GIT_TIMEOUT" git fetch origin
 BEFORE_PULL=$(git rev-parse HEAD)
 
@@ -198,24 +253,23 @@ elif $FORCE; then
   NEW_SHA=$BEFORE_PULL
   NEW_SHORT="${NEW_SHA:0:7}"
 else
-  err "git pull 失败，中止。请手动解决冲突。"
+  err "git pull 失败，中止。请依次检查：网络连通、GitHub 凭据（.hermes/runner-home/README.md）、本地是否偏离分支。"
   exit 1
 fi
 
 if [ "$BEFORE_PULL" = "$NEW_SHA" ] && [ "$FORCE" = false ]; then
-  log "代码无变更，跳过更新。"
-  exit 0
+  if deployed_matches "$NEW_SHA"; then
+    log "代码无变更，跳过更新。"
+    mark_deployed
+    exit 0
+  fi
+  warn "无新提交，但 HEAD 与已部署版本不一致（上次更新未完成），继续部署。"
 fi
 
 # ---- 步骤 4：变更检测 ----
 log "===== 步骤 4/7：变更检测 ====="
 
 CHANGED_FILES=$(git diff --name-only "$OLD_SHA" "$NEW_SHA" 2>/dev/null || echo "")
-
-if [ -z "$CHANGED_FILES" ] && [ "$FORCE" = false ]; then
-  log "无文件变更，跳过构建。"
-  exit 0
-fi
 
 detect_services() {
   local svc=""
@@ -253,12 +307,25 @@ detect_services() {
   fi
 }
 
-AFFECTED_SERVICES=$(detect_services | xargs)
-if $FORCE; then
-  log "--force: 强制全量重建"
+if [ -z "$CHANGED_FILES" ] && [ "$FORCE" = false ]; then
+  # R4：diff 为空 ≠ 已部署。HEAD 与已部署标记不一致（上次更新未完成）时
+  # 全量对齐重建，而不是假成功退出。
+  if deployed_matches "$NEW_SHA"; then
+    log "无文件变更，跳过构建。"
+    mark_deployed
+    exit 0
+  fi
+  warn "无文件变更，但 HEAD 与已部署版本不一致（上次更新未完成），执行全量对齐重建。"
   AFFECTED_SERVICES="ALL"
+  AFFECTED_LIST=$(echo "server py-agent py-agent-interpret epics-gateway ioc migrate" | tr ' ' '\n')
+else
+  AFFECTED_SERVICES=$(detect_services | xargs)
+  if $FORCE; then
+    log "--force: 强制全量重建"
+    AFFECTED_SERVICES="ALL"
+  fi
+  AFFECTED_LIST=$(echo "$AFFECTED_SERVICES" | tr ' ' '\n' | sed '/^$/d')
 fi
-AFFECTED_LIST=$(echo "$AFFECTED_SERVICES" | tr ' ' '\n' | sed '/^$/d')
 
 log "变更文件数: $(echo "$CHANGED_FILES" | wc -l)"
 log "受影响服务: ${AFFECTED_SERVICES:-none}"
@@ -275,21 +342,27 @@ fi
 
 if [ "$AFFECTED_SERVICES" = "none" ]; then
   log "无服务需要更新。"
+  mark_deployed
   exit 0
 fi
 
 # ---- 步骤 5：按依赖顺序构建 ----
 log "===== 步骤 5/7：构建镜像 ====="
 
+# R4：构建失败时仓库退回 OLD_SHA（revert_to_old），保证 HEAD 与运行镜像一致，
+# 避免「pull 已前进、build 失败 → 下次更新假成功跳过」的空转陷阱。
 if echo "$AFFECTED_SERVICES" | grep -q "ALL"; then
   warn "compose 文件或 Dockerfile 变更，执行全量重建"
-  docker compose -f "$COMPOSE_FILE" build --pull server py-agent py-agent-interpret epics-gateway ioc migrate
+  docker compose -f "$COMPOSE_FILE" build --pull server py-agent py-agent-interpret epics-gateway ioc migrate || { revert_to_old; exit 1; }
   AFFECTED_LIST=$(echo "server py-agent py-agent-interpret epics-gateway ioc migrate" | tr ' ' '\n')
 else
   for svc in epics-gateway ioc py-agent-interpret migrate; do
     if echo "$AFFECTED_LIST" | grep -q "$svc"; then
       log "构建 $svc …"
-      docker compose -f "$COMPOSE_FILE" build "$svc"
+      if ! docker compose -f "$COMPOSE_FILE" build "$svc"; then
+        revert_to_old
+        exit 1
+      fi
       if [ "$svc" = "py-agent-interpret" ]; then
         AFFECTED_SERVICES=$(echo "$AFFECTED_SERVICES" | sed 's/py-agent //')
       fi
@@ -298,7 +371,10 @@ else
 
   if echo "$AFFECTED_LIST" | grep -q "server"; then
     log "构建 server（含前端）…"
-    docker compose -f "$COMPOSE_FILE" build server
+    if ! docker compose -f "$COMPOSE_FILE" build server; then
+      revert_to_old
+      exit 1
+    fi
   fi
 
   if echo "$AFFECTED_LIST" | grep -q "py-agent"; then
@@ -451,6 +527,9 @@ else
   $NO_ROLLBACK || rollback
   exit 1
 fi
+
+# 全栈健康 + 附加验证通过：落已部署版本标记（R4），作为下次「无变更跳过」的事实源。
+mark_deployed
 
 if [ -n "${BACKUP_FILE:-}" ] && [ -f "$BACKUP_FILE" ]; then
   log "数据库备份保留: $BACKUP_FILE"
