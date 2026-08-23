@@ -6,6 +6,8 @@
     labctl projects list --status active
     labctl issues create prj_001 --title "..." --severity high
     labctl alerts list --status active
+    labctl update status
+    labctl update run
 """
 
 import json
@@ -495,6 +497,104 @@ def weekly_generate(ctx, week_start, no_notify):
 def weekly_recent(ctx, limit):
     """查看最近周报（复用 experiences 查询，tags=weekly_summary）"""
     run_command(ctx, commands.run_weekly_recent, limit=limit)
+
+
+# ---------------------------------------------------------------- update
+@cli.group("update")
+def update():
+    """系统更新（admin）：status / run"""
+
+
+@update.command("status")
+@click.pass_context
+def update_status(ctx):
+    """查询当前版本与远端差异（behind/can_update）"""
+    run_command(ctx, commands.run_update_status)
+
+
+@update.command("run")
+@click.option("--no-wait", is_flag=True, help="只触发更新不跟踪日志流（脚本后台触发场景）")
+@click.option("--timeout", "timeout_s", type=int, default=2400, show_default=True,
+              help="日志流读超时（秒），默认为服务端 30 分钟看门狗略留余量")
+@click.pass_context
+def update_run(ctx, no_wait, timeout_s):
+    """触发系统更新并实时跟踪执行日志（需 admin 交互登录）
+
+    默认订阅 SSE 日志流直到更新结束：done 且成功退出码 0，error / done 但
+    失败退出码 1；--no-wait 只触发并打印 session_id。
+    """
+    api = build_api(ctx.obj["base_url"])
+    human = ctx.obj["human"]
+    try:
+        result = commands.run_update_trigger(api)
+    except LabctlError as exc:
+        _emit_update_error(exc)
+    session_id = result.get("session_id", "")
+    if no_wait:
+        payload = dict(result)
+        payload["stream"] = f"/api/v1/admin/system/update/stream/{session_id}"
+        emit_result(payload, human)
+        return
+    if human:
+        click.echo(f"[UPDATE] 已触发更新 session={session_id}，当前版本 {result.get('current', '')}，开始跟踪日志流…")
+    else:
+        click.echo(json.dumps({"event": "triggered", "session_id": session_id,
+                               "current": result.get("current", "")}, ensure_ascii=False))
+    saw_done = saw_error = False
+    try:
+        for event, payload in commands.run_update_stream(api, session_id, timeout_s=timeout_s):
+            if human:
+                click.echo(_render_update_event_human(event, payload))
+            else:
+                click.echo(json.dumps({"event": event, "data": payload}, ensure_ascii=False))
+            if event == "error":
+                saw_error = True
+                break
+            if event == "done":
+                saw_done = True
+                if isinstance(payload, dict) and (payload.get("success") is False
+                                                  or payload.get("exit_code")):
+                    saw_error = True  # done 但失败（exit_code 非零 / success=false）同判失败
+                break
+    except LabctlError as exc:
+        _emit_update_error(exc)
+    if saw_error:
+        raise click.exceptions.Exit(EXIT_ERROR)
+    if not saw_done:
+        emit_error(LabctlError(
+            f"更新日志流已结束但未收到 done/error 结果事件（session={session_id}），"
+            "请用 labctl update status 或重新订阅确认结果", code="stream_ended_without_result"))
+        raise click.exceptions.Exit(EXIT_ERROR)
+
+
+def _emit_update_error(exc):
+    """更新命令统一错误出口：透传错误 + 403 时补 admin 交互登录提示。"""
+    emit_error(exc)
+    if exc.status == 403 or exc.code in ("csrf_failed", "permission_denied"):
+        click.echo("提示：系统更新需要 admin 账号交互登录（labctl login <admin 用户名>）；"
+                   "LABCTL_SERVICE_TOKEN 服务账号通道的写操作会被服务端 CSRF 校验拒绝（403）",
+                   err=True)
+    code = EXIT_AUTH if (exc.status == 401 or exc.code in _AUTH_CODES) else EXIT_ERROR
+    raise click.exceptions.Exit(code)
+
+
+def _render_update_event_human(event, payload):
+    if not isinstance(payload, dict):
+        return f"[UPDATE] {payload}"
+    if event == "step":
+        step, total = payload.get("step"), payload.get("step_total")
+        label = f"步骤 {step}/{total}" if step and total else (payload.get("title") or "步骤")
+        title = payload.get("title", "")
+        return f"[UPDATE] {label}：{title}" if title and label != title else f"[UPDATE] {label}"
+    if event == "line":
+        return payload.get("text", "")
+    if event == "done":
+        old, new = payload.get("old_sha", ""), payload.get("new_sha", "")
+        sha = f"（{old[:8]}..{new[:8]}）" if old or new else ""
+        return f"[UPDATE] 完成 exit_code={payload.get('exit_code', 0)}{sha}"
+    if event == "error":
+        return f"[UPDATE] 失败：{payload.get('message', '')}"
+    return f"[UPDATE] {event}: {json.dumps(payload, ensure_ascii=False)}"
 
 
 def main():

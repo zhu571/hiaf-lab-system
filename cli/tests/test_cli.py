@@ -6,6 +6,8 @@ import unittest
 from pathlib import Path
 from unittest import mock
 
+import httpx
+
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
 from click.testing import CliRunner  # noqa: E402
@@ -308,6 +310,123 @@ class TestCliSubcommands(BaseCliTest):
         result = self.invoke(["logs", "list", "prj_1", "--status", "bogus"], api=api)
         self.assertEqual(result.exit_code, 2)  # click 参数校验失败
         self.assertIn("bogus", result.output)
+
+
+def _update_stream_response(lines):
+    body = "\n".join(lines) + "\n"
+    return httpx.Response(200, content=body.encode("utf-8"),
+                          headers={"content-type": "text/event-stream"})
+
+
+class TestCliUpdate(BaseCliTest):
+    def _api(self, handler):
+        return make_api(handler, access_token="at_1", refresh_token="rt_1", csrf_token="csrf_1")
+
+    @staticmethod
+    def _stream_handler(lines, trigger=None):
+        def handler(request):
+            if request.url.path == "/api/v1/admin/system/update":
+                return trigger or ok({"session_id": "upd_1", "current": "fc9e4f7"})
+            return _update_stream_response(lines)
+        return handler
+
+    def test_update_status(self):
+        api = self._api(lambda request: ok({"current": "fc9e4f7", "latest": "b0ef9e7",
+                                            "behind": 3, "can_update": True}))
+        result = self.invoke(["update", "status"], api=api)
+        self.assertEqual(result.exit_code, 0, result.output)
+        self.assertIn('"behind": 3', result.output)
+        self.assertIn("fc9e4f7", result.output)
+
+    def test_update_run_streams_until_done_exit_0(self):
+        lines = [
+            'data: {"seq":1,"type":"step","step":3,"step_total":7,"title":"git pull"}',
+            "",
+            'data: {"seq":2,"type":"line","text":"Already up to date."}',
+            "",
+            'data: {"seq":3,"type":"done","exit_code":0,"success":true,"old_sha":"aaaa1111","new_sha":"bbbb2222"}',
+            "",
+        ]
+        api = self._api(self._stream_handler(lines))
+        result = self.invoke(["update", "run"], api=api)
+        self.assertEqual(result.exit_code, 0, result.output)
+        self.assertIn('"session_id": "upd_1"', result.output)
+        self.assertIn('"event": "step"', result.output)
+        self.assertIn('"event": "done"', result.output)
+
+    def test_update_run_human_render(self):
+        lines = [
+            'data: {"seq":1,"type":"step","step":3,"step_total":7,"title":"git pull"}',
+            "",
+            'data: {"seq":2,"type":"done","exit_code":0,"success":true,"old_sha":"aaaa1111","new_sha":"bbbb2222"}',
+            "",
+        ]
+        api = self._api(self._stream_handler(lines))
+        result = self.invoke(["--human", "update", "run"], api=api)
+        self.assertEqual(result.exit_code, 0, result.output)
+        self.assertIn("[UPDATE] 步骤 3/7：git pull", result.output)
+        self.assertIn("[UPDATE] 完成 exit_code=0（aaaa1111..bbbb2222）", result.output)
+
+    def test_update_run_error_event_exit_1(self):
+        lines = [
+            'data: {"seq":1,"type":"line","text":"fatal: 无法访问远程"}',
+            "",
+            'data: {"seq":2,"type":"error","message":"git pull 失败（exit 128）"}',
+            "",
+        ]
+        api = self._api(self._stream_handler(lines))
+        result = self.invoke(["update", "run"], api=api)
+        self.assertEqual(result.exit_code, 1)
+        self.assertIn('"event": "error"', result.output)
+
+    def test_update_run_done_failed_exit_1(self):
+        lines = [
+            'data: {"seq":1,"type":"done","exit_code":1,"success":false}',
+            "",
+        ]
+        api = self._api(self._stream_handler(lines))
+        result = self.invoke(["update", "run"], api=api)
+        self.assertEqual(result.exit_code, 1)
+        self.assertIn('"event": "done"', result.output)
+
+    def test_update_run_no_wait(self):
+        captured = {}
+
+        def handler(request):
+            captured["method"] = request.method
+            captured["path"] = request.url.path
+            return ok({"session_id": "upd_1", "current": "fc9e4f7"})
+
+        api = self._api(handler)
+        result = self.invoke(["update", "run", "--no-wait"], api=api)
+        self.assertEqual(result.exit_code, 0, result.output)
+        self.assertEqual(captured["path"], "/api/v1/admin/system/update")
+        self.assertIn('"session_id": "upd_1"', result.output)
+        self.assertIn("/api/v1/admin/system/update/stream/upd_1", result.output)
+
+    def test_update_run_conflict_409(self):
+        api = self._api(lambda request: err(409, "update_in_progress", "已有更新任务正在执行"))
+        result = self.invoke(["update", "run"], api=api)
+        self.assertEqual(result.exit_code, 1)
+        self.assertIn("update_in_progress", result.output)
+
+    def test_update_run_csrf_403_hints_admin_login(self):
+        api = self._api(lambda request: err(403, "csrf_failed", "CSRF 校验失败", "req_csrf"))
+        result = self.invoke(["update", "run"], api=api)
+        self.assertEqual(result.exit_code, 2)  # csrf_failed 属认证类退出码
+        self.assertIn("csrf_failed", result.output)
+        self.assertIn("admin 账号交互登录", result.output)
+
+    def test_update_run_stream_404(self):
+        def handler(request):
+            if request.url.path == "/api/v1/admin/system/update":
+                return ok({"session_id": "upd_gone", "current": "fc9e4f7"})
+            return err(404, "session_not_found", "session 不存在")
+
+        api = self._api(handler)
+        result = self.invoke(["update", "run"], api=api)
+        self.assertEqual(result.exit_code, 1)
+        self.assertIn("stream_failed", result.output)
 
 
 class TestCliServiceToken(BaseCliTest):

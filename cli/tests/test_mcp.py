@@ -20,6 +20,7 @@ EXPECTED_TOOLS = {
     "labctl_runs_list", "labctl_runs_get", "labctl_runs_status",
     "labctl_alerts_list", "labctl_alerts_resolve",
     "labctl_logs_list", "labctl_logs_get",
+    "labctl_update_status", "labctl_update_trigger",
 }
 
 
@@ -65,6 +66,18 @@ class TestMCP(unittest.TestCase):
         content, _ = asyncio.run(mcp.call_tool("labctl_alerts_list", {}))
         payload = json.loads(content[0].text)
         self.assertEqual(payload["error"]["code"], "not_logged_in")
+
+    def test_tool_call_update(self):
+        _session["api"] = FakeAPI(result={"current": "fc9e4f7", "latest": "b0ef9e7",
+                                          "behind": 3, "can_update": True})
+        content, _ = asyncio.run(mcp.call_tool("labctl_update_status", {}))
+        payload = json.loads(content[0].text)
+        self.assertEqual(payload["behind"], 3)
+
+        _session["api"] = FakeAPI(result={"session_id": "upd_1", "current": "fc9e4f7"})
+        content, _ = asyncio.run(mcp.call_tool("labctl_update_trigger", {}))
+        payload = json.loads(content[0].text)
+        self.assertEqual(payload["session_id"], "upd_1")
 
     def test_tool_call_error_passthrough(self):
         _session["api"] = FakeAPI(error=LabctlError("当前用户无权访问该项目",
