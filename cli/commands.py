@@ -1,10 +1,14 @@
-"""8 子命令 21 个动作的命令实现。
+"""命令行动作的命令实现（login / 日报 / 项目 / 问题 / 测试数据 / 批次 / 告警 / 日志 / 经验 / 周报 / 系统更新）。
 
 全部经 REST API 调用服务端（不直连数据库），被 cli.py 与 mcp_server.py 共用；
 参数校验尽量薄（服务端为准），写操作由 api_client 自动附加 Idempotency-Key/CSRF。
 """
 
+import json
+import os
 from urllib.parse import urlsplit
+
+import httpx
 
 from cli.api_client import LabctlError
 
@@ -219,3 +223,87 @@ def run_experiences_list(api, status="", project_id="", page=1, per_page=20):
 def run_experiences_publish(api, experience_id):
     _require(experience_id, "experience_id")
     return api.request("POST", f"/api/v1/experiences/{experience_id}/publish")
+
+
+def run_update_status(api):
+    """查询系统版本与远端差异（admin 只读）。"""
+    return api.request("GET", "/api/v1/admin/system/version")
+
+
+def run_update_trigger(api):
+    """触发系统更新（admin + 审计 + 幂等），返回 {session_id, current}。
+
+    api.request 已解 WriteSuccess 信封取 data；这里再兜一层，兼容
+    返回整体信封 {data: {...}} 的调用形态（如自定义 client 未解包）。
+    """
+    result = api.request("POST", "/api/v1/admin/system/update")
+    if isinstance(result, dict) and "session_id" not in result \
+            and isinstance(result.get("data"), dict):
+        result = result["data"]
+    return result
+
+
+def run_update_stream(api, session_id, timeout_s=2400):
+    """订阅更新 SSE 日志流，yield (event, payload) 直到流关闭。
+
+    服务端事件 type：line / step / done / error（system/model.go SSEEvent）；
+    timeout_s 是 httpx 读超时（无新数据的上限），默认 2400s =
+    服务端 30min 看门狗略留余量。
+    """
+    _require(session_id, "session_id")
+    token = os.getenv("LABCTL_SERVICE_TOKEN", "") or api.access_token
+    if not token:
+        raise LabctlError("未登录：请先执行 labctl login 或设置 LABCTL_SERVICE_TOKEN",
+                          code="not_logged_in")
+    headers = {"Authorization": f"Bearer {token}", "Accept": "text/event-stream"}
+    url = f"{api.base_url}/api/v1/admin/system/update/stream/{session_id}"
+    try:
+        with api.client.stream("GET", url, headers=headers, timeout=timeout_s) as response:
+            if response.status_code != 200:
+                body = response.read().decode("utf-8", "replace")[:200]
+                raise LabctlError(
+                    f"更新日志流订阅失败（HTTP {response.status_code}）：{body}",
+                    code="stream_failed", status=response.status_code)
+            yield from _iter_sse_events(response)
+    except httpx.TimeoutException as exc:
+        raise LabctlError(
+            f"更新日志流超时（{timeout_s}s 内无新数据），session={session_id}；"
+            "更新可能仍在执行，可稍后重新订阅查看结果", code="stream_timeout") from exc
+    except httpx.TransportError as exc:
+        raise LabctlError(
+            f"更新日志流连接中断（{exc.__class__.__name__}），session={session_id}",
+            code="stream_disconnected") from exc
+
+
+def _iter_sse_events(response):
+    """逐行解析 SSE：`event:`/`data:` 行收集，空行分发一个事件。
+
+    服务端只发 `id:`/`data:` 行（无 `event:`），事件名回退取 data JSON 的
+    `type` 字段；payload 尝试 JSON 解析，失败给原文。`id:` 行与
+    `: keepalive` 注释行忽略（注释行仅用于保活，不构成事件）。
+    """
+    event_name, data_lines = "", []
+    for line in response.iter_lines():
+        if line == "":
+            if data_lines or event_name:
+                raw = "\n".join(data_lines)
+                try:
+                    payload = json.loads(raw)
+                except ValueError:
+                    payload = raw
+                if event_name:
+                    event = event_name
+                else:
+                    event = payload.get("type", "message") if isinstance(payload, dict) else "message"
+                yield event, payload
+            event_name, data_lines = "", []
+        elif line.startswith("event:"):
+            event_name = _sse_field_value(line, "event")
+        elif line.startswith("data:"):
+            data_lines.append(_sse_field_value(line, "data"))
+
+
+def _sse_field_value(line, field):
+    """取 `field: value` 的值：按 SSE 规范剥掉冒号后的一个前导空格。"""
+    value = line[len(field) + 1:]
+    return value[1:] if value.startswith(" ") else value

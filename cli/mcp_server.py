@@ -217,6 +217,23 @@ def labctl_logs_get(log_id: str) -> str:
     return _call(commands.run_logs_get, log_id=log_id)
 
 
+# ---------------------------------------------------------------- 系统更新
+@mcp.tool()
+def labctl_update_status() -> str:
+    """查询系统版本与远端差异（需 admin；只读，返回 current/latest/behind/can_update）。"""
+    return _call(commands.run_update_status)
+
+
+@mcp.tool()
+def labctl_update_trigger() -> str:
+    """触发系统更新（需 admin 交互登录；服务账号 token 写操作会被 CSRF 校验拒绝）。
+
+    返回 session_id 与当前版本；日志流跟踪不适合 MCP 轮询模型，由
+    Web 端 SSE 或 labctl update run 订阅。
+    """
+    return _call(commands.run_update_trigger)
+
+
 def main():
     mcp.run(transport="stdio")
 

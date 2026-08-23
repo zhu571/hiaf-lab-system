@@ -44,7 +44,7 @@ CI/Agent 场景免交互登录：`echo -e "username\npassword" | labctl login --
 > 该 token 只能由登录响应获得——服务账号 JWT 透传通道没有 csrf token，**写操作会返回
 > 403 `csrf_failed`（原样透传 + request_id）**，只读操作为主；需要写操作请用交互登录通道。
 
-## 子命令覆盖表（8 子命令 / 21 动作）
+## 子命令覆盖表（11 子命令 / 29 动作）
 
 | 子命令 | 动作 | 端点（main.go 已核实） | 角色要求（服务端强校验） |
 |--------|------|------------------------|--------------------------|
@@ -56,6 +56,31 @@ CI/Agent 场景免交互登录：`echo -e "username\npassword" | labctl login --
 | `runs` | `list <pid>` / `get <id>` / `status <id> --action` | GET /projects/{id}/experiment-runs、GET /experiment-runs/{id}、PATCH /experiment-runs/{id} | 列表 viewer+；status 流转由服务端状态机校验 |
 | `alerts` | `list` / `resolve <id>` | GET /alerts、POST /alerts/resolve | 列表全员；resolve 限 admin/maintainer |
 | `logs` | `list <pid>` / `get <id>` | GET /projects/{id}/logs、GET /logs/{id} | 列表 viewer+；详情 service 内校验 |
+| `experiences` | `extract-candidates` / `list` / `publish <id>` | POST /experiences/extract-candidates、GET /experiences、POST /experiences/{id}/publish | extract 限 maintainer/admin；publish 项目 maintainer+（全局仅 admin） |
+| `weekly` | `generate` / `recent` | POST /weekly/summary、GET /experiences?tags=weekly_summary | generate 限 maintainer/admin |
+| `update` | `status` / `run [--no-wait] [--timeout N]` | GET /admin/system/version、POST /admin/system/update、GET /admin/system/update/stream/{id}（SSE） | 全部限 admin |
+
+## 系统更新（admin）
+
+```bash
+labctl update status                     # 版本差异：current/latest/behind/can_update
+labctl update run                        # 触发更新 + 实时跟踪 SSE 日志流直到结束
+labctl update run --no-wait              # 只触发不跟踪（脚本后台场景），打印 session_id
+labctl update run --timeout 3600         # 日志流读超时（秒），默认 2400（服务端 30min 看门狗略留余量）
+```
+
+- **需 admin 交互登录**：`labctl login <admin 用户名>`。`LABCTL_SERVICE_TOKEN`
+  服务账号通道没有 csrf token，触发更新（写操作）会被服务端 CSRF 校验拒绝
+  （403 `csrf_failed`，CLI 附带"需要 admin 登录"提示）；`update status` 为只读，不受影响。
+- `run` 默认订阅 `GET /admin/system/update/stream/{sessionId}`，把每个事件实时打印：
+  JSON 模式逐事件输出 `{"event": "...", "data": {...}}` 行；`--human` 渲染成
+  `[UPDATE] 步骤 3/7：git pull` 样式可读行。
+- 退出码：`done` 且成功 = 0；收到 `error` 事件、`done` 但 `exit_code` 非零 /
+  `success=false`、或日志流异常中断（超时/断连/未收到结果事件）= 1。
+- 常见服务端错误透传：409 `update_in_progress`（已有更新在执行）、
+  500 `script_missing` / `update_trigger_failed`。
+- 更新期间 server 可能重建（compose up），日志流断连属预期——runner 侧有磁盘日志，
+  更新结束后重连同一 session 可回放完整日志；session 内存保留 1 小时。
 
 ## 安全设计
 
@@ -79,7 +104,8 @@ py-agent/.venv/bin/python -m cli.mcp_server
 LABCTL_SERVICE_TOKEN=<jwt> py-agent/.venv/bin/python -m cli.mcp_server
 ```
 
-工具前缀 `labctl_*`（21 个），全部复用 `cli/commands.py` 命令执行函数，全部经 REST 调用服务端。
+工具前缀 `labctl_*`（23 个，含 `labctl_update_status` / `labctl_update_trigger`——SSE 日志流
+不适合 MCP 轮询模型，未暴露为工具），全部复用 `cli/commands.py` 命令执行函数，全部经 REST 调用服务端。
 `labctl_logout` 后进程内会话清空（重新调用工具前需再次 `labctl_login` 或设 `LABCTL_SERVICE_TOKEN`）。
 MCP 自身无独立鉴权——**安全边界 = 启动进程所持 token 的权限**：仅限内网/受信主机启动，
 不在公网暴露 MCP stdio 桥；工具调用由服务端权限/审计/限流兜底。
