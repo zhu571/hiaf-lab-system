@@ -2,7 +2,9 @@ package system
 
 import (
 	"context"
+	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 )
@@ -49,6 +51,38 @@ func TestNewServiceUpdateEnvDefaults(t *testing.T) {
 	}
 	if s2.gitHome != "/srv/keys" {
 		t.Errorf("gitHome env = %q, want /srv/keys", s2.gitHome)
+	}
+}
+
+func TestGitLsRemoteUsesDeployKey(t *testing.T) {
+	dir := t.TempDir()
+	gitHome := filepath.Join(dir, "runner-home")
+	capture := filepath.Join(dir, "ssh-command")
+	git := filepath.Join(dir, "git")
+	if err := os.WriteFile(git, []byte("#!/bin/sh\nprintf '%s\\n' \"$GIT_SSH_COMMAND\" > \"$CAPTURE\"\nprintf '0123456789012345678901234567890123456789\\tHEAD\\n'\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", dir)
+	t.Setenv("CAPTURE", capture)
+	s := &Service{repoRoot: dir, gitHome: gitHome}
+	if got := s.gitLsRemote(); got != "0123456789012345678901234567890123456789" {
+		t.Fatalf("gitLsRemote = %q", got)
+	}
+	data, err := os.ReadFile(capture)
+	if err != nil {
+		t.Fatal(err)
+	}
+	command := string(data)
+	for _, want := range []string{
+		"-o BatchMode=yes",
+		"-o StrictHostKeyChecking=accept-new",
+		"-o IdentitiesOnly=yes",
+		"-i " + filepath.Join(gitHome, ".ssh", "id_ed25519"),
+		"-o UserKnownHostsFile=" + filepath.Join(gitHome, ".ssh", "known_hosts"),
+	} {
+		if !strings.Contains(command, want) {
+			t.Errorf("GIT_SSH_COMMAND 缺少 %q: %q", want, command)
+		}
 	}
 }
 

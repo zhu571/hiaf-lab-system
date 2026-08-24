@@ -45,14 +45,15 @@ chmod 700 .ssh && chmod 600 .ssh/id_ed25519
 ## 自检
 
 配置完成后触发一次更新即可验证：流水线步骤 1（预检）会执行
-`ssh -o BatchMode=yes -T git@github.com` 凭据自检——认证成功日志为
+`git ls-remote origin HEAD` 凭据自检——认证成功日志为
 「SSH 凭据自检通过」，失败会给出上面同样的配置指引并中止。
 
 宿主机手工验证：
 
 ```bash
-HOME=$PWD/.hermes/runner-home ssh -o BatchMode=yes -T git@github.com
-# 期望 stderr: Hi <user>! You've successfully authenticated, ... （退出码 1 是正常的）
+GIT_SSH_COMMAND="ssh -o BatchMode=yes -o StrictHostKeyChecking=accept-new -o IdentitiesOnly=yes -i $PWD/.hermes/runner-home/.ssh/id_ed25519 -o UserKnownHostsFile=$PWD/.hermes/runner-home/.ssh/known_hosts" \
+  git ls-remote git@github.com:zhu571/hiaf-lab-system.git HEAD
+# 期望输出一行 HEAD commit SHA
 ```
 
 ## 安全说明

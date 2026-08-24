@@ -216,27 +216,26 @@ fi
 # ---- 步骤 3：拉取代码 ----
 log "===== 步骤 3/7：git pull ====="
 
-# 凭据自检（R16）：SSH 远程时先用 BatchMode 验证 deploy key 可用。
-# GitHub 认证成功时 ssh -T 退出码为 1，但报文含 successfully authenticated，
-# 因此以报文判定；失败时给出可操作指引，而不是 fetch 的裸 exit 128。
-# StrictHostKeyChecking=accept-new 与 runner-home/.gitconfig 的 core.sshCommand
-# 一致（TOFU）：仓库分发的 known_hosts 模板只含注释，裸 BatchMode（默认 ask）
-# 会因主机钥确认直接假失败，而实际 git fetch 走 accept-new 本可成功。
+# 凭据自检（R16）：SSH 远程用 git ls-remote 复用 GIT_SSH_COMMAND/deploy key。
 ORIGIN_URL="$(git remote get-url origin 2>/dev/null || echo "")"
 case "$ORIGIN_URL" in
   git@*|ssh://*)
     SSH_HOST="$(echo "$ORIGIN_URL" | sed -E 's#^(ssh://)?git@([^:/]+).*#\2#')"
-    if command -v ssh &>/dev/null; then
-      SSH_MSG="$(ssh -o BatchMode=yes -o StrictHostKeyChecking=accept-new -o ConnectTimeout=10 -T "git@$SSH_HOST" 2>&1 || true)"
-      if echo "$SSH_MSG" | grep -q "successfully authenticated"; then
-        log "SSH 凭据自检通过 (git@$SSH_HOST)"
-      else
-        err "GitHub SSH 凭据不可用 (git@$SSH_HOST): $SSH_MSG"
-        err "请按 .hermes/runner-home/README.md 配置 deploy key，或设置 UPDATE_GIT_HOME 指向含 .ssh/ 的凭据目录。"
-        exit 1
-      fi
+    SSH_MSG_FILE=$(mktemp)
+    if timeout "$GIT_TIMEOUT" git ls-remote origin HEAD 2>"$SSH_MSG_FILE" | grep -q '[[:xdigit:]]'; then
+      rm -f "$SSH_MSG_FILE"
+      log "SSH 凭据自检通过 (git@$SSH_HOST)"
     else
-      warn "宿主机无 ssh 客户端，跳过凭据自检（fetch 失败时再排查）"
+      SSH_MSG=$(tail -n 5 "$SSH_MSG_FILE")
+      rm -f "$SSH_MSG_FILE"
+      case "$SSH_MSG" in
+        *"Could not resolve"*|*"Connection timed out"*|*"Connection refused"*|*"Network is unreachable"*)
+          err "GitHub SSH 远程不可达 (git@$SSH_HOST)：请检查网络、DNS 与防火墙。" ;;
+        *)
+          err "GitHub SSH 凭据不可用 (git@$SSH_HOST): $SSH_MSG"
+          err "请按 .hermes/runner-home/README.md 配置 deploy key，或设置 UPDATE_GIT_HOME 指向含 .ssh/ 的凭据目录。" ;;
+      esac
+      exit 1
     fi
     ;;
 esac
@@ -348,6 +347,35 @@ fi
 
 # ---- 步骤 5：按依赖顺序构建 ----
 log "===== 步骤 5/7：构建镜像 ====="
+
+# 构建前检查实际 Dockerfile 的 FROM 镜像；本地缺失先拉取，失败时给离线导入指引。
+base_dockerfiles() {
+  if echo "$AFFECTED_SERVICES" | grep -q "ALL"; then
+    printf '%s\n' deploy/Dockerfile deploy/Dockerfile.migrate py-agent/Dockerfile py-agent/ioc/Dockerfile go-server/epics-gateway/Dockerfile
+    return
+  fi
+  echo "$AFFECTED_LIST" | grep -q '^server$' && echo deploy/Dockerfile
+  echo "$AFFECTED_LIST" | grep -q '^migrate$' && echo deploy/Dockerfile.migrate
+  echo "$AFFECTED_LIST" | grep -Eq '^py-agent(-interpret)?$' && echo py-agent/Dockerfile
+  echo "$AFFECTED_LIST" | grep -q '^ioc$' && echo py-agent/ioc/Dockerfile
+  echo "$AFFECTED_LIST" | grep -q '^epics-gateway$' && echo go-server/epics-gateway/Dockerfile
+}
+
+MISSING_BASE_IMAGES=""
+while read -r image; do
+  [ -z "$image" ] && continue
+  if ! docker image inspect "$image" &>/dev/null; then
+    log "base 镜像 $image 本地缺失，尝试拉取 …"
+    docker pull "$image" || MISSING_BASE_IMAGES="$MISSING_BASE_IMAGES $image"
+  fi
+done < <(while read -r dockerfile; do awk '$1 == "FROM" { print ($2 ~ /^--platform=/ ? $3 : $2) }' "$dockerfile"; done < <(base_dockerfiles) | sort -u)
+
+if [ -n "$MISSING_BASE_IMAGES" ]; then
+  err "基础镜像缺失:${MISSING_BASE_IMAGES}"
+  err "请按 deploy/scripts/README.md 离线导入（docker save / docker load）后再触发更新。"
+  revert_to_old
+  exit 1
+fi
 
 # R4：构建失败时仓库退回 OLD_SHA（revert_to_old），保证 HEAD 与运行镜像一致，
 # 避免「pull 已前进、build 失败 → 下次更新假成功跳过」的空转陷阱。

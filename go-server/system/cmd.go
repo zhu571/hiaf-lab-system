@@ -14,9 +14,10 @@ import (
 // Call 记录一次命令调用（fake runner 用于断言流水线的命令序列）。
 // ctxErr 记录调用时刻的 ctx 取消状态（测试断言超时/取消传播用；生产路径不读）。
 type Call struct {
-	Name   string
-	Args   []string
-	ctxErr error
+	Name        string
+	Args        []string
+	ctxErr      error
+	hasDeadline bool
 }
 
 // CmdRunner 抽象 updater.go 的全部 docker/git 子命令执行。
@@ -93,7 +94,8 @@ type fakeCmdRunner struct {
 }
 
 func (f *fakeCmdRunner) Run(ctx context.Context, name string, args ...string) (string, string, error) {
-	call := Call{Name: name, Args: args, ctxErr: ctx.Err()}
+	_, hasDeadline := ctx.Deadline()
+	call := Call{Name: name, Args: args, ctxErr: ctx.Err(), hasDeadline: hasDeadline}
 	f.mu.Lock()
 	f.calls = append(f.calls, call)
 	f.mu.Unlock()

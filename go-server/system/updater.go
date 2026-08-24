@@ -873,13 +873,8 @@ func (p *Pipeline) deployedAligned() bool {
 
 // ---------- SSH 凭据自检（R2） ----------
 
-// checkGitSSH 在 origin 为 SSH 协议时用 `ssh -o BatchMode=yes -T git@<host>` 预检
-// deploy key 可用性：GitHub 认证成功时退出码仍为 1，但 stderr 含
-// "successfully authenticated"，因此以报文而非退出码判定。StrictHostKeyChecking
-// 取 accept-new，与 runner-home/.gitconfig 的 core.sshCommand 一致（TOFU）：仓库
-// 分发的 known_hosts 模板只含注释，裸 BatchMode（默认 ask）会因主机钥确认直接
-// 假失败，而实际 git fetch 走 accept-new 本可成功。网络不可达不拦截（留给 fetch
-// 报详细错误），凭据/主机钥变更问题给出可操作指引。
+// checkGitSSH 在 origin 为 SSH 协议时用 git ls-remote 预检 deploy key；这样会复用
+// runner 注入的 GIT_SSH_COMMAND，不再依赖 OpenSSH 忽略 HOME 的身份文件查找规则。
 func (p *Pipeline) checkGitSSH(ctx context.Context) error {
 	out, err := p.gitRun(ctx, "-C", p.cfg.RepoRoot, "remote", "get-url", "origin")
 	if err != nil || strings.TrimSpace(out) == "" {
@@ -889,26 +884,24 @@ func (p *Pipeline) checkGitSSH(ctx context.Context) error {
 	if host == "" {
 		return nil // https 等非 SSH 协议无需凭据自检
 	}
-	_, serr, runErr := p.cmds.Run(ctx, "ssh", "-o", "BatchMode=yes", "-o", "StrictHostKeyChecking=accept-new", "-o", "ConnectTimeout=10", "-T", "git@"+host)
-	msg := sanitizeOutput(serr)
-	if strings.Contains(msg, "successfully authenticated") {
+	args := []string{"-C", p.cfg.RepoRoot, "ls-remote", "origin", "HEAD"}
+	gctx, cancel := context.WithTimeout(ctx, gitTimeout)
+	defer cancel()
+	out, serr, runErr := p.cmds.Run(gctx, "git", args...)
+	if runErr == nil && strings.TrimSpace(out) != "" {
 		p.log.Linef("[UPDATE] SSH 凭据自检通过 (git@%s)", host)
 		return nil
 	}
-	if runErr != nil && strings.Contains(runErr.Error(), "executable file not found") {
-		return fmt.Errorf("runner 镜像缺少 ssh 客户端（openssh-client），无法走 SSH 远程；请重建 server 镜像后重试（deploy/Dockerfile 已包含 openssh-client）")
+	if runErr != nil {
+		p.logCmdTail("git", args, serr)
 	}
+	msg := sanitizeOutput(serr)
 	for _, kw := range []string{"timed out", "Could not resolve", "Connection refused", "Network is unreachable", "Connection closed"} {
-		if strings.Contains(msg, kw) {
-			p.log.Linef("[WARN]  SSH 连接 %s 失败（网络不可达？），交由 git fetch 报详细错误", host)
-			return nil
-
+		if strings.Contains(strings.ToLower(msg), strings.ToLower(kw)) {
+			return fmt.Errorf("GitHub SSH 远程不可达（git@%s）：请检查网络、DNS 与防火墙", host)
 		}
 	}
-	p.log.Linef("[ERROR] SSH 凭据自检失败 (git@%s):", host)
-	for _, ln := range tailLines(msg, 5) {
-		p.log.Linef("  | %s", ln)
-	}
+	p.log.Linef("[ERROR] SSH 凭据自检失败 (git@%s)", host)
 	return fmt.Errorf("GitHub SSH 凭据不可用（git@%s）：请按 .hermes/runner-home/README.md 配置 deploy key（UPDATE_GIT_HOME 默认 .hermes/runner-home，需含 .ssh/id_ed25519 与 known_hosts）", host)
 }
 
