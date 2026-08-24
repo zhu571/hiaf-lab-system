@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
@@ -244,19 +245,22 @@ func (s *Service) gitRevParse(rev string) string {
 }
 
 // gitLsRemote 查询远程 origin/HEAD，网络不可达时返回空字符串。
-// R2：配置了 gitHome（deploy-key 目录）时透传 HOME，让 server 容器内的
-// ls-remote 与 runner 一样能用到 deploy key（版本页 latest 不再恒为空）。
 func (s *Service) gitLsRemote() string {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 	cmd := exec.CommandContext(ctx, "git", "-C", s.repoRoot, "ls-remote", "origin", "HEAD")
 	cmd.Env = append(os.Environ(), "GIT_TERMINAL_PROMPT=0")
 	if s.gitHome != "" {
-		cmd.Env = append(cmd.Env, "HOME="+s.gitHome)
+		cmd.Env = append(cmd.Env, "HOME="+s.gitHome, "GIT_SSH_COMMAND="+gitSSHCommand(s.gitHome))
 	}
 	out, err := cmd.Output()
 	if err != nil {
-		slog.Warn("git ls-remote failed", "error", err)
+		var exitErr *exec.ExitError
+		stderr := ""
+		if errors.As(err, &exitErr) {
+			stderr = strings.Join(tailLines(sanitizeOutput(string(exitErr.Stderr)), 5), "\n")
+		}
+		slog.Warn("git ls-remote failed", "error", err, "stderr_tail", stderr)
 		return ""
 	}
 	fields := strings.Fields(string(out))
@@ -264,6 +268,10 @@ func (s *Service) gitLsRemote() string {
 		return ""
 	}
 	return fields[0]
+}
+
+func gitSSHCommand(gitHome string) string {
+	return "ssh -o BatchMode=yes -o StrictHostKeyChecking=accept-new -o IdentitiesOnly=yes -i " + filepath.Join(gitHome, ".ssh", "id_ed25519") + " -o UserKnownHostsFile=" + filepath.Join(gitHome, ".ssh", "known_hosts")
 }
 
 func (s *Service) gitRevListCount(a, b string) int {

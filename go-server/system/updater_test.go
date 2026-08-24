@@ -36,8 +36,9 @@ type pipelineHandler struct {
 	services      string
 	// origin：git remote get-url origin 的返回（空 = 非 SSH 场景，跳过凭据自检）。
 	origin string
-	// sshOK：SSH 凭据自检是否认证成功（GitHub -T 成功时退出码仍为 1）。
-	sshOK bool
+	// sshOK/sshStderr：git ls-remote 凭据自检结果。
+	sshOK     bool
+	sshStderr string
 	// missingImages：docker image inspect 报缺失的镜像（R7 base 镜像预检）。
 	missingImages map[string]bool
 	// schemaVersion：psql 查询 schema_migrations 的模拟返回（R9）。
@@ -79,6 +80,15 @@ func (h *pipelineHandler) git(c Call) (string, string, error) {
 			return "\n", "", nil
 		}
 		return h.origin + "\n", "", nil
+	case hasArg(args, "ls-remote"):
+		if h.sshOK {
+			return "newsha\tHEAD\n", "", nil
+		}
+		stderr := h.sshStderr
+		if stderr == "" {
+			stderr = "git@github.com: Permission denied (publickey)."
+		}
+		return "", stderr, errors.New("exit status 128")
 	case hasArg(args, "fetch"):
 		if h.fetchErr != nil {
 			return "", h.fetchStderr, h.fetchErr
@@ -952,7 +962,7 @@ func TestPipelineBuildStreamsOutputAndFailureReason(t *testing.T) {
 
 // ---------- R2：SSH 凭据预检 ----------
 
-// TestPipelineSSHPrecheckFailsFast origin 为 SSH 且凭据不可用 → 步骤 1 就以可操作
+// TestPipelineSSHPrecheckFailsFast origin 为 SSH 且 ls-remote 报凭据不可用 → 步骤 1 就以可操作
 // 报错中止（而不是步骤 3 的裸 exit 128）。
 func TestPipelineSSHPrecheckFailsFast(t *testing.T) {
 	rev := &struct{ after bool }{}
@@ -976,9 +986,17 @@ func TestPipelineSSHPrecheckFailsFast(t *testing.T) {
 	if containsCall(fake.callsSnapshot(), "git", "fetch") {
 		t.Error("凭据自检失败后不应再执行 git fetch")
 	}
+	for _, c := range fake.callsSnapshot() {
+		if c.match("git", "ls-remote", "origin", "HEAD") && !c.hasDeadline {
+			t.Error("git ls-remote 预检必须受单命令超时保护")
+		}
+		if c.Name == "ssh" {
+			t.Error("预检不应直接调用 ssh")
+		}
+	}
 }
 
-// TestPipelineSSHPrecheckPasses 凭据自检通过（GitHub -T 成功报文 + 退出码 1）→ 流水线正常走完。
+// TestPipelineSSHPrecheckPasses git ls-remote 成功 → 流水线正常走完。
 func TestPipelineSSHPrecheckPasses(t *testing.T) {
 	rev := &struct{ after bool }{}
 	h := &pipelineHandler{
@@ -988,7 +1006,7 @@ func TestPipelineSSHPrecheckPasses(t *testing.T) {
 		sshOK:  true,
 		onPull: func() { rev.after = true },
 	}
-	p, _, logPath, _ := newTestPipeline(t, nil, h)
+	p, fake, logPath, _ := newTestPipeline(t, nil, h)
 
 	if code := p.Run(context.Background()); code != 0 {
 		t.Fatalf("Run = %d, want 0", code)
@@ -996,6 +1014,32 @@ func TestPipelineSSHPrecheckPasses(t *testing.T) {
 	data, _ := os.ReadFile(logPath)
 	if !strings.Contains(string(data), "SSH 凭据自检通过 (git@github.com)") {
 		t.Error("缺少凭据自检通过日志")
+	}
+	calls := fake.callsSnapshot()
+	if !containsCall(calls, "git", "ls-remote", "origin", "HEAD") {
+		t.Error("凭据自检应执行 git ls-remote origin HEAD")
+	}
+	if containsCall(calls, "ssh") {
+		t.Error("凭据自检不应直接调用 ssh")
+	}
+}
+
+func TestPipelineSSHPrecheckNetworkErrorHasNoDeployKeyAdvice(t *testing.T) {
+	h := &pipelineHandler{
+		rev:       func() string { return "oldsha" },
+		origin:    "git@github.com:zhu571/hiaf-lab-system.git",
+		sshStderr: "ssh: Could not resolve hostname github.com: Temporary failure in name resolution",
+	}
+	p, _, logPath, _ := newTestPipeline(t, nil, h)
+	if code := p.Run(context.Background()); code != 1 {
+		t.Fatalf("Run = %d, want 1", code)
+	}
+	data, _ := os.ReadFile(logPath)
+	if !strings.Contains(string(data), "请检查网络、DNS 与防火墙") {
+		t.Error("网络失败应给出网络排查指引")
+	}
+	if strings.Contains(string(data), "runner-home/README.md") {
+		t.Error("网络失败不应误报 deploy key 配置指引")
 	}
 }
 
