@@ -72,25 +72,26 @@ func defaultLogDir() string {
 
 // UpdateSession 记录一次更新任务的内存状态，日志同时落盘到 logFile 供进程重启后回放。
 type UpdateSession struct {
-	ID         string
-	Status     string // "running" | "done"
-	ExitCode   int
-	OldSHA     string
-	NewSHA     string
-	LogBuffer  *RingBuffer // 内存环形日志缓冲
-	history    []SSEEvent  // recoverFromDisk 重建的历史事件序列
-	doneEvent  SSEEvent    // finish 时记录的最终 done 事件
-	logFile    string      // {logDir}/lab-update-{id}.log（runner 写入）
-	doneFile   string      // {logDir}/lab-update-{id}.done
-	runnerFile string      // {logDir}/lab-update-{id}.runner（持久化 runner ID，重启恢复用）
-	subs       map[chan SSEEvent]struct{}
-	subsCount  int
-	maxSubs    int
-	seq        int
-	done       chan struct{}
-	once       sync.Once
-	DoneAt     time.Time
-	mu         sync.Mutex
+	ID          string
+	Status      string // "running" | "done"
+	ExitCode    int
+	OldSHA      string
+	NewSHA      string
+	LogBuffer   *RingBuffer // 内存环形日志缓冲
+	history     []SSEEvent  // recoverFromDisk 重建的历史事件序列
+	errorEvents []SSEEvent  // 非日志错误（如 Spawn 失败），供迟到的 SSE 订阅者回放
+	doneEvent   SSEEvent    // finish 时记录的最终 done 事件
+	logFile     string      // {logDir}/lab-update-{id}.log（runner 写入）
+	doneFile    string      // {logDir}/lab-update-{id}.done
+	runnerFile  string      // {logDir}/lab-update-{id}.runner（持久化 runner ID，重启恢复用）
+	subs        map[chan SSEEvent]struct{}
+	subsCount   int
+	maxSubs     int
+	seq         int
+	done        chan struct{}
+	once        sync.Once
+	DoneAt      time.Time
+	mu          sync.Mutex
 
 	runnerID     RunnerID    // runner 标识（lab-updater-<id> / pid:N / local:<id>）
 	timeoutTimer *time.Timer // 超时看门狗，finish 时 Stop

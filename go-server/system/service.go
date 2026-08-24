@@ -716,9 +716,9 @@ func (s *UpdateSession) unsubscribe(ch chan SSEEvent) {
 	}
 }
 
-// ingestError 以与日志行共享的 seq 计数器投递错误事件（不写日志文件/环形缓冲）。
+// ingestError 以与日志行共享的 seq 计数器投递并保存错误事件。
 // live 广播的 error 若不带 seq（seq=0），会被前端按 `seq <= lastSeq` 去重丢弃，
-// spawn 失败/超时/中断的具体原因用户将看不到；done 后丢弃，避免反超 done 序号。
+// spawn 失败发生在 Trigger 返回前，必须可回放，否则迟到的订阅者只能看到裸 done。
 func (s *UpdateSession) ingestError(message string) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -727,6 +727,7 @@ func (s *UpdateSession) ingestError(message string) {
 	}
 	s.seq++
 	evt := SSEEvent{Seq: s.seq, Timestamp: time.Now().Format(time.RFC3339Nano), Type: "error", Message: message}
+	s.errorEvents = append(s.errorEvents, evt)
 	s.broadcastLocked(evt)
 }
 
@@ -994,12 +995,14 @@ func (s *UpdateSession) replaySnapshot() []SSEEvent {
 		for _, ln := range s.LogBuffer.Snapshot() {
 			out = append(out, ringLineToEvent(ln))
 		}
+		out = append(out, s.errorEvents...)
 		return out
 	}
 	var out []SSEEvent
 	for _, ln := range s.LogBuffer.Snapshot() {
 		out = append(out, ringLineToEvent(ln))
 	}
+	out = append(out, s.errorEvents...)
 	if s.Status == "done" && s.doneEvent.Seq != 0 {
 		out = append(out, s.doneEvent)
 	}
