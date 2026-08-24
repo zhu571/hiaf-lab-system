@@ -584,8 +584,8 @@ func (p *Pipeline) verifySchemaVersion(ctx context.Context) bool {
 	return true
 }
 
-// verifyFrontendEmbed 核对 server 容器内 embed 的前端产物非空，并与工作区
-// web-ui/dist 对比（R9，移植 update.sh 附加验证 2，防白屏回归——AGENTS.md PR 清单项）。
+// verifyFrontendEmbed 核对 server 容器内 embed 的前端产物非空
+//（R9，移植 update.sh 附加验证 2，防白屏回归——AGENTS.md PR 清单项）。
 func (p *Pipeline) verifyFrontendEmbed(ctx context.Context) bool {
 	p.log.Linef("验证前端产物（server 容器内 embed 的 static）…")
 	out, _, err := p.cmds.Run(ctx, "docker", p.composeArgs("exec", "-T", "server", "sh", "-c",
@@ -594,18 +594,7 @@ func (p *Pipeline) verifyFrontendEmbed(ctx context.Context) bool {
 		p.log.Linef("[ERROR] server 容器内未发现前端静态产物（/app/static/assets/*.js 为空，疑似白屏风险）")
 		return false
 	}
-	embedded := filepath.Base(strings.TrimSpace(strings.Fields(out)[0]))
-	p.log.Linef("容器内产物: %s", embedded)
-	local, gerr := filepath.Glob(filepath.Join(p.cfg.RepoRoot, "web-ui", "dist", "assets", "*.js"))
-	if gerr != nil || len(local) == 0 {
-		p.log.Linef("[WARN]  工作区无 web-ui/dist 产物，跳过对比（容器内产物已验证非空）")
-		return true
-	}
-	if filepath.Base(local[0]) != embedded {
-		p.log.Linef("[ERROR] 前端产物不一致: 容器 %s vs 工作区 %s（embed/构建过期？）", embedded, filepath.Base(local[0]))
-		return false
-	}
-	p.log.Linef("前端产物与工作区 web-ui/dist 一致")
+	p.log.Linef("容器内产物: %s", filepath.Base(strings.TrimSpace(strings.Fields(out)[0])))
 	return true
 }
 

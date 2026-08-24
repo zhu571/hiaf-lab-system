@@ -1270,8 +1270,8 @@ func TestPipelineHealthEmbedMissing(t *testing.T) {
 	}
 }
 
-// TestPipelineHealthEmbedDrift 容器内产物与工作区 web-ui/dist 不一致 → 不健康（R9）。
-func TestPipelineHealthEmbedDrift(t *testing.T) {
+// TestPipelineHealthEmbedDifferentHash 容器与工作区来自不同构建、哈希不同，但均非空 → 成功（R9）。
+func TestPipelineHealthEmbedDifferentHash(t *testing.T) {
 	rev := &struct{ after bool }{}
 	h := &pipelineHandler{
 		rev:    defaultRev(rev, "oldsha", "newsha"),
@@ -1287,12 +1287,12 @@ func TestPipelineHealthEmbedDrift(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if code := p.Run(context.Background()); code != 1 {
-		t.Fatalf("Run = %d, want 1", code)
+	if code := p.Run(context.Background()); code != 0 {
+		t.Fatalf("Run = %d, want 0（跨构建哈希不同不应误判）", code)
 	}
 	data, _ := os.ReadFile(logPath)
-	if !strings.Contains(string(data), "前端产物不一致") || !strings.Contains(string(data), "index-DIFFERENT.js") {
-		t.Errorf("缺少产物不一致日志: %s", data)
+	if strings.Contains(string(data), "前端产物不一致") {
+		t.Errorf("跨构建哈希不同不应报错: %s", data)
 	}
 }
 
