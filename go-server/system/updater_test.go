@@ -150,7 +150,7 @@ func (h *pipelineHandler) docker(c Call) (string, string, error) {
 			h.services = "postgres\nmigrate\nepics-gateway\ninfluxdb\ngrafana\nioc\nserver\npy-agent\npy-agent-interpret\nntfy\n"
 		}
 		return h.services, "", nil
-	case hasArg(args, "config") && hasArg(args, "--images"):
+	case hasArg(args, "images") && hasArg(args, "-q"):
 		if h.images == "" {
 			h.images = "repo-server\n"
 		}

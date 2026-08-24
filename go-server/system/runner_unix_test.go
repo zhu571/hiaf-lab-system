@@ -4,6 +4,7 @@ package system
 
 import (
 	"context"
+	"os"
 	"strings"
 	"testing"
 	"time"
@@ -232,6 +233,54 @@ func TestDockerRunnerSpawnContainerExited(t *testing.T) {
 	}
 }
 
+// Spawn 在 Trigger 返回前就失败时，labctl 只能事后订阅；容器无日志文件
+// 也必须回放 docker logs 原因，不能只返回 done exit_code=-1。
+func TestSpawnExitedWithoutLogReplaysError(t *testing.T) {
+	fake := &fakeCmdRunner{fn: func(c Call) (string, string, error) {
+		switch {
+		case hasArg(c.Args, "inspect"):
+			return "exited 127\n", "", nil
+		case hasArg(c.Args, "logs"):
+			return "lab-update: not found\n", "", nil
+		default:
+			return "", "", nil
+		}
+	}}
+	dir := t.TempDir()
+	id := "upd_abc1234567"
+	logPath, donePath, runnerPath := sessionPaths(dir, id)
+	sess := &UpdateSession{
+		ID: id, Status: "running", LogBuffer: NewRingBuffer(ringBufferCap),
+		subs: make(map[chan SSEEvent]struct{}), done: make(chan struct{}),
+		logFile: logPath, doneFile: donePath, runnerFile: runnerPath, maxSubs: 4,
+	}
+	svc := NewService(t.TempDir())
+	svc.logDir = dir
+	svc.runner = &dockerRunner{cmds: fake, cfg: RunnerSpawnConfig{
+		RepoRoot: "/r", ComposeFile: "deploy/docker-compose.yml", RunnerImage: "img", Engine: "go",
+	}}
+	svc.mu.Lock()
+	svc.sessions[id] = sess
+	svc.mu.Unlock()
+	svc.runScript(sess)
+
+	if _, err := os.Stat(logPath); !os.IsNotExist(err) {
+		t.Fatalf("失败 runner 不应创建日志文件: %v", err)
+	}
+	ch, stop, err := svc.Subscribe(id) // 模拟 POST 返回后 labctl 才连 SSE
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer stop()
+	first := <-ch
+	if first.Type != "error" || !strings.Contains(first.Message, "127") || !strings.Contains(first.Message, "lab-update: not found") {
+		t.Fatalf("迟到订阅应先回放容器失败原因: %+v", first)
+	}
+	if done := <-ch; done.Type != "done" || done.ExitCode != -1 {
+		t.Fatalf("错误后应正常收尾: %+v", done)
+	}
+}
+
 // TestDockerRunnerSpawnCreatedStatePolls R11 回归：docker run 返回与 start 完成
 // 之间的 created 窗口（Status=created、ExitCode=0）不得被误判「启动即退出」rm 掉，
 // 应继续轮询直到进入运行态。
@@ -286,6 +335,19 @@ func TestDockerRunnerResolveImageFails(t *testing.T) {
 		if hasArg(c.Args, "run") {
 			t.Errorf("解析失败后不应 docker run: %v", calls)
 		}
+	}
+}
+
+func TestDockerRunnerResolveImageSelectsServer(t *testing.T) {
+	fake := &fakeCmdRunner{fn: func(c Call) (string, string, error) {
+		if hasArg(c.Args, "images") && hasArg(c.Args, "-q") && hasArg(c.Args, "server") {
+			return "server-image-id\n", "", nil
+		}
+		return "", "", nil
+	}}
+	r := &dockerRunner{cmds: fake, cfg: RunnerSpawnConfig{RepoRoot: "/r", ComposeFile: "deploy/docker-compose.yml"}}
+	if got, err := r.resolveImage(context.Background()); err != nil || got != "server-image-id" {
+		t.Fatalf("resolveImage = %q, %v", got, err)
 	}
 }
 
