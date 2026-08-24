@@ -29,7 +29,7 @@ type UpdateConfig struct {
 	NtfyURL     string // ntfy 通知地址（为空则不发通知）
 	BackupDir   string // DB 备份共享目录（为空则用仓库内 .hermes/backups）
 
-	// RunnerImage 为空时在预检里用 `compose images -q server` 解析。
+	// RunnerImage 为空时在预检里从运行中的 lab-server 容器解析。
 	RunnerImage string
 
 	// Branch 更新分支（R12：默认 main，UPDATE_BRANCH 覆盖；pull/回滚/behind 统一来源）。
@@ -1187,13 +1187,13 @@ func (p *Pipeline) diskFreeKB(ctx context.Context) (int64, error) {
 	return avail, nil
 }
 func (p *Pipeline) resolveRunnerImage(ctx context.Context) (string, error) {
-	out, _, err := p.cmds.Run(ctx, "docker", p.composeArgs("images", "-q", "server")...)
+	out, _, err := p.cmds.Run(ctx, "docker", "inspect", "-f", "{{.Config.Image}}", "lab-server")
 	if err != nil {
 		return "", err
 	}
 	images, perr := parseComposeImages([]byte(out))
 	if perr != nil || len(images) == 0 {
-		return "", errors.New("compose images -q server 无输出")
+		return "", errors.New("docker inspect lab-server 无镜像输出")
 	}
 	return images[0], nil
 }

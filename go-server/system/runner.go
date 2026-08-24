@@ -34,7 +34,7 @@ type RunnerSpawnConfig struct {
 	LogFile     string
 	DoneFile    string
 	LogDir      string // 会话日志共享目录（挂载用）
-	RunnerImage string // 为空由 Spawn 用 compose images -q server 解析
+	RunnerImage string // 为空由 Spawn 从运行中的 lab-server 容器解析
 	NtfyURL     string
 	BackupDir   string
 	GitHome     string // runner 内 git HOME（只读挂载 .gitconfig/.ssh）
