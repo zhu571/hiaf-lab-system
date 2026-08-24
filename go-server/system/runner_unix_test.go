@@ -340,13 +340,13 @@ func TestDockerRunnerResolveImageFails(t *testing.T) {
 
 func TestDockerRunnerResolveImageSelectsServer(t *testing.T) {
 	fake := &fakeCmdRunner{fn: func(c Call) (string, string, error) {
-		if hasArg(c.Args, "images") && hasArg(c.Args, "-q") && hasArg(c.Args, "server") {
-			return "server-image-id\n", "", nil
+		if hasArg(c.Args, "inspect") && hasArg(c.Args, "lab-server") {
+			return "deploy-server:latest\n", "", nil
 		}
 		return "", "", nil
 	}}
 	r := &dockerRunner{cmds: fake, cfg: RunnerSpawnConfig{RepoRoot: "/r", ComposeFile: "deploy/docker-compose.yml"}}
-	if got, err := r.resolveImage(context.Background()); err != nil || got != "server-image-id" {
+	if got, err := r.resolveImage(context.Background()); err != nil || got != "deploy-server:latest" {
 		t.Fatalf("resolveImage = %q, %v", got, err)
 	}
 }

@@ -131,6 +131,11 @@ func (h *pipelineHandler) docker(c Call) (string, string, error) {
 			h.projects = `[{"Name":"deploy","Status":"running","ConfigFiles":"x.yml"}]`
 		}
 		return h.projects, "", nil
+	case hasArg(args, "inspect") && hasArg(args, "lab-server"):
+		if h.images == "" {
+			h.images = "deploy-server:latest\n"
+		}
+		return h.images, "", nil
 	case hasArg(args, "image") && hasArg(args, "inspect"):
 		img := args[len(args)-1]
 		if h.missingImages[img] {
@@ -150,11 +155,6 @@ func (h *pipelineHandler) docker(c Call) (string, string, error) {
 			h.services = "postgres\nmigrate\nepics-gateway\ninfluxdb\ngrafana\nioc\nserver\npy-agent\npy-agent-interpret\nntfy\n"
 		}
 		return h.services, "", nil
-	case hasArg(args, "images") && hasArg(args, "-q"):
-		if h.images == "" {
-			h.images = "repo-server\n"
-		}
-		return h.images, "", nil
 	case hasArg(args, "ps"):
 		svc := args[len(args)-1]
 		h.psCount++

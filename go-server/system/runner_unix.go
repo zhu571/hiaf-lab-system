@@ -128,16 +128,15 @@ func (r *dockerRunner) confirmRunning(ctx context.Context, id RunnerID) error {
 	return fmt.Errorf("%w: runner 容器状态确认超时", ErrScriptStartFailed)
 }
 
-// resolveImage 解析当前 server 镜像 ID（runner 复用旧镜像）。
+// resolveImage 解析当前 server 容器使用的镜像（runner 复用旧镜像）。
 func (r *dockerRunner) resolveImage(ctx context.Context) (string, error) {
-	composeArgs := []string{"compose", "-f", r.cfg.composeFileAbs(), "-p", r.cfg.project(), "images", "-q", "server"}
-	out, _, err := r.cmds.Run(ctx, "docker", composeArgs...)
+	out, _, err := r.cmds.Run(ctx, "docker", "inspect", "-f", "{{.Config.Image}}", "lab-server")
 	if err != nil {
 		return "", err
 	}
 	images, perr := parseComposeImages([]byte(out))
 	if perr != nil || len(images) == 0 {
-		return "", fmt.Errorf("compose images -q server 无输出")
+		return "", fmt.Errorf("docker inspect lab-server 无镜像输出")
 	}
 	return images[0], nil
 }

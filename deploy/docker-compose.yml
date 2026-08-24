@@ -157,6 +157,7 @@ services:
         condition: service_healthy
 
   server:
+    image: deploy-server:latest
     build:
       context: ..
       dockerfile: deploy/Dockerfile
