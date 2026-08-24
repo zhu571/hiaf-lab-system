@@ -39,6 +39,10 @@ RUN git config --system --add safe.directory '*'
 
 COPY --from=builder /lab-server /lab-server
 COPY --from=builder /lab-update /usr/local/bin/lab-update
+# 前端产物 builder 阶段已构建到 /app/static（在 builder 镜像的 /app 下），
+# 必须随最终镜像一起拷出，否则 server 容器 /app/static 为空（R9 健康检查
+# "前端产物为空/白屏风险" 即因此触发；2026-08-24 实测 server 容器 static 缺失）。
+COPY --from=builder /app/static /app/static
 # ntfy CLI：跨容器直写共享 auth-file（账号/ACL 管理），镜像锁定与 ntfy 服务同版本。
 COPY --from=ntfy-cli /usr/bin/ntfy /usr/local/bin/ntfy
 # 打包自检：两个二进制 + ntfy CLI 必须已就位且可执行。
