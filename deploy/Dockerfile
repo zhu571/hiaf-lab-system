@@ -49,6 +49,12 @@ RUN test -x /lab-server && test -x /usr/local/bin/lab-update && test -x /usr/loc
 WORKDIR /app
 RUN mkdir -p /app/uploads && chown 1000:1000 /app/uploads
 
+# passwd 必须有 UID 1000 条目：git/ssh 启动时解析当前用户家目录走 getpwuid，
+# 无条目时报 "No user exists for uid 1000" 直接失败（2026-08-24 实测：
+# gitLsRemote/预检在此容器内全部因此失败）。HOME 由 compose 注入 runner-home。
+RUN addgroup -g 1000 gascell && adduser -D -u 1000 -G gascell -h /home/gascell gascell \
+    && mkdir -p /home/gascell && chown 1000:1000 /home/gascell
+
 # 非 root 运行；UID/GID 由 compose 的 UPDATE_RUN_UID/UPDATE_RUN_GID 覆盖，
 # docker.sock 访问依赖 compose 的 group_add（UPDATE_DOCKER_GID）。
 USER 1000:1000
