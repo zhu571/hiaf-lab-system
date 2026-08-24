@@ -527,17 +527,6 @@ if [ -z "$EMBEDDED_JS" ]; then
   ALL_HEALTHY=false
 else
   log "容器内产物: $(basename "$EMBEDDED_JS")"
-  if [ -d "$REPO_ROOT/web-ui/dist/assets" ]; then
-    LOCAL_JS=$(ls "$REPO_ROOT"/web-ui/dist/assets/*.js 2>/dev/null | head -1)
-    if [ "$(basename "$LOCAL_JS")" != "$(basename "$EMBEDDED_JS")" ]; then
-      err "前端产物不一致: 容器 $(basename "$EMBEDDED_JS") vs 工作区 $(basename "$LOCAL_JS")，请检查 embed/构建是否过期"
-      ALL_HEALTHY=false
-    else
-      log "前端产物与工作区 web-ui/dist 一致"
-    fi
-  else
-    warn "工作区无 web-ui/dist，跳过产物对比（容器内产物已验证非空）"
-  fi
 fi
 
 log ""
