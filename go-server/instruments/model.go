@@ -207,6 +207,7 @@ type QueueCommand struct {
 	Priority   int
 	ResponseCh chan CommandResult
 	SessionID  string
+	queueEpoch uint64
 }
 
 type FlowLimits struct {

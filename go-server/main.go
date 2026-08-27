@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"embed"
+	"errors"
 	"io/fs"
 	"log/slog"
 	"net/http"
@@ -223,6 +224,15 @@ func main() {
 	}
 	instrumentsHandler := instruments.NewHandler(instrumentsSvc, db, workers)
 	instrumentsHandler.SetAlertReporter(alertSvc)
+	instrumentsHandler.SetFlowAuthorizer(func(_ context.Context, actorID, actingUserID, _ string) error {
+		for _, userID := range []string{actorID, actingUserID} {
+			user, err := authSvc.GetUser(userID)
+			if err != nil || user == nil || user.Disabled || (user.Role != auth.RoleMaintainer && user.Role != auth.RoleAdmin) {
+				return errors.New("instrument flow permission revoked")
+			}
+		}
+		return nil
+	})
 	// M6 灰度止血开关（设计 §15）：INSTRUMENT_FLOW_ENABLED 默认关闭，
 	// 关闭时不注册 flow 写端点、不启动 FlowRecovery；GET 进度与急停不受影响。
 	flowEnabled := instruments.FlowEnabled()

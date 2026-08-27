@@ -58,6 +58,12 @@ func (h *Handler) SetAlertReporter(r alert.Reporter) {
 	h.alertReporter = r
 }
 
+func (h *Handler) SetFlowAuthorizer(authorize func(context.Context, string, string, string) error) {
+	if h.flows != nil {
+		h.flows.authorize = authorize
+	}
+}
+
 // reportAlert 异步上报告警中心（未注入或失败仅记日志，不影响业务路径）。
 func (h *Handler) reportAlert(level, source, title, detail string) {
 	if h.alertReporter == nil {

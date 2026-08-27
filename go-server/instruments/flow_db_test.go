@@ -15,6 +15,8 @@ import (
 	_ "github.com/lib/pq"
 )
 
+func allowFlowAuthorization(context.Context, string, string, string) error { return nil }
+
 func TestSafetyAndFlowRepositoryPostgres(t *testing.T) {
 	dsn := os.Getenv("TEST_DATABASE_URL")
 	if dsn == "" {
@@ -212,6 +214,7 @@ func TestHiokiFlowExecutorPostgres(t *testing.T) {
 	svc := NewServiceWithGateway("http://unused")
 	svc.ConfigureInterpreter(agent.URL, "test")
 	exec := NewFlowExecutor(repo, svc, map[string]*InstrumentWorker{"hioki_im3536": worker})
+	exec.authorize = allowFlowAuthorization
 	exec.settle = 0
 	lease, err := NewSafetyService(repo).CreateLease(ctx, "hioki_im3536", creator, "executor db test", 15*time.Minute, false, "maintainer")
 	if err != nil {
@@ -238,4 +241,318 @@ func TestHiokiFlowExecutorPostgres(t *testing.T) {
 		}
 	}
 	inst.waitLine(t, "FREQuency 777")
+}
+
+func TestFlowPreSendGuardAfterSlowDecisionPostgres(t *testing.T) {
+	dsn := os.Getenv("TEST_DATABASE_URL")
+	if dsn == "" {
+		t.Skip("TEST_DATABASE_URL is not set")
+	}
+	db, err := sql.Open("postgres", dsn)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+
+	tests := []struct {
+		name       string
+		creator    string
+		approver   string
+		mutate     func(*testing.T, *Repository, *FlowSession, *Lease)
+		wantStatus string
+		wantCode   string
+		rateWait   bool
+	}{
+		{"deadline expires during slow LLM", "00000000-0000-0000-0000-00000000f211", "00000000-0000-0000-0000-00000000f212", func(t *testing.T, repo *Repository, f *FlowSession, _ *Lease) {
+			if _, err := repo.db.Exec(`UPDATE instrument_flow_sessions SET deadline_at=now()-interval '1 second' WHERE id=$1`, f.ID); err != nil {
+				t.Fatal(err)
+			}
+		}, "timed_out", "deadline_exceeded", false},
+		{"lease expires during slow LLM", "00000000-0000-0000-0000-00000000f213", "00000000-0000-0000-0000-00000000f214", func(t *testing.T, repo *Repository, _ *FlowSession, lease *Lease) {
+			if _, err := repo.db.Exec(`UPDATE instrument_leases SET expires_at=now()-interval '1 second' WHERE id=$1`, lease.ID); err != nil {
+				t.Fatal(err)
+			}
+		}, "failed", "lease_expired", false},
+		{"approval expires during slow LLM", "00000000-0000-0000-0000-00000000f215", "00000000-0000-0000-0000-00000000f216", func(t *testing.T, repo *Repository, f *FlowSession, _ *Lease) {
+			if _, err := repo.db.Exec(`UPDATE instrument_approvals SET expires_at=now()-interval '1 second' WHERE id=$1`, *f.ApprovalID); err != nil {
+				t.Fatal(err)
+			}
+		}, "failed", "approval_expired", false},
+		{"concurrent stop during slow LLM", "00000000-0000-0000-0000-00000000f217", "00000000-0000-0000-0000-00000000f218", func(t *testing.T, repo *Repository, f *FlowSession, _ *Lease) {
+			if err := repo.StopFlow(context.Background(), f.ID, f.ActingUserID); err != nil {
+				t.Fatal(err)
+			}
+		}, "stopped", "", true},
+		{"permission revoked during slow LLM", "00000000-0000-0000-0000-00000000f219", "00000000-0000-0000-0000-00000000f220", func(t *testing.T, repo *Repository, f *FlowSession, _ *Lease) {
+			if _, err := repo.db.Exec(`UPDATE users SET disabled=true WHERE id=$1`, f.ActingUserID); err != nil {
+				t.Fatal(err)
+			}
+		}, "failed", "permission_revoked", false},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			ctx := context.Background()
+			creatorName := "flow-guard-" + tc.creator[len(tc.creator)-3:]
+			approverName := "flow-guard-" + tc.approver[len(tc.approver)-3:]
+			if _, err := db.Exec(`INSERT INTO users (id,username,password_hash,role) VALUES ($1,$2,'unused','maintainer'),($3,$4,'unused','maintainer')`, tc.creator, creatorName, tc.approver, approverName); err != nil {
+				t.Fatal(err)
+			}
+			t.Cleanup(func() {
+				db.Exec(`DELETE FROM command_log WHERE user_id=$1`, tc.creator)
+				db.Exec(`DELETE FROM instrument_flow_steps WHERE session_id IN (SELECT id FROM instrument_flow_sessions WHERE actor_id=$1)`, tc.creator)
+				db.Exec(`UPDATE instrument_flow_sessions SET approval_id=NULL WHERE actor_id=$1`, tc.creator)
+				db.Exec(`UPDATE instrument_approvals SET flow_session_id=NULL WHERE requested_by=$1`, tc.creator)
+				db.Exec(`DELETE FROM instrument_flow_sessions WHERE actor_id=$1`, tc.creator)
+				db.Exec(`DELETE FROM instrument_approvals WHERE requested_by=$1`, tc.creator)
+				db.Exec(`DELETE FROM instrument_leases WHERE user_id=$1`, tc.creator)
+				db.Exec(`DELETE FROM users WHERE id IN ($1,$2)`, tc.creator, tc.approver)
+			})
+
+			inst := startFakeTCPInstrument(t, "")
+			inst.responder = func(line string) string {
+				if line == "FREQuency?" {
+					return "777\n"
+				}
+				return ""
+			}
+			worker := NewInstrumentWorker(WorkerConfig{InstrumentID: "hioki_im3536", Addr: inst.addr, Terminator: "\n", RateWindow: 150 * time.Millisecond})
+			if err := worker.Start(); err != nil {
+				t.Fatal(err)
+			}
+			defer worker.Stop()
+
+			decisionStarted := make(chan struct{})
+			releaseDecision := make(chan struct{})
+			agent := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if r.URL.Path == "/health" {
+					w.WriteHeader(http.StatusOK)
+					return
+				}
+				close(decisionStarted)
+				<-releaseDecision
+				_ = json.NewEncoder(w).Encode(FlowDecision{Decision: "next_command", Command: "set_frequency", Params: map[string]any{"hz": 1000.0}, Reason: "slow test"})
+			}))
+			defer agent.Close()
+
+			repo := NewRepository(db)
+			svc := NewServiceWithGateway("http://unused")
+			svc.ConfigureInterpreter(agent.URL, "test")
+			exec := NewFlowExecutor(repo, svc, map[string]*InstrumentWorker{"hioki_im3536": worker})
+			exec.authorize = func(ctx context.Context, actorID, actingUserID, _ string) error {
+				for _, userID := range []string{actorID, actingUserID} {
+					var role string
+					var disabled bool
+					if err := db.QueryRowContext(ctx, `SELECT role,disabled FROM users WHERE id=$1`, userID).Scan(&role, &disabled); err != nil {
+						return err
+					}
+					if disabled || (role != "maintainer" && role != "admin") {
+						return errors.New("instrument flow permission revoked")
+					}
+				}
+				return nil
+			}
+			exec.settle = 0
+			lease, err := NewSafetyService(repo).CreateLease(ctx, "hioki_im3536", tc.creator, "pre-send guard test", 15*time.Minute, false, "maintainer")
+			if err != nil {
+				t.Fatal(err)
+			}
+			flow, err := exec.Create(ctx, "hioki_im3536", tc.creator, tc.creator, "req-guard", CreateFlowRequest{Objective: "1 kHz 到 2 kHz 取 2 个线性频点", LeaseID: lease.ID})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if _, err = exec.Approve(ctx, flow.ID, tc.approver, "maintainer"); err != nil {
+				t.Fatal(err)
+			}
+			done := make(chan struct{})
+			go func() {
+				exec.Run(ctx, flow.ID)
+				close(done)
+			}()
+			select {
+			case <-decisionStarted:
+			case <-time.After(5 * time.Second):
+				t.Fatal("slow decision was not reached")
+			}
+			tc.mutate(t, repo, flow, lease)
+			if tc.rateWait {
+				worker.mu.Lock()
+				worker.lastCmdTimes = []time.Time{time.Now(), time.Now(), time.Now(), time.Now(), time.Now(), time.Now(), time.Now()}
+				worker.mu.Unlock()
+			}
+			guardStarted := time.Now()
+			close(releaseDecision)
+			select {
+			case <-done:
+			case <-time.After(5 * time.Second):
+				t.Fatal("flow did not stop after guard failure")
+			}
+			if tc.rateWait && time.Since(guardStarted) < 100*time.Millisecond {
+				t.Fatal("test did not exercise the rate-limit wait before the pre-send guard")
+			}
+			inst.assertNoLine(t, "FREQuency 1000")
+			finished, err := repo.GetFlow(ctx, flow.ID)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if finished.Status != tc.wantStatus || finished.ErrorCode != tc.wantCode {
+				t.Fatalf("status=%s code=%s, want %s/%s", finished.Status, finished.ErrorCode, tc.wantStatus, tc.wantCode)
+			}
+		})
+	}
+}
+
+func TestFlowAuditAndStepPersistenceFailClosedPostgres(t *testing.T) {
+	dsn := os.Getenv("TEST_DATABASE_URL")
+	if dsn == "" {
+		t.Skip("TEST_DATABASE_URL is not set")
+	}
+	db, err := sql.Open("postgres", dsn)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx := context.Background()
+	const creator = "00000000-0000-0000-0000-00000000f221"
+	const approver = "00000000-0000-0000-0000-00000000f222"
+	if _, err := db.Exec(`INSERT INTO users (id,username,password_hash,role) VALUES ($1,'flow-persist-creator','unused','maintainer'),($2,'flow-persist-approver','unused','maintainer')`, creator, approver); err != nil {
+		t.Fatal(err)
+	}
+	repo := NewRepository(db)
+	t.Cleanup(func() {
+		db.Exec(`DELETE FROM command_log WHERE user_id=$1`, creator)
+		db.Exec(`DELETE FROM instrument_flow_steps WHERE session_id IN (SELECT id FROM instrument_flow_sessions WHERE actor_id=$1)`, creator)
+		db.Exec(`UPDATE instrument_flow_sessions SET approval_id=NULL WHERE actor_id=$1`, creator)
+		db.Exec(`UPDATE instrument_approvals SET flow_session_id=NULL WHERE requested_by=$1`, creator)
+		db.Exec(`DELETE FROM instrument_flow_sessions WHERE actor_id=$1`, creator)
+		db.Exec(`DELETE FROM instrument_approvals WHERE requested_by=$1`, creator)
+		db.Exec(`DELETE FROM instrument_leases WHERE user_id=$1`, creator)
+		db.Exec(`DELETE FROM users WHERE id IN ($1,$2)`, creator, approver)
+		db.Close()
+	})
+
+	inst := startFakeTCPInstrument(t, "")
+	inst.responder = func(line string) string {
+		if line == "FREQuency?" {
+			return "777\n"
+		}
+		return ""
+	}
+	worker := NewInstrumentWorker(WorkerConfig{InstrumentID: "hioki_im3536", Addr: inst.addr, Terminator: "\n"})
+	if err := worker.Start(); err != nil {
+		t.Fatal(err)
+	}
+	defer worker.Stop()
+	health := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusOK) }))
+	defer health.Close()
+	svc := NewServiceWithGateway("http://unused")
+	svc.ConfigureInterpreter(health.URL, "test")
+	exec := NewFlowExecutor(repo, svc, map[string]*InstrumentWorker{"hioki_im3536": worker})
+	exec.authorize = allowFlowAuthorization
+	exec.settle = 0
+	lease, err := NewSafetyService(repo).CreateLease(ctx, "hioki_im3536", creator, "persistence fail-closed test", 15*time.Minute, false, "maintainer")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	newRunningFlow := func(t *testing.T) *FlowSession {
+		flow, err := exec.Create(ctx, "hioki_im3536", creator, creator, "req-persist", CreateFlowRequest{Objective: "1 kHz 到 2 kHz 取 2 个线性频点", LeaseID: lease.ID})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err = exec.Approve(ctx, flow.ID, approver, "maintainer"); err != nil {
+			t.Fatal(err)
+		}
+		if err = repo.StartFlow(ctx, flow.ID); err != nil {
+			t.Fatal(err)
+		}
+		flow, err = repo.GetFlow(ctx, flow.ID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return flow
+	}
+
+	t.Run("requested audit failure prevents hardware send", func(t *testing.T) {
+		flow := newRunningFlow(t)
+		if err := worker.AcquireSession(flow.ID, flow.DeadlineAt); err != nil {
+			t.Fatal(err)
+		}
+		defer worker.ReleaseSession(flow.ID)
+		realAudit := exec.audit
+		exec.audit = func(_ context.Context, action string, _ map[string]any) error {
+			if action == "instrument.command.requested" {
+				return errors.New("forced audit failure")
+			}
+			return nil
+		}
+		_, runErr := exec.runRaw(ctx, flow, worker, 1, "set_frequency", map[string]any{"hz": 4321.0})
+		exec.audit = realAudit
+		if commandErrorCode(runErr) != "audit_failed" {
+			t.Fatalf("run error=%v, want audit_failed", runErr)
+		}
+		inst.assertNoLine(t, "FREQuency 4321")
+		if err := repo.FinishFlow(ctx, flow.ID, "failed", "audit_failed", nil); err != nil {
+			t.Fatal(err)
+		}
+	})
+
+	t.Run("step insert failure cannot complete flow", func(t *testing.T) {
+		flow := newRunningFlow(t)
+		if err := worker.AcquireSession(flow.ID, flow.DeadlineAt); err != nil {
+			t.Fatal(err)
+		}
+		if err := repo.AddStep(ctx, &FlowStep{SessionID: flow.ID, StepNo: 1, Decision: "next_command", Command: "set_frequency", Params: map[string]any{"hz": 1000.0}, Status: "succeeded", WhitelistVersion: whitelistVersion}); err != nil {
+			t.Fatal(err)
+		}
+		result, runErr := exec.runRaw(ctx, flow, worker, 1, "set_frequency", map[string]any{"hz": 1000.0})
+		if runErr != nil {
+			t.Fatal(runErr)
+		}
+		step := &FlowStep{SessionID: flow.ID, StepNo: 1, Decision: "next_command", Command: "set_frequency", Params: map[string]any{"hz": 1000.0}, Status: "succeeded", WhitelistVersion: whitelistVersion, DurationMS: int(result.Duration.Milliseconds())}
+		if exec.persistStep(ctx, flow, worker, step, true) {
+			t.Fatal("duplicate step unexpectedly persisted")
+		}
+		finished, err := repo.GetFlow(ctx, flow.ID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if finished.Status != "failed" || finished.ErrorCode != "step_persistence_failed" {
+			t.Fatalf("status=%s code=%s", finished.Status, finished.ErrorCode)
+		}
+		if worker.State() != WorkerStateLockedManualCheck {
+			t.Fatalf("worker state=%s, want manual-check lock", worker.State())
+		}
+		if err := worker.ConfirmManualCheck(); err != nil {
+			t.Fatal(err)
+		}
+	})
+
+	t.Run("terminal audit failure cannot remain completed", func(t *testing.T) {
+		flow := newRunningFlow(t)
+		if err := worker.AcquireSession(flow.ID, flow.DeadlineAt); err != nil {
+			t.Fatal(err)
+		}
+		realAudit := exec.audit
+		exec.audit = func(_ context.Context, action string, _ map[string]any) error {
+			if action == "instrument.flow.completed" {
+				return errors.New("forced terminal audit failure")
+			}
+			return nil
+		}
+		exec.finish(ctx, flow, "completed", "", &ParsedResult{Type: "sweep_xy"})
+		exec.audit = realAudit
+		finished, err := repo.GetFlow(ctx, flow.ID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if finished.Status != "failed" || finished.ErrorCode != "audit_failed" || finished.Result != nil {
+			t.Fatalf("status=%s code=%s result=%+v", finished.Status, finished.ErrorCode, finished.Result)
+		}
+		if worker.State() != WorkerStateLockedManualCheck {
+			t.Fatalf("worker state=%s, want manual-check lock", worker.State())
+		}
+		if err := worker.ConfirmManualCheck(); err != nil {
+			t.Fatal(err)
+		}
+	})
 }
