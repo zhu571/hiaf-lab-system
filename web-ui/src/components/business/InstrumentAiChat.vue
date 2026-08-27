@@ -49,6 +49,21 @@
             <div v-if="message.exec && !isViewer" class="exec-actions">
               <el-button size="small" plain @click="emit('save', message.exec!)">{{ t('instrument.saveToTestData') }}</el-button>
             </div>
+            <div v-if="message.flow" class="flow-card">
+              <p>{{ t('instrument.flowStatus') }}: {{ message.flow.status }}</p>
+              <p>{{ message.flow.point_count }}/{{ message.flow.limits.max_points }} · {{ message.flow.step_count }}/{{ message.flow.limits.max_commands }}</p>
+              <p class="request-id">flow_id: {{ message.flow.id }}</p>
+              <div class="candidate-actions">
+                <!-- API-only 试点（M1）：审批走后端 API/命令行，创建者面板不放自审批按钮（后端强校验审批人分离，自审批必 403）。 -->
+                <el-button v-if="['queued', 'running'].includes(message.flow.status)" size="small" @click="stopInstrumentFlow(message)">{{ t('instrument.stopFlow') }}</el-button>
+              </div>
+              <ol v-if="message.flow.steps?.length" class="flow-steps">
+                <li v-for="step in message.flow.steps" :key="step.step_no">#{{ step.step_no }} {{ step.command }} — {{ step.status }}<span v-if="step.error_code"> ({{ step.error_code }})</span></li>
+              </ol>
+              <svg v-if="message.flow.result?.points?.length" viewBox="0 0 400 160" role="img" :aria-label="t('instrument.chartLabel')" class="flow-chart">
+                <polyline :points="flowPolyline(message.flow.result.points)" />
+              </svg>
+            </div>
           </div>
         </div>
         <p v-if="aiLoading" class="muted chat-loading">{{ t('instrument.aiTranslating') }}</p>
@@ -91,12 +106,17 @@ export function riskTag(risk: string): 'success' | 'warning' | 'danger' | 'info'
 </script>
 
 <script setup lang="ts">
-import { computed, ref } from 'vue'
+import { computed, onBeforeUnmount, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { ElMessageBox } from 'element-plus'
 import {
   executeCommandWithMeta,
+  createFlow,
+  createLease,
+  getFlow,
   interpretCommand,
+  stopFlow,
+  type FlowSession,
   type InstrumentSummary,
   type NLCommandCandidate
 } from '@/api/instruments'
@@ -124,6 +144,7 @@ type ChatMessage = {
   running?: boolean
   done?: boolean
   exec?: ExecRecord
+  flow?: FlowSession
 }
 
 const aiInstrumentId = ref('')
@@ -133,6 +154,7 @@ const aiLoading = ref(false)
 const aiError = ref('')
 const aiMessages = ref<ChatMessage[]>([])
 const aiPanelRef = ref<HTMLElement>()
+const pollers = new Map<string, number>()
 
 function resetAIChat() {
   aiMessages.value = []
@@ -159,6 +181,13 @@ async function sendAI() {
   aiError.value = ''
   aiLoading.value = true
   try {
+    if (ins.id === 'hioki_im3536' && /扫频|sweep/i.test(input)) {
+      const lease = await createLease(ins.id, input)
+      const response = await createFlow(ins.id, input, lease.data.id)
+      const message: ChatMessage = { role: 'assistant', content: t('instrument.flowCreated'), flow: response.data, requestId: response.requestId }
+      aiMessages.value.push(message)
+      return
+    }
     const response = await interpretCommand(ins.id, input, history)
     aiMessages.value.push({
       role: 'assistant',
@@ -172,6 +201,37 @@ async function sendAI() {
     aiLoading.value = false
   }
 }
+
+function startFlowPolling(message: ChatMessage) {
+  const flow = message.flow
+  if (!flow || pollers.has(flow.id)) return
+  const timer = window.setInterval(async () => {
+    try {
+      const latest = await getFlow(flow.instrument_id, flow.id)
+      message.flow = latest
+      if (!['queued', 'running'].includes(latest.status)) {
+        window.clearInterval(timer)
+        pollers.delete(flow.id)
+      }
+    } catch { /* keep the last trusted GET snapshot */ }
+  }, 1000)
+  pollers.set(flow.id, timer)
+}
+
+async function stopInstrumentFlow(message: ChatMessage) {
+  if (!message.flow) return
+  await stopFlow(message.flow.instrument_id, message.flow.id)
+  startFlowPolling(message)
+}
+
+function flowPolyline(points: { x: number; y: number }[]) {
+  if (points.length < 2) return ''
+  const xs = points.map((p) => Math.log10(p.x)), ys = points.map((p) => p.y)
+  const minX = Math.min(...xs), maxX = Math.max(...xs), minY = Math.min(...ys), maxY = Math.max(...ys)
+  return points.map((p, i) => `${20 + (xs[i] - minX) / (maxX - minX || 1) * 360},${140 - (p.y - minY) / (maxY - minY || 1) * 120}`).join(' ')
+}
+
+onBeforeUnmount(() => pollers.forEach((timer) => window.clearInterval(timer)))
 
 async function runAICandidate(message: ChatMessage) {
   const ins = aiInstrument.value
@@ -249,6 +309,11 @@ defineExpose({ openAiFor })
 .candidate-card {
   flex-direction: column;
 }
+
+.flow-card { border: 1px solid var(--border); border-radius: var(--radius-sm); padding: var(--space-3); }
+.flow-steps { max-height: 160px; overflow-y: auto; padding-left: var(--space-5); }
+.flow-chart { background: var(--surface); width: 100%; }
+.flow-chart polyline { fill: none; stroke: var(--brand-500); stroke-width: 2; }
 
 .candidate-title,
 .chat-input {

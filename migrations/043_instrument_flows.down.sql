@@ -1,0 +1,10 @@
+DROP INDEX IF EXISTS command_log_flow_step;
+ALTER TABLE command_log DROP COLUMN IF EXISTS result_hash, DROP COLUMN IF EXISTS phase, DROP COLUMN IF EXISTS step_no, DROP COLUMN IF EXISTS flow_session_id;
+DROP TABLE IF EXISTS instrument_flow_steps;
+ALTER TABLE instrument_approvals DROP COLUMN IF EXISTS flow_session_id;
+DROP TABLE IF EXISTS instrument_flow_sessions;
+ALTER TABLE instrument_approvals DROP COLUMN IF EXISTS envelope_hash, DROP COLUMN IF EXISTS envelope, DROP COLUMN IF EXISTS acting_user_id;
+UPDATE instrument_approvals SET approved_by = requested_by WHERE approved_by IS NULL;
+ALTER TABLE instrument_approvals ALTER COLUMN approved_by SET NOT NULL;
+DROP INDEX IF EXISTS instrument_leases_one_active;
+ALTER TABLE instrument_leases DROP COLUMN IF EXISTS updated_at;

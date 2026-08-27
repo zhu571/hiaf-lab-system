@@ -13,7 +13,7 @@ from starlette.routing import Route
 
 from tools.ask import AskEngine
 from tools.experience import ExperienceExtractor
-from tools.parse import InstrumentInterpreter, ParseError, Parser
+from tools.parse import InstrumentFlowDecider, InstrumentInterpreter, ParseError, Parser
 from tools.stepplan import StepPlanner
 from tools.todoplan import TodoPlanner
 from tools.weekly import WeeklySummarizer
@@ -55,6 +55,22 @@ def validate_request(data):
     for command in commands:
         check(isinstance(command, dict) and isinstance(command.get("name"), str), "whitelist command is invalid")
     return user_input.strip(), history, commands
+
+
+def validate_flow_next(data):
+    check(_size_ok(data), "request too large")
+    trusted, untrusted = data.get("trusted_context"), data.get("untrusted_inputs", {})
+    check(isinstance(trusted, dict) and isinstance(untrusted, dict), "flow context is invalid")
+    commands = trusted.get("allowed_commands")
+    check(isinstance(commands, list) and 1 <= len(commands) <= 10, "allowed_commands is invalid")
+    for command in commands:
+        check(isinstance(command, dict) and command.get("name") in {"set_frequency", "measure_single"}
+              and command.get("risk") != "red", "flow command is invalid")
+    check(trusted.get("flow_kind") == "impedance_frequency_sweep", "flow_kind is invalid")
+    grid = trusted.get("frequency_grid")
+    check(isinstance(grid, list) and 2 <= len(grid) <= 50
+          and all(isinstance(v, (int, float)) and not isinstance(v, bool) for v in grid), "frequency_grid is invalid")
+    return trusted, untrusted
 
 
 def validate_step_plan(data):
@@ -217,7 +233,7 @@ def validate_experience_extract(data):
     return issues
 
 
-def create_app(interpreter, planner, parser, todo_planner, token, ask_engine=None, weekly=None, extractor=None, translator=None):
+def create_app(interpreter, planner, parser, todo_planner, token, ask_engine=None, weekly=None, extractor=None, translator=None, flow_decider=None):
     def make_endpoint(validate, handler, parse_error_code):
         """端点工厂：统一 Bearer 鉴权、JSON 解析（64KB 上限）、三态异常映射（400/422/502）。
 
@@ -252,6 +268,11 @@ def create_app(interpreter, planner, parser, todo_planner, token, ask_engine=Non
             str(data.get("instrument_id", ""))[:128], str(data.get("instrument_name", ""))[:256],
             commands, user_input, history,
         )
+
+    async def do_flow_next(validated, _data):
+        if flow_decider is None:
+            raise RuntimeError("instrument flow decider is not configured")
+        return await asyncio.to_thread(flow_decider.decide, *validated)
 
     async def do_step_plan(validated, _data):
         kind, prompt, context = validated
@@ -310,6 +331,7 @@ def create_app(interpreter, planner, parser, todo_planner, token, ask_engine=Non
     return Starlette(routes=[
         Route("/health", health),
         Route("/v1/interpret", make_endpoint(validate_request, do_interpret, "interpretation_failed"), methods=["POST"]),
+        Route("/v1/instrument-flow-next", make_endpoint(validate_flow_next, do_flow_next, "flow_decision_failed"), methods=["POST"]),
         Route("/v1/step-plan", make_endpoint(validate_step_plan, do_step_plan, "planning_failed"), methods=["POST"]),
         Route("/v1/daily-parse", make_endpoint(validate_daily_parse, do_daily_parse, "daily_parse_failed"), methods=["POST"]),
         Route("/v1/todo-add", make_endpoint(validate_todo_add, do_todo_add, "todo_add_failed"), methods=["POST"]),
@@ -333,5 +355,6 @@ if __name__ == "__main__":
         weekly=WeeklySummarizer(api_key),
         extractor=ExperienceExtractor(api_key),
         translator=Translator(api_key),
+        flow_decider=InstrumentFlowDecider(api_key),
     )
     uvicorn.run(app, host="0.0.0.0", port=8001)

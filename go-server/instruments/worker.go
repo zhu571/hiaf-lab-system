@@ -33,6 +33,8 @@ type InstrumentWorker struct {
 	rateLimitedAt time.Time
 	started       bool
 	stopped       bool
+	sessionOwner  string
+	sessionUntil  time.Time
 }
 
 // NewInstrumentWorker creates an idle worker with a bounded command queue.
@@ -83,17 +85,91 @@ func (w *InstrumentWorker) Submit(cmd *QueueCommand) error {
 	if cmd == nil || cmd.Name == "" || cmd.ResponseCh == nil {
 		return fmt.Errorf("command name and response channel are required")
 	}
-	w.mu.RLock()
+	w.mu.Lock()
+	if w.sessionOwner != "" && time.Now().After(w.sessionUntil) {
+		w.sessionOwner, w.sessionUntil = "", time.Time{}
+	}
 	running := w.started && !w.stopped
-	w.mu.RUnlock()
+	owner := w.sessionOwner
+	w.mu.Unlock()
 	if !running {
 		return fmt.Errorf("instrument worker is not running")
+	}
+	if w.State() == WorkerStateLockedManualCheck {
+		return fmt.Errorf("instrument is locked until manual check")
+	}
+	if owner != "" && cmd.SessionID != owner {
+		return fmt.Errorf("instrument_busy: owned by flow session")
+	}
+	if owner == "" && cmd.SessionID != "" {
+		return fmt.Errorf("instrument session is not acquired")
 	}
 	select {
 	case w.cmdQueue <- cmd:
 		return nil
 	default:
 		return fmt.Errorf("instrument command queue is full")
+	}
+}
+
+// AcquireSession reserves the worker across multiple Submit calls. EmergencyStop bypasses it.
+func (w *InstrumentWorker) AcquireSession(sessionID string, until time.Time) error {
+	if sessionID == "" || !until.After(time.Now()) {
+		return fmt.Errorf("invalid instrument session")
+	}
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	if !w.started || w.stopped {
+		return fmt.Errorf("instrument worker is not running")
+	}
+	if w.sessionOwner != "" && time.Now().Before(w.sessionUntil) && w.sessionOwner != sessionID {
+		return fmt.Errorf("instrument_busy: owned by flow session")
+	}
+	w.sessionOwner, w.sessionUntil = sessionID, until
+	return nil
+}
+
+func (w *InstrumentWorker) ReleaseSession(sessionID string) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	if w.sessionOwner == sessionID {
+		w.sessionOwner, w.sessionUntil = "", time.Time{}
+	}
+}
+
+func (w *InstrumentWorker) SessionOwner() string {
+	w.mu.RLock()
+	defer w.mu.RUnlock()
+	return w.sessionOwner
+}
+
+// WaitFlowYellowSlot enforces the conservative flow share of seven yellow sends per rolling window.
+func (w *InstrumentWorker) WaitFlowYellowSlot(ctx context.Context, deadline time.Time) error {
+	for {
+		now := time.Now()
+		w.mu.Lock()
+		cutoff := now.Add(-w.cfg.RateWindow)
+		first := 0
+		for first < len(w.lastCmdTimes) && w.lastCmdTimes[first].Before(cutoff) {
+			first++
+		}
+		w.lastCmdTimes = w.lastCmdTimes[first:]
+		if len(w.lastCmdTimes) < 7 {
+			w.mu.Unlock()
+			return nil
+		}
+		wait := w.lastCmdTimes[0].Add(w.cfg.RateWindow).Sub(now)
+		w.mu.Unlock()
+		if now.Add(wait).After(deadline) {
+			return newCommandError("rate_limited", fmt.Errorf("flow yellow budget unavailable before deadline"))
+		}
+		t := time.NewTimer(wait)
+		select {
+		case <-ctx.Done():
+			t.Stop()
+			return ctx.Err()
+		case <-t.C:
+		}
 	}
 }
 
@@ -122,9 +198,12 @@ func (w *InstrumentWorker) EmergencyStop() error {
 		Priority:   1,
 		ResponseCh: make(chan CommandResult, 1),
 	}
-	w.mu.RLock()
+	w.mu.Lock()
 	running := w.started && !w.stopped
-	w.mu.RUnlock()
+	if running {
+		w.sessionOwner, w.sessionUntil = "", time.Time{}
+	}
+	w.mu.Unlock()
 	if !running {
 		return fmt.Errorf("instrument worker is not running")
 	}
@@ -164,24 +243,24 @@ func (w *InstrumentWorker) run() {
 func (w *InstrumentWorker) execute(cmd *QueueCommand) {
 	started := time.Now()
 	if cmd.Name != emergencyCommand && cmd.Risk == "yellow" && w.rateLimitExceeded(started) {
-		w.respond(cmd, CommandResult{Command: cmd.Name, Duration: time.Since(started), Error: fmt.Errorf("instrument command rate limit exceeded")})
+		w.respond(cmd, CommandResult{Command: cmd.Name, Duration: time.Since(started), Error: newCommandError("rate_limited", fmt.Errorf("instrument command rate limit exceeded"))})
 		return
 	}
-	if cmd.Name != emergencyCommand {
+	if cmd.Name != emergencyCommand && cmd.Risk == "yellow" {
 		w.recordCmdTime(started)
 	}
 
 	scpi, err := w.buildSCPI(cmd)
 	if err != nil {
 		w.setState(WorkerStateError)
-		w.respond(cmd, CommandResult{Command: cmd.Name, Duration: time.Since(started), Error: err})
+		w.respond(cmd, CommandResult{Command: cmd.Name, Duration: time.Since(started), Error: newCommandError("validation_error", err)})
 		return
 	}
 	if w.connection() == nil {
 		if err = w.reconnect(); err != nil {
 			w.reportAlert("warning", "仪器断开: "+w.cfg.InstrumentID, err.Error())
 			w.setState(WorkerStateNeedsReconnect)
-			w.respond(cmd, CommandResult{Command: cmd.Name, Duration: time.Since(started), Error: err})
+			w.respond(cmd, CommandResult{Command: cmd.Name, Duration: time.Since(started), Error: newCommandError("communication_error", err)})
 			return
 		}
 		// 重连成功 → 解除「仪器断开」告警（幂等：无 active 行时 no-op）。
@@ -192,10 +271,23 @@ func (w *InstrumentWorker) execute(cmd *QueueCommand) {
 		w.closeConnection()
 		w.reportAlert("error", "仪器恢复失败: "+w.cfg.InstrumentID, err.Error())
 		w.setState(WorkerStateNeedsReconnect)
+		err = newCommandError("communication_error", err)
+	} else if cmd.Name == emergencyCommand {
+		w.setState(WorkerStateLockedManualCheck)
 	} else {
 		w.setState(WorkerStateRunning)
 	}
 	w.respond(cmd, CommandResult{Command: cmd.Name, Response: response, Duration: time.Since(started), Error: err})
+}
+
+func (w *InstrumentWorker) ConfirmManualCheck() error {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	if w.state != WorkerStateLockedManualCheck {
+		return fmt.Errorf("instrument is not awaiting manual check")
+	}
+	w.state = WorkerStateRunning
+	return nil
 }
 
 func (w *InstrumentWorker) buildSCPI(cmd *QueueCommand) (string, error) {

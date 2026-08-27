@@ -62,6 +62,25 @@ func (s *Service) ConfigureInterpreter(url, token string) {
 	s.interpretToken = token
 }
 
+func (s *Service) InterpreterHealthy(ctx context.Context) error {
+	if s.interpretURL == "" || s.interpretToken == "" {
+		return fmt.Errorf("py-agent interpreter is not configured")
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, s.interpretURL+"/health", nil)
+	if err != nil {
+		return err
+	}
+	resp, err := s.client.Do(req)
+	if err != nil {
+		return fmt.Errorf("py-agent unavailable: %w", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return fmt.Errorf("py-agent unhealthy: %d", resp.StatusCode)
+	}
+	return nil
+}
+
 type interpretResponse struct {
 	Status        string         `json:"status"`
 	Command       string         `json:"command"`

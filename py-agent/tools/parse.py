@@ -176,6 +176,37 @@ class InstrumentInterpreter:
         return validate_interpretation(_json_object(str(result)), allowed)
 
 
+class InstrumentFlowDecider:
+    """No-tool, one-decision-at-a-time instrument flow model boundary."""
+    def __init__(self, api_key, prompt_path=None):
+        from LightAgent import HookDecision, LightAgent, ToolRegistry
+
+        class NoToolHook:
+            def __call__(self, context):
+                if context.phase == "before_model_request":
+                    params = context.payload["params"]
+                    if params.get("tools") or params.get("extra_body", {}).get("thinking", {}).get("type") != "disabled":
+                        return HookDecision.block("flow decision escaped the no-tool boundary")
+                return HookDecision.continue_()
+
+        prompt_path = prompt_path or Path(__file__).parents[1] / "prompts" / "instrument_flow_next.txt"
+        self.agent = LightAgent(
+            name="instrument-flow-decider", model=MODEL, base_url=BASE_URL, api_key=api_key,
+            instructions=Path(prompt_path).read_text(), tools=[], filter_tools=True, tree_of_thought=False,
+            memory=None, self_learning=False, auto_discover_skills=False,
+            hooks=[NoToolHook()], debug=False,
+        )
+        self.agent.tool_registry = ToolRegistry()
+        self.agent.loaded_tools = {}
+
+    def decide(self, trusted_context, untrusted_inputs):
+        query = json.dumps({"trusted_context": trusted_context, "untrusted_inputs": untrusted_inputs}, ensure_ascii=False)
+        result = self.agent.run(query, tools=[], use_skills=False, max_retry=2, result_format="str",
+                                metadata={"extra_body": {"thinking": {"type": "disabled"}}})
+        allowed = {item["name"] for item in trusted_context["allowed_commands"]}
+        return validate_flow_decision(_json_object(str(result)), allowed)
+
+
 def validate_interpretation(item, allowed_commands):
     status = item.get("status")
     if status not in {"ok", "clarify", "rejected"}:
@@ -197,6 +228,31 @@ def validate_interpretation(item, allowed_commands):
         "explanation": str(item.get("explanation", "")).strip(),
         "question": str(item.get("question", "")).strip() or None,
         "reason": str(item.get("reason", "")).strip() or None,
+        "prompt_version": "1.0", "model": MODEL,
+    }
+
+
+def validate_flow_decision(item, allowed_commands):
+    allowed_fields = {"decision", "command", "params", "reason", "summary"}
+    if set(item) - allowed_fields:
+        raise ParseError("flow decision contains unknown fields")
+    decision = item.get("decision")
+    if decision not in {"next_command", "complete", "abort"}:
+        raise ParseError("flow decision is invalid")
+    if any(key in item for key in ("commands", "scpi", "tool", "code")):
+        raise ParseError("flow decision contains forbidden execution data")
+    command, params = item.get("command"), item.get("params", {})
+    if decision == "next_command" and (command not in allowed_commands or not isinstance(params, dict)):
+        raise ParseError("flow command or params are invalid")
+    if decision != "next_command" and (command is not None or "params" in item):
+        raise ParseError("terminal flow decision cannot contain a command")
+    reason = item.get("reason", "")
+    if not isinstance(reason, str) or not reason.strip():
+        raise ParseError("flow decision reason is required")
+    return {
+        "decision": decision, "command": command if decision == "next_command" else None,
+        "params": params if decision == "next_command" else None,
+        "reason": reason.strip(), "summary": str(item.get("summary", "")).strip() or None,
         "prompt_version": "1.0", "model": MODEL,
     }
 

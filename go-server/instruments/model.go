@@ -26,6 +26,10 @@ type CommandLogEntry struct {
 	ErrorCode        *string         `json:"error_code"`
 	DurationMS       *int            `json:"duration_ms"`
 	RequestID        string          `json:"request_id"`
+	FlowSessionID    *string         `json:"flow_session_id,omitempty"`
+	StepNo           *int            `json:"step_no,omitempty"`
+	Phase            string          `json:"phase"`
+	ResultHash       *string         `json:"result_hash,omitempty"`
 	CreatedAt        time.Time       `json:"created_at"`
 }
 
@@ -44,16 +48,20 @@ type Lease struct {
 
 // Approval authorizes one command and parameter hash for a lease.
 type Approval struct {
-	ID          string     `json:"id"`
-	LeaseID     *string    `json:"lease_id"`
-	CommandName string     `json:"command_name"`
-	ParamsHash  string     `json:"params_hash"`
-	RequestedBy string     `json:"requested_by"`
-	ApprovedBy  string     `json:"approved_by"`
-	Status      string     `json:"status"`
-	ApprovedAt  *time.Time `json:"approved_at"`
-	ExpiresAt   time.Time  `json:"expires_at"`
-	CreatedAt   time.Time  `json:"created_at"`
+	ID            string          `json:"id"`
+	LeaseID       *string         `json:"lease_id"`
+	CommandName   string          `json:"command_name"`
+	ParamsHash    string          `json:"params_hash"`
+	RequestedBy   string          `json:"requested_by"`
+	ApprovedBy    *string         `json:"approved_by,omitempty"`
+	ActingUserID  *string         `json:"acting_user_id,omitempty"`
+	FlowSessionID *string         `json:"flow_session_id,omitempty"`
+	Envelope      json.RawMessage `json:"envelope,omitempty"`
+	EnvelopeHash  string          `json:"envelope_hash,omitempty"`
+	Status        string          `json:"status"`
+	ApprovedAt    *time.Time      `json:"approved_at"`
+	ExpiresAt     time.Time       `json:"expires_at"`
+	CreatedAt     time.Time       `json:"created_at"`
 }
 
 // PiezoStatus is the full piezo instrument state returned by the status endpoint.
@@ -144,8 +152,10 @@ type NLHistoryItem struct {
 }
 
 type NLCommandRequest struct {
-	Input   string          `json:"input"`
-	History []NLHistoryItem `json:"history,omitempty"`
+	Input      string          `json:"input"`
+	History    []NLHistoryItem `json:"history,omitempty"`
+	LeaseID    string          `json:"lease_id,omitempty"`
+	ApprovalID string          `json:"approval_id,omitempty"`
 }
 
 type NLValidation struct {
@@ -196,16 +206,139 @@ type QueueCommand struct {
 	Risk       string
 	Priority   int
 	ResponseCh chan CommandResult
+	SessionID  string
+}
+
+type FlowLimits struct {
+	AllowedCommands  []string  `json:"allowed_commands"`
+	FrequencyMinHz   float64   `json:"frequency_min_hz"`
+	FrequencyMaxHz   float64   `json:"frequency_max_hz"`
+	MaxPoints        int       `json:"max_points"`
+	RetryBudget      int       `json:"retry_budget"`
+	MaxCommands      int       `json:"max_commands"`
+	DeadlineAt       time.Time `json:"deadline_at"`
+	RestoreFrequency bool      `json:"restore_frequency"`
+}
+
+// FlowCommandSummary 是审批包络中的命令摘要：只暴露审批所需的参数区间/枚举，
+// 不携带 SCPI 模板（设计 §11.2：前端不显示或接收可执行 SCPI）。
+type FlowCommandSummary struct {
+	Name        string         `json:"name"`
+	Description string         `json:"description"`
+	Risk        string         `json:"risk"`
+	TimeoutMS   int            `json:"timeout_ms,omitempty"`
+	Params      map[string]any `json:"params,omitempty"`
+}
+
+// FlowEnvelope 是审批人在批准前必须能完整查看的不可变会话包络（M2：
+// 「一次人工确认整个会话包络」是替代逐命令审批的核心人为安全控制）。
+type FlowEnvelope struct {
+	InstrumentID      string               `json:"instrument_id"`
+	InstrumentName    string               `json:"instrument_name,omitempty"`
+	FlowKind          string               `json:"flow_kind"`
+	Objective         string               `json:"objective"`
+	ObjectType        string               `json:"object_type"`
+	ActorID           string               `json:"actor_id"`
+	ActingUserID      string               `json:"acting_user_id"`
+	LeaseID           string               `json:"lease_id"`
+	WhitelistVersion  string               `json:"whitelist_version"`
+	AllowedCommands   []FlowCommandSummary `json:"allowed_commands"`
+	FrequencyMinHz    float64              `json:"frequency_min_hz"`
+	FrequencyMaxHz    float64              `json:"frequency_max_hz"`
+	FrequencyGrid     []float64            `json:"frequency_grid"`
+	MaxPoints         int                  `json:"max_points"`
+	RetryBudget       int                  `json:"retry_budget"`
+	MaxCommands       int                  `json:"max_commands"`
+	DeadlineAt        time.Time            `json:"deadline_at"`
+	RestoreFrequency  bool                 `json:"restore_frequency"`
+	ApprovalID        string               `json:"approval_id,omitempty"`
+	ApprovalStatus    string               `json:"approval_status,omitempty"`
+	ApprovedBy        *string              `json:"approved_by,omitempty"`
+	ApprovalExpiresAt *time.Time           `json:"approval_expires_at,omitempty"`
+	EnvelopeHash      string               `json:"envelope_hash,omitempty"`
+}
+
+type FlowSession struct {
+	ID               string        `json:"id"`
+	InstrumentID     string        `json:"instrument_id"`
+	FlowKind         string        `json:"flow_kind"`
+	Objective        string        `json:"objective"`
+	ObjectType       string        `json:"object_type"`
+	Status           string        `json:"status"`
+	Limits           FlowLimits    `json:"limits"`
+	FrequencyGrid    []float64     `json:"frequency_grid"`
+	LeaseID          string        `json:"lease_id"`
+	ApprovalID       *string       `json:"approval_id,omitempty"`
+	WhitelistVersion string        `json:"whitelist_version"`
+	ActorID          string        `json:"actor_id"`
+	ActingUserID     string        `json:"acting_user_id"`
+	RequestID        string        `json:"request_id"`
+	StepCount        int           `json:"step_count"`
+	PointCount       int           `json:"point_count"`
+	StopRequested    bool          `json:"stop_requested"`
+	ErrorCode        string        `json:"error_code,omitempty"`
+	Result           *ParsedResult `json:"result,omitempty"`
+	DeadlineAt       time.Time     `json:"deadline_at"`
+	CreatedAt        time.Time     `json:"created_at"`
+	UpdatedAt        time.Time     `json:"updated_at"`
+	Steps            []FlowStep    `json:"steps,omitempty"`
+	// Envelope 仅为 API 呈现层组装（GET/approve/create 响应），不落库；
+	// 审批人据此在批准前核对完整不可变包络。
+	Envelope *FlowEnvelope `json:"envelope,omitempty"`
+}
+
+type FlowStep struct {
+	ID               string         `json:"id"`
+	SessionID        string         `json:"session_id"`
+	StepNo           int            `json:"step_no"`
+	Decision         string         `json:"decision"`
+	Command          string         `json:"command,omitempty"`
+	Params           map[string]any `json:"params,omitempty"`
+	Status           string         `json:"status"`
+	Reason           string         `json:"reason,omitempty"`
+	Result           *ParsedResult  `json:"result,omitempty"`
+	ErrorCode        string         `json:"error_code,omitempty"`
+	Model            string         `json:"model,omitempty"`
+	PromptVersion    string         `json:"prompt_version,omitempty"`
+	InputHash        string         `json:"input_hash,omitempty"`
+	OutputHash       string         `json:"output_hash,omitempty"`
+	WhitelistVersion string         `json:"whitelist_version"`
+	DurationMS       int            `json:"duration_ms,omitempty"`
+	CreatedAt        time.Time      `json:"created_at"`
+}
+
+type FlowDecision struct {
+	Decision      string         `json:"decision"`
+	Command       string         `json:"command,omitempty"`
+	Params        map[string]any `json:"params,omitempty"`
+	Reason        string         `json:"reason,omitempty"`
+	Summary       string         `json:"summary,omitempty"`
+	PromptVersion string         `json:"prompt_version,omitempty"`
+	Model         string         `json:"model,omitempty"`
+	InputHash     string         `json:"-"`
+	OutputHash    string         `json:"-"`
+}
+
+type CreateFlowRequest struct {
+	Objective  string  `json:"objective"`
+	FlowKind   string  `json:"flow_kind,omitempty"`
+	ObjectType string  `json:"object_type,omitempty"`
+	StartHz    float64 `json:"start_hz,omitempty"`
+	StopHz     float64 `json:"stop_hz,omitempty"`
+	Points     int     `json:"points,omitempty"`
+	Spacing    string  `json:"spacing,omitempty"`
+	LeaseID    string  `json:"lease_id"`
 }
 
 // WorkerState is the current state of an InstrumentWorker.
 type WorkerState string
 
 const (
-	WorkerStateRunning        WorkerState = "running"
-	WorkerStateRateLimited    WorkerState = "rate_limited"
-	WorkerStateNeedsReconnect WorkerState = "needs_reconnect"
-	WorkerStateError          WorkerState = "error"
+	WorkerStateRunning           WorkerState = "running"
+	WorkerStateRateLimited       WorkerState = "rate_limited"
+	WorkerStateNeedsReconnect    WorkerState = "needs_reconnect"
+	WorkerStateError             WorkerState = "error"
+	WorkerStateLockedManualCheck WorkerState = "locked_until_manual_check"
 )
 
 // InstrumentResult records one instrument command execution result.

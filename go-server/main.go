@@ -223,6 +223,15 @@ func main() {
 	}
 	instrumentsHandler := instruments.NewHandler(instrumentsSvc, db, workers)
 	instrumentsHandler.SetAlertReporter(alertSvc)
+	// M6 灰度止血开关（设计 §15）：INSTRUMENT_FLOW_ENABLED 默认关闭，
+	// 关闭时不注册 flow 写端点、不启动 FlowRecovery；GET 进度与急停不受影响。
+	flowEnabled := instruments.FlowEnabled()
+	if !flowEnabled {
+		slog.Info("instrument flows disabled (set INSTRUMENT_FLOW_ENABLED to enable)")
+	}
+	if flowEnabled {
+		instrumentsHandler.StartFlowRecovery(context.Background())
+	}
 	sensorsHandler := sensors.NewHandler(sensorsSvc)
 
 	repoRoot := commonEnv("REPO_ROOT", "/opt/hiaf-lab-system")
@@ -594,9 +603,21 @@ func main() {
 				})
 			})
 			r.Get("/{id}/status", instrumentsHandler.InstrumentStatus)
+			r.Get("/{id}/flows/{flow_id}", instrumentsHandler.GetFlow)
 			r.Post("/{id}/nl-commands", instrumentsHandler.InterpretCommand)
 			r.Post("/{id}/nl-execute", instrumentsHandler.NLExecute)
 			r.Post("/{id}/emergency-stop", instrumentsHandler.EmergencyStop)
+			r.With(mw.RequireRole(auth.RoleMaintainer, auth.RoleAdmin)).Post("/{id}/manual-check", instrumentsHandler.ConfirmManualCheck)
+			r.With(mw.RequireRole(auth.RoleMaintainer, auth.RoleAdmin)).Post("/{id}/leases", instrumentsHandler.CreateLease)
+			r.With(mw.RequireRole(auth.RoleMaintainer, auth.RoleAdmin)).Post("/{id}/leases/{lease_id}/renew", instrumentsHandler.RenewLease)
+			r.With(mw.RequireRole(auth.RoleMaintainer, auth.RoleAdmin)).Post("/{id}/leases/{lease_id}/release", instrumentsHandler.ReleaseLease)
+			r.With(mw.RequireRole(auth.RoleMaintainer, auth.RoleAdmin)).Post("/{id}/approvals", instrumentsHandler.RequestApproval)
+			r.With(mw.RequireRole(auth.RoleMaintainer, auth.RoleAdmin)).Post("/{id}/approvals/{approval_id}/approve", instrumentsHandler.ApproveCommand)
+			if flowEnabled {
+				r.With(mw.RequireRole(auth.RoleMaintainer, auth.RoleAdmin)).Post("/{id}/flows", instrumentsHandler.CreateFlow)
+				r.With(mw.RequireRole(auth.RoleMaintainer, auth.RoleAdmin)).Post("/{id}/flows/{flow_id}/approve", instrumentsHandler.ApproveFlow)
+				r.With(mw.RequireRole(auth.RoleMaintainer, auth.RoleAdmin)).Post("/{id}/flows/{flow_id}/stop", instrumentsHandler.StopFlow)
+			}
 			r.With(mw.RequireRole(auth.RoleMaintainer, auth.RoleAdmin)).Post("/{id}/commands", instrumentsHandler.ExecuteCommand)
 			r.Route("/piezo", func(r chi.Router) {
 				r.Get("/status", instrumentsHandler.PiezoStatus)

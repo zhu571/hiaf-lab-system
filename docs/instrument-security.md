@@ -200,3 +200,46 @@ Hioki：
 - 前端展示范围只能作为辅助，不能作为安全边界。
 - Agent 输出只能生成候选命令，最终仍由仪器服务校验。
 - 每台仪器配置独立 TCP 连接池或串行 worker，避免命令交错。
+
+## 8. 已知限制与登记（多步流程 API-only 试点，2026-08-27）
+
+> 本节登记 Line B 仪器多步编排首轮安全审查（Kimi，`.hermes/reviews/kimi_multistep_security_review.md`）
+> 后按用户决策落地为 **API-only 试点**的已知限制与后续加固项。安全模型结论：🔴 0，可放行。
+
+### 8.1 已知限制（接受，不阻塞试点）
+
+1. **前端 UI 暂不支持 yellow 单命令审批链路（M3）**：Phase 0 起后端对 yellow 命令
+   （`POST /commands`、`/nl-execute`）强制「租约 + 审批」，前端无租约选择/审批申请 UI，
+   UI 发起的 yellow 单命令会得到 403 `instrument_authorization_required`（fail-closed 回归，非安全漏洞）。
+   **后端 API 能力完整保留**：`POST /{id}/leases` → `POST /{id}/approvals` →
+   `POST /{id}/approvals/{approval_id}/approve` → 携 `lease_id`/`approval_id` 调 `/commands`、
+   `/nl-execute`；不得为了 UI 改动收紧或放宽这些后端约束。
+2. **流程审批无前端 UI（API-only 决策，M1/M2 的落地形态）**：yellow 多步流程的审批经
+   API/命令行完成——审批人先 `GET /api/v1/instruments/{id}/flows/{flow_id}` 查看完整不可变
+   包络（`envelope` 字段：命令集合与参数区间、频率网格、点数/命令数/deadline、白名单版本、
+   审批状态与有效期、包络 hash），再由**非创建者/非 acting user** 的 maintainer/admin 调
+   `POST /api/v1/instruments/{id}/flows/{flow_id}/approve`（后端 SQL CAS 强校验审批人分离，
+   并发 approve 只产生一次 `queued` 转换）。创建者聊天面板不渲染自审批按钮（自审批必 403）。
+3. **决策端零重试**：py-agent 决策失败（超时/非法输出）立即安全终止，不做「有限重试」；
+   方向更保守，登记为与设计 §6.1 的偏差。
+
+### 8.2 后续加固项（Phase 2）
+
+1. **object_constraints 在 Hioki 扫频路径上空转（M4）**：会话创建固定
+   `object_type=passive_lc_component` 并写入包络 hash，但白名单中 `set_frequency`/
+   `measure_single` 两条命令无 `object_constraints` 定义，每步校验与会话对象类型无关联。
+   当前安全性由 Go 网格兜底：每步 `set_frequency.hz` 必须与 Go 确定性生成的网格点
+   **浮点精确相等**（`flow.go` runRaw 校验），网格端点/单调性/跨度经硬校验。Phase 2 需：
+   runRaw 校验前强制注入 `params.object_type = 会话 object_type`（当命令 schema 含该参数时），
+   并为流程命令补对象约束定义或显式登记「无约束」豁免。
+2. **重启 Interrupted 无告警/needs_check 标记**：进程重启把 queued/running 流程转
+   `interrupted` 仅改 DB 状态，未按设计 §7.1 联动仪器 `needs_check` 与告警中心。
+3. **急停时 queued 态会话不连带转终态**：急停以 worker owner 为键，无 owner 的 queued
+   会话由 reaper 按 deadline 转 `timed_out`；建议急停时按 instrument_id 连带标记。
+
+### 8.3 灰度止血开关（M6）
+
+`INSTRUMENT_FLOW_ENABLED` 环境变量，**默认关闭**。关闭时：flow 写端点
+（创建/审批/停止）不注册、FlowRecovery（重启中断 + 超时 reaper）不启动；
+GET 流程进度与既有急停不受影响。handler 层另有 `flow_disabled` 兜底（404）。
+异常时关闭该 flag 即止血，不需要回滚数据库。

@@ -184,6 +184,9 @@ func TestSourceWriteAllowedMatrix(t *testing.T) {
 	denied := []struct{ method, path string }{
 		{http.MethodPost, "/api/v1/instruments/i1/commands"},
 		{http.MethodPost, "/api/v1/instruments/i1/nl-execute"},
+		{http.MethodPost, "/api/v1/instruments/i1/flows"},
+		{http.MethodPost, "/api/v1/instruments/i1/flows/f1/approve"},
+		{http.MethodPost, "/api/v1/instruments/i1/flows/f1/stop"},
 		{http.MethodPost, "/api/v1/logs/l1/ai-parse-x"},
 		{http.MethodPost, "/api/v1/projects"},
 		{http.MethodPatch, "/api/v1/projects/p1"},
