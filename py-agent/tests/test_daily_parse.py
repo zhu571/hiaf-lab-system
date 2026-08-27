@@ -113,12 +113,14 @@ class ValidateDailyLogsTests(unittest.TestCase):
         result = validate_daily_logs({"status": "rejected", "logs": [], "question": None, "reason": "与工作无关"}, {"p1"}, "原文")
         self.assertEqual(result["reason"], "与工作无关")
 
-    def test_raw_snippet_must_be_complete_original_segment(self):
+    def test_raw_snippet_allows_minor_rewording_but_rejects_unrelated_text(self):
         raw_text = "  测试了一下qpig两个rf之间的电阻是4.4M欧姆。\nRF 匹配通过！"
         entry = ok_item()["logs"][0]
         valid = dict(entry, raw_snippet="测试了一下qpig两个rf之间的电阻是4.4M欧姆")
         self.assertEqual(validate_daily_logs(ok_item(logs=[valid]), {"p1"}, raw_text)["logs"][0]["raw_snippet"], valid["raw_snippet"])
-        for bad in (None, 1, "电阻是4.4M欧姆", "测试了q-pig两个rf之间的电阻为4.4M欧姆", ""):
+        polished = dict(entry, raw_snippet="测试了q-pig两个rf之间的电阻为4.4M欧姆")
+        self.assertEqual(validate_daily_logs(ok_item(logs=[polished]), {"p1"}, raw_text)["logs"][0]["raw_snippet"], polished["raw_snippet"])
+        for bad in (None, 1, "电阻是4.4M欧姆", "今天完成了低温系统检漏", ""):
             with self.subTest(raw_snippet=bad), self.assertRaises(ParseError):
                 validate_daily_logs(ok_item(logs=[dict(entry, raw_snippet=bad)]), {"p1"}, raw_text)
 

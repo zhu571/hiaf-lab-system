@@ -72,6 +72,15 @@ func TestAiParseOKPassthrough(t *testing.T) {
 	}
 }
 
+func TestAiParseAllowsPolishedRawSnippet(t *testing.T) {
+	rawText := "测试了一下qpig两个rf之间的电阻是4.4M欧姆"
+	body := `{"status":"ok","logs":[{"category":"test","project_id":"prj_1","content":"测量 q-pig 电阻","raw_snippet":"测试了q-pig两个rf之间的电阻为4.4M欧姆","occurred_at":"2026-08-06T09:00:00+08:00"}],"summary":"完成电阻测量。"}`
+	upstream, _ := aiParseOKUpstream(t, body)
+	if _, err := aiParseService(t, testReport("usr_1", ReportStatusDraft, rawText), upstream).AiParse(context.Background(), "report_1", "usr_1", "member"); err != nil {
+		t.Fatalf("polished raw_snippet was rejected: %v", err)
+	}
+}
+
 func TestAiParseClarifyAndRejectedPassthrough(t *testing.T) {
 	for _, tt := range []struct{ status, body string }{
 		{"clarify", `{"status":"clarify","logs":[],"question":"哪个项目？","reason":null}`},
