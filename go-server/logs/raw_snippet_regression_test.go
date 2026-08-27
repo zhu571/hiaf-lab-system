@@ -25,6 +25,18 @@ func TestRealReport_20260819_NoFalsePositive(t *testing.T) {
 	}
 }
 
+func TestRawSnippetAllowsMinorRewordingOnly(t *testing.T) {
+	rawText := "测试了一下qpig两个rf之间的电阻是4.4M欧姆。"
+	if !containsRawTextSegment(rawText, "测试了q-pig两个rf之间的电阻为4.4M欧姆") {
+		t.Fatal("minor AI rewording should match its source segment")
+	}
+	for _, snippet := range []string{"电阻是4.4M欧姆", "今天完成了低温系统检漏"} {
+		if containsRawTextSegment(rawText, snippet) {
+			t.Fatalf("untraceable snippet matched source: %q", snippet)
+		}
+	}
+}
+
 func TestRealReport_20260819_MissingSegment(t *testing.T) {
 	// 原文 2 段，AI 只覆盖 1 段 → 应触发警告（漏内容检测）
 	rawText := "今天拆掉了外腔，测试了一下qpig两个rf之间的电阻是4.4M欧姆。测量了qpigdc-与地之间的四个电容。"

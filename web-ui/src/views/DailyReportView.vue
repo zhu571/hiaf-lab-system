@@ -8,7 +8,7 @@
       <div class="toolbar">
         <h3>{{ t('dailyReport.todayRecord') }}</h3>
         <div class="toolbar-actions">
-          <el-upload :auto-upload="false" :show-file-list="false" :on-change="onFileSelect" accept="image/*,.pdf">
+          <el-upload :auto-upload="false" :show-file-list="false" :on-change="onFileSelect">
             <el-button>{{ t('dailyReport.addAttachment') }}</el-button>
           </el-upload>
           <el-button @click="saveRaw">{{ t('dailyReport.saveRaw') }}</el-button>

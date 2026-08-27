@@ -1,6 +1,7 @@
 import json
 import os
 import re
+from collections import Counter
 from datetime import datetime
 from pathlib import Path
 
@@ -266,6 +267,18 @@ def _trim_segment_separators(s):
     return s.strip("。！？；\r\n").strip()
 
 
+def _matches_raw_text_segment(raw_text, snippet):
+    snippet = _trim_segment_separators(snippet)
+    for segment in _raw_text_segments(raw_text):
+        if snippet == segment:
+            return True
+        snippet_chars, segment_chars = Counter(snippet.casefold()), Counter(segment.casefold())
+        overlap = sum((snippet_chars & segment_chars).values())
+        if overlap * 5 >= max(len(snippet), len(segment)) * 4:
+            return True
+    return False
+
+
 def validate_daily_logs(item, allowed_projects, raw_text):
     status = item.get("status")
     if status not in {"ok", "clarify", "rejected"}:
@@ -295,7 +308,7 @@ def validate_daily_logs(item, allowed_projects, raw_text):
                 raise ParseError("daily parse log category or project is invalid")
             if not 1 <= len(content) <= 2000:
                 raise ParseError("daily parse log content length is invalid")
-            if not 1 <= len(raw_snippet) <= 4000 or _trim_segment_separators(raw_snippet) not in _raw_text_segments(raw_text):
+            if not 1 <= len(raw_snippet) <= 4000 or not _matches_raw_text_segment(raw_text, raw_snippet):
                 raise ParseError("daily parse log raw_snippet is invalid")
             if not RFC3339.match(occurred_at):
                 raise ParseError("daily parse log occurred_at is invalid")

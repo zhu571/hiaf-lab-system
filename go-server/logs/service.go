@@ -812,23 +812,26 @@ func submitWarnings(report DailyReport, items []Log) []SubmitWarning {
 
 func rawTextHasMatchingLog(rawText string, items []Log) bool {
 	strict := false
-	counts := make(map[string]int)
+	snippets := make([]string, 0, len(items))
 	for _, item := range items {
 		if item.RawSnippet != nil && *item.RawSnippet != "" {
 			strict = true
-			// 与 containsRawTextSegment 一致：裁掉首尾分隔符后再计数
-			snip := strings.Trim(*item.RawSnippet, "。！？；\r\n")
-			if snip != "" {
-				counts[snip]++
-			}
+			snippets = append(snippets, *item.RawSnippet)
 		}
 	}
 	if strict {
 		for _, segment := range rawTextSegments(rawText) {
-			if counts[segment] == 0 {
+			matched := -1
+			for i, snippet := range snippets {
+				if rawTextSegmentMatches(segment, snippet) {
+					matched = i
+					break
+				}
+			}
+			if matched < 0 {
 				return false
 			}
-			counts[segment]--
+			snippets = append(snippets[:matched], snippets[matched+1:]...)
 		}
 		return true
 	}
@@ -859,18 +862,32 @@ func containsRawTextSegment(rawText, snippet string) bool {
 	if n := utf8.RuneCountInString(snippet); n < 1 || n > 4000 {
 		return false
 	}
-	// 容忍模型在 snippet 首尾带上分隔符（如句号）：先裁掉分隔符再比较，
-	// 仍要求与某个完整分段完全相等（短子串/改写不会通过）。
-	trimmed := strings.Trim(snippet, "。！？；\r\n")
-	if trimmed == "" {
-		return false
-	}
 	for _, segment := range rawTextSegments(rawText) {
-		if trimmed == segment {
+		if rawTextSegmentMatches(segment, snippet) {
 			return true
 		}
 	}
 	return false
+}
+
+func rawTextSegmentMatches(segment, snippet string) bool {
+	snippet = strings.TrimSpace(strings.Trim(snippet, "。！？；\r\n"))
+	if snippet == segment {
+		return true
+	}
+	snippetRunes, segmentRunes := []rune(strings.ToLower(snippet)), []rune(strings.ToLower(segment))
+	counts := make(map[rune]int, len(snippetRunes))
+	for _, r := range snippetRunes {
+		counts[r]++
+	}
+	overlap := 0
+	for _, r := range segmentRunes {
+		if counts[r] > 0 {
+			counts[r]--
+			overlap++
+		}
+	}
+	return overlap*5 >= max(len(snippetRunes), len(segmentRunes))*4
 }
 
 func validateOptionalRFC3339(v string) error {

@@ -94,6 +94,12 @@ afterEach(() => {
 })
 
 describe('DailyReportView 日报编辑', () => {
+  it('附件选择不限制文件类型', async () => {
+    vi.mocked(todayReport).mockResolvedValue(makeReport())
+    const wrapper = await mountView('member')
+    expect(wrapper.find('el-upload-stub').attributes('accept')).toBe('')
+  })
+
   it('挂载：todayReport 自动创建后 raw_text 落位到编辑器（覆写竞态固化）', async () => {
     vi.mocked(todayReport).mockResolvedValue(makeReport({ raw_text: '今天完成了低温靶的抽真空' }))
     const wrapper = await mountView('member')
