@@ -25,8 +25,10 @@ func TestSafetyAndFlowRepositoryPostgres(t *testing.T) {
 		t.Fatal(err)
 	}
 	ctx := context.Background()
-	const creator = "00000000-0000-0000-0000-00000000f101"
-	const approver = "00000000-0000-0000-0000-00000000f102"
+	// 种子 UUID 必须与其它包错开（CI -p 1 跨包共用同一测试库，runs 占用 f101–f105），
+	// 且 cleanup 要删净种子用户：残留行会让其它包的 ON CONFLICT (id) DO NOTHING 静默失效。
+	const creator = "00000000-0000-0000-0000-00000000f203"
+	const approver = "00000000-0000-0000-0000-00000000f204"
 	_, err = db.Exec(`INSERT INTO users (id,username,password_hash,role) VALUES ($1,'instrument-flow-creator','unused','maintainer'),($2,'instrument-flow-approver','unused','maintainer') ON CONFLICT (id) DO NOTHING`, creator, approver)
 	if err != nil {
 		t.Fatal(err)
@@ -45,6 +47,7 @@ func TestSafetyAndFlowRepositoryPostgres(t *testing.T) {
 		db.Exec(`DELETE FROM instrument_flow_sessions WHERE actor_id=$1`, creator)
 		db.Exec(`DELETE FROM instrument_approvals WHERE requested_by=$1`, creator)
 		db.Exec(`DELETE FROM instrument_leases WHERE user_id=$1`, creator)
+		db.Exec(`DELETE FROM users WHERE id IN ($1,$2)`, creator, approver)
 		db.Close()
 	})
 	if _, err = safety.CreateLease(ctx, "hioki_im3536", approver, "must conflict", time.Minute, false, "maintainer"); !errors.Is(err, ErrLeaseBusy) {
@@ -154,6 +157,7 @@ func TestHiokiFlowExecutorPostgres(t *testing.T) {
 		db.Exec(`DELETE FROM instrument_flow_sessions WHERE actor_id=$1`, creator)
 		db.Exec(`DELETE FROM instrument_approvals WHERE requested_by=$1`, creator)
 		db.Exec(`DELETE FROM instrument_leases WHERE user_id=$1`, creator)
+		db.Exec(`DELETE FROM users WHERE id IN ($1,$2)`, creator, approver)
 		db.Close()
 	})
 	inst := startFakeTCPInstrument(t, "")
