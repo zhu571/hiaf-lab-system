@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"math"
 	"os"
 	"regexp"
@@ -23,24 +24,36 @@ const (
 )
 
 type FlowExecutor struct {
-	repo    *Repository
-	svc     *Service
-	workers map[string]*InstrumentWorker
-	settle  time.Duration
+	repo      *Repository
+	svc       *Service
+	workers   map[string]*InstrumentWorker
+	settle    time.Duration
 	maxPoints int
 	maxSpanHz float64
-	deadline time.Duration
+	deadline  time.Duration
+	authorize func(context.Context, string, string, string) error
+	audit     func(context.Context, string, map[string]any) error
 }
 
 func NewFlowExecutor(repo *Repository, svc *Service, workers map[string]*InstrumentWorker) *FlowExecutor {
-	return &FlowExecutor{repo: repo, svc: svc, workers: workers,
-		settle: time.Duration(envBoundedInt("HIOKI_FLOW_SETTLE_MS",500,0,5000))*time.Millisecond,
-		maxPoints: envBoundedInt("HIOKI_FLOW_MAX_POINTS",flowMaxPoints,2,flowMaxPoints),
-		maxSpanHz: float64(envBoundedInt("HIOKI_FLOW_MAX_SPAN_HZ",int(flowMaxSpanHz),1,int(flowMaxSpanHz))),
-		deadline: time.Duration(envBoundedInt("HIOKI_FLOW_DEADLINE_SECONDS",900,60,900))*time.Second}
+	e := &FlowExecutor{repo: repo, svc: svc, workers: workers,
+		settle:    time.Duration(envBoundedInt("HIOKI_FLOW_SETTLE_MS", 500, 0, 5000)) * time.Millisecond,
+		maxPoints: envBoundedInt("HIOKI_FLOW_MAX_POINTS", flowMaxPoints, 2, flowMaxPoints),
+		maxSpanHz: float64(envBoundedInt("HIOKI_FLOW_MAX_SPAN_HZ", int(flowMaxSpanHz), 1, int(flowMaxSpanHz))),
+		deadline:  time.Duration(envBoundedInt("HIOKI_FLOW_DEADLINE_SECONDS", 900, 60, 900)) * time.Second}
+	e.audit = func(ctx context.Context, action string, detail map[string]any) error {
+		return middleware.WriteSystemAudit(ctx, repo.db, action, detail)
+	}
+	return e
 }
 
-func envBoundedInt(name string, fallback, min, max int) int { value,err:=strconv.Atoi(os.Getenv(name));if err!=nil||value<min||value>max{return fallback};return value }
+func envBoundedInt(name string, fallback, min, max int) int {
+	value, err := strconv.Atoi(os.Getenv(name))
+	if err != nil || value < min || value > max {
+		return fallback
+	}
+	return value
+}
 
 // FlowEnabled 报告多步流程入口是否开放（设计 §15 灰度止血开关）。
 // INSTRUMENT_FLOW_ENABLED 默认关闭：关闭时 flow 写端点不注册、FlowRecovery
@@ -139,8 +152,12 @@ func (e *FlowExecutor) Create(ctx context.Context, instrument, actor, acting, re
 		return nil, fmt.Errorf("unsupported object_type")
 	}
 	parseSweepObjective(&req)
-	if req.Points > e.maxPoints { return nil, fmt.Errorf("points exceed configured limit %d", e.maxPoints) }
-	if req.StopHz-req.StartHz > e.maxSpanHz { return nil, fmt.Errorf("frequency span exceeds configured limit %.0f Hz", e.maxSpanHz) }
+	if req.Points > e.maxPoints {
+		return nil, fmt.Errorf("points exceed configured limit %d", e.maxPoints)
+	}
+	if req.StopHz-req.StartHz > e.maxSpanHz {
+		return nil, fmt.Errorf("frequency span exceeds configured limit %.0f Hz", e.maxSpanHz)
+	}
 	grid, err := frequencyGrid(req.StartHz, req.StopHz, req.Points, req.Spacing)
 	if err != nil {
 		return nil, err
@@ -188,17 +205,17 @@ func (e *FlowExecutor) Run(ctx context.Context, id string) {
 	}
 	worker := e.workers[f.InstrumentID]
 	if worker == nil {
-		_ = e.repo.FinishFlow(ctx, id, "failed", "instrument_unavailable", nil)
+		e.finish(ctx, f, "failed", "instrument_unavailable", nil)
 		return
 	}
 	if err = worker.AcquireSession(id, f.DeadlineAt); err != nil {
-		_ = e.repo.FinishFlow(ctx, id, "failed", "instrument_busy", nil)
+		e.finish(ctx, f, "failed", "instrument_busy", nil)
 		return
 	}
 	defer worker.ReleaseSession(id)
 	defer func() {
 		if recover() != nil {
-			_ = e.repo.FinishFlow(context.Background(), id, "failed", "executor_panic", nil)
+			e.finish(context.Background(), f, "failed", "executor_panic", nil)
 		}
 	}()
 	if err = e.repo.StartFlow(ctx, id); err != nil {
@@ -221,34 +238,16 @@ func (e *FlowExecutor) Run(ctx context.Context, id string) {
 	defer func() {
 		if f.Limits.RestoreFrequency && worker.SessionOwner() == id {
 			if _, restoreErr := e.runRaw(context.Background(), f, worker, -1, "set_frequency", map[string]any{"hz": parsedOriginal}); restoreErr != nil {
-				_ = e.repo.RestoreFailed(context.Background(), f.ID)
+				if persistErr := e.repo.RestoreFailed(context.Background(), f.ID); persistErr != nil {
+					e.persistenceFailure(f, persistErr)
+				}
 			}
 		}
 	}()
 	for stepNo := 1; stepNo <= f.Limits.MaxCommands+1; stepNo++ {
-		fresh, getErr := e.repo.GetFlow(ctx, id)
+		fresh, getErr := e.preSendGuard(ctx, f)
 		if getErr != nil {
-			e.finish(ctx, f, "failed", "state_read_failed", nil)
-			return
-		}
-		if fresh.StopRequested {
-			e.finish(ctx, f, "stopped", "", &ParsedResult{Type: "sweep_xy", Points: points, XLabel: "频率 (Hz)", YLabel: "阻抗 |Z| (Ω)"})
-			return
-		}
-		if time.Now().After(f.DeadlineAt) {
-			e.finish(ctx, f, "timed_out", "deadline_exceeded", nil)
-			return
-		}
-		if fresh.WhitelistVersion != whitelistVersion {
-			e.finish(ctx, f, "failed", "whitelist_changed", nil)
-			return
-		}
-		if _, getErr = e.repo.ValidLease(ctx, f.LeaseID, f.InstrumentID, f.ActingUserID); getErr != nil {
-			e.finish(ctx, f, "failed", "lease_expired", nil)
-			return
-		}
-		if f.ApprovalID == nil || e.repo.ValidFlowApproval(ctx, f.ID, *f.ApprovalID, f.LeaseID, f.ActingUserID) != nil {
-			e.finish(ctx, f, "failed", "approval_expired", nil)
+			e.finishGuardFailure(ctx, f, getErr, points)
 			return
 		}
 		f.StepCount, f.PointCount = fresh.StepCount, fresh.PointCount
@@ -304,7 +303,13 @@ func (e *FlowExecutor) Run(ctx context.Context, id string) {
 		if runErr != nil {
 			step.Status = "failed"
 			step.ErrorCode = commandErrorCode(runErr)
-			_ = e.repo.AddStep(ctx, step)
+			if !e.persistStep(ctx, f, worker, step, result.Command != "") {
+				return
+			}
+			if step.ErrorCode == "stop_requested" || step.ErrorCode == "deadline_exceeded" || step.ErrorCode == "flow_not_running" {
+				e.finishGuardFailure(ctx, f, runErr, points)
+				return
+			}
 			previous = map[string]any{"command": decision.Command, "error": step.ErrorCode}
 			if !canRetryMeasure(decision.Command, pending, retries[pending], runErr, worker.State()) {
 				e.finish(ctx, f, "failed", step.ErrorCode, nil)
@@ -320,7 +325,9 @@ func (e *FlowExecutor) Run(ctx context.Context, id string) {
 			if parseErr != nil || parsed == nil || parsed.Value == nil {
 				step.Status = "failed"
 				step.ErrorCode = "parse_failed"
-				_ = e.repo.AddStep(ctx, step)
+				if !e.persistStep(ctx, f, worker, step, true) {
+					return
+				}
 				e.finish(ctx, f, "failed", "parse_failed", nil)
 				return
 			}
@@ -335,7 +342,9 @@ func (e *FlowExecutor) Run(ctx context.Context, id string) {
 			case <-time.After(e.settle):
 			}
 		}
-		_ = e.repo.AddStep(ctx, step)
+		if !e.persistStep(ctx, f, worker, step, true) {
+			return
+		}
 		previous = map[string]any{"command": decision.Command, "params": params, "result": step.Result}
 	}
 	e.finish(ctx, f, "failed", "max_commands_exceeded", nil)
@@ -356,12 +365,21 @@ func (e *FlowExecutor) runRaw(ctx context.Context, f *FlowSession, w *Instrument
 			return CommandResult{}, err
 		}
 	}
+	if stepNo > 0 {
+		if _, err = e.preSendGuard(ctx, f); err != nil {
+			return CommandResult{}, err
+		}
+	}
 	step := stepNo
 	flowID := f.ID
 	raw, _ := json.Marshal(params)
 	norm, _ := json.Marshal(normalized)
-	_ = e.repo.InsertCommandLog(ctx, &CommandLogEntry{InstrumentID: f.InstrumentID, CommandName: command, RiskLevel: def.Risk, ParamsRaw: raw, ParamsNormalized: norm, UserID: f.ActorID, ActingUserID: &f.ActingUserID, LeaseID: &f.LeaseID, ApprovalID: f.ApprovalID, WhitelistVersion: whitelistVersion, RequestID: f.RequestID, FlowSessionID: &flowID, StepNo: &step, Phase: "requested"})
-	_ = middleware.WriteSystemAudit(ctx, e.repo.db, "instrument.command.requested", map[string]any{"flow_session_id": f.ID, "step_no": stepNo, "command": command, "actor_id": f.ActorID, "acting_user_id": f.ActingUserID, "lease_id": f.LeaseID, "approval_id": f.ApprovalID, "whitelist_version": whitelistVersion})
+	if err = e.repo.InsertCommandLog(ctx, &CommandLogEntry{InstrumentID: f.InstrumentID, CommandName: command, RiskLevel: def.Risk, ParamsRaw: raw, ParamsNormalized: norm, UserID: f.ActorID, ActingUserID: &f.ActingUserID, LeaseID: &f.LeaseID, ApprovalID: f.ApprovalID, WhitelistVersion: whitelistVersion, RequestID: f.RequestID, FlowSessionID: &flowID, StepNo: &step, Phase: "requested"}); err != nil {
+		return CommandResult{}, newCommandError("audit_failed", err)
+	}
+	if err = e.audit(ctx, "instrument.command.requested", map[string]any{"flow_session_id": f.ID, "step_no": stepNo, "command": command, "actor_id": f.ActorID, "acting_user_id": f.ActingUserID, "lease_id": f.LeaseID, "approval_id": f.ApprovalID, "whitelist_version": whitelistVersion}); err != nil {
+		return CommandResult{}, newCommandError("audit_failed", err)
+	}
 	cmd := &QueueCommand{Name: command, Params: normalized, Risk: def.Risk, SessionID: f.ID, ResponseCh: make(chan CommandResult, 1)}
 	if err = w.Submit(cmd); err != nil {
 		// 未到达硬件的会话/队列拒绝（busy/locked/not acquired 等）不可重试。
@@ -388,23 +406,99 @@ func (e *FlowExecutor) runRaw(ctx context.Context, f *FlowSession, w *Instrument
 		errCode = &x
 	}
 	duration := int(result.Duration.Milliseconds())
-	_ = e.repo.InsertCommandLog(ctx, &CommandLogEntry{InstrumentID: f.InstrumentID, CommandName: command, RiskLevel: def.Risk, ParamsRaw: raw, ParamsNormalized: norm, UserID: f.ActorID, ActingUserID: &f.ActingUserID, LeaseID: &f.LeaseID, ApprovalID: f.ApprovalID, WhitelistVersion: whitelistVersion, ResultSummary: &summary, ResultHash: &resultHash, ErrorCode: errCode, DurationMS: &duration, RequestID: f.RequestID, FlowSessionID: &flowID, StepNo: &step, Phase: "completed"})
+	postErr := e.repo.InsertCommandLog(ctx, &CommandLogEntry{InstrumentID: f.InstrumentID, CommandName: command, RiskLevel: def.Risk, ParamsRaw: raw, ParamsNormalized: norm, UserID: f.ActorID, ActingUserID: &f.ActingUserID, LeaseID: &f.LeaseID, ApprovalID: f.ApprovalID, WhitelistVersion: whitelistVersion, ResultSummary: &summary, ResultHash: &resultHash, ErrorCode: errCode, DurationMS: &duration, RequestID: f.RequestID, FlowSessionID: &flowID, StepNo: &step, Phase: "completed"})
 	action := "instrument.command.completed"
 	if result.Error != nil {
 		action = "instrument.command.failed"
 	}
-	_ = middleware.WriteSystemAudit(ctx, e.repo.db, action, map[string]any{"flow_session_id": f.ID, "step_no": stepNo, "command": command, "result_hash": resultHash, "error_code": errCode})
+	if postErr == nil {
+		postErr = e.audit(ctx, action, map[string]any{"flow_session_id": f.ID, "step_no": stepNo, "command": command, "result_hash": resultHash, "error_code": errCode})
+	}
+	if postErr != nil {
+		w.requireManualCheck(postErr)
+		return result, newCommandError("audit_failed", postErr)
+	}
 	return result, result.Error
 }
 
 func (e *FlowExecutor) reject(ctx context.Context, f *FlowSession, n int, d *FlowDecision, code string) {
-	_ = e.repo.AddStep(ctx, &FlowStep{SessionID: f.ID, StepNo: n, Decision: d.Decision, Command: d.Command, Params: d.Params, Status: "rejected", Reason: d.Reason, ErrorCode: code, InputHash: d.InputHash, OutputHash: d.OutputHash, Model: d.Model, PromptVersion: d.PromptVersion, WhitelistVersion: whitelistVersion})
+	if !e.persistStep(ctx, f, nil, &FlowStep{SessionID: f.ID, StepNo: n, Decision: d.Decision, Command: d.Command, Params: d.Params, Status: "rejected", Reason: d.Reason, ErrorCode: code, InputHash: d.InputHash, OutputHash: d.OutputHash, Model: d.Model, PromptVersion: d.PromptVersion, WhitelistVersion: whitelistVersion}, false) {
+		return
+	}
 	e.finish(ctx, f, "failed", code, nil)
 }
 func (e *FlowExecutor) finish(ctx context.Context, f *FlowSession, status, code string, result *ParsedResult) {
-	_ = e.repo.FinishFlow(ctx, f.ID, status, code, result)
-	_ = middleware.WriteSystemAudit(ctx, e.repo.db, "instrument.flow."+status, map[string]any{"flow_session_id": f.ID, "actor_id": f.ActorID, "acting_user_id": f.ActingUserID, "lease_id": f.LeaseID, "approval_id": f.ApprovalID, "error_code": code})
+	if err := e.repo.FinishFlow(ctx, f.ID, status, code, result); err != nil {
+		e.persistenceFailure(f, err)
+		return
+	}
+	if err := e.audit(ctx, "instrument.flow."+status, map[string]any{"flow_session_id": f.ID, "actor_id": f.ActorID, "acting_user_id": f.ActingUserID, "lease_id": f.LeaseID, "approval_id": f.ApprovalID, "error_code": code}); err != nil {
+		if markErr := e.repo.MarkFlowAuditFailure(context.Background(), f.ID); markErr != nil {
+			slog.Error("mark instrument flow audit failure failed", "flow_session_id", f.ID, "error", markErr)
+		}
+		e.persistenceFailure(f, err)
+	}
 }
+
+func (e *FlowExecutor) preSendGuard(ctx context.Context, f *FlowSession) (*FlowSession, error) {
+	fresh, err := e.repo.GetFlow(ctx, f.ID)
+	if err != nil {
+		return nil, newCommandError("state_read_failed", err)
+	}
+	if fresh.StopRequested {
+		return nil, newCommandError("stop_requested", errors.New("flow stop requested"))
+	}
+	if fresh.Status != "running" {
+		return nil, newCommandError("flow_not_running", fmt.Errorf("flow status is %s", fresh.Status))
+	}
+	if !time.Now().Before(fresh.DeadlineAt) {
+		return nil, newCommandError("deadline_exceeded", context.DeadlineExceeded)
+	}
+	if fresh.WhitelistVersion != whitelistVersion {
+		return nil, newCommandError("whitelist_changed", errors.New("instrument whitelist changed"))
+	}
+	if _, err = e.repo.ValidLease(ctx, fresh.LeaseID, fresh.InstrumentID, fresh.ActingUserID); err != nil {
+		return nil, newCommandError("lease_expired", err)
+	}
+	if fresh.ApprovalID == nil || e.repo.ValidFlowApproval(ctx, fresh.ID, *fresh.ApprovalID, fresh.LeaseID, fresh.ActingUserID) != nil {
+		return nil, newCommandError("approval_expired", ErrApprovalInvalid)
+	}
+	if e.authorize == nil || e.authorize(ctx, fresh.ActorID, fresh.ActingUserID, fresh.InstrumentID) != nil {
+		return nil, newCommandError("permission_revoked", errors.New("instrument flow permission revoked"))
+	}
+	return fresh, nil
+}
+
+func (e *FlowExecutor) finishGuardFailure(ctx context.Context, f *FlowSession, err error, points []Point) {
+	code := commandErrorCode(err)
+	switch code {
+	case "stop_requested":
+		e.finish(ctx, f, "stopped", "", &ParsedResult{Type: "sweep_xy", Points: points, XLabel: "频率 (Hz)", YLabel: "阻抗 |Z| (Ω)"})
+	case "deadline_exceeded":
+		e.finish(ctx, f, "timed_out", code, nil)
+	default:
+		e.finish(ctx, f, "failed", code, nil)
+	}
+}
+
+func (e *FlowExecutor) persistStep(ctx context.Context, f *FlowSession, w *InstrumentWorker, step *FlowStep, hardwareTouched bool) bool {
+	if err := e.repo.AddStep(ctx, step); err != nil {
+		if hardwareTouched && w != nil {
+			w.requireManualCheck(err)
+		}
+		e.finish(ctx, f, "failed", "step_persistence_failed", nil)
+		return false
+	}
+	return true
+}
+
+func (e *FlowExecutor) persistenceFailure(f *FlowSession, err error) {
+	slog.Error("instrument flow persistence failed", "flow_session_id", f.ID, "error", err)
+	if w := e.workers[f.InstrumentID]; w != nil {
+		w.requireManualCheck(err)
+	}
+}
+
 // commandError 给命令失败携带结构化错误类别（M5）。重试判定只认 code，
 // 不再对错误消息做子串匹配——中文 NormalizeParams 校验错误此前会落入
 // communication_error 而被当作可重试瞬时错误。未知错误一律 validation_error

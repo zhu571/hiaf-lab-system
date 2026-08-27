@@ -242,7 +242,21 @@ func (r *Repository) FinishFlow(ctx context.Context, id, status, code string, re
 	if result != nil {
 		raw, _ = json.Marshal(result)
 	}
-	_, err := r.db.ExecContext(ctx, `UPDATE instrument_flow_sessions SET status=$2,error_code=NULLIF($3,''),result=$4,finished_at=now(),updated_at=now() WHERE id=$1 AND status IN ('queued','running')`, id, status, code, raw)
+	res, err := r.db.ExecContext(ctx, `UPDATE instrument_flow_sessions SET status=$2,error_code=NULLIF($3,''),result=$4,finished_at=now(),updated_at=now() WHERE id=$1 AND status IN ('queued','running')`, id, status, code, raw)
+	if err != nil {
+		return err
+	}
+	n, err := res.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if n != 1 {
+		return errors.New("flow is already terminal")
+	}
+	return nil
+}
+func (r *Repository) MarkFlowAuditFailure(ctx context.Context, id string) error {
+	_, err := r.db.ExecContext(ctx, `UPDATE instrument_flow_sessions SET status='failed',error_code='audit_failed',result=NULL,finished_at=now(),updated_at=now() WHERE id=$1 AND status<>'emergency_stopped'`, id)
 	return err
 }
 func (r *Repository) AddStep(ctx context.Context, s *FlowStep) error {
@@ -251,11 +265,25 @@ func (r *Repository) AddStep(ctx context.Context, s *FlowStep) error {
 	}
 	params, _ := json.Marshal(s.Params)
 	result, _ := json.Marshal(s.Result)
-	_, err := r.db.ExecContext(ctx, `INSERT INTO instrument_flow_steps (id,session_id,step_no,decision,command_name,params,status,reason,result,error_code,input_hash,output_hash,model,prompt_version,whitelist_version,duration_ms) VALUES ($1,$2,$3,$4,NULLIF($5,''),$6,$7,NULLIF($8,''),$9,NULLIF($10,''),NULLIF($11,''),NULLIF($12,''),NULLIF($13,''),NULLIF($14,''),$15,$16)`, s.ID, s.SessionID, s.StepNo, s.Decision, s.Command, params, s.Status, s.Reason, result, s.ErrorCode, s.InputHash, s.OutputHash, s.Model, s.PromptVersion, s.WhitelistVersion, s.DurationMS)
-	if err == nil {
-		_, err = r.db.ExecContext(ctx, `UPDATE instrument_flow_sessions SET step_count=step_count+1,point_count=point_count+CASE WHEN $2 THEN 1 ELSE 0 END,updated_at=now() WHERE id=$1`, s.SessionID, s.Status == "succeeded" && s.Command == "measure_single")
+	tx, err := r.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
 	}
-	return err
+	defer tx.Rollback()
+	if _, err = tx.ExecContext(ctx, `INSERT INTO instrument_flow_steps (id,session_id,step_no,decision,command_name,params,status,reason,result,error_code,input_hash,output_hash,model,prompt_version,whitelist_version,duration_ms) VALUES ($1,$2,$3,$4,NULLIF($5,''),$6,$7,NULLIF($8,''),$9,NULLIF($10,''),NULLIF($11,''),NULLIF($12,''),NULLIF($13,''),NULLIF($14,''),$15,$16)`, s.ID, s.SessionID, s.StepNo, s.Decision, s.Command, params, s.Status, s.Reason, result, s.ErrorCode, s.InputHash, s.OutputHash, s.Model, s.PromptVersion, s.WhitelistVersion, s.DurationMS); err != nil {
+		return err
+	}
+	res, err := tx.ExecContext(ctx, `UPDATE instrument_flow_sessions SET step_count=step_count+1,point_count=point_count+CASE WHEN $2 THEN 1 ELSE 0 END,updated_at=now() WHERE id=$1`, s.SessionID, s.Status == "succeeded" && s.Command == "measure_single")
+	if err != nil {
+		return err
+	}
+	if n, rowsErr := res.RowsAffected(); rowsErr != nil || n != 1 {
+		if rowsErr != nil {
+			return rowsErr
+		}
+		return errors.New("flow session not found while adding step")
+	}
+	return tx.Commit()
 }
 func (r *Repository) ListSteps(ctx context.Context, id string) ([]FlowStep, error) {
 	rows, err := r.db.QueryContext(ctx, `SELECT id,session_id,step_no,decision,COALESCE(command_name,''),params,status,COALESCE(reason,''),result,COALESCE(error_code,''),COALESCE(input_hash,''),COALESCE(output_hash,''),COALESCE(model,''),COALESCE(prompt_version,''),whitelist_version,COALESCE(duration_ms,0),created_at FROM instrument_flow_steps WHERE session_id=$1 ORDER BY step_no`, id)

@@ -81,6 +81,18 @@ func (f *fakeTCPInstrument) waitLine(t *testing.T, want string) {
 	t.Fatalf("instrument did not receive %q; got %v", want, f.lines)
 }
 
+func (f *fakeTCPInstrument) assertNoLine(t *testing.T, unwanted string) {
+	t.Helper()
+	time.Sleep(50 * time.Millisecond)
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	for _, line := range f.lines {
+		if line == unwanted {
+			t.Fatalf("instrument unexpectedly received %q; got %v", unwanted, f.lines)
+		}
+	}
+}
+
 func TestWorkerDefaultsAndValidation(t *testing.T) {
 	worker := NewInstrumentWorker(WorkerConfig{InstrumentID: "e5063a", Addr: "1.2.3.4:1", Terminator: "\n"})
 	if worker.cfg.RateLimit != defaultRateLimit || worker.cfg.RateWindow != defaultRateWindow {
@@ -167,6 +179,96 @@ func TestWorkerFullLoopIdentifyAndEmergency(t *testing.T) {
 	}
 	inst.waitLine(t, "ABOR")
 	inst.waitLine(t, "SOUR1:POW -45")
+}
+
+func TestWorkerAcquireInvalidatesQueuedOrdinaryCommand(t *testing.T) {
+	inst := startFakeTCPInstrument(t, "")
+	unblock := make(chan struct{})
+	inst.responder = func(line string) string {
+		if line == "FREQuency?" {
+			<-unblock
+			return "1000\n"
+		}
+		return "Hioki,IM3536\n"
+	}
+	worker := NewInstrumentWorker(WorkerConfig{InstrumentID: "hioki_im3536", Addr: inst.addr, Terminator: "\n"})
+	if err := worker.Start(); err != nil {
+		t.Fatal(err)
+	}
+	defer worker.Stop()
+
+	active := &QueueCommand{Name: "read_frequency", Risk: "green", ResponseCh: make(chan CommandResult, 1)}
+	queued := &QueueCommand{Name: "identify", Risk: "green", ResponseCh: make(chan CommandResult, 1)}
+	if err := worker.Submit(active); err != nil {
+		t.Fatal(err)
+	}
+	inst.waitLine(t, "FREQuency?")
+	if err := worker.Submit(queued); err != nil {
+		t.Fatal(err)
+	}
+	if err := worker.AcquireSession("flow-queued-boundary", time.Now().Add(time.Minute)); err != nil {
+		t.Fatal(err)
+	}
+	close(unblock)
+	<-active.ResponseCh
+	if result := <-queued.ResponseCh; commandErrorCode(result.Error) != "cancelled" {
+		t.Fatalf("queued command result=%v, want cancelled", result.Error)
+	}
+	inst.assertNoLine(t, "*IDN?")
+
+	owned := &QueueCommand{Name: "identify", Risk: "green", SessionID: "flow-queued-boundary", ResponseCh: make(chan CommandResult, 1)}
+	if err := worker.Submit(owned); err != nil {
+		t.Fatal(err)
+	}
+	if result := <-owned.ResponseCh; result.Error != nil {
+		t.Fatalf("owned command failed: %v", result.Error)
+	}
+}
+
+func TestWorkerEmergencyInvalidatesQueuedCommandAndKeepsManualLock(t *testing.T) {
+	inst := startFakeTCPInstrument(t, "")
+	unblock := make(chan struct{})
+	inst.responder = func(line string) string {
+		if line == "FREQuency?" {
+			<-unblock
+			return "1000\n"
+		}
+		return ""
+	}
+	worker := NewInstrumentWorker(WorkerConfig{InstrumentID: "hioki_im3536", Addr: inst.addr, Terminator: "\n"})
+	if err := worker.Start(); err != nil {
+		t.Fatal(err)
+	}
+	defer worker.Stop()
+
+	active := &QueueCommand{Name: "read_frequency", Risk: "green", ResponseCh: make(chan CommandResult, 1)}
+	queued := &QueueCommand{Name: "set_frequency", Risk: "yellow", Params: map[string]any{"hz": 2000.0}, ResponseCh: make(chan CommandResult, 1)}
+	if err := worker.Submit(active); err != nil {
+		t.Fatal(err)
+	}
+	inst.waitLine(t, "FREQuency?")
+	if err := worker.Submit(queued); err != nil {
+		t.Fatal(err)
+	}
+	if err := worker.EmergencyStop(); err != nil {
+		t.Fatal(err)
+	}
+	close(unblock)
+	<-active.ResponseCh
+	if result := <-queued.ResponseCh; commandErrorCode(result.Error) != "cancelled" {
+		t.Fatalf("queued command result=%v, want cancelled", result.Error)
+	}
+	inst.waitLine(t, "DCBias OFF")
+	inst.assertNoLine(t, "FREQuency 2000")
+	if worker.State() != WorkerStateLockedManualCheck {
+		t.Fatalf("state=%q, want manual-check lock", worker.State())
+	}
+	if err := worker.Submit(&QueueCommand{Name: "identify", Risk: "green", ResponseCh: make(chan CommandResult, 1)}); err == nil {
+		t.Fatal("normal command accepted before manual check")
+	}
+	if err := worker.ConfirmManualCheck(); err != nil {
+		t.Fatal(err)
+	}
 }
 
 func TestWorkerRateLimit(t *testing.T) {

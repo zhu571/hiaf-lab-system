@@ -35,6 +35,7 @@ type InstrumentWorker struct {
 	stopped       bool
 	sessionOwner  string
 	sessionUntil  time.Time
+	queueEpoch    uint64
 }
 
 // NewInstrumentWorker creates an idle worker with a bounded command queue.
@@ -88,22 +89,28 @@ func (w *InstrumentWorker) Submit(cmd *QueueCommand) error {
 	w.mu.Lock()
 	if w.sessionOwner != "" && time.Now().After(w.sessionUntil) {
 		w.sessionOwner, w.sessionUntil = "", time.Time{}
+		w.queueEpoch++
 	}
 	running := w.started && !w.stopped
 	owner := w.sessionOwner
-	w.mu.Unlock()
 	if !running {
+		w.mu.Unlock()
 		return fmt.Errorf("instrument worker is not running")
 	}
-	if w.State() == WorkerStateLockedManualCheck {
+	if w.state == WorkerStateLockedManualCheck {
+		w.mu.Unlock()
 		return fmt.Errorf("instrument is locked until manual check")
 	}
 	if owner != "" && cmd.SessionID != owner {
+		w.mu.Unlock()
 		return fmt.Errorf("instrument_busy: owned by flow session")
 	}
 	if owner == "" && cmd.SessionID != "" {
+		w.mu.Unlock()
 		return fmt.Errorf("instrument session is not acquired")
 	}
+	cmd.queueEpoch = w.queueEpoch
+	w.mu.Unlock()
 	select {
 	case w.cmdQueue <- cmd:
 		return nil
@@ -125,6 +132,10 @@ func (w *InstrumentWorker) AcquireSession(sessionID string, until time.Time) err
 	if w.sessionOwner != "" && time.Now().Before(w.sessionUntil) && w.sessionOwner != sessionID {
 		return fmt.Errorf("instrument_busy: owned by flow session")
 	}
+	if w.state == WorkerStateLockedManualCheck {
+		return fmt.Errorf("instrument is locked until manual check")
+	}
+	w.queueEpoch++
 	w.sessionOwner, w.sessionUntil = sessionID, until
 	return nil
 }
@@ -133,6 +144,7 @@ func (w *InstrumentWorker) ReleaseSession(sessionID string) {
 	w.mu.Lock()
 	defer w.mu.Unlock()
 	if w.sessionOwner == sessionID {
+		w.queueEpoch++
 		w.sessionOwner, w.sessionUntil = "", time.Time{}
 	}
 }
@@ -200,17 +212,19 @@ func (w *InstrumentWorker) EmergencyStop() error {
 	}
 	w.mu.Lock()
 	running := w.started && !w.stopped
-	if running {
-		w.sessionOwner, w.sessionUntil = "", time.Time{}
-	}
-	w.mu.Unlock()
 	if !running {
+		w.mu.Unlock()
 		return fmt.Errorf("instrument worker is not running")
 	}
 	select {
 	case w.emergencyCh <- cmd:
+		w.queueEpoch++
+		w.sessionOwner, w.sessionUntil = "", time.Time{}
+		w.state = WorkerStateLockedManualCheck
+		w.mu.Unlock()
 		return nil
 	default:
+		w.mu.Unlock()
 		return fmt.Errorf("emergency stop is already queued")
 	}
 }
@@ -242,6 +256,19 @@ func (w *InstrumentWorker) run() {
 
 func (w *InstrumentWorker) execute(cmd *QueueCommand) {
 	started := time.Now()
+	if cmd.Name != emergencyCommand {
+		w.mu.Lock()
+		if w.sessionOwner != "" && started.After(w.sessionUntil) {
+			w.sessionOwner, w.sessionUntil = "", time.Time{}
+			w.queueEpoch++
+		}
+		valid := w.state != WorkerStateLockedManualCheck && cmd.queueEpoch == w.queueEpoch && cmd.SessionID == w.sessionOwner
+		w.mu.Unlock()
+		if !valid {
+			w.respond(cmd, CommandResult{Command: cmd.Name, Duration: time.Since(started), Error: newCommandError("cancelled", fmt.Errorf("command invalidated by instrument ownership boundary"))})
+			return
+		}
+	}
 	if cmd.Name != emergencyCommand && cmd.Risk == "yellow" && w.rateLimitExceeded(started) {
 		w.respond(cmd, CommandResult{Command: cmd.Name, Duration: time.Since(started), Error: newCommandError("rate_limited", fmt.Errorf("instrument command rate limit exceeded"))})
 		return
@@ -252,14 +279,14 @@ func (w *InstrumentWorker) execute(cmd *QueueCommand) {
 
 	scpi, err := w.buildSCPI(cmd)
 	if err != nil {
-		w.setState(WorkerStateError)
+		w.setStateUnlessLocked(WorkerStateError)
 		w.respond(cmd, CommandResult{Command: cmd.Name, Duration: time.Since(started), Error: newCommandError("validation_error", err)})
 		return
 	}
 	if w.connection() == nil {
 		if err = w.reconnect(); err != nil {
 			w.reportAlert("warning", "仪器断开: "+w.cfg.InstrumentID, err.Error())
-			w.setState(WorkerStateNeedsReconnect)
+			w.setStateUnlessLocked(WorkerStateNeedsReconnect)
 			w.respond(cmd, CommandResult{Command: cmd.Name, Duration: time.Since(started), Error: newCommandError("communication_error", err)})
 			return
 		}
@@ -270,12 +297,13 @@ func (w *InstrumentWorker) execute(cmd *QueueCommand) {
 	if err != nil {
 		w.closeConnection()
 		w.reportAlert("error", "仪器恢复失败: "+w.cfg.InstrumentID, err.Error())
-		w.setState(WorkerStateNeedsReconnect)
+		w.setStateUnlessLocked(WorkerStateNeedsReconnect)
 		err = newCommandError("communication_error", err)
-	} else if cmd.Name == emergencyCommand {
+	} else if cmd.Name != emergencyCommand {
+		w.setStateUnlessLocked(WorkerStateRunning)
+	}
+	if cmd.Name == emergencyCommand {
 		w.setState(WorkerStateLockedManualCheck)
-	} else {
-		w.setState(WorkerStateRunning)
 	}
 	w.respond(cmd, CommandResult{Command: cmd.Name, Response: response, Duration: time.Since(started), Error: err})
 }
@@ -288,6 +316,15 @@ func (w *InstrumentWorker) ConfirmManualCheck() error {
 	}
 	w.state = WorkerStateRunning
 	return nil
+}
+
+func (w *InstrumentWorker) requireManualCheck(reason error) {
+	w.mu.Lock()
+	w.queueEpoch++
+	w.sessionOwner, w.sessionUntil = "", time.Time{}
+	w.state = WorkerStateLockedManualCheck
+	w.mu.Unlock()
+	w.reportAlert("error", "仪器审计失败: "+w.cfg.InstrumentID, reason.Error())
 }
 
 func (w *InstrumentWorker) buildSCPI(cmd *QueueCommand) (string, error) {
@@ -325,8 +362,18 @@ func (w *InstrumentWorker) rateLimitExceeded(now time.Time) bool {
 	}
 	w.rateLimited = true
 	w.rateLimitedAt = now
-	w.state = WorkerStateRateLimited
+	if w.state != WorkerStateLockedManualCheck {
+		w.state = WorkerStateRateLimited
+	}
 	return true
+}
+
+func (w *InstrumentWorker) setStateUnlessLocked(state WorkerState) {
+	w.mu.Lock()
+	if w.state != WorkerStateLockedManualCheck {
+		w.state = state
+	}
+	w.mu.Unlock()
 }
 
 func (w *InstrumentWorker) recordCmdTime(now time.Time) {
