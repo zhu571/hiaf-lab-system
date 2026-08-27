@@ -240,7 +240,7 @@ SERVICE_TOKEN 调用（todos scheduler 拉全量日报）：必须显式传 `use
 }
 ```
 
-`status=ok` 的每条日志必须包含 `raw_snippet`：它是日报原文按 `。！？；` 或换行分隔、仅裁掉首尾 Unicode 空白后的完整非空分段（1–4000 Unicode 字符），逐字保留大小写和其余字符；逗号（，）、顿号（、）、英文句点（.）不是分隔符，短子串或改写均无效，重复分段按出现次数覆盖。有效分段超过 20 个时返回 `clarify`，不静默漏段。
+`status=ok` 的每条日志必须包含 `raw_snippet`（1–4000 Unicode 字符）：它应对应日报原文按 `。！？；` 或换行分隔后的一个完整非空分段。逐字原文直接通过；为兼容模型轻微润色，与某个完整分段的字符重合率须达到 80%（按较长文本计），短子串和无关内容无效。重复分段按出现次数覆盖。有效分段超过 20 个时返回 `clarify`，不静默漏段。
 
 `status=clarify` 时 `question` 非空、`logs` 为空；`status=rejected` 时 `reason` 非空、`logs` 为空。
 
@@ -275,7 +275,7 @@ SERVICE_TOKEN 调用（todos scheduler 拉全量日报）：必须显式传 `use
 ### `POST /api/v1/projects/{id}/logs`
 
 请求：`{category, content, occurred_at?, source?, daily_report_id?, raw_snippet?}`（main.go:368，`PermCreateLog` member+）。
-`raw_snippet` 是 AI 日志的来源证据，必须是关联日报当前 `raw_text` 按 `。！？；` 或换行分隔、仅裁掉首尾 Unicode 空白后的一个完整非空分段（1–4000 Unicode 字符）；提供时 `daily_report_id` 必填且后端会校验。数据库字段可空，手工及历史日志可不提供。
+`raw_snippet` 是 AI 日志的来源证据，须能匹配关联日报当前 `raw_text` 的一个完整分段（规则同上，允许字符重合率至少 80% 的轻微润色）；提供时 `daily_report_id` 必填且后端会校验。数据库字段可空，手工及历史日志可不提供。
 响应 201：`Log`。错误：400 `log_project_missing`、`project_lifecycle_blocked`。
 
 ### `GET /api/v1/logs/{id}`
