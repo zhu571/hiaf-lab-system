@@ -52,6 +52,25 @@ export type ParsedResult = {
   y_label?: string
 }
 
+export type InstrumentLease = { id: string; instrument_id: string; user_id: string; purpose: string; status: string; expires_at: string }
+export type FlowStep = { step_no: number; command?: string; params?: Record<string, unknown>; status: string; reason?: string; result?: ParsedResult; error_code?: string; duration_ms?: number }
+// 审批人在批准前可核对的完整不可变包络（API-only 试点：审批走 API/命令行，无前端审批 UI）
+export type FlowEnvelope = {
+  instrument_id: string; instrument_name?: string; flow_kind: string; objective: string; object_type: string
+  actor_id: string; acting_user_id: string; lease_id: string; whitelist_version: string
+  allowed_commands: { name: string; description: string; risk: string; timeout_ms?: number; params?: Record<string, unknown> }[]
+  frequency_min_hz: number; frequency_max_hz: number; frequency_grid: number[]
+  max_points: number; retry_budget: number; max_commands: number; deadline_at: string; restore_frequency: boolean
+  approval_id?: string; approval_status?: string; approved_by?: string; approval_expires_at?: string; envelope_hash?: string
+}
+export type FlowSession = {
+  id: string; instrument_id: string; flow_kind: string; objective: string; object_type: string; status: string
+  limits: { allowed_commands: string[]; frequency_min_hz: number; frequency_max_hz: number; max_points: number; retry_budget: number; max_commands: number; deadline_at: string; restore_frequency: boolean }
+  lease_id: string; approval_id?: string; whitelist_version: string; actor_id: string; acting_user_id: string
+  step_count: number; point_count: number; error_code?: string; result?: ParsedResult; steps?: FlowStep[]
+  envelope?: FlowEnvelope
+}
+
 export type NLCommandCandidate = {
   status: 'ok' | 'clarify' | 'rejected'
   command?: string
@@ -130,6 +149,25 @@ export function interpretCommand(id: string, input: string, history: { role: 'us
   return requestWithMeta<NLCommandCandidate>({
     url: `/instruments/${id}/nl-commands`, method: 'POST', data: { input, history: history.slice(-10) }
   })
+}
+
+export function createLease(id: string, purpose: string) {
+  return requestWithMeta<InstrumentLease>({ url: `/instruments/${id}/leases`, method: 'POST', data: { purpose } })
+}
+
+export function createFlow(id: string, objective: string, leaseId: string) {
+  return requestWithMeta<FlowSession>({ url: `/instruments/${id}/flows`, method: 'POST', data: { objective, lease_id: leaseId } })
+}
+
+export function getFlow(id: string, flowId: string) {
+  return request<FlowSession>({ url: `/instruments/${id}/flows/${flowId}` })
+}
+
+// API-only 试点（M1）：流程审批走后端 API（POST /instruments/{id}/flows/{flowId}/approve，
+// 非创建者/非 acting user 的 maintainer/admin），前端不封装审批入口。
+
+export function stopFlow(id: string, flowId: string) {
+  return requestWithMeta<{ status: string }>({ url: `/instruments/${id}/flows/${flowId}/stop`, method: 'POST' })
 }
 
 export function piezoStatus() {

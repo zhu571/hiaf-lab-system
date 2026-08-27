@@ -750,7 +750,7 @@ AuthRequired 阶段 401。同值 role、仅改 display_name / language **不递�
 > **未实现**（main.go 无注册）。当前时序数据由 IOC 侧直写 InfluxDB
 > （py-agent/ioc/hiaf_storage.py，EPICS PV 采样入库），Go 侧只提供读取端点，无设备推送通道。
 
-## 3.14 仪器控制模块（已实现；租约未实现）
+## 3.14 仪器控制模块（含安全租约与多步流程）
 
 路由：main.go:505-551（instruments）、548-551（ws）。控制类端点限 maintainer/admin；急停/翻译全员可触发。
 
@@ -818,8 +818,43 @@ AuthRequired 阶段 401。同值 role、仅改 display_name / language **不递�
 ```
 
 red 风险命令拒绝（400 `command_not_allowed`）；白名单 + NormalizeParams 校验（400 `validation_failed`）；
-503 `instrument_unavailable`、502 `command_failed`。租约接口（旧设计 `POST /instruments/{id}/leases`）**未实现**，
-命令执行不依赖租约，靠角色权限 + 白名单 + 告警兜底。
+503 `instrument_unavailable`、502 `command_failed`。yellow 命令还必须携带有效 `lease_id` 与
+`approval_id`；green 命令保持无需租约。每次执行在 `command_log` 追加 requested/completed 记录。
+> 已知限制（API-only 试点）：前端 UI 暂未接入 yellow 单命令的租约/审批链路，UI 发起的 yellow
+> 单命令会得到 403 `instrument_authorization_required`；上述后端 API 链路完整可用，
+> 详见 `docs/instrument-security.md` §8.1。
+
+### 租约与审批
+
+| 方法 | 路径 | 说明 |
+|---|---|---|
+| POST | `/api/v1/instruments/{id}/leases` | 申请独占租约；默认 15 分钟，最长 2 小时 |
+| POST | `/api/v1/instruments/{id}/leases/{lease_id}/renew` | 携原因续期 |
+| POST | `/api/v1/instruments/{id}/leases/{lease_id}/release` | 释放租约 |
+| POST | `/api/v1/instruments/{id}/approvals` | 为精确 command + params + lease 请求审批 |
+| POST | `/api/v1/instruments/{id}/approvals/{approval_id}/approve` | 非请求者/非 acting user 的 maintainer/admin 审批 |
+
+### Hioki 多步扫频流程
+
+> **灰度开关（M6）**：`INSTRUMENT_FLOW_ENABLED` 默认**关闭**。关闭时下表三个 POST 端点不注册
+> （handler 层另有 404 `flow_disabled` 兜底）、FlowRecovery 不启动；GET 进度不受影响。
+> **API-only 试点**：流程审批经 API/命令行完成，前端无审批 UI（已知限制见
+> `docs/instrument-security.md` §8）。
+
+| 方法 | 路径 | 说明 |
+|---|---|---|
+| POST | `/api/v1/instruments/{id}/flows` | 创建 `impedance_frequency_sweep`（202，含 `envelope` 包络）；写入口仅内网 |
+| POST | `/api/v1/instruments/{id}/flows/{flow_id}/approve` | 非创建者/非 acting user 的 maintainer/admin 审批包络并异步执行（202，含 `envelope`）；SQL CAS 保证并发只一次 `queued`；写入口仅内网 |
+| GET | `/api/v1/instruments/{id}/flows/{flow_id}` | 会话、步骤、进度、`sweep_xy` 结果与**完整审批包络** `envelope`（命令集合含参数区间、频率网格、点数/重试/命令数上限、deadline、白名单版本、审批状态/有效期/审批人、包络 hash、恢复策略）；不含 SCPI 模板 |
+| POST | `/api/v1/instruments/{id}/flows/{flow_id}/stop` | 当前原子命令后普通停止；写入口仅内网 |
+| POST | `/api/v1/instruments/{id}/manual-check` | maintainer/admin 完成人工检查后解除急停锁；仅内网 |
+
+流程仅支持 Hioki IM3536，Go 生成 linear/log 网格；allowed commands 固定为
+`set_frequency`、`measure_single`。每轮 py-agent 只能返回一个 next_command/complete/abort 决策，
+Go 对白名单、包络、租约、审批、7 yellow/10s、命令数、deadline 和重试额度逐步复核；
+每步 `set_frequency.hz` 必须与 Go 网格点浮点精确相等。命令失败按结构化错误类别
+（`timeout`/`rate_limited`/`validation_error`/`communication_error`）判定重试：
+仅超时与瞬时硬件通信错误可重试（单点上限 1 次），越权/参数校验/解析失败绝不重试。
 
 ### `POST /api/v1/instruments/{instrument_id}/emergency-stop`
 

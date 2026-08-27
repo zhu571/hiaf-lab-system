@@ -31,6 +31,9 @@ type Handler struct {
 	nlMu          sync.Mutex
 	nlCalls       map[string][]time.Time
 	alertReporter alert.Reporter
+	repo          *Repository
+	safety        *SafetyService
+	flows         *FlowExecutor
 }
 
 // NewHandler creates an instruments Handler.
@@ -41,7 +44,13 @@ func NewHandler(svc *Service, db *sql.DB, workerMaps ...map[string]*InstrumentWo
 			workers[k] = v
 		}
 	}
-	return &Handler{svc: svc, db: db, workers: workers, epoch: time.Now().Unix(), nlCalls: map[string][]time.Time{}}
+	h := &Handler{svc: svc, db: db, workers: workers, epoch: time.Now().Unix(), nlCalls: map[string][]time.Time{}}
+	if db != nil {
+		h.repo = NewRepository(db)
+		h.safety = NewSafetyService(h.repo)
+		h.flows = NewFlowExecutor(h.repo, svc, workers)
+	}
+	return h
 }
 
 // SetAlertReporter 注入告警上报窄接口（main.go 接 alertSvc；急停等安全事件收敛到告警中心）。
@@ -89,8 +98,10 @@ func (h *Handler) ExecuteCommand(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var req struct {
-		Command string         `json:"command"`
-		Params  map[string]any `json:"params"`
+		Command    string         `json:"command"`
+		Params     map[string]any `json:"params"`
+		LeaseID    string         `json:"lease_id"`
+		ApprovalID string         `json:"approval_id"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.Command == "" {
 		common.WriteError(w, r, http.StatusBadRequest, "bad_request", "请求体解析失败", nil)
@@ -106,6 +117,48 @@ func (h *Handler) ExecuteCommand(w http.ResponseWriter, r *http.Request) {
 		common.WriteError(w, r, http.StatusBadRequest, "validation_failed", err.Error(), nil)
 		return
 	}
+	claims := middleware.GetUserClaims(r.Context())
+	effectiveUser := middleware.EffectiveUserID(r.Context())
+	if h.safety != nil {
+		if err := h.safety.AuthorizeCommand(r.Context(), id, effectiveUser, req.LeaseID, req.ApprovalID, req.Command, normalized); err != nil {
+			common.WriteError(w, r, http.StatusForbidden, "instrument_authorization_required", err.Error(), nil)
+			return
+		}
+	}
+	logCommand := func(phase string, result *CommandResult) {
+		if h.repo == nil || claims == nil {
+			return
+		}
+		raw, _ := json.Marshal(req.Params)
+		norm, _ := json.Marshal(normalized)
+		entry := &CommandLogEntry{InstrumentID: id, CommandName: req.Command, RiskLevel: def.Risk, ParamsRaw: raw, ParamsNormalized: norm, UserID: claims.UserID, WhitelistVersion: whitelistVersion, RequestID: common.GetRequestID(r.Context()), Phase: phase}
+		if effectiveUser != claims.UserID {
+			entry.ActingUserID = &effectiveUser
+		}
+		if req.LeaseID != "" {
+			entry.LeaseID = &req.LeaseID
+		}
+		if req.ApprovalID != "" {
+			entry.ApprovalID = &req.ApprovalID
+		}
+		if result != nil {
+			summary := result.Response
+			if len(summary) > 512 {
+				summary = summary[:512]
+			}
+			entry.ResultSummary = &summary
+			hash, _, _ := canonicalHash(result.Response)
+			entry.ResultHash = &hash
+			d := int(result.Duration.Milliseconds())
+			entry.DurationMS = &d
+			if result.Error != nil {
+				code := commandErrorCode(result.Error)
+				entry.ErrorCode = &code
+			}
+		}
+		_ = h.repo.InsertCommandLog(r.Context(), entry)
+	}
+	logCommand("requested", nil)
 	cmd := &QueueCommand{
 		Name:       req.Command,
 		Params:     normalized,
@@ -116,7 +169,17 @@ func (h *Handler) ExecuteCommand(w http.ResponseWriter, r *http.Request) {
 		common.WriteError(w, r, http.StatusServiceUnavailable, "instrument_unavailable", err.Error(), nil)
 		return
 	}
-	result := <-cmd.ResponseCh
+	var result CommandResult
+	timeout := time.Duration(def.TimeoutMS) * time.Millisecond
+	if timeout <= 0 {
+		timeout = 30 * time.Second
+	}
+	select {
+	case result = <-cmd.ResponseCh:
+	case <-time.After(timeout):
+		result = CommandResult{Command: req.Command, Error: newCommandError("timeout", fmt.Errorf("command timeout")), Duration: timeout}
+	}
+	logCommand("completed", &result)
 	if result.Error != nil {
 		common.WriteError(w, r, http.StatusBadGateway, "command_failed", result.Error.Error(), nil)
 		return
@@ -248,6 +311,51 @@ func (h *Handler) NLExecute(w http.ResponseWriter, r *http.Request) {
 		common.WriteSuccess(w, r, candidate)
 		return
 	}
+	commandDef, defErr := GetCommand(id, candidate.Command)
+	if defErr != nil {
+		common.WriteError(w, r, http.StatusBadRequest, "command_not_allowed", "命令不在允许的白名单中", nil)
+		return
+	}
+	effectiveUser := middleware.EffectiveUserID(r.Context())
+	if h.safety != nil {
+		if err := h.safety.AuthorizeCommand(r.Context(), id, effectiveUser, req.LeaseID, req.ApprovalID, candidate.Command, candidate.Params); err != nil {
+			common.WriteError(w, r, http.StatusForbidden, "instrument_authorization_required", err.Error(), nil)
+			return
+		}
+	}
+	logNL := func(phase string, result *CommandResult) {
+		if h.repo == nil {
+			return
+		}
+		raw, _ := json.Marshal(candidate.Params)
+		entry := &CommandLogEntry{InstrumentID: id, CommandName: candidate.Command, RiskLevel: commandDef.Risk, ParamsRaw: raw, ParamsNormalized: raw, UserID: claims.UserID, WhitelistVersion: whitelistVersion, RequestID: common.GetRequestID(r.Context()), Phase: phase}
+		if effectiveUser != claims.UserID {
+			entry.ActingUserID = &effectiveUser
+		}
+		if req.LeaseID != "" {
+			entry.LeaseID = &req.LeaseID
+		}
+		if req.ApprovalID != "" {
+			entry.ApprovalID = &req.ApprovalID
+		}
+		if result != nil {
+			summary := result.Response
+			if len(summary) > 512 {
+				summary = summary[:512]
+			}
+			hash, _, _ := canonicalHash(result.Response)
+			entry.ResultSummary = &summary
+			entry.ResultHash = &hash
+			d := int(result.Duration.Milliseconds())
+			entry.DurationMS = &d
+			if result.Error != nil {
+				code := commandErrorCode(result.Error)
+				entry.ErrorCode = &code
+			}
+		}
+		_ = h.repo.InsertCommandLog(r.Context(), entry)
+	}
+	logNL("requested", nil)
 
 	cmd := &QueueCommand{
 		Name:       candidate.Command,
@@ -265,7 +373,10 @@ func (h *Handler) NLExecute(w http.ResponseWriter, r *http.Request) {
 	var result CommandResult
 	select {
 	case result = <-cmd.ResponseCh:
+		logNL("completed", &result)
 	case <-time.After(30 * time.Second):
+		timedOut := CommandResult{Command: candidate.Command, Error: newCommandError("timeout", fmt.Errorf("command timeout")), Duration: 30 * time.Second}
+		logNL("completed", &timedOut)
 		common.WriteError(w, r, http.StatusGatewayTimeout, "timeout", "命令执行超时 (30s)", nil)
 		return
 	}
@@ -274,9 +385,8 @@ func (h *Handler) NLExecute(w http.ResponseWriter, r *http.Request) {
 	var plotType string
 	var parsedValue *float64
 
-	def, defErr := GetCommand(id, candidate.Command)
-	if defErr == nil && def.Returns != nil {
-		if returnsStr, ok := def.Returns.(string); ok && returnsStr == "array" && result.Response != "" {
+	if commandDef.Returns != nil {
+		if returnsStr, ok := commandDef.Returns.(string); ok && returnsStr == "array" && result.Response != "" {
 			points, plotType = parseScanData(result.Response)
 		}
 	}
@@ -360,13 +470,65 @@ func (h *Handler) EmergencyStop(w http.ResponseWriter, r *http.Request) {
 		common.WriteError(w, r, http.StatusNotFound, "instrument_not_found", "仪器不存在", nil)
 		return
 	}
+	owner := worker.SessionOwner()
 	if err := worker.EmergencyStop(); err != nil {
 		common.WriteError(w, r, http.StatusServiceUnavailable, "instrument_unavailable", err.Error(), nil)
 		return
 	}
+	if owner != "" && h.repo != nil {
+		_ = h.repo.EmergencyFlow(r.Context(), owner)
+	}
 	h.reportAlert("critical", "instruments", "仪器急停",
 		fmt.Sprintf("%s 被 %s 紧急停止", id, middleware.GetUserClaims(r.Context()).Username))
 	common.WriteSuccess(w, r, map[string]string{"status": "emergency_stop_queued"})
+}
+
+func (h *Handler) ConfirmManualCheck(w http.ResponseWriter, r *http.Request) {
+	if !requireIdempotencyKey(w, r) {
+		return
+	}
+	worker, ok := h.workers[chi.URLParam(r, "id")]
+	if !ok {
+		common.WriteError(w, r, http.StatusNotFound, "instrument_not_found", "仪器不存在", nil)
+		return
+	}
+	if err := worker.ConfirmManualCheck(); err != nil {
+		common.WriteError(w, r, http.StatusConflict, "invalid_instrument_state", err.Error(), nil)
+		return
+	}
+	middleware.SetAuditAction(r.Context(), "instrument.manual_check.confirmed")
+	common.WriteSuccess(w, r, map[string]string{"status": "running"})
+}
+
+func (h *Handler) StartFlowRecovery(ctx context.Context) {
+	if h.repo == nil {
+		return
+	}
+	if err := h.repo.InterruptActiveFlows(ctx); err != nil {
+		slog.Error("interrupt stale instrument flows failed", "error", err)
+	}
+	go func() {
+		ticker := time.NewTicker(30 * time.Second)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-ticker.C:
+				expired, err := h.repo.ExpiredActiveFlows(context.Background())
+				if err != nil {
+					slog.Error("instrument flow reaper failed", "error", err)
+					continue
+				}
+				for id, instrument := range expired {
+					if worker := h.workers[instrument]; worker != nil {
+						worker.ReleaseSession(id)
+					}
+					h.reportAlert("warning", "instruments", "仪器流程超时", id)
+				}
+			}
+		}
+	}()
 }
 
 // ListInstruments handles GET /api/v1/instruments.

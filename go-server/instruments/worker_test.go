@@ -13,11 +13,12 @@ import (
 // fakeTCPInstrument：本地 TCP 模拟 SCPI 仪器；收到以 ? 结尾的命令返回应答，
 // 其余命令仅读取；lines 记录收到的全部命令（并发安全），供急停序列断言。
 type fakeTCPInstrument struct {
-	listener net.Listener
-	addr     string
-	response string
-	mu       sync.Mutex
-	lines    []string
+	listener  net.Listener
+	addr      string
+	response  string
+	responder func(string) string
+	mu        sync.Mutex
+	lines     []string
 }
 
 func startFakeTCPInstrument(t *testing.T, response string) *fakeTCPInstrument {
@@ -45,8 +46,14 @@ func startFakeTCPInstrument(t *testing.T, response string) *fakeTCPInstrument {
 					inst.mu.Lock()
 					inst.lines = append(inst.lines, line)
 					inst.mu.Unlock()
-					if strings.HasSuffix(line, "?") && inst.response != "" {
-						_, _ = c.Write([]byte(inst.response))
+					if strings.HasSuffix(line, "?") {
+						response := inst.response
+						if inst.responder != nil {
+							response = inst.responder(line)
+						}
+						if response != "" {
+							_, _ = c.Write([]byte(response))
+						}
 					}
 				}
 			}(conn)
@@ -205,14 +212,17 @@ func TestWorkerRateLimit(t *testing.T) {
 	}
 	inst.waitLine(t, "ABOR")
 	inst.waitLine(t, "SOUR1:POW -45")
-	// 急停命令执行完毕（Send 返回后）worker 状态回到 running；轮询避免与
+	// 急停命令执行完毕后锁定至人工检查；轮询避免与
 	// execute 内的 setState 竞争（waitLine 只保证仪器已收到命令）。
 	deadline := time.Now().Add(5 * time.Second)
-	for worker.State() != WorkerStateRunning {
+	for worker.State() != WorkerStateLockedManualCheck {
 		if time.Now().After(deadline) {
-			t.Fatalf("state = %q, want running after emergency", worker.State())
+			t.Fatalf("state = %q, want locked manual check after emergency", worker.State())
 		}
 		time.Sleep(10 * time.Millisecond)
+	}
+	if err := worker.ConfirmManualCheck(); err != nil || worker.State() != WorkerStateRunning {
+		t.Fatalf("manual check: state=%q err=%v", worker.State(), err)
 	}
 }
 
