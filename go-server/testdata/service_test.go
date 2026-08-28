@@ -331,7 +331,8 @@ func TestBatchCreateEmptyRunIDTreatedAsUnset(t *testing.T) {
 func float64Pointer(v float64) *float64 { return &v }
 
 type fakeRepository struct {
-	item *TestData
+	item  *TestData
+	curve *Curve
 	// batchCalls 记录 CreateBatch 调用次数；batchErr 控制 CreateBatch 返回值（FK 兜底测试用）。
 	batchCalls int
 	batchErr   error
@@ -359,6 +360,31 @@ func (f *fakeRepository) List(ListParams) ([]TestData, int, error) {
 func (f *fakeRepository) Update(string, UpdateTestDataRequest) error { return nil }
 func (f *fakeRepository) MarkInvalid(string, string) error {
 	f.item.Quality = QualityInvalid
+	return nil
+}
+func (f *fakeRepository) CreateCurve(curve *Curve) error {
+	curve.ID, curve.CreatedAt, curve.UpdatedAt = dataUUID, time.Now(), time.Now()
+	f.curve = curve
+	return nil
+}
+func (f *fakeRepository) GetCurve(string) (*Curve, error) { return f.curve, nil }
+func (f *fakeRepository) ListCurves(ListCurvesParams) ([]Curve, int, error) {
+	if f.curve == nil {
+		return nil, 0, nil
+	}
+	return []Curve{*f.curve}, 1, nil
+}
+func (f *fakeRepository) UpdateCurve(_ string, req UpdateCurveRequest) error {
+	if req.Name != nil {
+		f.curve.Name = *req.Name
+	}
+	if req.Points != nil {
+		f.curve.Points = *req.Points
+	}
+	return nil
+}
+func (f *fakeRepository) MarkCurveVoid(string, string, string) error {
+	f.curve = nil
 	return nil
 }
 

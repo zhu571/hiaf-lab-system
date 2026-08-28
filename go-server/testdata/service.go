@@ -32,6 +32,7 @@ var batchRowFieldOrder = map[string]int{
 
 var (
 	ErrTestDataNotFound = errors.New("测试数据不存在")
+	ErrCurveNotFound    = errors.New("测试数据曲线不存在")
 	ErrRunNotFound      = errors.New("实验批次不存在")
 	ErrProjectNotFound  = errors.New("项目不存在")
 	ErrForbidden        = errors.New("当前用户无权访问该项目")
@@ -55,6 +56,11 @@ type testDataRepository interface {
 	List(params ListParams) ([]TestData, int, error)
 	Update(id string, req UpdateTestDataRequest) error
 	MarkInvalid(id, recordedBy string) error
+	CreateCurve(curve *Curve) error
+	GetCurve(id string) (*Curve, error)
+	ListCurves(params ListCurvesParams) ([]Curve, int, error)
+	UpdateCurve(id string, req UpdateCurveRequest) error
+	MarkCurveVoid(id, voidedBy, reason string) error
 }
 
 type Service struct {
@@ -406,6 +412,166 @@ func (s *Service) MarkInvalid(id, userID, userRole string) error {
 	return s.repo.MarkInvalid(td.ID, userID)
 }
 
+func (s *Service) CreateCurve(projectID, userID, userRole string, headers http.Header, req CreateCurveRequest) (*Curve, error) {
+	projectID = strings.TrimSpace(projectID)
+	if err := s.requireProject(projectID); err != nil {
+		return nil, err
+	}
+	if err := s.requireAccess(projectID, userID, userRole, projects.RoleMember); err != nil {
+		return nil, err
+	}
+	curveType := strings.TrimSpace(req.CurveType)
+	if curveType == "" {
+		curveType = CurveTypeImpedanceSweep
+	}
+	xLabel := strings.TrimSpace(req.XLabel)
+	if xLabel == "" {
+		xLabel = "频率 (Hz)"
+	}
+	yLabel := strings.TrimSpace(req.YLabel)
+	if yLabel == "" {
+		yLabel = "阻抗 |Z| (Ω)"
+	}
+	quality, source := QualityNormal, SourceImport
+	if req.Quality != nil {
+		quality = strings.TrimSpace(*req.Quality)
+	}
+	if req.Source != nil {
+		source = strings.TrimSpace(*req.Source)
+	}
+	curve := &Curve{
+		ProjectID: projectID, Name: strings.TrimSpace(req.Name), CurveType: curveType,
+		XLabel: xLabel, YLabel: yLabel, Unit: strings.TrimSpace(req.Unit), Points: req.Points,
+		Quality: quality, Source: source, Notes: strings.TrimSpace(req.Notes), MeasuredAt: req.MeasuredAt, CreatedBy: &userID,
+	}
+	if curve.Name == "" || len(curve.Name) > 128 || !validCurveType(curve.CurveType) ||
+		len(curve.XLabel) > 64 || len(curve.YLabel) > 64 || len(curve.Unit) > 16 ||
+		!validCurvePoints(curve.Points) || !validQuality(curve.Quality) || !validSource(curve.Source) {
+		return nil, ErrInvalidInput
+	}
+	if req.RunID != nil {
+		runID := strings.TrimSpace(*req.RunID)
+		if uuid.Validate(runID) != nil || s.runs == nil {
+			return nil, ErrInvalidInput
+		}
+		exists, err := s.runs.Exists(runID, headers)
+		if err != nil {
+			return nil, err
+		}
+		if !exists {
+			return nil, ErrRunNotFound
+		}
+		curve.RunID = &runID
+	}
+	if err := s.repo.CreateCurve(curve); err != nil {
+		return nil, err
+	}
+	return curve, nil
+}
+
+func (s *Service) GetCurve(id, userID, userRole string) (*Curve, error) {
+	curve, err := s.getCurve(id)
+	if err != nil {
+		return nil, err
+	}
+	if err := s.requireAccess(curve.ProjectID, userID, userRole, projects.RoleViewer); err != nil {
+		return nil, err
+	}
+	return curve, nil
+}
+
+func (s *Service) ListCurves(projectID, userID, userRole string, params ListCurvesParams) (*ListCurvesResult, error) {
+	projectID = strings.TrimSpace(projectID)
+	if uuid.Validate(projectID) != nil {
+		return nil, ErrInvalidInput
+	}
+	if err := s.requireAccess(projectID, userID, userRole, projects.RoleViewer); err != nil {
+		return nil, err
+	}
+	params.ProjectID = projectID
+	params.RunID = strings.TrimSpace(params.RunID)
+	params.CurveType = strings.TrimSpace(params.CurveType)
+	params.Quality = strings.TrimSpace(params.Quality)
+	if (params.RunID != "" && uuid.Validate(params.RunID) != nil) ||
+		(params.CurveType != "" && !validCurveType(params.CurveType)) ||
+		(params.Quality != "" && !validQuality(params.Quality)) {
+		return nil, ErrInvalidInput
+	}
+	params.Page, params.PerPage = normalizePage(params.Page, params.PerPage)
+	items, total, err := s.repo.ListCurves(params)
+	if err != nil {
+		return nil, err
+	}
+	return &ListCurvesResult{Items: items, Total: total, Page: params.Page, PerPage: params.PerPage}, nil
+}
+
+func (s *Service) UpdateCurve(id, userID, userRole string, req UpdateCurveRequest) (*Curve, error) {
+	curve, err := s.getCurve(id)
+	if err != nil {
+		return nil, err
+	}
+	if err := s.requireAccess(curve.ProjectID, userID, userRole, projects.RoleMember); err != nil {
+		return nil, err
+	}
+	for _, field := range []struct {
+		value    **string
+		max      int
+		nonempty bool
+	}{{&req.Name, 128, true}, {&req.XLabel, 64, false}, {&req.YLabel, 64, false}, {&req.Unit, 16, false}, {&req.Notes, 0, false}} {
+		if *field.value == nil {
+			continue
+		}
+		trimmed := strings.TrimSpace(**field.value)
+		if (field.nonempty && trimmed == "") || (field.max > 0 && len(trimmed) > field.max) {
+			return nil, ErrInvalidInput
+		}
+		*field.value = &trimmed
+	}
+	if req.Points != nil && !validCurvePoints(*req.Points) {
+		return nil, ErrInvalidInput
+	}
+	if req.Quality != nil {
+		quality := strings.TrimSpace(*req.Quality)
+		if !validQuality(quality) {
+			return nil, ErrInvalidInput
+		}
+		req.Quality = &quality
+	}
+	if err := s.repo.UpdateCurve(curve.ID, req); err != nil {
+		return nil, err
+	}
+	return s.getCurve(curve.ID)
+}
+
+func (s *Service) VoidCurve(id, userID, userRole, reason string) error {
+	if userRole == auth.RoleAgent {
+		return ErrForbidden
+	}
+	curve, err := s.getCurve(id)
+	if err != nil {
+		return err
+	}
+	if err := s.requireAccess(curve.ProjectID, userID, userRole, projects.RoleMember); err != nil {
+		return err
+	}
+	return s.repo.MarkCurveVoid(curve.ID, userID, strings.TrimSpace(reason))
+}
+
+func (s *Service) getCurve(id string) (*Curve, error) {
+	id = strings.TrimSpace(id)
+	if uuid.Validate(id) != nil {
+		return nil, ErrInvalidInput
+	}
+	curve, err := s.repo.GetCurve(id)
+	if err != nil {
+		return nil, err
+	}
+	if curve == nil {
+		return nil, ErrCurveNotFound
+	}
+	return curve, nil
+}
+
 func (s *Service) get(id string) (*TestData, error) {
 	id = strings.TrimSpace(id)
 	if uuid.Validate(id) != nil {
@@ -453,6 +619,32 @@ func validDataType(value string) bool {
 	default:
 		return false
 	}
+}
+
+func validCurveType(value string) bool {
+	switch value {
+	case CurveTypeImpedanceSweep, CurveTypeS11Sweep, CurveTypeCustom:
+		return true
+	default:
+		return false
+	}
+}
+
+func validCurvePoints(points []CurvePoint) bool {
+	if len(points) == 0 {
+		return false
+	}
+	for _, point := range points {
+		if point.FreqHz == nil || (point.ZOhm == nil && point.ThetaDeg == nil) ||
+			!finiteFloat(point.FreqHz) || !finiteFloat(point.ZOhm) || !finiteFloat(point.ThetaDeg) {
+			return false
+		}
+	}
+	return true
+}
+
+func finiteFloat(value *float64) bool {
+	return value == nil || (!math.IsNaN(*value) && !math.IsInf(*value, 0))
 }
 
 func validQuality(value string) bool {

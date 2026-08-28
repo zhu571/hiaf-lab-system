@@ -77,12 +77,58 @@ func openTestDataDB(t *testing.T) *sql.DB {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() {
+		db.Exec(`DELETE FROM test_data_curves WHERE project_id = $1`, tdDBProjectID)
 		db.Exec(`DELETE FROM test_data WHERE project_id = $1`, tdDBProjectID)
 		db.Exec(`DELETE FROM experiment_runs WHERE id = $1`, tdDBRunID)
 		db.Exec(`DELETE FROM projects WHERE id = $1`, tdDBProjectID)
 		db.Exec(`DELETE FROM users WHERE id IN ($1,$2)`, tdDBOwnerID, tdDBMemberID)
 	})
 	return db
+}
+
+func TestDBCurveRepositoryRoundTripAndVoid(t *testing.T) {
+	db := openTestDataDB(t)
+	repo := NewRepository(db)
+	runID, createdBy := tdDBRunID, tdDBMemberID
+	curve := &Curve{
+		ProjectID: tdDBProjectID, RunID: &runID, Name: "RF Carpet", CurveType: CurveTypeImpedanceSweep,
+		XLabel: "频率 (Hz)", YLabel: "阻抗 |Z| (Ω)", Unit: "Ω", Quality: QualityNormal,
+		Source: SourceInstrument, Points: []CurvePoint{{FreqHz: float64Pointer(1e6), ZOhm: float64Pointer(0.957)}},
+		CreatedBy: &createdBy,
+	}
+	if err := repo.CreateCurve(curve); err != nil {
+		t.Fatal(err)
+	}
+	if curve.ID == "" {
+		t.Fatal("CreateCurve did not populate id")
+	}
+	got, err := repo.GetCurve(curve.ID)
+	if err != nil || got == nil || len(got.Points) != 1 || got.Points[0].FreqHz == nil || *got.Points[0].FreqHz != 1e6 {
+		t.Fatalf("GetCurve: curve=%+v err=%v", got, err)
+	}
+	items, total, err := repo.ListCurves(ListCurvesParams{ProjectID: tdDBProjectID, CurveType: CurveTypeImpedanceSweep})
+	if err != nil || total != 1 || len(items) != 1 {
+		t.Fatalf("ListCurves: items=%+v total=%d err=%v", items, total, err)
+	}
+	name := "RF Carpet updated"
+	points := []CurvePoint{{FreqHz: float64Pointer(2e6), ThetaDeg: float64Pointer(-86.57)}}
+	if err := repo.UpdateCurve(curve.ID, UpdateCurveRequest{Name: &name, Points: &points}); err != nil {
+		t.Fatal(err)
+	}
+	got, err = repo.GetCurve(curve.ID)
+	if err != nil || got.Name != name || got.Points[0].ThetaDeg == nil {
+		t.Fatalf("updated curve=%+v err=%v", got, err)
+	}
+	if err := repo.MarkCurveVoid(curve.ID, tdDBMemberID, "duplicate"); err != nil {
+		t.Fatal(err)
+	}
+	if got, err = repo.GetCurve(curve.ID); err != nil || got != nil {
+		t.Fatalf("voided GetCurve: curve=%+v err=%v", got, err)
+	}
+	items, total, err = repo.ListCurves(ListCurvesParams{ProjectID: tdDBProjectID})
+	if err != nil || total != 0 || len(items) != 0 {
+		t.Fatalf("voided ListCurves: items=%+v total=%d err=%v", items, total, err)
+	}
 }
 
 func tdUniqueKey(t *testing.T) string {

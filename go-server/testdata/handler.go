@@ -18,6 +18,12 @@ type Handler struct{ svc *Service }
 
 func NewHandler(svc *Service) *Handler { return &Handler{svc: svc} }
 
+type CurveHandler struct{ *Handler }
+
+func NewCurveHandler(svc *Service) *CurveHandler { return &CurveHandler{Handler: NewHandler(svc)} }
+
+const curveMaxBodyBytes = 512 << 10
+
 func (h *Handler) Create(w http.ResponseWriter, r *http.Request) {
 	middleware.SetAuditAction(r.Context(), "test_data.create")
 	if !requireIdempotencyKey(w, r) {
@@ -266,6 +272,150 @@ func (h *Handler) MarkInvalid(w http.ResponseWriter, r *http.Request) {
 	common.WriteSuccess(w, r, map[string]string{"id": id})
 }
 
+func (h *CurveHandler) Create(w http.ResponseWriter, r *http.Request) {
+	middleware.SetAuditAction(r.Context(), "test_data_curve.create")
+	if !requireIdempotencyKey(w, r) {
+		return
+	}
+	claims := middleware.GetUserClaims(r.Context())
+	if claims == nil {
+		common.WriteError(w, r, http.StatusUnauthorized, "unauthorized", "未登录", nil)
+		return
+	}
+	r.Body = http.MaxBytesReader(w, r.Body, curveMaxBodyBytes)
+	var req CreateCurveRequest
+	decoder := json.NewDecoder(r.Body)
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(&req); err != nil {
+		writeCurveDecodeError(w, r, err)
+		return
+	}
+	curve, err := h.svc.CreateCurve(projectID(r), middleware.EffectiveUserID(r.Context()), claims.Role, r.Header, req)
+	if err != nil {
+		h.writeError(w, r, err)
+		return
+	}
+	common.WriteCreated(w, r, curve)
+}
+
+func (h *CurveHandler) List(w http.ResponseWriter, r *http.Request) {
+	claims := middleware.GetUserClaims(r.Context())
+	if claims == nil {
+		common.WriteError(w, r, http.StatusUnauthorized, "unauthorized", "未登录", nil)
+		return
+	}
+	result, err := h.svc.ListCurves(projectID(r), middleware.EffectiveUserID(r.Context()), claims.Role, ListCurvesParams{
+		RunID: r.URL.Query().Get("run_id"), CurveType: r.URL.Query().Get("curve_type"),
+		Quality: r.URL.Query().Get("quality"), Page: queryInt(r, "page", 1), PerPage: queryInt(r, "per_page", 20),
+	})
+	if err != nil {
+		h.writeError(w, r, err)
+		return
+	}
+	common.WriteSuccess(w, r, result)
+}
+
+func (h *CurveHandler) GetByID(w http.ResponseWriter, r *http.Request) {
+	claims := middleware.GetUserClaims(r.Context())
+	if claims == nil {
+		common.WriteError(w, r, http.StatusUnauthorized, "unauthorized", "未登录", nil)
+		return
+	}
+	curve, err := h.svc.GetCurve(chi.URLParam(r, "id"), middleware.EffectiveUserID(r.Context()), claims.Role)
+	if err != nil {
+		h.writeError(w, r, err)
+		return
+	}
+	common.WriteSuccess(w, r, curve)
+}
+
+func (h *CurveHandler) Update(w http.ResponseWriter, r *http.Request) {
+	middleware.SetAuditAction(r.Context(), "test_data_curve.update")
+	if !requireIdempotencyKey(w, r) {
+		return
+	}
+	claims := middleware.GetUserClaims(r.Context())
+	if claims == nil {
+		common.WriteError(w, r, http.StatusUnauthorized, "unauthorized", "未登录", nil)
+		return
+	}
+	r.Body = http.MaxBytesReader(w, r.Body, curveMaxBodyBytes)
+	req, err := decodeCurveUpdateRequest(r)
+	if err != nil {
+		writeCurveDecodeError(w, r, err)
+		return
+	}
+	curve, err := h.svc.UpdateCurve(chi.URLParam(r, "id"), middleware.EffectiveUserID(r.Context()), claims.Role, req)
+	if err != nil {
+		h.writeError(w, r, err)
+		return
+	}
+	common.WriteSuccess(w, r, curve)
+}
+
+func (h *CurveHandler) Void(w http.ResponseWriter, r *http.Request) {
+	middleware.SetAuditAction(r.Context(), "test_data_curve.delete")
+	if !requireIdempotencyKey(w, r) {
+		return
+	}
+	claims := middleware.GetUserClaims(r.Context())
+	if claims == nil {
+		common.WriteError(w, r, http.StatusUnauthorized, "unauthorized", "未登录", nil)
+		return
+	}
+	var req struct {
+		Reason string `json:"reason"`
+	}
+	if r.Body != nil && r.ContentLength != 0 {
+		decoder := json.NewDecoder(r.Body)
+		decoder.DisallowUnknownFields()
+		if err := decoder.Decode(&req); err != nil {
+			common.WriteError(w, r, http.StatusBadRequest, "bad_request", "请求体解析失败", nil)
+			return
+		}
+	}
+	id := chi.URLParam(r, "id")
+	if err := h.svc.VoidCurve(id, middleware.EffectiveUserID(r.Context()), claims.Role, req.Reason); err != nil {
+		h.writeError(w, r, err)
+		return
+	}
+	common.WriteSuccess(w, r, map[string]string{"id": id})
+}
+
+func decodeCurveUpdateRequest(r *http.Request) (UpdateCurveRequest, error) {
+	var raw map[string]json.RawMessage
+	if err := json.NewDecoder(r.Body).Decode(&raw); err != nil {
+		return UpdateCurveRequest{}, err
+	}
+	allowed := map[string]bool{
+		"name": true, "x_label": true, "y_label": true, "unit": true, "points": true,
+		"quality": true, "notes": true, "measured_at": true,
+	}
+	for field := range raw {
+		if !allowed[field] {
+			return UpdateCurveRequest{}, errors.New("immutable or unknown field")
+		}
+	}
+	body, err := json.Marshal(raw)
+	if err != nil {
+		return UpdateCurveRequest{}, err
+	}
+	var req UpdateCurveRequest
+	decoder := json.NewDecoder(bytes.NewReader(body))
+	decoder.DisallowUnknownFields()
+	err = decoder.Decode(&req)
+	return req, err
+}
+
+func writeCurveDecodeError(w http.ResponseWriter, r *http.Request, err error) {
+	var maxBytesErr *http.MaxBytesError
+	if errors.As(err, &maxBytesErr) {
+		common.WriteError(w, r, http.StatusRequestEntityTooLarge, "request_too_large", "请求体超过 512KB 上限", nil)
+		return
+	}
+	common.WriteError(w, r, http.StatusBadRequest, "bad_request", "请求体包含不允许的字段或无法解析", nil)
+}
+
 func decodeUpdateRequest(r *http.Request) (UpdateTestDataRequest, error) {
 	var raw map[string]json.RawMessage
 	if err := json.NewDecoder(r.Body).Decode(&raw); err != nil {
@@ -292,6 +442,8 @@ func decodeUpdateRequest(r *http.Request) (UpdateTestDataRequest, error) {
 
 func (h *Handler) writeError(w http.ResponseWriter, r *http.Request, err error) {
 	switch {
+	case errors.Is(err, ErrCurveNotFound):
+		common.WriteError(w, r, http.StatusNotFound, "test_data_curve_not_found", err.Error(), nil)
 	case errors.Is(err, ErrTestDataNotFound):
 		common.WriteError(w, r, http.StatusNotFound, "test_data_not_found", err.Error(), nil)
 	case errors.Is(err, ErrProjectNotFound):

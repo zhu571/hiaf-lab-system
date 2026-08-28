@@ -2,6 +2,7 @@ package testdata
 
 import (
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"strings"
@@ -11,6 +12,9 @@ import (
 
 const testDataColumns = `id, project_id, run_id, data_type, measurement, value, unit,
 quality, source, measured_at, notes, created_at, updated_at, recorded_by`
+
+const curveColumns = `id, project_id, run_id, name, curve_type, x_label, y_label, unit, points,
+quality, source, notes, is_void, voided_at, voided_by, void_reason, measured_at, created_by, created_at, updated_at`
 
 type Repository struct{ db *sql.DB }
 
@@ -175,6 +179,137 @@ func (r *Repository) MarkInvalid(id, _ string) error {
 	return requireAffected(result)
 }
 
+func (r *Repository) CreateCurve(curve *Curve) error {
+	points, err := json.Marshal(curve.Points)
+	if err != nil {
+		return fmt.Errorf("marshal test data curve points: %w", err)
+	}
+	err = scanCurve(r.db.QueryRow(`INSERT INTO test_data_curves
+		(project_id, run_id, name, curve_type, x_label, y_label, unit, points, quality, source, notes, measured_at, created_by)
+		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)
+		RETURNING `+curveColumns,
+		curve.ProjectID, nullableString(curve.RunID), curve.Name, curve.CurveType, curve.XLabel, curve.YLabel,
+		curve.Unit, string(points), curve.Quality, curve.Source, curve.Notes, curve.MeasuredAt, nullableString(curve.CreatedBy),
+	), curve)
+	if err != nil {
+		return fmt.Errorf("create test data curve: %w", err)
+	}
+	return nil
+}
+
+func (r *Repository) GetCurve(id string) (*Curve, error) {
+	var curve Curve
+	err := scanCurve(r.db.QueryRow(`SELECT `+curveColumns+` FROM test_data_curves WHERE id = $1 AND is_void = false`, id), &curve)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("get test data curve: %w", err)
+	}
+	return &curve, nil
+}
+
+func (r *Repository) ListCurves(params ListCurvesParams) ([]Curve, int, error) {
+	params.Page, params.PerPage = normalizePage(params.Page, params.PerPage)
+	parts := []string{"project_id = $1", "is_void = false"}
+	args := []any{params.ProjectID}
+	add := func(column, value string) {
+		args = append(args, value)
+		parts = append(parts, fmt.Sprintf("%s = $%d", column, len(args)))
+	}
+	if params.RunID != "" {
+		add("run_id", params.RunID)
+	}
+	if params.CurveType != "" {
+		add("curve_type", params.CurveType)
+	}
+	if params.Quality != "" {
+		add("quality", params.Quality)
+	} else {
+		parts = append(parts, "quality <> 'invalid'")
+	}
+	where := " WHERE " + strings.Join(parts, " AND ")
+	var total int
+	if err := r.db.QueryRow(`SELECT COUNT(*) FROM test_data_curves`+where, args...).Scan(&total); err != nil {
+		return nil, 0, fmt.Errorf("count test data curves: %w", err)
+	}
+	args = append(args, params.PerPage, (params.Page-1)*params.PerPage)
+	rows, err := r.db.Query(`SELECT `+curveColumns+` FROM test_data_curves`+where+
+		fmt.Sprintf(` ORDER BY created_at DESC LIMIT $%d OFFSET $%d`, len(args)-1, len(args)), args...)
+	if err != nil {
+		return nil, 0, fmt.Errorf("list test data curves: %w", err)
+	}
+	defer rows.Close()
+	items := []Curve{}
+	for rows.Next() {
+		var curve Curve
+		if err := scanCurve(rows, &curve); err != nil {
+			return nil, 0, fmt.Errorf("scan test data curve: %w", err)
+		}
+		items = append(items, curve)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, 0, fmt.Errorf("iterate test data curves: %w", err)
+	}
+	return items, total, nil
+}
+
+func (r *Repository) UpdateCurve(id string, req UpdateCurveRequest) error {
+	sets := []string{}
+	args := []any{id}
+	add := func(column string, value any) {
+		args = append(args, value)
+		sets = append(sets, fmt.Sprintf("%s = $%d", column, len(args)))
+	}
+	if req.Name != nil {
+		add("name", *req.Name)
+	}
+	if req.XLabel != nil {
+		add("x_label", *req.XLabel)
+	}
+	if req.YLabel != nil {
+		add("y_label", *req.YLabel)
+	}
+	if req.Unit != nil {
+		add("unit", *req.Unit)
+	}
+	if req.Points != nil {
+		points, err := json.Marshal(*req.Points)
+		if err != nil {
+			return fmt.Errorf("marshal test data curve points: %w", err)
+		}
+		add("points", string(points))
+	}
+	if req.Quality != nil {
+		add("quality", *req.Quality)
+	}
+	if req.Notes != nil {
+		add("notes", *req.Notes)
+	}
+	if req.MeasuredAt != nil {
+		add("measured_at", *req.MeasuredAt)
+	}
+	if len(sets) == 0 {
+		return nil
+	}
+	sets = append(sets, "updated_at = now()")
+	result, err := r.db.Exec(`UPDATE test_data_curves SET `+strings.Join(sets, ", ")+` WHERE id = $1 AND is_void = false`, args...)
+	if err != nil {
+		return fmt.Errorf("update test data curve: %w", err)
+	}
+	return requireCurveAffected(result)
+}
+
+func (r *Repository) MarkCurveVoid(id, voidedBy, reason string) error {
+	result, err := r.db.Exec(`UPDATE test_data_curves
+		SET is_void = true, voided_at = now(), voided_by = $2, void_reason = $3, updated_at = now()
+		WHERE id = $1 AND is_void = false`, id, voidedBy, nullableText(reason))
+	if err != nil {
+		return fmt.Errorf("void test data curve: %w", err)
+	}
+	return requireCurveAffected(result)
+}
+
 type rowScanner interface{ Scan(...any) error }
 
 func scanTestData(row rowScanner, td *TestData) error {
@@ -200,6 +335,38 @@ func scanTestData(row rowScanner, td *TestData) error {
 		td.RecordedBy = &recordedBy.String
 	}
 	return nil
+}
+
+func scanCurve(row rowScanner, curve *Curve) error {
+	var runID, voidedBy, voidReason, createdBy sql.NullString
+	var voidedAt, measuredAt sql.NullTime
+	var points []byte
+	if err := row.Scan(&curve.ID, &curve.ProjectID, &runID, &curve.Name, &curve.CurveType, &curve.XLabel,
+		&curve.YLabel, &curve.Unit, &points, &curve.Quality, &curve.Source, &curve.Notes, &curve.IsVoid,
+		&voidedAt, &voidedBy, &voidReason, &measuredAt, &createdBy, &curve.CreatedAt, &curve.UpdatedAt); err != nil {
+		return err
+	}
+	if err := json.Unmarshal(points, &curve.Points); err != nil {
+		return fmt.Errorf("decode points: %w", err)
+	}
+	curve.RunID = nullStringPointer(runID)
+	curve.VoidedBy = nullStringPointer(voidedBy)
+	curve.VoidReason = nullStringPointer(voidReason)
+	curve.CreatedBy = nullStringPointer(createdBy)
+	if voidedAt.Valid {
+		curve.VoidedAt = &voidedAt.Time
+	}
+	if measuredAt.Valid {
+		curve.MeasuredAt = &measuredAt.Time
+	}
+	return nil
+}
+
+func nullStringPointer(value sql.NullString) *string {
+	if !value.Valid {
+		return nil
+	}
+	return &value.String
 }
 
 func nullableString(value *string) sql.NullString {
@@ -236,6 +403,17 @@ func requireAffected(result sql.Result) error {
 	}
 	if n == 0 {
 		return ErrTestDataNotFound
+	}
+	return nil
+}
+
+func requireCurveAffected(result sql.Result) error {
+	n, err := result.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if n == 0 {
+		return ErrCurveNotFound
 	}
 	return nil
 }
