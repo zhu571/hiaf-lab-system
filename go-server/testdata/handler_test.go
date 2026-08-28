@@ -254,3 +254,86 @@ func TestCreateBatchSuccess201(t *testing.T) {
 		t.Fatalf("CreateBatch calls = %d, want 1", repo.batchCalls)
 	}
 }
+
+func newCurveRouter(svc *Service) http.Handler {
+	middleware.SetJWTSecret([]byte("curve-test-secret"))
+	h := NewCurveHandler(svc)
+	router := chi.NewRouter()
+	router.Route("/api/v1/projects/{project_id}", func(r chi.Router) {
+		r.Use(middleware.AuthRequired)
+		r.Get("/test-data-curves", h.List)
+		r.Post("/test-data-curves", h.Create)
+	})
+	router.Route("/api/v1/test-data-curves/{id}", func(r chi.Router) {
+		r.Use(middleware.AuthRequired)
+		r.Get("/", h.GetByID)
+		r.Patch("/", h.Update)
+		r.Delete("/", h.Void)
+	})
+	return router
+}
+
+func curveRequest(router http.Handler, method, path, body string, withKey bool) *httptest.ResponseRecorder {
+	token, err := middleware.GenerateToken("curve-user", "curve-user", auth.RoleMember, 1, []byte("curve-test-secret"))
+	if err != nil {
+		panic(err)
+	}
+	req := httptest.NewRequest(method, path, strings.NewReader(body))
+	req.Header.Set("Authorization", "Bearer "+token)
+	if withKey {
+		req.Header.Set("Idempotency-Key", "curve-test-key")
+	}
+	rec := httptest.NewRecorder()
+	router.ServeHTTP(rec, req)
+	return rec
+}
+
+func TestCurveHandlersFlowAndValidation(t *testing.T) {
+	repo := &fakeRepository{}
+	router := newCurveRouter(NewService(repo, fakeAccess{role: projects.RoleMember}, &fakeRuns{exists: true}))
+	base := "/api/v1/projects/" + projectUUID + "/test-data-curves"
+	body := `{"name":"RF Carpet","points":[{"freq_Hz":1000000,"Z_ohm":0.957,"theta_deg":-92.75}]}`
+
+	if rec := curveRequest(router, http.MethodPost, base, body, false); rec.Code != http.StatusBadRequest {
+		t.Fatalf("missing idempotency key: status=%d body=%s", rec.Code, rec.Body.String())
+	}
+	if rec := curveRequest(router, http.MethodPost, base,
+		`{"name":"bad","points":[{"freq_Hz":1000000}]}`, true); rec.Code != http.StatusBadRequest {
+		t.Fatalf("invalid points: status=%d body=%s", rec.Code, rec.Body.String())
+	}
+	rec := curveRequest(router, http.MethodPost, base, body, true)
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("create: status=%d body=%s", rec.Code, rec.Body.String())
+	}
+	if repo.curve == nil || repo.curve.CurveType != CurveTypeImpedanceSweep || repo.curve.Source != SourceImport {
+		t.Fatalf("created curve = %+v", repo.curve)
+	}
+
+	if rec = curveRequest(router, http.MethodGet, base, "", false); rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), `"total":1`) {
+		t.Fatalf("list: status=%d body=%s", rec.Code, rec.Body.String())
+	}
+	path := "/api/v1/test-data-curves/" + dataUUID
+	if rec = curveRequest(router, http.MethodGet, path, "", false); rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), `"freq_Hz":1000000`) {
+		t.Fatalf("get: status=%d body=%s", rec.Code, rec.Body.String())
+	}
+	if rec = curveRequest(router, http.MethodPatch, path, `{"name":"updated"}`, true); rec.Code != http.StatusOK || repo.curve.Name != "updated" {
+		t.Fatalf("update: status=%d body=%s curve=%+v", rec.Code, rec.Body.String(), repo.curve)
+	}
+	if rec = curveRequest(router, http.MethodDelete, path, `{"reason":"duplicate"}`, true); rec.Code != http.StatusOK {
+		t.Fatalf("void: status=%d body=%s", rec.Code, rec.Body.String())
+	}
+	if rec = curveRequest(router, http.MethodGet, path, "", false); rec.Code != http.StatusNotFound {
+		t.Fatalf("voided get: status=%d body=%s", rec.Code, rec.Body.String())
+	}
+	if rec = curveRequest(router, http.MethodGet, base, "", false); rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), `"total":0`) {
+		t.Fatalf("voided list: status=%d body=%s", rec.Code, rec.Body.String())
+	}
+}
+
+func TestCurveHandlersRejectNonMember(t *testing.T) {
+	router := newCurveRouter(NewService(&fakeRepository{}, fakeAccessDeny{}, &fakeRuns{exists: true}))
+	rec := curveRequest(router, http.MethodGet, "/api/v1/projects/"+projectUUID+"/test-data-curves", "", false)
+	if rec.Code != http.StatusForbidden {
+		t.Fatalf("status=%d, want 403; body=%s", rec.Code, rec.Body.String())
+	}
+}

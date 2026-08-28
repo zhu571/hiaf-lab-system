@@ -23,6 +23,10 @@ const (
 	SourceImport     = "import"
 	SourceAgent      = "agent"
 	SourceBackfill   = "backfill"
+
+	CurveTypeImpedanceSweep = "impedance_sweep"
+	CurveTypeS11Sweep       = "s11_sweep"
+	CurveTypeCustom         = "custom"
 )
 
 type TestData struct {
@@ -78,6 +82,76 @@ type ListResult struct {
 	Total   int        `json:"total"`
 	Page    int        `json:"page"`
 	PerPage int        `json:"per_page"`
+}
+
+type CurvePoint struct {
+	FreqHz   *float64 `json:"freq_Hz"`
+	ZOhm     *float64 `json:"Z_ohm,omitempty"`
+	ThetaDeg *float64 `json:"theta_deg,omitempty"`
+}
+
+type Curve struct {
+	ID         string       `json:"id"`
+	ProjectID  string       `json:"project_id"`
+	RunID      *string      `json:"run_id,omitempty"`
+	Name       string       `json:"name"`
+	CurveType  string       `json:"curve_type"`
+	XLabel     string       `json:"x_label"`
+	YLabel     string       `json:"y_label"`
+	Unit       string       `json:"unit"`
+	Points     []CurvePoint `json:"points"`
+	Quality    string       `json:"quality"`
+	Source     string       `json:"source"`
+	Notes      string       `json:"notes,omitempty"`
+	IsVoid     bool         `json:"is_void"`
+	VoidedAt   *time.Time   `json:"voided_at,omitempty"`
+	VoidedBy   *string      `json:"voided_by,omitempty"`
+	VoidReason *string      `json:"void_reason,omitempty"`
+	MeasuredAt *time.Time   `json:"measured_at,omitempty"`
+	CreatedBy  *string      `json:"created_by,omitempty"`
+	CreatedAt  time.Time    `json:"created_at"`
+	UpdatedAt  time.Time    `json:"updated_at"`
+}
+
+type CreateCurveRequest struct {
+	RunID      *string      `json:"run_id,omitempty"`
+	Name       string       `json:"name"`
+	CurveType  string       `json:"curve_type,omitempty"`
+	XLabel     string       `json:"x_label,omitempty"`
+	YLabel     string       `json:"y_label,omitempty"`
+	Unit       string       `json:"unit,omitempty"`
+	Points     []CurvePoint `json:"points"`
+	Quality    *string      `json:"quality,omitempty"`
+	Source     *string      `json:"source,omitempty"`
+	Notes      string       `json:"notes,omitempty"`
+	MeasuredAt *time.Time   `json:"measured_at,omitempty"`
+}
+
+type UpdateCurveRequest struct {
+	Name       *string       `json:"name,omitempty"`
+	XLabel     *string       `json:"x_label,omitempty"`
+	YLabel     *string       `json:"y_label,omitempty"`
+	Unit       *string       `json:"unit,omitempty"`
+	Points     *[]CurvePoint `json:"points,omitempty"`
+	Quality    *string       `json:"quality,omitempty"`
+	Notes      *string       `json:"notes,omitempty"`
+	MeasuredAt *time.Time    `json:"measured_at,omitempty"`
+}
+
+type ListCurvesParams struct {
+	ProjectID string
+	RunID     string
+	CurveType string
+	Quality   string
+	Page      int
+	PerPage   int
+}
+
+type ListCurvesResult struct {
+	Items   []Curve `json:"items"`
+	Total   int     `json:"total"`
+	Page    int     `json:"page"`
+	PerPage int     `json:"per_page"`
 }
 
 // CreateBatchRow 是批量录入的单行请求体，与单条 CreateTestDataRequest 同构。

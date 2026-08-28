@@ -159,6 +159,7 @@ func main() {
 	testDataSvc := testdata.NewService(testDataRepo, testdata.ProjectAccessAdapter{Repo: projectsRepo},
 		testdata.NewHTTPRunValidator(selfBase))
 	testDataHandler := testdata.NewHandler(testDataSvc)
+	testDataCurveHandler := testdata.NewCurveHandler(testDataSvc)
 	rfMatchingRepo := rfmatch.NewRepository(db)
 	rfMatchingSvc := rfmatch.NewService(rfMatchingRepo, rfmatch.ProjectAccessAdapter{Repo: projectsRepo})
 	rfMatchingHandler := rfmatch.NewHandler(rfMatchingSvc)
@@ -417,6 +418,8 @@ func main() {
 			r.Get("/test-data", testDataHandler.List)
 			r.Post("/test-data", testDataHandler.Create)
 			r.Post("/test-data/batch", testDataHandler.CreateBatch)
+			r.Get("/test-data-curves", testDataCurveHandler.List)
+			r.Post("/test-data-curves", testDataCurveHandler.Create)
 			r.Get("/rf-matching", rfMatchingHandler.List)
 			r.Post("/rf-matching", rfMatchingHandler.Create)
 
@@ -507,6 +510,17 @@ func main() {
 			r.Get("/", testDataHandler.GetByID)
 			r.Patch("/", testDataHandler.Update)
 			r.Delete("/", testDataHandler.MarkInvalid)
+		})
+	})
+	r.Route("/api/v1/test-data-curves", func(r chi.Router) {
+		r.Use(mw.AuthRequired)
+		r.Use(mw.AgentContext(db))
+		r.Use(mw.Audit(db))
+		r.Use(mw.RequireIdempotencyKey(db))
+		r.Route("/{id}", func(r chi.Router) {
+			r.Get("/", testDataCurveHandler.GetByID)
+			r.Patch("/", testDataCurveHandler.Update)
+			r.Delete("/", testDataCurveHandler.Void)
 		})
 	})
 	r.Route("/api/v1/rf-matching", func(r chi.Router) {
