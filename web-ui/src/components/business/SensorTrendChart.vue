@@ -25,7 +25,7 @@
 /* ---------- 窗口数学纯函数（§4.2 + §4.5 可测性安排：不触碰 chart 实例，可独立导入单测） ---------- */
 
 export type ChartPoint = { time: number; value: number }
-export type ChartGroup = { name: string; color: string; points: ChartPoint[] }
+export type ChartGroup = { name: string; color: string; dash: number[]; points: ChartPoint[] }
 
 /** 缩放窗口最小宽度：60s（§4.2.2 clamp 定稿） */
 export const MIN_WINDOW_MS = 60_000
@@ -247,6 +247,7 @@ function applyView() {
     label: g.name,
     data: sliceWindow(g.points, win.min, win.max).map((p) => ({ x: p.time, y: p.value })),
     borderColor: g.color,
+    borderDash: g.dash,
     pointRadius: 0,
     borderWidth: 2,
     hidden: visibleTags.value.get(g.name) === false

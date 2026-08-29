@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { Chart } from 'chart.js'
-import { buildChartGroups, chartPalette, refreshDefaults, setupChartDefaults, type ChartGroupRow } from '@/utils/chartTheme'
+import { buildChartGroups, chartPalette, LINE_DASHES, refreshDefaults, setupChartDefaults, type ChartGroupRow } from '@/utils/chartTheme'
 
 // chartTheme 单测（测试方案 §8.4 R4-9 ①，美术 S3 自带）：
 // setupChartDefaults 注册表收口 / refreshDefaults 快照与计算色实时读取 / chartPalette 解析去重 / buildChartGroups 纯函数。
@@ -125,6 +125,13 @@ describe('buildChartGroups 纯函数（P15 合并双份分组逻辑）', () => {
     expect(groups[2].color).toBe('c3')
     expect(groups[3].color).toBe('c1')
     expect(groups[1].points.map((p) => p.time)).toEqual([10, 20])
+  })
+
+  it('dash 线型按组索引取模循环（V7-C 冗余编码：实线/长虚线/点线/点划线）', () => {
+    expect(LINE_DASHES).toEqual([[], [6, 4], [2, 3], [8, 3, 2, 3]])
+    const rows: ChartGroupRow[] = [1, 2, 3, 4, 5].map((n) => ({ key: `k${n}`, time: n, value: n }))
+    const groups = buildChartGroups(rows, palette)
+    expect(groups.map((g) => g.dash)).toEqual([[], [6, 4], [2, 3], [8, 3, 2, 3], []])
   })
 
   it('空输入返回空数组', () => {

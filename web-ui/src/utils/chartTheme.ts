@@ -29,9 +29,14 @@ import {
 } from 'chart.js'
 
 export type ChartPoint = { time: number; value: number }
-export type ChartGroup = { name: string; color: string; points: ChartPoint[] }
+export type ChartGroup = { name: string; color: string; dash: number[]; points: ChartPoint[] }
 /** buildChartGroups 的输入行：key = 分组键（测量项/标签），time/value = 折线坐标 */
 export type ChartGroupRow = { key: string; time: number; value: number }
+
+/** 系列线型冗余编码（美术增量 V7-C / 盲点 C）：实线/长虚线/点线/点划线按组索引取模循环，
+    多系列不再仅靠色相区分（色觉障碍/灰度打印可读）；Chart.js 图例符号自动跟随 borderDash，
+    SVG 侧（TestDataView）接线 stroke-dasharray */
+export const LINE_DASHES: number[][] = [[], [6, 4], [2, 3], [8, 3, 2, 3]]
 
 const FONT_FALLBACK =
   '"PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", "Noto Sans CJK SC", ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif'
@@ -137,6 +142,7 @@ export function buildChartGroups(rows: ChartGroupRow[], palette: string[]): Char
   return Array.from(groups.entries()).map(([name, points], index) => ({
     name,
     color: palette[index % palette.length],
+    dash: LINE_DASHES[index % LINE_DASHES.length],
     points: points.sort((a, b) => a.time - b.time)
   }))
 }

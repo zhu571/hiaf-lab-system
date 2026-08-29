@@ -55,8 +55,20 @@
   --el-text-color-primary: var(--text-1);
   --el-text-color-regular: var(--text-2);
   --el-text-color-secondary: var(--text-3);
-  --el-fill-color-light: #f0f4f9;
+  /* 中性色补全（美术增量 V7-B / 盲点 B）：与 dark.css 中性对接块逐条对称，
+     placeholder/disabled 由 EP 默认灰蓝加深为 text-3（5.18:1），fill 族归入 surface 阶梯 */
+  --el-text-color-placeholder: var(--text-3);
+  --el-text-color-disabled: var(--text-3);
+  --el-bg-color: var(--surface);
   --el-bg-color-page: var(--bg);
+  --el-bg-color-overlay: var(--surface);
+  --el-fill-color: var(--surface-3);
+  --el-fill-color-light: var(--surface-2);
+  --el-fill-color-lighter: var(--surface-2);
+  --el-fill-color-extra-light: var(--surface-2);
+  --el-fill-color-dark: var(--surface-3);
+  --el-fill-color-darker: var(--surface-3);
+  --el-fill-color-blank: var(--surface);
 }
 
 /* ---------- Element Plus 细节打磨 ---------- */

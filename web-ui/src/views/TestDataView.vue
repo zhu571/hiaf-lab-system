@@ -100,6 +100,7 @@
                   v-if="group.points.length >= 2"
                   :points="polyline(group)"
                   :stroke="group.color"
+                  :stroke-dasharray="group.dash.length ? group.dash.join(' ') : undefined"
                   fill="none"
                   stroke-linecap="round"
                   stroke-linejoin="round"
