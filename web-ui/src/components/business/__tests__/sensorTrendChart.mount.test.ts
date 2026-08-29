@@ -48,8 +48,8 @@ type MockChartInstance = {
   destroy: ReturnType<typeof vi.fn>
 }
 
-function makeGroup(name: string, values: Array<[number, number]>): ChartGroup {
-  return { name, color: '#1a86a2', points: values.map(([time, value]) => ({ time, value })) }
+function makeGroup(name: string, values: Array<[number, number]>, dash: number[] = []): ChartGroup {
+  return { name, color: '#1a86a2', dash, points: values.map(([time, value]) => ({ time, value })) }
 }
 
 async function mountChart(groups: ChartGroup[], windowKey = 'p:1h', windowSizeMs = 3600e3) {
@@ -87,7 +87,7 @@ describe('SensorTrendChart 挂载渲染', () => {
       makeGroup('temperature', [
         [0, 10],
         [500, 20]
-      ])
+      ], [6, 4])
     ]
     await mountChart(groups)
     const chart = chartInstance()
@@ -96,7 +96,9 @@ describe('SensorTrendChart 挂载渲染', () => {
     expect(chart.data.datasets[0].label).toBe('pressure')
     expect(chart.data.datasets[0].data).toHaveLength(3)
     expect(chart.data.datasets[0].borderColor).toBe('#1a86a2')
+    expect(chart.data.datasets[0].borderDash).toEqual([])
     expect(chart.data.datasets[1].label).toBe('temperature')
+    expect(chart.data.datasets[1].borderDash).toEqual([6, 4])
   })
 
   it('windowKey 变化：视图复位为跟随模式，emit zoom-change {zoomed:false}', async () => {

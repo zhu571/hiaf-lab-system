@@ -28,6 +28,9 @@
  *   新增 --topbar-height / --topbar-bg / --topbar-border / --nav-width-collapsed
  *   （桌面 56px 顶栏 + 侧栏 232↔64 折叠）；--topbar-* 全引用型，dark.css 零覆写；
  *   z-index 复用既有 --z-topbar，不新增层级。
+ * - 美术增量 V7 批（2026-08-29，docs/美术重设计方案.md §3）：无新增令牌；
+ *   V7-D 改值 --touch-target 40px → 44px（平台惯例 iOS 44pt，el-button--small 36px 例外保留）；
+ *   V7-A/B 改动在 themes/dark.css 与 element-overrides.css（var() 引用，无新令牌）。
  */
 :root {
   /* ========== 色彩：底色 ========== */
@@ -218,5 +221,5 @@
   --mobile-topbar-height: 48px;
   --safe-area-bottom: env(safe-area-inset-bottom, 0px);
   --safe-area-top: env(safe-area-inset-top, 0px);
-  --touch-target: 40px;
+  --touch-target: 44px;
 }

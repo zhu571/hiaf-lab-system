@@ -31,7 +31,9 @@ html.dark {
   --text-3: #8496a6;
   --text-inverse: #f8fbff;
 
-  /* 品牌阶梯 */
+  /* 品牌阶梯（dark 语义登记，美术增量 V7-A / 盲点 E）：
+     400 与 500 同值 #3398b8 是有意设计——dark 下两档都作 hover 亮档，勿去重；
+     800/900 反转为浅色档（dark 语境档位越大越浅），供浅底/深字场景，勿按 light 语义"修正"。 */
   --brand-050: #12303c;
   --brand-100: #173c4a;
   --brand-200: #1d4a5a;
@@ -200,3 +202,10 @@ html.dark body {
 
 /* webkit 滚动条：base.css 引用 var(--scrollbar-thumb[-hover])，dark 令牌覆写（--border-strong/--text-3）即生效；
    原 html.dark 滚动条覆写规则已收敛为上方令牌覆写（S1） */
+
+/* 文本选区 dark 覆写（美术增量 V7-A / 盲点 A）：base.css 的 ::selection 在 dark 继承 brand-100 底 +
+   brand-700 字仅 1.66:1 不可读；改 brand-200（#1d4a5a）底 + text-1（#e8eef4）字，实测对比度 8.24:1。 */
+html.dark ::selection {
+  background: var(--brand-200);
+  color: var(--text-1);
+}
