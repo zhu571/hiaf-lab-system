@@ -35,7 +35,7 @@
 import { computed } from 'vue'
 import { useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
-import { NAV_ITEMS, filterNavByRole } from '@/config/navigation'
+import { NAV_ITEMS, filterNavByRole, groupNavBySection, type NavSection } from '@/config/navigation'
 import { useAuthStore } from '@/stores/auth'
 import NotificationCenter from '@/components/business/NotificationCenter.vue'
 
@@ -44,18 +44,29 @@ const router = useRouter()
 const auth = useAuthStore()
 const { t } = useI18n()
 
-const groups = computed(() => [
-  {
+const SECTION_TITLE_KEYS: Record<NavSection, string> = {
+  device: 'nav.sections.device',
+  manage: 'nav.sections.manage'
+}
+
+// 分组与桌面侧栏同源（nav-menu-redesign 方案 §3.3）：main 组 + system 组按 section 聚类，
+// settings（仅移动端项）随 manage 组出现在抽屉末尾。
+const groups = computed(() => {
+  const role = auth.user?.role ?? ''
+  const main = {
     name: 'main',
     label: t('mobile.drawer.main'),
-    items: filterNavByRole(NAV_ITEMS.filter((item) => item.group === 'main'), auth.user?.role ?? '')
-  },
-  {
-    name: 'system',
-    label: t('mobile.drawer.system'),
-    items: filterNavByRole(NAV_ITEMS.filter((item) => item.group === 'system'), auth.user?.role ?? '')
+    items: filterNavByRole(NAV_ITEMS.filter((item) => item.group === 'main'), role)
   }
-])
+  const sections = groupNavBySection(
+    filterNavByRole(NAV_ITEMS.filter((item) => item.group === 'system'), role)
+  ).map((g) => ({
+    name: g.section,
+    label: t(SECTION_TITLE_KEYS[g.section]),
+    items: g.items
+  }))
+  return [main, ...sections]
+})
 
 const displayName = computed(() => auth.user?.display_name || auth.user?.username || '')
 const avatarText = computed(() => displayName.value.slice(0, 1).toUpperCase() || '?')

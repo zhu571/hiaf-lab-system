@@ -26,19 +26,25 @@
           </template>
         </RouterLink>
       </el-tooltip>
-      <el-tooltip :content="t('nav.aiAsk')" placement="right" :disabled="!collapsed">
-        <button type="button" class="nav-link nav-ask" @click="openAskDialog">
-          <el-icon><ChatDotRound /></el-icon>
-          <span class="nav-label">{{ t('nav.aiAsk') }}</span>
-        </button>
-      </el-tooltip>
-      <p class="nav-group">{{ t('nav.systemGroup') }}</p>
-      <el-tooltip v-for="item in systemItems" :key="item.path" :content="item.label" placement="right" :disabled="!collapsed">
-        <RouterLink :to="item.path" :class="['nav-link', { 'router-link-active': navActive(item.path) }]">
-          <el-icon><component :is="item.icon" /></el-icon>
-          <span class="nav-label">{{ item.label }}</span>
-        </RouterLink>
-      </el-tooltip>
+      <!-- 系统组按 section 聚类出小标题（nav-menu-redesign 方案 §3.2）：设备监控 / 系统管理 -->
+      <template v-for="group in systemGroups" :key="group.section">
+        <p class="nav-group">{{ t(group.titleKey) }}</p>
+        <el-tooltip v-for="item in group.items" :key="item.path" :content="item.label" placement="right" :disabled="!collapsed">
+          <RouterLink :to="item.path" :class="['nav-link', { 'router-link-active': navActive(item.path) }]">
+            <el-icon><component :is="item.icon" /></el-icon>
+            <span class="nav-label">{{ item.label }}</span>
+          </RouterLink>
+        </el-tooltip>
+      </template>
+      <!-- AI 问答是全局动作而非路由项，落位侧栏底部与导航列表分离（原夹在两组之间，语义混杂） -->
+      <div class="nav-footer">
+        <el-tooltip :content="t('nav.aiAsk')" placement="right" :disabled="!collapsed">
+          <button type="button" class="nav-link nav-ask" @click="openAskDialog">
+            <el-icon><ChatDotRound /></el-icon>
+            <span class="nav-label">{{ t('nav.aiAsk') }}</span>
+          </button>
+        </el-tooltip>
+      </div>
     </aside>
 
     <header v-if="!isMobile" class="topbar">
@@ -121,7 +127,7 @@ import { useProjectStore } from '@/stores/project'
 import { useAskDialog } from '@/composables/useAskDialog'
 import { useCommandPalette } from '@/composables/useCommandPalette'
 import { useAgentPending } from '@/composables/useAgentPending'
-import { NAV_ITEMS, filterNavByRole } from '@/config/navigation'
+import { NAV_ITEMS, filterNavByRole, groupNavBySection, type NavSection } from '@/config/navigation'
 import MobileTopBar from '@/layouts/MobileTopBar.vue'
 import AskDialog from '@/components/business/AskDialog.vue'
 import CommandPalette from '@/components/business/CommandPalette.vue'
@@ -219,11 +225,23 @@ const navItems = computed<NavItem[]>(() =>
   }))
 )
 
-const systemItems = computed<NavItem[]>(() =>
-  filterNavByRole(NAV_ITEMS.filter((i) => i.group === 'system' && !i.mobile), auth.user?.role ?? '').map((i) => ({
-    label: t(i.titleKey),
-    path: i.path,
-    icon: i.icon
+const SECTION_TITLE_KEYS: Record<NavSection, string> = {
+  device: 'nav.sections.device',
+  manage: 'nav.sections.manage'
+}
+
+// 系统组先按角色过滤，再按 section 聚类（nav-menu-redesign 方案 §3.2）：桌面侧栏出小标题分组。
+const systemGroups = computed(() =>
+  groupNavBySection(
+    filterNavByRole(NAV_ITEMS.filter((i) => i.group === 'system' && !i.mobile), auth.user?.role ?? '')
+  ).map((g) => ({
+    section: g.section,
+    titleKey: SECTION_TITLE_KEYS[g.section],
+    items: g.items.map((i) => ({
+      label: t(i.titleKey),
+      path: i.path,
+      icon: i.icon
+    }))
   }))
 )
 
@@ -341,9 +359,21 @@ async function onUserCommand(command: string | number | object) {
   white-space: nowrap;
 }
 
-/* 折叠态：系统组标题隐藏 */
+/* 折叠态：组标题文字隐藏，退化为分隔线保住分组边界（不再两组图标粘连） */
 .layout.nav-collapsed .nav-group {
-  display: none;
+  border-top: 1px solid var(--nav-border);
+  font-size: 0;
+  height: 0;
+  margin: 8px 10px;
+  padding: 0;
+}
+
+/* AI 问答落底（nav-menu-redesign 方案 §3.2）：margin-top:auto 吸底 + 顶部分隔线；
+   aside 为 flex column + overflow auto，内容超高时本块自然处于流末尾 */
+.nav-footer {
+  border-top: 1px solid var(--nav-border);
+  margin-top: auto;
+  padding-top: 4px;
 }
 
 .nav-link,

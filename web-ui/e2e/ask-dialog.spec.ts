@@ -5,7 +5,7 @@ import { ADMIN, login } from './helpers'
 // E2E 环境无 py-agent-interpret 实例（test-e2e.sh:137 PY_AGENT_INTERPRET_URL 指向
 // 127.0.0.1:18099 无服务），ask/chat 必然 502 upstream_error；
 // ask/history 为普通 Go API（E2E 环境可达），历史 tab 断言列表加载（空态其一）。
-// 断言锚点：.nav-ask（AppLayout.vue:28-30）、.ask-drawer（AskDialog.vue:2）、
+// 断言锚点：.nav-ask（AppLayout.vue 侧栏底部 .nav-footer 内）、.ask-drawer（AskDialog.vue:2）、
 // .ask-error（AskDialog.vue:16）、.ask-tabs（AskDialog.vue:4）。
 test.describe('AI 问答降级旅程', () => {
   test('提问失败：interpret 不可达时 .ask-error 展示错误文案', async ({ page }) => {
