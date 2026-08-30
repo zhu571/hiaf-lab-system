@@ -52,8 +52,12 @@ export default {
     aiReview: 'AI Review',
     aiAsk: 'AI Ask',
     pendingReview: 'Pending review candidates',
-    // Section header above the system-level menu entries.
-    systemGroup: 'System',
+    // Section headers inside the system menu group (nav-menu-redesign: system
+    // group is clustered by section in the sidebar and mobile drawer).
+    sections: {
+      device: 'Devices',
+      manage: 'Administration'
+    },
     gasControl: 'Gas Control',
     instruments: 'Instruments',
     sensors: 'Sensors',
@@ -79,8 +83,7 @@ export default {
     menu: 'Open navigation menu',
     drawer: {
       title: 'All navigation',
-      main: 'Main',
-      system: 'System'
+      main: 'Main'
     },
     title: {
       runDetail: 'Run Detail',

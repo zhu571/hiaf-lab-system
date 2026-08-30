@@ -44,7 +44,11 @@ export default {
     aiReview: 'AI审核',
     aiAsk: 'AI 问答',
     pendingReview: '待审核候选',
-    systemGroup: '系统',
+    // 侧栏/抽屉内系统组小标题（nav-menu-redesign：system 组按 section 聚类）
+    sections: {
+      device: '设备监控',
+      manage: '系统管理'
+    },
     gasControl: '气压控制',
     instruments: '测量仪器',
     sensors: '传感器',
@@ -69,8 +73,7 @@ export default {
     menu: '打开导航菜单',
     drawer: {
       title: '全部导航',
-      main: '主要功能',
-      system: '系统功能'
+      main: '主要功能'
     },
     title: {
       runDetail: '运行详情',
