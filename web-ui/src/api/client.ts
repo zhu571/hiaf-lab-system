@@ -78,10 +78,8 @@ export function newIdempotencyKey() {
 export const api = axios.create({
   baseURL: '/api/v1',
   withCredentials: true,
-  headers: {
-    'Content-Type': 'application/json'
-  }
 })
+// 不能设全局 Content-Type: application/json——否则 FormData(multipart) 上传会被 axios 序列化成 JSON、文件丢失；普通对象 data axios 会自动补 application/json，无需默认头。
 
 api.interceptors.request.use((config) => {
   config.headers = AxiosHeaders.from(config.headers)
