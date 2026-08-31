@@ -431,8 +431,9 @@ async function submit(force: boolean) {
     }
     const result = await submitReport(report.value.id, force)
     report.value = result.report
-    if (result.warnings.length > 0 && result.blocked) {
-      warnings.value = result.warnings as typeof warnings.value
+    const ws = result.warnings ?? []
+    if (ws.length > 0 && result.blocked) {
+      warnings.value = ws as typeof warnings.value
       warningDialog.value = true
       return
     }
