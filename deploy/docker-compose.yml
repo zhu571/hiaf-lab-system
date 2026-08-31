@@ -251,6 +251,8 @@ services:
       # server 容器内 ntfy CLI 默认读 /etc/ntfy/server.yml 定位 auth-file，
       # 必须与 lab-ntfy 挂同一份配置（只读），否则 CLI 可能写到错误路径
       - ./ntfy/server.yml:/etc/ntfy/server.yml:ro
+      # 附件持久化：容器重建不丢已上传附件（named volume，docker 首次挂载会拷贝容器层现有数据）
+      - lab-uploads:/app/uploads
     depends_on:
       postgres:
         condition: service_healthy
@@ -380,6 +382,7 @@ volumes:
   influxdb_config:
   ntfy-cache:
   ntfy-etc:
+  lab-uploads:
 
 secrets:
   db_password:

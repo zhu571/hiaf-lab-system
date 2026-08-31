@@ -318,3 +318,29 @@ describe('GET 网络错误自动重试（S2，§3.5：仅 GET 且无 response，
     expect(adapter).toHaveBeenCalledTimes(1)
   })
 })
+
+describe('附件上传：FormData 不被全局 JSON Content-Type 序列化（回归 00d7c94）', () => {
+  it('uploadAttachment 传给 adapter 的 data 仍是 FormData 实例（非 JSON 字符串）', async () => {
+    const client = await loadClient()
+    // attachments.ts 与 client.ts 在同一 resetModules 作用域，复用同一个 api 实例
+    const attachments = await import('../attachments')
+    let capturedData: unknown
+    const adapter = vi.fn(async (config: AdapterConfig) => {
+      capturedData = config.data
+      return jsonResponse(
+        config,
+        { data: { attachment: { id: 'a1', original_name: 'a.txt' }, links: [] }, request_id: 'r-up' },
+        201
+      )
+    })
+    client.api.defaults.adapter = adapter as unknown as typeof client.api.defaults.adapter
+
+    const file = new File(['probe-bytes'], 'a.txt', { type: 'text/plain' })
+    await attachments.uploadAttachment(file, 'log', 'some-id')
+
+    // 关键断言：经 transformRequest 后，data 必须是 FormData。
+    // 若全局默认头被重新加回，axios 会把它序列化成 JSON 字符串 → 此处失败。
+    expect(capturedData).toBeInstanceOf(FormData)
+    expect((capturedData as FormData).get('file')).toBeInstanceOf(File)
+  })
+})
