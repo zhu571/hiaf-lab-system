@@ -31,7 +31,9 @@ FROM alpine:3.20
 # docker-cli-compose: runner 容器内执行 docker compose；coreutils: update.sh 使用 stdbuf。
 # openssh-client: git 走 SSH 远程（git@github.com）必须有 ssh 二进制，git 包不携带它
 # （2026-08-20 gascell 事故根因之一：fetch 报 cannot run ssh）。
-RUN apk add --no-cache ca-certificates tzdata docker-cli docker-cli-compose git curl bash coreutils openssh-client
+# 构建容器内 dl-cdn/alpinelinux.org 超时、tuna 403；aliyun 实测可达(200)——apk 走国内源
+RUN sed -i 's|dl-cdn.alpinelinux.org|mirrors.aliyun.com|g' /etc/apk/repositories \
+    && apk add --no-cache ca-certificates tzdata docker-cli docker-cli-compose git curl bash coreutils openssh-client
 
 # 容器内以 UID 1000 运行、无 HOME，写不了 global git config；
 # 仓库属主与容器 UID 不一致会触发 git dubious ownership，构建期写入 system 级配置。
