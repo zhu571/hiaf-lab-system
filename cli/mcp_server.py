@@ -342,14 +342,16 @@ def labctl_alerts_get(alert_id: str) -> str:
 def labctl_logs_list(project_id: str, category: str = None, date_from: str = None,
                      date_to: str = None, status: str = None, page: int = 1,
                      per_page: int = 20) -> str:
-    """项目日志列表。category: general/assembly/test/cryo/rf/vacuum/beam/data_analysis。"""
+    """项目日志列表。status 缺省时服务端只返回 confirmed；查看草稿须显式传
+    status=draft。category: general/assembly/test/cryo/rf/vacuum/beam/data_analysis。"""
     return _call(commands.run_logs_list, project_id=project_id, category=category,
                  date_from=date_from, date_to=date_to, status=status, page=page, per_page=per_page)
 
 
 @mcp.tool()
 def labctl_logs_get(log_id: str) -> str:
-    """日志详情。"""
+    """日志详情。日志列表的 status 缺省只返回 confirmed；定位草稿时须先显式用
+    labctl_logs_list(status=draft) 查询。"""
     return _call(commands.run_logs_get, log_id=log_id)
 
 

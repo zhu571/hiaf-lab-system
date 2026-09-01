@@ -120,6 +120,7 @@ type LogListParams struct {
 	Page     int    `json:"page"`
 	PerPage  int    `json:"per_page"`
 	Category string `json:"category,omitempty"`
+	Keyword  string `json:"keyword,omitempty"`
 	DateFrom string `json:"date_from,omitempty"`
 	DateTo   string `json:"date_to,omitempty"`
 	Status   string `json:"status,omitempty"`
@@ -136,6 +137,8 @@ type ReportListParams struct {
 	Status   string `json:"status,omitempty"`
 	Keyword  string `json:"keyword,omitempty"`
 	Date     string `json:"date,omitempty"`
+	DateFrom string `json:"date_from,omitempty"`
+	DateTo   string `json:"date_to,omitempty"`
 	Page     int    `json:"page"`
 	PerPage  int    `json:"per_page"`
 }

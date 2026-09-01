@@ -233,6 +233,24 @@ type runTemplateReaderBridge struct {
 	repo *steptemplates.Repository
 }
 
+type runReportReaderBridge struct{ repo *logs.Repository }
+
+func (b runReportReaderBridge) GetReportSummaries(ids []string, userID, userRole string) ([]runs.LinkedDailyReport, error) {
+	reports := make([]runs.LinkedDailyReport, 0, len(ids))
+	// ponytail: linked reports are few; add a batch repository query if this becomes a measured N+1 hotspot.
+	for _, id := range ids {
+		report, err := b.repo.GetReportByID(id)
+		if err != nil {
+			return nil, err
+		}
+		if report == nil || report.AuthorID != userID && userRole != auth.RoleAdmin {
+			continue
+		}
+		reports = append(reports, runs.LinkedDailyReport{ID: report.ID, ReportDate: report.ReportDate, Summary: report.Summary})
+	}
+	return reports, nil
+}
+
 func (b runTemplateReaderBridge) GetTemplateWithItems(id string) (*runs.SteptemplatesTemplate, []runs.SteptemplatesItem, error) {
 	tmpl, items, err := b.repo.GetTemplateWithItems(id)
 	if err != nil {

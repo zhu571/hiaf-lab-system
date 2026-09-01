@@ -54,6 +54,10 @@ type TemplateReader interface {
 	GetTemplateWithItems(id string) (*SteptemplatesTemplate, []SteptemplatesItem, error)
 }
 
+type ReportReader interface {
+	GetReportSummaries(ids []string, userID, userRole string) ([]LinkedDailyReport, error)
+}
+
 type SteptemplatesTemplate struct {
 	ID   string
 	Name string
@@ -72,6 +76,7 @@ type Service struct {
 	repo       runRepository
 	access     ProjectAccessChecker
 	tmplReader TemplateReader
+	reports    ReportReader
 }
 
 func NewService(repo runRepository, access ProjectAccessChecker) *Service {
@@ -81,6 +86,8 @@ func NewService(repo runRepository, access ProjectAccessChecker) *Service {
 func (s *Service) ConfigureTemplates(reader TemplateReader) {
 	s.tmplReader = reader
 }
+
+func (s *Service) ConfigureReports(reader ReportReader) { s.reports = reader }
 
 func (s *Service) Create(projectID, userID, userRole string, req CreateRunRequest) (*ExperimentRun, error) {
 	projectID = strings.TrimSpace(projectID)
@@ -144,6 +151,20 @@ func (s *Service) GetByID(id, userID, userRole string) (*ExperimentRun, error) {
 	run, err := s.getAccessible(id, userID, userRole, projects.RoleViewer, false)
 	if err != nil {
 		return nil, err
+	}
+	ids, err := s.repo.GetReportLinks(run.ID)
+	if err != nil {
+		return nil, err
+	}
+	run.DailyReports = make([]LinkedDailyReport, len(ids))
+	for i, id := range ids {
+		run.DailyReports[i].ID = id
+	}
+	if s.reports != nil && len(ids) > 0 {
+		run.DailyReports, err = s.reports.GetReportSummaries(ids, userID, userRole)
+		if err != nil {
+			return nil, err
+		}
 	}
 	return run, nil
 }

@@ -232,6 +232,57 @@ class TestCommands(unittest.TestCase):
             commands.run_logs_list(api, "prj_1", status="bogus")
         self.assertEqual(cm.exception.code, "bad_request")
 
+    def test_logs_list_date_sugar(self):
+        self._assert_happy(
+            lambda api: commands.run_logs_list(api, "prj_1", date_value="2026-08-30"),
+            "GET", "/api/v1/projects/prj_1/logs",
+            params={"date_from": "2026-08-30T00:00:00+08:00",
+                    "date_to": "2026-08-31T00:00:00+08:00",
+                    "page": "1", "per_page": "20"})
+
+    def test_logs_list_bare_date_bounds(self):
+        self._assert_happy(
+            lambda api: commands.run_logs_list(
+                api, "prj_1", date_from="2026-08-30", date_to="2026-08-31"),
+            "GET", "/api/v1/projects/prj_1/logs",
+            params={"date_from": "2026-08-30T00:00:00+08:00",
+                    "date_to": "2026-08-31T23:59:59+08:00",
+                    "page": "1", "per_page": "20"})
+
+    def test_logs_list_rejects_invalid_time(self):
+        api = _login_then(lambda request: ok({}))
+        with self.assertRaises(LabctlError) as cm:
+            commands.run_logs_list(api, "prj_1", date_from="yesterday")
+        self.assertEqual(cm.exception.code, "bad_request")
+
+    def test_logs_list_all_pages(self):
+        pages = []
+
+        def handler(request):
+            current = int(request.url.params["page"])
+            pages.append(current)
+            return ok({"items": [{"id": f"log_{current}"}], "total": 3})
+
+        result = commands.run_logs_list(_login_then(handler), "prj_1", per_page=1,
+                                        all_pages=True)
+        self.assertEqual(pages, [1, 2, 3])
+        self.assertEqual(result, {"items": [{"id": "log_1"}, {"id": "log_2"},
+                                             {"id": "log_3"}], "total": 3})
+
+    def test_logs_list_resolves_project_code(self):
+        paths = []
+
+        def handler(request):
+            paths.append(request.url.path)
+            if request.url.path == "/api/v1/projects":
+                return ok([{"id": "00000000-0000-0000-0000-000000000001",
+                            "code": "HIAF", "name": "低温靶"}])
+            return ok({"items": [], "total": 0, "page": 1})
+
+        commands.run_logs_list(_login_then(handler), "HIAF", resolve_project=True)
+        self.assertEqual(paths, ["/api/v1/projects",
+                                 "/api/v1/projects/00000000-0000-0000-0000-000000000001/logs"])
+
     def test_logs_get(self):
         self._assert_happy(lambda api: commands.run_logs_get(api, "log_1"),
                            "GET", "/api/v1/logs/log_1")

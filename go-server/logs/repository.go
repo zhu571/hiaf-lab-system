@@ -174,6 +174,14 @@ func buildReportWhere(params ReportListParams) (string, []any) {
 		args = append(args, strings.TrimSpace(params.Date))
 		parts = append(parts, fmt.Sprintf("dr.report_date = $%d::date", len(args)))
 	}
+	if strings.TrimSpace(params.DateFrom) != "" {
+		args = append(args, strings.TrimSpace(params.DateFrom))
+		parts = append(parts, fmt.Sprintf("dr.report_date >= $%d::date", len(args)))
+	}
+	if strings.TrimSpace(params.DateTo) != "" {
+		args = append(args, strings.TrimSpace(params.DateTo))
+		parts = append(parts, fmt.Sprintf("dr.report_date <= $%d::date", len(args)))
+	}
 	if len(parts) == 0 {
 		return "", args
 	}
@@ -442,6 +450,10 @@ func buildLogWhere(projectID string, params LogListParams) (string, []any) {
 	if params.Category != "" {
 		args = append(args, params.Category)
 		parts = append(parts, fmt.Sprintf("category = $%d", len(args)))
+	}
+	if strings.TrimSpace(params.Keyword) != "" {
+		args = append(args, "%"+strings.TrimSpace(params.Keyword)+"%")
+		parts = append(parts, fmt.Sprintf("content ILIKE $%d", len(args)))
 	}
 	if params.DateFrom != "" {
 		args = append(args, params.DateFrom)

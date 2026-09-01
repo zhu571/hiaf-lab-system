@@ -41,6 +41,7 @@ const (
 
 type fakeRepo struct {
 	run          *ExperimentRun
+	reportLinks  []string
 	steps        map[string]*RunStep
 	maxOrder     int
 	sourcedSteps map[string]string
@@ -60,7 +61,7 @@ func (f *fakeRepo) Update(string, UpdateRunRequest) error                 { retu
 func (f *fakeRepo) SoftDelete(string) error                               { return nil }
 func (f *fakeRepo) AddReportLink(string, string) error                    { return nil }
 func (f *fakeRepo) RemoveReportLink(string, string) error                 { return nil }
-func (f *fakeRepo) GetReportLinks(string) ([]string, error)               { return nil, nil }
+func (f *fakeRepo) GetReportLinks(string) ([]string, error)               { return f.reportLinks, nil }
 func (f *fakeRepo) UpdateStatus(string, string, string, bool, bool) error { return nil }
 func (f *fakeRepo) Reorder(string, []ReorderItem) error                   { return nil }
 func (f *fakeRepo) MaxStepOrder(string) (int, error)                      { return f.maxOrder, nil }
@@ -121,6 +122,27 @@ func (allowAccess) CanAccessProject(string, string, string, string) (bool, error
 type fakeTemplateReader struct {
 	tmpl  *SteptemplatesTemplate
 	items []SteptemplatesItem
+}
+
+type fakeReportReader struct{ reports []LinkedDailyReport }
+
+func (f fakeReportReader) GetReportSummaries([]string, string, string) ([]LinkedDailyReport, error) {
+	return f.reports, nil
+}
+
+func TestGetByIDIncludesLinkedDailyReports(t *testing.T) {
+	repo := newFakeRepo()
+	repo.reportLinks = []string{"report-1"}
+	svc := NewService(repo, allowAccess{})
+	svc.ConfigureReports(fakeReportReader{reports: []LinkedDailyReport{{ID: "report-1", ReportDate: "2026-08-01", Summary: "降温完成"}}})
+
+	run, err := svc.GetByID(testRunID, "user", "viewer")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(run.DailyReports) != 1 || run.DailyReports[0].Summary != "降温完成" || run.DailyReports[0].ReportDate != "2026-08-01" {
+		t.Fatalf("daily_reports = %+v", run.DailyReports)
+	}
 }
 
 func (f fakeTemplateReader) GetTemplateWithItems(string) (*SteptemplatesTemplate, []SteptemplatesItem, error) {

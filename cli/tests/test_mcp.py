@@ -90,6 +90,9 @@ class TestMCP(unittest.TestCase):
         self.assertTrue(all(name.startswith("labctl_") for name in names))
         for tool in tools:
             self.assertTrue(tool.description, f"{tool.name} 缺描述")
+        descriptions = {tool.name: tool.description for tool in tools}
+        self.assertIn("status=draft", descriptions["labctl_logs_list"])
+        self.assertIn("只返回 confirmed", descriptions["labctl_logs_get"])
 
     def test_tool_call_alerts_list(self):
         _session["api"] = FakeAPI(result={"items": [{"id": "a_1", "level": "warning"}],

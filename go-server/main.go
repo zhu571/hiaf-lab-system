@@ -154,6 +154,7 @@ func main() {
 	templatesHandler := steptemplates.NewHandler(templatesSvc)
 	assemblySvc.ConfigureTemplates(templateReaderBridge{repo: templatesRepo})
 	runsSvc.ConfigureTemplates(runTemplateReaderBridge{repo: templatesRepo})
+	runsSvc.ConfigureReports(runReportReaderBridge{repo: logsRepo})
 	testDataRepo := testdata.NewRepository(db)
 	selfBase := commonEnv("SELF_BASE_URL", "http://127.0.0.1:"+port)
 	testDataSvc := testdata.NewService(testDataRepo, testdata.ProjectAccessAdapter{Repo: projectsRepo},

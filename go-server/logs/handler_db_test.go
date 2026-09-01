@@ -468,6 +468,14 @@ func TestHandlerByDateAndListReports(t *testing.T) {
 	if rec.Code != http.StatusBadRequest || logsErrorCode(t, rec) != "bad_request" {
 		t.Fatalf("list bad status = %d body=%s", rec.Code, rec.Body.String())
 	}
+	rec = logsReq(t, router, http.MethodGet, "/api/v1/daily-reports?date_from=2099-06-01&date_to=2099-06-30", userA, "", "")
+	if rec.Code != http.StatusOK {
+		t.Fatalf("list report range = %d body=%s", rec.Code, rec.Body.String())
+	}
+	rec = logsReq(t, router, http.MethodGet, "/api/v1/daily-reports?date_from=bogus", userA, "", "")
+	if rec.Code != http.StatusBadRequest || logsErrorCode(t, rec) != "bad_request" {
+		t.Fatalf("list bad range = %d body=%s", rec.Code, rec.Body.String())
+	}
 }
 
 func TestHandlerCreateListUpdateLog(t *testing.T) {
@@ -520,6 +528,17 @@ func TestHandlerCreateListUpdateLog(t *testing.T) {
 	rec = logsReq(t, router, http.MethodGet, path+"?status=draft", userA, "", "")
 	if rec.Code != http.StatusOK {
 		t.Fatalf("list draft = %d", rec.Code)
+	}
+	rec = logsReq(t, router, http.MethodGet, path+"?status=draft&keyword=%E5%86%B7%E5%A4%B4", userA, "", "")
+	if rec.Code != http.StatusOK {
+		t.Fatalf("list keyword = %d body=%s", rec.Code, rec.Body.String())
+	}
+	keywordData, _ := logsEnvelope(t, rec)
+	var keywordResult struct {
+		Total int `json:"total"`
+	}
+	if err := json.Unmarshal(keywordData, &keywordResult); err != nil || keywordResult.Total != 1 {
+		t.Fatalf("list keyword result = %+v err=%v", keywordResult, err)
 	}
 	rec = logsReq(t, router, http.MethodGet, path+"?status=bogus", userA, "", "")
 	if rec.Code != http.StatusBadRequest || logsErrorCode(t, rec) != "bad_request" {

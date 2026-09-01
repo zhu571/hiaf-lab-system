@@ -6,10 +6,13 @@
 """
 
 import csv
+from datetime import date, datetime, timedelta
 import io
 import json
 import mimetypes
 import os
+import re
+import uuid
 from urllib.parse import urlsplit
 
 import httpx
@@ -47,6 +50,10 @@ CANDIDATE_STATUSES = ("pending_review", "approved", "rejected", "executed", "exe
 ATTACHMENT_ENTITY_TYPES = ("assembly_step", "daily_report", "issue", "log", "test_data",
                            "experiment_run", "rf_matching_record")
 MAX_UPLOAD_BYTES = 100 * 1024 * 1024  # 服务端 maxUploadSize 同阈值（100 MiB）
+MAX_LOGS_ALL = 1000
+_DATE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
+_RFC3339_RE = re.compile(
+    r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:\d{2})$")
 
 
 def _clean(data):
@@ -852,16 +859,83 @@ def run_runs_report_unlink(api, run_id, report_id):
                        f"/api/v1/experiment-runs/{run_id}/daily-reports/{report_id}")
 
 
+def _log_time(value, end=False):
+    if not value:
+        return value
+    if _DATE_RE.fullmatch(value):
+        try:
+            date.fromisoformat(value)
+        except ValueError as exc:
+            raise LabctlError(f"无效日期：{value}", code="bad_request") from exc
+        return f"{value}T{'23:59:59' if end else '00:00:00'}+08:00"
+    if not _RFC3339_RE.fullmatch(value):
+        raise LabctlError(f"无效时间：{value}（须为 YYYY-MM-DD 或 RFC3339）", code="bad_request")
+    try:
+        datetime.fromisoformat(value.replace("Z", "+00:00"))
+    except ValueError as exc:
+        raise LabctlError(f"无效时间：{value}", code="bad_request") from exc
+    return value
+
+
+def _resolve_project(api, value):
+    try:
+        uuid.UUID(value)
+        return value
+    except ValueError:
+        pass
+    projects = run_projects_list(api)
+    exact = [p for p in projects if str(p.get("code", "")).casefold() == value.casefold()]
+    matches = exact or [p for p in projects if value.casefold() in
+                        f"{p.get('name', '')} {p.get('short_name', '')}".casefold()]
+    if len(matches) == 1:
+        return matches[0]["id"]
+    candidates = ", ".join(f"{p.get('code')} ({p.get('name')})" for p in matches)
+    if candidates:
+        raise LabctlError(f"项目定位不唯一：{value}；候选：{candidates}", code="bad_request")
+    raise LabctlError(f"未找到项目：{value}", code="bad_request")
+
+
 def run_logs_list(api, project_id, category=None, date_from=None, date_to=None, status=None,
-                  page=1, per_page=20):
+                  page=1, per_page=20, date_value=None, all_pages=False,
+                  resolve_project=False):
     _require(project_id, "project_id")
+    if page < 1 or not 1 <= per_page <= 100:
+        raise LabctlError("page 须 >= 1，per_page 须为 1-100", code="bad_request")
     if status and status not in LOG_STATUSES:
         raise LabctlError(
             f"无效的状态 {status}（可选：{'/'.join(LOG_STATUSES)}）", code="bad_request")
-    return api.request("GET", f"/api/v1/projects/{project_id}/logs",
-                       params=_clean({"category": category, "date_from": date_from,
-                                      "date_to": date_to, "status": status,
-                                      "page": page, "per_page": per_page}))
+    if date_value and (date_from or date_to):
+        raise LabctlError("--date 不能与 --date-from/--date-to 同用", code="bad_request")
+    if date_value:
+        date_from = _log_time(date_value)
+        try:
+            date_to = f"{date.fromisoformat(date_value) + timedelta(days=1)}T00:00:00+08:00"
+        except ValueError as exc:
+            raise LabctlError(f"无效日期：{date_value}", code="bad_request") from exc
+    else:
+        date_from, date_to = _log_time(date_from), _log_time(date_to, end=True)
+    if resolve_project:
+        project_id = _resolve_project(api, project_id)
+
+    def fetch(current_page):
+        return api.request("GET", f"/api/v1/projects/{project_id}/logs",
+                           params=_clean({"category": category, "date_from": date_from,
+                                          "date_to": date_to, "status": status,
+                                          "page": current_page, "per_page": per_page}))
+
+    if not all_pages:
+        return fetch(page)
+    items = []
+    current_page = 1
+    while True:
+        result = fetch(current_page)
+        total = result.get("total", 0)
+        if total > MAX_LOGS_ALL or len(items) + len(result.get("items", [])) > MAX_LOGS_ALL:
+            raise LabctlError(f"匹配日志超过 {MAX_LOGS_ALL} 条，请增加筛选条件", code="bad_request")
+        items.extend(result.get("items", []))
+        if current_page * per_page >= total:
+            return {"items": items, "total": total}
+        current_page += 1
 
 
 def run_logs_get(api, log_id):
