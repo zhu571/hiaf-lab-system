@@ -239,5 +239,151 @@ class TestErrors(unittest.TestCase):
             api.request("GET", "/api/v1/alerts")
 
 
+class TestMultipartAndTimeout(unittest.TestCase):
+    def test_request_passes_data_files_and_timeout(self):
+        captured = {}
+
+        def handler(request):
+            captured.update(
+                method=request.method,
+                path=request.url.path,
+                content_type=request.headers.get("content-type", ""),
+                timeout=request.extensions.get("timeout") if hasattr(request, "extensions") else None,
+            )
+            captured["body"] = request.read()
+            return ok({"id": "att_1"})
+
+        api = make_api(handler, access_token="at_1", csrf_token="csrf_1")
+        api.request("POST", "/api/v1/attachments",
+                    data={"entity_type": "log", "entity_id": "log_1"},
+                    files={"file": ("a.png", b"\x89PNG", "image/png")},
+                    timeout=300)
+        self.assertEqual(captured["method"], "POST")
+        self.assertEqual(captured["path"], "/api/v1/attachments")
+        self.assertIn("multipart/form-data", captured["content_type"])
+        self.assertIn("boundary=", captured["content_type"])
+        self.assertIn(b'name="entity_type"', captured["body"])
+        self.assertIn(b"log_1", captured["body"])
+        self.assertIn(b'filename="a.png"', captured["body"])
+        self.assertIn(b"\x89PNG", captured["body"])
+
+    def test_request_json_with_files_rejected(self):
+        api = make_api(lambda request: ok({}), access_token="at_1")
+        with self.assertRaises(LabctlError) as cm:
+            api.request("POST", "/api/v1/attachments", json={"a": 1},
+                        files={"file": ("a", b"x")})
+        self.assertEqual(cm.exception.code, "bad_request")
+
+    def test_multipart_write_headers_kept(self):
+        captured = {}
+
+        def handler(request):
+            captured["headers"] = request.headers
+            request.read()
+            return ok({"id": "att_1"})
+
+        api = make_api(handler, access_token="at_1", refresh_token="rt_1", csrf_token="csrf_1")
+        api.request("POST", "/api/v1/attachments", files={"file": ("a.txt", b"hi")})
+        self.assertIn("Idempotency-Key", captured["headers"])  # POST 自动幂等键
+        self.assertEqual(captured["headers"]["X-CSRF-Token"], "csrf_1")
+
+    def test_multipart_retry_replays_body(self):
+        bodies = []
+
+        def handler(request):
+            bodies.append(request.read())
+            if len(bodies) == 1:
+                return httpx.Response(500, json={"error": {"code": "internal"}})
+            return ok({"id": "att_1"})
+
+        api = make_api(handler, access_token="at_1")
+        api.request("POST", "/api/v1/attachments", files={"file": ("a.txt", b"payload")})
+        self.assertEqual(len(bodies), 2)
+        # 内存 bytes 重放：boundary 每次随机，但两次请求体都完整携带文件内容
+        # （若传文件句柄，第二次读为空、请求体不再含 payload）
+        for body in bodies:
+            self.assertIn(b"payload", body)
+            self.assertIn(b'filename="a.txt"', body)
+
+
+class TestDownload(unittest.TestCase):
+    def test_download_writes_file_with_sha256(self):
+        import hashlib
+        captured = {}
+        payload = b"binary-attachment-content"
+
+        def handler(request):
+            captured.update(method=request.method, path=request.url.path,
+                            idempotency=request.headers.get("Idempotency-Key", ""),
+                            auth=request.headers.get("Authorization", ""))
+            return httpx.Response(200, content=payload,
+                                  headers={"content-type": "application/octet-stream"})
+
+        import tempfile
+        with tempfile.NamedTemporaryFile(delete=False) as fh:
+            dest = fh.name
+        api = make_api(handler, access_token="at_1")
+        result = api.download("/api/v1/attachments/att_1/content", dest)
+        self.assertEqual(captured["method"], "GET")
+        self.assertEqual(captured["path"], "/api/v1/attachments/att_1/content")
+        self.assertTrue(captured["idempotency"])  # handler 级校验：GET 也须带幂等键
+        self.assertEqual(captured["auth"], "Bearer at_1")
+        self.assertEqual(result["path"], dest)
+        self.assertEqual(result["size"], len(payload))
+        self.assertEqual(result["sha256"], hashlib.sha256(payload).hexdigest())
+        with open(dest, "rb") as fh:
+            self.assertEqual(fh.read(), payload)
+
+    def test_download_error_envelope_passthrough(self):
+        def handler(request):
+            return err(404, "attachment_not_found", "附件不存在", "req_dl_404")
+
+        api = make_api(handler, access_token="at_1")
+        import tempfile
+        with tempfile.NamedTemporaryFile(delete=False) as fh:
+            dest = fh.name
+        with self.assertRaises(LabctlError) as cm:
+            api.download("/api/v1/attachments/nope/content", dest)
+        exc = cm.exception
+        self.assertEqual(exc.status, 404)
+        self.assertEqual(exc.code, "attachment_not_found")
+        self.assertEqual(exc.request_id, "req_dl_404")
+
+    def test_download_non_json_error(self):
+        api = make_api(lambda request: httpx.Response(502, content=b"bad gateway"),
+                       access_token="at_1")
+        import tempfile
+        with tempfile.NamedTemporaryFile(delete=False) as fh:
+            dest = fh.name
+        with self.assertRaises(LabctlError) as cm:
+            api.download("/api/v1/attachments/att_1/content", dest)
+        self.assertEqual(cm.exception.status, 502)
+
+    def test_download_requires_login(self):
+        api = make_api(lambda request: ok({}), access_token="")
+        with self.assertRaises(LabctlError) as cm:
+            api.download("/api/v1/attachments/att_1/content", "/tmp/x")
+        self.assertEqual(cm.exception.code, "not_logged_in")
+
+    def test_download_service_token_env(self):
+        import os
+        os.environ["LABCTL_SERVICE_TOKEN"] = "svc_jwt"
+        try:
+            captured = {}
+
+            def handler(request):
+                captured["auth"] = request.headers.get("Authorization")
+                return httpx.Response(200, content=b"x")
+
+            api = make_api(handler, access_token="")
+            import tempfile
+            with tempfile.NamedTemporaryFile(delete=False) as fh:
+                dest = fh.name
+            api.download("/api/v1/attachments/att_1/content", dest)
+            self.assertEqual(captured["auth"], "Bearer svc_jwt")
+        finally:
+            del os.environ["LABCTL_SERVICE_TOKEN"]
+
+
 if __name__ == "__main__":
     unittest.main()
