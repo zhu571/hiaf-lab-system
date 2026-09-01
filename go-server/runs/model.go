@@ -24,26 +24,33 @@ const (
 )
 
 type ExperimentRun struct {
-	ID           string     `json:"id"`
-	ProjectID    string     `json:"project_id"`
-	Name         string     `json:"name"`
-	Campaign     *string    `json:"campaign,omitempty"`
-	RunType      string     `json:"run_type"`
-	Status       string     `json:"status"`
-	GasType      string     `json:"gas_type"`
-	TargetTemp   *float64   `json:"target_temp,omitempty"`
-	MinTemp      *float64   `json:"min_temp,omitempty"`
-	PressureMin  *float64   `json:"pressure_min,omitempty"`
-	PressureMax  *float64   `json:"pressure_max,omitempty"`
-	PressureUnit string     `json:"pressure_unit"`
-	HasBeam      bool       `json:"has_beam"`
-	Devices      []string   `json:"devices"`
-	StartedAt    *time.Time `json:"started_at,omitempty"`
-	EndedAt      *time.Time `json:"ended_at,omitempty"`
-	Description  string     `json:"description,omitempty"`
-	CreatedAt    time.Time  `json:"created_at"`
-	UpdatedAt    time.Time  `json:"updated_at"`
-	CreatedBy    *string    `json:"created_by,omitempty"`
+	ID           string              `json:"id"`
+	ProjectID    string              `json:"project_id"`
+	Name         string              `json:"name"`
+	Campaign     *string             `json:"campaign,omitempty"`
+	RunType      string              `json:"run_type"`
+	Status       string              `json:"status"`
+	GasType      string              `json:"gas_type"`
+	TargetTemp   *float64            `json:"target_temp,omitempty"`
+	MinTemp      *float64            `json:"min_temp,omitempty"`
+	PressureMin  *float64            `json:"pressure_min,omitempty"`
+	PressureMax  *float64            `json:"pressure_max,omitempty"`
+	PressureUnit string              `json:"pressure_unit"`
+	HasBeam      bool                `json:"has_beam"`
+	Devices      []string            `json:"devices"`
+	StartedAt    *time.Time          `json:"started_at,omitempty"`
+	EndedAt      *time.Time          `json:"ended_at,omitempty"`
+	Description  string              `json:"description,omitempty"`
+	CreatedAt    time.Time           `json:"created_at"`
+	UpdatedAt    time.Time           `json:"updated_at"`
+	CreatedBy    *string             `json:"created_by,omitempty"`
+	DailyReports []LinkedDailyReport `json:"daily_reports,omitempty"`
+}
+
+type LinkedDailyReport struct {
+	ID         string `json:"id"`
+	ReportDate string `json:"report_date"`
+	Summary    string `json:"summary"`
 }
 
 type CreateRunRequest struct {

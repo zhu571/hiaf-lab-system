@@ -132,11 +132,12 @@ class TestCliSubcommands(BaseCliTest):
 
     def test_daily_report_history_human(self):
         api = self._api(lambda request: ok({
-            "items": [{"id": "rep_1", "status": "submitted", "date": "2026-08-11"}],
+            "items": [{"id": "rep_1", "content_status": "submitted",
+                       "report_date": "2026-08-11", "summary": "完成低温测试"}],
             "total": 1, "page": 1}))
         result = self.invoke(["--human", "daily-report", "history"], api=api)
         self.assertEqual(result.exit_code, 0, result.output)
-        self.assertIn("共 1 条", result.output)
+        self.assertIn("2026-08-11 | submitted | 完成低温测试", result.output)
 
     def test_projects_list(self):
         api = self._api(lambda request: ok([{"id": "prj_1", "code": "prj_a", "name": "项目A"}]))
@@ -310,6 +311,39 @@ class TestCliSubcommands(BaseCliTest):
         result = self.invoke(["logs", "list", "prj_1", "--status", "bogus"], api=api)
         self.assertEqual(result.exit_code, 2)  # click 参数校验失败
         self.assertIn("bogus", result.output)
+
+    def test_logs_list_human_and_project_name(self):
+        paths = []
+
+        def handler(request):
+            paths.append(request.url.path)
+            if request.url.path == "/api/v1/projects":
+                return ok([{"id": "00000000-0000-0000-0000-000000000001",
+                            "code": "HIAF", "name": "低温气体靶"}])
+            return ok({"items": [{"id": "12345678-aaaa", "occurred_at":
+                                   "2026-08-30T10:20:30+08:00", "category": "cryo",
+                                   "content_status": "confirmed", "content": "第一行\n第二行"}],
+                       "total": 1, "page": 1})
+
+        result = self.invoke(["--human", "logs", "list", "低温"], api=self._api(handler))
+        self.assertEqual(result.exit_code, 0, result.output)
+        self.assertIn("第 1 页 / 共 1 条", result.output)
+        self.assertIn("12345678 |", result.output)
+        self.assertIn("cryo | confirmed | 第一行 第二行", result.output)
+        self.assertEqual(paths[-1],
+                         "/api/v1/projects/00000000-0000-0000-0000-000000000001/logs")
+
+    def test_logs_get_human_sections(self):
+        api = self._api(lambda request: ok({
+            "id": "log_1", "project_id": "prj_1", "author_id": "usr_1",
+            "occurred_at": "2026-08-30T10:20:30+08:00", "category": "rf",
+            "content_status": "draft", "source": "manual", "content": "完整正文",
+            "raw_snippet": "原文一\n原文二"}))
+        result = self.invoke(["--human", "logs", "get", "log_1"], api=api)
+        self.assertEqual(result.exit_code, 0, result.output)
+        self.assertIn("元信息", result.output)
+        self.assertIn("正文\n完整正文", result.output)
+        self.assertIn("原文引用\n> 原文一\n> 原文二", result.output)
 
 
 def _update_stream_response(lines):

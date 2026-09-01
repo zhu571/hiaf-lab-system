@@ -14,6 +14,7 @@
 import json
 import os
 import sys
+from datetime import datetime
 
 if __package__ in (None, ""):
     sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -89,10 +90,23 @@ def render_human(result):
         return str(result)
     items = result.get("items")
     if isinstance(items, list):
+        if items and all(isinstance(item, dict) and "occurred_at" in item
+                         and "content" in item for item in items):
+            heading = (f"第 {result['page']} 页 / 共 {result.get('total', len(items))} 条"
+                       if "page" in result else f"共 {result.get('total', len(items))} 条")
+            return "\n".join([heading] + [_render_log_line(item) for item in items])
+        if items and all(isinstance(item, dict) and "summary" in item
+                         and ("report_date" in item or "date" in item) for item in items):
+            return "\n".join(
+                [f"{item.get('report_date', item.get('date', ''))} | "
+                 f"{item.get('content_status', item.get('status', '-'))} | "
+                 f"{_preview(item.get('summary', ''))}" for item in items])
         lines.append(f"共 {result.get('total', len(items))} 条")
         for item in items:
             lines.append("  " + _brief(item))
         return "\n".join(lines) if lines else "(空)"
+    if "occurred_at" in result and "content" in result:
+        return _render_log_detail(result)
     for key in ("id", "code", "name", "title", "status", "date", "category", "level",
                 "source", "username", "message", "success", "total"):
         if key in result:
@@ -113,6 +127,42 @@ def _brief(item):
                "measurement", "level", "source", "severity", "run_type")
               if item.get(k) is not None]
     return ", ".join(f"{k}={v}" for k, v in fields)
+
+
+def _preview(value, limit=60):
+    text = " ".join(str(value or "").split())
+    return text if len(text) <= limit else text[:limit] + "…"
+
+
+def _local_time(value):
+    try:
+        return datetime.fromisoformat(value.replace("Z", "+00:00")).astimezone().strftime(
+            "%Y-%m-%d %H:%M:%S %z")
+    except (AttributeError, ValueError):
+        return str(value or "-")
+
+
+def _render_log_line(item):
+    return (f"{str(item.get('id', '-'))[:8]} | {_local_time(item.get('occurred_at'))} | "
+            f"{item.get('category', '-')} | {item.get('content_status', item.get('status', '-'))} | "
+            f"{_preview(item.get('content', ''))}")
+
+
+def _render_log_detail(item):
+    metadata = (
+        ("id", item.get("id")), ("project", item.get("project_id")),
+        ("category", item.get("category")),
+        ("status", item.get("content_status", item.get("status"))),
+        ("occurred_at", _local_time(item.get("occurred_at"))),
+        ("source", item.get("source")),
+        ("author", item.get("author_name", item.get("author_id"))),
+    )
+    lines = ["元信息", *[f"{key}: {value or '-'}" for key, value in metadata], "", "正文",
+             str(item.get("content") or "")]
+    if item.get("raw_snippet"):
+        lines.extend(("", "原文引用", *[f"> {line}" for line in
+                                         str(item["raw_snippet"]).splitlines()]))
+    return "\n".join(lines)
 
 
 class LoginGroup(click.Group):
@@ -765,17 +815,22 @@ def logs():
 @click.option("--category",
               type=click.Choice(["general", "assembly", "test", "cryo", "rf", "vacuum",
                                  "beam", "data_analysis"]))
-@click.option("--date-from")
-@click.option("--date-to")
+@click.option("--date", "date_value", help="自然日 YYYY-MM-DD（按 +08:00 展开）")
+@click.option("--date-from", help="YYYY-MM-DD 或 RFC3339")
+@click.option("--date-to", help="YYYY-MM-DD 或 RFC3339")
 @click.option("--status", type=click.Choice(list(commands.LOG_STATUSES)),
               help="内容状态过滤：draft/confirmed/locked/voided（默认不传，服务端默认只返回 confirmed）")
 @click.option("--page", type=int, default=1, show_default=True)
 @click.option("--per-page", type=int, default=20, show_default=True)
+@click.option("--all", "all_pages", is_flag=True, help="拉取全部匹配日志（最多 1000 条）")
 @click.pass_context
-def logs_list(ctx, project_id, category, date_from, date_to, status, page, per_page):
+def logs_list(ctx, project_id, category, date_value, date_from, date_to, status, page, per_page,
+              all_pages):
     """项目日志列表"""
     run_command(ctx, commands.run_logs_list, project_id=project_id, category=category,
-                date_from=date_from, date_to=date_to, status=status, page=page, per_page=per_page)
+                date_value=date_value, date_from=date_from, date_to=date_to, status=status,
+                page=page, per_page=per_page, all_pages=all_pages,
+                resolve_project=ctx.obj["human"])
 
 
 @logs.command("get")

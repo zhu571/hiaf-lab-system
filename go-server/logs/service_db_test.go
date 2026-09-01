@@ -590,12 +590,19 @@ func TestDBListReports(t *testing.T) {
 	if err != nil || total != 1 {
 		t.Fatalf("keyword filter: total=%d err=%v", total, err)
 	}
+	_, total, err = svc.ListReports(ReportListParams{AuthorID: logsDBUserA, DateFrom: "2099-05-01", DateTo: "2099-05-01"})
+	if err != nil || total != 1 {
+		t.Fatalf("date range filter: total=%d err=%v", total, err)
+	}
 	// 非法参数
 	if _, _, err := svc.ListReports(ReportListParams{AuthorID: logsDBUserA, Status: "bogus"}); !errors.Is(err, ErrInvalidInput) {
 		t.Fatalf("bad status: got %v", err)
 	}
 	if _, _, err := svc.ListReports(ReportListParams{AuthorID: logsDBUserA, Date: "bogus"}); !errors.Is(err, ErrInvalidInput) {
 		t.Fatalf("bad date: got %v", err)
+	}
+	if _, _, err := svc.ListReports(ReportListParams{AuthorID: logsDBUserA, DateFrom: "2099-05-02", DateTo: "2099-05-01"}); !errors.Is(err, ErrInvalidInput) {
+		t.Fatalf("inverted date range: got %v", err)
 	}
 }
 
@@ -647,6 +654,10 @@ func TestDBListLogsAndGetLog(t *testing.T) {
 	}
 	if rfResult.Total < 1 {
 		t.Fatalf("assembly filter: %+v", rfResult)
+	}
+	keywordResult, err := svc.ListLogs(logsDBProject, logsDBUserA, "member", LogListParams{Keyword: "工作记录"})
+	if err != nil || keywordResult.Total != 1 || keywordResult.Items[0].ID != logsDBLogB {
+		t.Fatalf("keyword filter: %+v err=%v", keywordResult, err)
 	}
 
 	// GetLog：404 / 无权限 / 命中

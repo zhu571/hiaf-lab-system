@@ -323,16 +323,23 @@ func (s *Service) ListReports(params ReportListParams) ([]DailyReport, int, erro
 	params.Status = strings.TrimSpace(params.Status)
 	params.Keyword = strings.TrimSpace(params.Keyword)
 	params.Date = strings.TrimSpace(params.Date)
+	params.DateFrom = strings.TrimSpace(params.DateFrom)
+	params.DateTo = strings.TrimSpace(params.DateTo)
 	if params.PerPage > 100 {
 		params.PerPage = 100
 	}
 	if !validOptionalReportStatus(params.Status) {
 		return nil, 0, ErrInvalidInput
 	}
-	if params.Date != "" {
-		if _, err := time.Parse(time.DateOnly, params.Date); err != nil {
-			return nil, 0, ErrInvalidInput
+	for _, date := range []string{params.Date, params.DateFrom, params.DateTo} {
+		if date != "" {
+			if _, err := time.Parse(time.DateOnly, date); err != nil {
+				return nil, 0, ErrInvalidInput
+			}
 		}
+	}
+	if params.DateFrom != "" && params.DateTo != "" && params.DateFrom > params.DateTo {
+		return nil, 0, ErrInvalidInput
 	}
 	items, total, err := s.repo.ListReports(params)
 	if err != nil || s.translation == nil {
@@ -486,6 +493,7 @@ func (s *Service) SubmitReport(id, userID, userRole string, force bool) (*Submit
 }
 
 func (s *Service) ListLogs(projectID, userID, userRole string, params LogListParams) (*LogListResult, error) {
+	params.Keyword = strings.TrimSpace(params.Keyword)
 	if params.PerPage > 100 {
 		params.PerPage = 100
 	}

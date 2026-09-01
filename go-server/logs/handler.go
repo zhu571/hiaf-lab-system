@@ -156,6 +156,8 @@ func (h *Handler) ListReports(w http.ResponseWriter, r *http.Request) {
 		Status:   r.URL.Query().Get("status"),
 		Keyword:  r.URL.Query().Get("keyword"),
 		Date:     r.URL.Query().Get("date"),
+		DateFrom: r.URL.Query().Get("date_from"),
+		DateTo:   r.URL.Query().Get("date_to"),
 		Page:     queryInt(r, "page", 1),
 		PerPage:  queryInt(r, "per_page", 20),
 	}
@@ -253,6 +255,7 @@ func (h *Handler) ListLogs(w http.ResponseWriter, r *http.Request) {
 		Page:     queryInt(r, "page", 1),
 		PerPage:  queryInt(r, "per_page", 20),
 		Category: r.URL.Query().Get("category"),
+		Keyword:  r.URL.Query().Get("keyword"),
 		DateFrom: r.URL.Query().Get("date_from"),
 		DateTo:   r.URL.Query().Get("date_to"),
 		Status:   r.URL.Query().Get("status"),

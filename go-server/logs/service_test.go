@@ -86,6 +86,14 @@ func TestGetReportByIDUsesOwnerBoundary(t *testing.T) {
 	}
 }
 
+func TestListReportsRejectsInvertedDateRange(t *testing.T) {
+	svc := testService(testReport("usr_1", ReportStatusDraft, "worked"), nil, true)
+	_, _, err := svc.ListReports(ReportListParams{AuthorID: "usr_1", DateFrom: "2026-08-02", DateTo: "2026-08-01"})
+	if !errors.Is(err, ErrInvalidInput) {
+		t.Fatalf("ListReports error = %v, want %v", err, ErrInvalidInput)
+	}
+}
+
 func TestSubmitReportWarningsBlockWithoutForce(t *testing.T) {
 	report := testReport("usr_1", ReportStatusDraft, "raw text has no log content")
 	item := testLog("log_1", "prj_1", LogStatusDraft, "actual log content", "2026-07-13T10:00:00+08:00")
@@ -299,6 +307,12 @@ func (f *fakeRepo) ListReports(params ReportListParams) ([]DailyReport, int, err
 		if params.Date != "" && report.ReportDate != params.Date {
 			continue
 		}
+		if params.DateFrom != "" && report.ReportDate < params.DateFrom {
+			continue
+		}
+		if params.DateTo != "" && report.ReportDate > params.DateTo {
+			continue
+		}
 		out = append(out, *cloneReport(*report))
 	}
 	return out, len(out), nil
@@ -354,7 +368,7 @@ func (f *fakeRepo) GetByID(id string) (*Log, error) {
 func (f *fakeRepo) List(projectID string, params LogListParams) ([]Log, int, error) {
 	var out []Log
 	for _, item := range f.logs {
-		if item.ProjectID == projectID {
+		if item.ProjectID == projectID && (params.Keyword == "" || strings.Contains(item.Content, params.Keyword)) {
 			out = append(out, *cloneLog(*item))
 		}
 	}
