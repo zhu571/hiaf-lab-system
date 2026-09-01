@@ -88,7 +88,8 @@ export default {
     title: {
       runDetail: 'Run Detail',
       dailyReportDetail: 'Daily Report Detail',
-      stepTemplates: 'Step Templates'
+      stepTemplates: 'Step Templates',
+      logDetail: 'Log Detail'
     }
   },
   // Command palette (R2 structural restructure, CommandPalette). The placeholder
@@ -280,6 +281,7 @@ export default {
     fallbackNoProjects: 'No projects yet. Create or select a project first.',
     tabs: {
       overview: 'Overview',
+      logs: 'Logs',
       issues: 'Issues',
       runs: 'Runs',
       testData: 'Test Data',
@@ -1075,6 +1077,7 @@ export default {
     noMembers: 'No members',
     recentLogs: 'Recent Logs',
     newLog: 'New Log',
+    viewAllLogs: 'View All',
     noLogs: 'No logs',
     recentIssues: 'Recent Issues',
     newIssue: 'New Issue',
@@ -1294,7 +1297,7 @@ export default {
     aiRateLimited: 'Too many requests. Please try again later',
     aiDuplicate: 'Duplicate submission. Please click again',
     aiConfirmFailed: 'Failed to confirm log',
-    loadFailed: 'Failed to load audit records'
+    loadFailed: 'Failed to load daily report'
   },
   dailyReportDetail: {
     title: 'Daily Report Detail',
@@ -1302,15 +1305,79 @@ export default {
     date: 'Date',
     author: 'Author',
     status: 'Status',
+    qualityStatus: 'Quality',
     summary: 'Summary',
     rawText: 'Raw Text',
     projectLogs: 'Project Logs',
     category: 'Category',
     content: 'Content',
+    occurredAt: 'Occurred At',
+    project: 'Project',
+    actions: 'Actions',
+    detail: 'Detail',
+    attachments: 'Attachments',
     noLogs: 'No logs',
     notFound: 'Report not found or no permission to view',
     none: '(None)',
     loadFailed: 'Failed to load daily report'
+  },
+  // Log viewing optimization batch (log-view-optimization): project log list / log detail / attachment display
+  logList: {
+    title: 'Project Logs',
+    categoryAll: 'All Categories',
+    dateStart: 'Start date',
+    dateEnd: 'End date',
+    time: 'Time',
+    category: 'Category',
+    content: 'Content',
+    source: 'Source',
+    status: 'Status',
+    empty: 'No logs',
+    loadFailed: 'Failed to load logs'
+  },
+  logDetail: {
+    title: 'Log Detail',
+    back: 'Back',
+    project: 'Project',
+    occurredAt: 'Occurred At',
+    category: 'Category',
+    author: 'Author',
+    source: 'Source',
+    status: 'Status',
+    content: 'Content',
+    rawSnippet: 'AI Source Snippet',
+    translationStatus: 'Translation Status',
+    attachments: 'Attachments',
+    createdAt: 'Created At',
+    notFound: 'Log not found or no permission to view',
+    loadFailed: 'Failed to load log'
+  },
+  logCategory: {
+    general: 'General',
+    assembly: 'Assembly',
+    test: 'Test',
+    cryo: 'Cryo',
+    rf: 'RF',
+    vacuum: 'Vacuum',
+    beam: 'Beam',
+    data_analysis: 'Data Analysis'
+  },
+  logSource: {
+    manual: 'Manual',
+    agent: 'AI',
+    import: 'Import',
+    wechat: 'WeChat'
+  },
+  logStatus: {
+    draft: 'Draft',
+    confirmed: 'Confirmed',
+    locked: 'Locked',
+    voided: 'Voided'
+  },
+  reportQuality: {
+    unchecked: 'Unchecked',
+    passed: 'Passed',
+    warnings: 'Warnings'
   },
   issuesFallback: {
     selectProject: 'Please select a project on the project page first',

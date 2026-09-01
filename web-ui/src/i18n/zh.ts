@@ -78,7 +78,8 @@ export default {
     title: {
       runDetail: '运行详情',
       dailyReportDetail: '日报详情',
-      stepTemplates: '步骤模板'
+      stepTemplates: '步骤模板',
+      logDetail: '日志详情'
     }
   },
   // 命令面板（结构改版 R2，CommandPalette）：placeholder 明示范围为页面/项目/动作，不制造全文搜索预期
@@ -264,6 +265,7 @@ export default {
     fallbackNoProjects: '暂无项目，请先创建或选择一个项目',
     tabs: {
       overview: '概览',
+      logs: '日志',
       issues: '问题',
       runs: '批次',
       testData: '数据',
@@ -1033,6 +1035,7 @@ export default {
     noMembers: '暂无成员',
     recentLogs: '最近日志',
     newLog: '新建日志',
+    viewAllLogs: '查看全部',
     noLogs: '暂无日志',
     recentIssues: '最近问题',
     newIssue: '新建问题',
@@ -1246,7 +1249,7 @@ export default {
     aiRateLimited: '操作过于频繁，请稍后再试',
     aiDuplicate: '请勿重复提交，请重新点击生成',
     aiConfirmFailed: '确认日志失败',
-    loadFailed: '审计记录加载失败'
+    loadFailed: '日报加载失败'
   },
   dailyReportDetail: {
     title: '日报详情',
@@ -1254,15 +1257,79 @@ export default {
     date: '日期',
     author: '作者',
     status: '状态',
+    qualityStatus: '质量状态',
     summary: '摘要',
     rawText: '原文',
     projectLogs: '项目化日志',
     category: '分类',
     content: '内容',
+    occurredAt: '发生时间',
+    project: '项目',
+    actions: '操作',
+    detail: '详情',
+    attachments: '附件',
     noLogs: '暂无日志',
     notFound: '日报不存在或无权查看',
     none: '（无）',
     loadFailed: '日报加载失败'
+  },
+  // 日志查看优化批（log-view-optimization）：项目日志列表页 / 日志详情页 / 附件展示
+  logList: {
+    title: '项目日志',
+    categoryAll: '全部分类',
+    dateStart: '开始日期',
+    dateEnd: '结束日期',
+    time: '时间',
+    category: '分类',
+    content: '内容',
+    source: '来源',
+    status: '状态',
+    empty: '暂无日志',
+    loadFailed: '日志加载失败'
+  },
+  logDetail: {
+    title: '日志详情',
+    back: '返回',
+    project: '项目',
+    occurredAt: '发生时间',
+    category: '分类',
+    author: '作者',
+    source: '来源',
+    status: '状态',
+    content: '正文',
+    rawSnippet: 'AI 原文证据',
+    translationStatus: '翻译状态',
+    attachments: '附件',
+    createdAt: '记录时间',
+    notFound: '日志不存在或无权查看',
+    loadFailed: '日志加载失败'
+  },
+  logCategory: {
+    general: '综合',
+    assembly: '装配',
+    test: '测试',
+    cryo: '低温',
+    rf: '射频',
+    vacuum: '真空',
+    beam: '束流',
+    data_analysis: '数据分析'
+  },
+  logSource: {
+    manual: '手动',
+    agent: 'AI',
+    import: '导入',
+    wechat: '微信'
+  },
+  logStatus: {
+    draft: '草稿',
+    confirmed: '已确认',
+    locked: '已锁定',
+    voided: '已作废'
+  },
+  reportQuality: {
+    unchecked: '未检查',
+    passed: '通过',
+    warnings: '有警告'
   },
   runDetail: {
     retry: '重试',
