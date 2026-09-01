@@ -80,12 +80,15 @@
         <section class="overview-card timeline-card">
           <div class="toolbar overview-head">
             <h3>{{ t('projectDashboard.recentLogs') }}</h3>
-            <el-button link type="primary" @click="go('/daily-report')">{{ t('projectDashboard.newLog') }}</el-button>
+            <div class="overview-head-actions">
+              <el-button link type="primary" @click="go('/projects/' + store.current.id + '/logs')">{{ t('projectDashboard.viewAllLogs') }}</el-button>
+              <el-button link type="primary" @click="go('/daily-report')">{{ t('projectDashboard.newLog') }}</el-button>
+            </div>
           </div>
           <div v-if="logs.length" class="timeline-list">
             <article v-for="log in logs" :key="log.id" class="timeline-item">
               <div class="timeline-meta">
-                <el-tag size="small" effect="plain">{{ log.category }}</el-tag>
+                <el-tag size="small" effect="plain">{{ categoryLabel(log.category) }}</el-tag>
                 <time>{{ formatDateTime(log.occurred_at) }}</time>
               </div>
               <p>{{ localized(log).text }}</p>
@@ -156,6 +159,7 @@ import FormDialog from '@/components/base/FormDialog.vue'
 import { listProjectLogs, type LogItem } from '@/api/logs'
 import { listProjectIssues, type Issue } from '@/api/issues'
 import { resolveLocalizedText } from '@/utils/contentLanguage'
+import { logCategoryKey } from '@/utils/logMeta'
 
 const router = useRouter()
 const route = useRoute()
@@ -166,6 +170,8 @@ const { t, locale } = useI18n()
 const members = ref<ProjectMember[]>([])
 const logs = ref<LogItem[]>([])
 function localized(log: LogItem) { return resolveLocalizedText(log.content, log.translations?.content, locale.value) }
+// 日志分类走 logMeta 显式 i18n key 映射，未登记值回退原文（log-view-optimization 批：不再显示原始英文枚举）
+function categoryLabel(c: string) { const key = logCategoryKey(c); return key ? t(key) : c }
 const issues = ref<Issue[]>([])
 const issueTotal = ref(0)
 const loading = ref(false)
@@ -613,6 +619,12 @@ const go = (path: string) => router.push(path)
 
 .overview-head h3 {
   font-size: 15px;
+}
+
+.overview-head-actions {
+  align-items: center;
+  display: flex;
+  gap: 4px;
 }
 
 .member-list,

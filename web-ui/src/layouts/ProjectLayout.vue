@@ -47,6 +47,7 @@ const ready = ref(false)
 
 const tabs = computed(() => [
   { label: t('project.tabs.overview'), name: 'overview', path: '' },
+  { label: t('project.tabs.logs'), name: 'logs', path: 'logs' },
   { label: t('project.tabs.issues'), name: 'issues', path: 'issues' },
   { label: t('project.tabs.runs'), name: 'experiment-runs', path: 'experiment-runs' },
   { label: t('project.tabs.testData'), name: 'test-data', path: 'test-data' },

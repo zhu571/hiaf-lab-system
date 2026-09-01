@@ -27,6 +27,9 @@
 //   experienceStatus     go-server/experiences/model.go:6-8  candidate/published/archived
 //   reportStatus         go-server/logs/model.go:6-9         draft/submitted/confirmed/locked
 //   agentCandidateStatus go-server/agent/model.go:15-19      pending_review/approved/rejected/executed/execution_failed
+// 日志查看优化批补登（log-view-optimization，2026-09-01）：
+//   logStatus            go-server/logs/model.go:16-19       draft/confirmed/locked/voided
+//   reportQuality        go-server/logs/model.go:12-14       unchecked/passed/warnings
 // 美术 S4 补登（前端派生态，非后端枚举——DashboardView isOnline/gasOnline 由设备 state/snapshot 计算）：
 //   onlineStatus         web-ui/src/views/DashboardView.vue  online/offline
 //
@@ -60,6 +63,8 @@ export type StatusDomain =
   | 'onlineStatus'
   | 'invitationCode'
   | 'translation'
+  | 'logStatus'
+  | 'reportQuality'
 
 const FAMILY: Record<StatusTone, { graphic: string; text: string; soft: string }> = {
   success: { graphic: '--ok', text: '--ok-text', soft: '--ok-soft' },
@@ -160,7 +165,20 @@ export const STATUS_META: Record<StatusDomain, Record<string, StatusMeta>> = {
     offline: meta('info', 'common.offline')
   },
   invitationCode: { active: meta('success', 'adminUsers.invitationCodes.statusActive'), used: meta('info', 'adminUsers.invitationCodes.statusUsed'), expired: meta('warning', 'adminUsers.invitationCodes.statusExpired'), revoked: meta('danger', 'adminUsers.invitationCodes.statusRevoked') }
-  ,translation: { pending: meta('warning', 'translation.pending'), failed: meta('danger', 'translation.failed'), stale: meta('warning', 'translation.stale'), missing: meta('info', 'translation.missing'), ready: meta('success', 'translation.original') }
+  ,translation: { pending: meta('warning', 'translation.pending'), failed: meta('danger', 'translation.failed'), stale: meta('warning', 'translation.stale'), missing: meta('info', 'translation.missing'), ready: meta('success', 'translation.original') },
+  // 日志查看优化批补登（log-view-optimization）：logStatus/reportQuality 追加在末尾，
+  // 保持 findStatusMeta 跨域扫描对 draft/confirmed/locked 等共享值的既有命中顺序不变
+  logStatus: {
+    draft: meta('warning', 'logStatus.draft'),
+    confirmed: meta('success', 'logStatus.confirmed'),
+    locked: meta('info', 'logStatus.locked'),
+    voided: meta('danger', 'logStatus.voided')
+  },
+  reportQuality: {
+    unchecked: meta('info', 'reportQuality.unchecked'),
+    passed: meta('success', 'reportQuality.passed'),
+    warnings: meta('warning', 'reportQuality.warnings')
+  }
 }
 
 /** 按 domain 查注册表；未命中返回 undefined（调用方走未命中降级） */

@@ -101,3 +101,7 @@ export function updateLog(id: string, data: { category?: string; content?: strin
 export function listProjectLogs(projectId: string, params: Record<string, string | number> = {}) {
   return request<{ items: LogItem[]; total: number; page: number }>({ url: `/projects/${projectId}/logs`, params })
 }
+
+export function getLog(id: string) {
+  return request<LogItem>({ url: `/logs/${id}` })
+}

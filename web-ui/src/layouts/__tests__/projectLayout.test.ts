@@ -19,7 +19,7 @@ vi.mock('vue-router', () => ({
 }))
 
 describe('ProjectLayout 挂载冒烟', () => {
-  it('项目工作区渲染：标题/阶段标签 + 6 个页签 + RouterView', async () => {
+  it('项目工作区渲染：标题/阶段标签 + 7 个页签 + RouterView', async () => {
     const pinia = createPinia()
     setActivePinia(pinia)
     const wrapper = mount(ProjectLayout, {
@@ -36,7 +36,7 @@ describe('ProjectLayout 挂载冒烟', () => {
     expect(wrapper.find('.back-btn').exists()).toBe(true)
     expect(wrapper.find('.back-btn').attributes('aria-label')).toBe('项目列表')
     const tabs = wrapper.findAll('.el-tabs__item').map((t) => t.text().trim())
-    expect(tabs).toEqual(['概览', '问题', '批次', '数据', 'RF匹配', '装配'])
+    expect(tabs).toEqual(['概览', '日志', '问题', '批次', '数据', 'RF匹配', '装配'])
     expect(useProjectStore().currentId).toBe('proj_01')
   })
 })

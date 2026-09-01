@@ -31,7 +31,7 @@ import {
 // 约束说明：
 // 1. 前端角色过滤只是 UX，不替代后端鉴权——路由 meta（admin/reviewer）与后端接口强校验仍是安全边界。
 // 2. mobile: true = 出现在移动底栏；settings 为仅移动端项（group 'system' 但桌面系统组过滤时排除 mobile 项）。
-// 3. ProjectLayout tabs 数组顺序 = router children 顺序（/projects/:id 下 6 个子路由），新增 tab 需双改。
+// 3. ProjectLayout tabs 数组顺序 = router children 顺序（/projects/:id 下 7 个子路由），新增 tab 需双改。
 // 4. section（nav-menu-redesign 方案 §3.1）：仅 system 组项使用，桌面侧栏与移动抽屉按
 //    groupNavBySection 聚类出「设备监控 / 系统管理」小标题；main 组无标题不设 section。
 

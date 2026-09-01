@@ -4,6 +4,8 @@
       <h2>{{ t('dailyReport.title') }}</h2>
       <el-button v-if="canSubmit" type="primary" :disabled="!report" :loading="submitLoading" @click="submit(false)">{{ t('dailyReport.submit') }}</el-button>
     </div>
+    <!-- 页面级三态（log-view-optimization 批）：初始化失败不再留下半空页面，错误态可重试 -->
+    <StateBlock :loading="pageLoading" :error="pageError" :error-text="t('dailyReport.loadFailed')" @retry="init">
     <section class="panel editor-panel">
       <div class="toolbar">
         <h3>{{ t('dailyReport.todayRecord') }}</h3>
@@ -50,9 +52,9 @@
         <el-table-column :label="t('dailyReport.category')" width="150">
           <template #default="{ row }">
             <el-select v-if="row._draft" v-model="row.category" size="small">
-              <el-option v-for="c in categories" :key="c" :label="c" :value="c" />
+              <el-option v-for="c in LOG_CATEGORIES" :key="c" :label="categoryLabel(c)" :value="c" />
             </el-select>
-            <template v-else>{{ row.category }}</template>
+            <template v-else>{{ categoryLabel(row.category) }}</template>
           </template>
         </el-table-column>
         <el-table-column :label="t('dailyReport.project')" width="160">
@@ -66,7 +68,7 @@
         <el-table-column :label="t('dailyReport.occurredAt')" width="220">
           <template #default="{ row }">
             <el-date-picker v-if="row._draft" v-model="row.occurred_at" type="datetime" size="small" value-format="YYYY-MM-DDTHH:mm:ssZ" style="width: 200px" />
-            <template v-else>{{ row.occurred_at }}</template>
+            <template v-else>{{ formatDateTime(row.occurred_at) }}</template>
           </template>
         </el-table-column>
         <el-table-column :label="t('dailyReport.content')">
@@ -99,11 +101,11 @@
         <template #card="{ row }">
           <div class="log-card">
             <div class="log-card-head">
-              <span class="log-card-time">{{ row.occurred_at }}</span>
+              <span class="log-card-time">{{ formatDateTime(row.occurred_at) }}</span>
               <el-tag v-if="row._draft" size="small" type="warning">{{ t('dailyReport.aiTag') }}</el-tag>
               <StatusBadge v-else :value="row.content_status" />
             </div>
-            <div class="log-card-meta">{{ row.category }}<template v-if="row.project_id"> · {{ projectName(row.project_id) }}</template></div>
+            <div class="log-card-meta">{{ categoryLabel(row.category) }}<template v-if="row.project_id"> · {{ projectName(row.project_id) }}</template></div>
             <p class="log-card-content">{{ row.content }}</p>
             <div class="log-card-actions">
               <template v-if="row._draft">
@@ -119,21 +121,6 @@
         </template>
       </ResponsiveTable>
     </section>
-    <FormDialog v-model="logDialog" :title="editingLogId ? t('dailyReport.editLog') : t('dailyReport.addNewLog')" width="560" @submit="saveLog">
-      <el-form-item v-if="!editingLogId" :label="t('dailyReport.project')"><el-select v-model="logDraft.project_id"><el-option v-for="p in projects.projects" :key="p.id" :label="p.name" :value="p.id" /></el-select></el-form-item>
-      <el-form-item :label="t('dailyReport.category')"><el-input v-model="logDraft.category" /></el-form-item>
-      <el-form-item :label="t('dailyReport.content')"><el-input v-model="logDraft.content" type="textarea" /></el-form-item>
-    </FormDialog>
-    <el-dialog v-model="warningDialog" :title="t('dailyReport.confirmSubmit')" width="520">
-      <div class="warning-list">
-        <el-alert v-for="warning in warnings" :key="warning.code + warning.log_id" :title="warning.message" type="warning" show-icon :closable="false" />
-      </div>
-      <template #footer>
-        <el-button @click="warningDialog = false">{{ t('dailyReport.backToEdit') }}</el-button>
-        <el-button type="warning" :loading="submitLoading" @click="submit(true)">{{ t('dailyReport.ignoreSubmit') }}</el-button>
-      </template>
-    </el-dialog>
-
     <section v-if="pendingFiles.length" class="panel">
       <h3>{{ t('dailyReport.attachments', { n: pendingFiles.length }) }}</h3>
       <div class="file-list">
@@ -146,6 +133,21 @@
         </div>
       </div>
     </section>
+    </StateBlock>
+    <FormDialog v-model="logDialog" :title="editingLogId ? t('dailyReport.editLog') : t('dailyReport.addNewLog')" width="560" @submit="saveLog">
+      <el-form-item v-if="!editingLogId" :label="t('dailyReport.project')"><el-select v-model="logDraft.project_id"><el-option v-for="p in projects.projects" :key="p.id" :label="p.name" :value="p.id" /></el-select></el-form-item>
+      <el-form-item :label="t('dailyReport.category')"><el-select v-model="logDraft.category"><el-option v-for="c in LOG_CATEGORIES" :key="c" :label="categoryLabel(c)" :value="c" /></el-select></el-form-item>
+      <el-form-item :label="t('dailyReport.content')"><el-input v-model="logDraft.content" type="textarea" /></el-form-item>
+    </FormDialog>
+    <el-dialog v-model="warningDialog" :title="t('dailyReport.confirmSubmit')" width="520">
+      <div class="warning-list">
+        <el-alert v-for="warning in warnings" :key="warning.code + warning.log_id" :title="warning.message" type="warning" show-icon :closable="false" />
+      </div>
+      <template #footer>
+        <el-button @click="warningDialog = false">{{ t('dailyReport.backToEdit') }}</el-button>
+        <el-button type="warning" :loading="submitLoading" @click="submit(true)">{{ t('dailyReport.ignoreSubmit') }}</el-button>
+      </template>
+    </el-dialog>
   </div>
 </template>
 
@@ -157,8 +159,12 @@ import { showApiError } from '../composables/useNotify'
 import { Paperclip } from '@element-plus/icons-vue'
 import StatusBadge from '@/components/base/StatusBadge.vue'
 import ResponsiveTable from '@/components/base/ResponsiveTable.vue'
+import StateBlock from '@/components/base/StateBlock.vue'
 import FormDialog from '@/components/base/FormDialog.vue'
 import { aiParseReport, createLog, submitReport, todayReport, updateLog, updateReport, saveReportTranslation, requestReportTranslation, type DailyReport, type LogItem } from '../api/logs'
+import { ApiError, isApiError } from '@/api/client'
+import { formatDateTime } from '@/utils/datetime'
+import { LOG_CATEGORIES, logCategoryKey } from '@/utils/logMeta'
 import { useProjectStore } from '../stores/project'
 import { useAuthStore } from '../stores/auth'
 import { uploadAttachment } from '../api/attachments'
@@ -238,7 +244,6 @@ const aiDrafts = ref<AiDraftRow[]>([])
 const aiLoading = ref(false)
 const submitLoading = ref(false)
 let aiDraftSeq = 0
-const categories = ['general', 'assembly', 'test', 'cryo', 'rf', 'vacuum', 'beam', 'data_analysis']
 const tableRows = computed(() => [...(report.value?.logs || []), ...aiDrafts.value])
 const canAiOrganize = computed(
   () => !!report.value && report.value.content_status === 'draft' && rawText.value.trim() !== '' && !aiLoading.value
@@ -263,6 +268,12 @@ const { start: startTranslationPolling } = usePolling(async () => {
 
 function projectName(id: string) {
   return projects.projects.find((p) => p.id === id)?.name || id
+}
+
+// 分类枚举走 logMeta 显式 i18n key 映射（log-view-optimization 批），未登记值回退原文
+function categoryLabel(c: string) {
+  const key = logCategoryKey(c)
+  return key ? t(key) : c
 }
 
 async function organizeWithAI() {
@@ -353,16 +364,31 @@ function removeDraft(row: AiDraftRow) {
   aiDrafts.value = aiDrafts.value.filter((item) => item.key !== row.key)
 }
 
-onMounted(async () => {
-  await projects.load()
-  report.value = await todayReport()
-  syncTranslation()
-  rawText.value = report.value.raw_text
-  summaryText.value = report.value.summary || ''
-  logDraft.project_id = projects.current?.id || ''
-  await uploadAllPending()
-  startTranslationPolling()
-})
+// 页面级初始化三态（log-view-optimization 批）：projects.load/todayReport 失败不再静默留下
+// 半空页面，error 交 StateBlock 错误态 + 重试（操作级错误仍走 showApiError toast）
+const pageLoading = ref(false)
+const pageError = ref<ApiError | null>(null)
+
+async function init() {
+  pageLoading.value = true
+  pageError.value = null
+  try {
+    await projects.load()
+    report.value = await todayReport()
+    syncTranslation()
+    rawText.value = report.value.raw_text
+    summaryText.value = report.value.summary || ''
+    logDraft.project_id = projects.current?.id || ''
+    await uploadAllPending()
+    startTranslationPolling()
+  } catch (err) {
+    pageError.value = isApiError(err) ? err : new ApiError(err instanceof Error && err.message ? err.message : t('dailyReport.loadFailed'), 'unknown')
+  } finally {
+    pageLoading.value = false
+  }
+}
+
+onMounted(init)
 
 async function saveDraft() {
   if (!report.value) return
