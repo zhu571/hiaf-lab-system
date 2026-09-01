@@ -453,5 +453,466 @@ class TestCliServiceToken(BaseCliTest):
         self.assertIn("not_logged_in", result.output)
 
 
+class TestCliP0(BaseCliTest):
+    def _api(self, handler):
+        return make_api(handler, access_token="at_1", refresh_token="rt_1", csrf_token="csrf_1")
+
+    def test_logs_create_content(self):
+        captured = {}
+
+        def handler(request):
+            captured["body"] = request.read().decode()
+            return ok({"id": "log_9", "category": "rf", "content_status": "draft"})
+
+        api = self._api(handler)
+        result = self.invoke(["logs", "create", "prj_1", "--content", "RF 完成",
+                              "--category", "rf"], api=api)
+        self.assertEqual(result.exit_code, 0, result.output)
+        self.assertIn("log_9", result.output)
+        self.assertIn('"category":"rf"', captured["body"])
+
+    def test_logs_create_from_file(self):
+        import tempfile
+        with tempfile.NamedTemporaryFile("w", suffix=".txt", delete=False, encoding="utf-8") as fh:
+            fh.write("从文件来的长正文")
+            path = fh.name
+        captured = {}
+
+        def handler(request):
+            captured["body"] = request.read().decode()
+            return ok({"id": "log_9"})
+
+        api = self._api(handler)
+        result = self.invoke(["logs", "create", "prj_1", "--file", path,
+                              "--daily-report-id", "rep_1"], api=api)
+        self.assertEqual(result.exit_code, 0, result.output)
+        self.assertIn("从文件来的长正文", captured["body"])
+        self.assertIn("rep_1", captured["body"])
+
+    def test_logs_create_requires_exactly_one_source(self):
+        api = self._api(lambda request: ok({}))
+        result = self.invoke(["logs", "create", "prj_1"], api=api)
+        self.assertEqual(result.exit_code, 2)  # click UsageError
+        result = self.invoke(["logs", "create", "prj_1", "--content", "x",
+                              "--file", "/etc/hosts"], api=api)
+        self.assertEqual(result.exit_code, 2)
+
+    def test_attachments_upload(self):
+        import tempfile
+        with tempfile.NamedTemporaryFile(suffix=".txt", delete=False) as fh:
+            fh.write(b"hello attachment")
+            path = fh.name
+        captured = {}
+
+        def handler(request):
+            captured["content_type"] = request.headers.get("content-type", "")
+            captured["body"] = request.read()
+            return ok({"attachment": {"id": "att_7", "original_name": "note.txt",
+                                      "file_size": 17, "mime_type": "text/plain"},
+                       "links": [{"id": "lnk_1", "entity_type": "log", "entity_id": "log_1"}]})
+
+        api = self._api(handler)
+        result = self.invoke(["attachments", "upload", path, "--entity-type", "log",
+                              "--entity-id", "log_1"], api=api)
+        self.assertEqual(result.exit_code, 0, result.output)
+        self.assertIn("att_7", result.output)
+        self.assertIn("multipart/form-data", captured["content_type"])
+        self.assertIn(b"hello attachment", captured["body"])
+
+    def test_attachments_upload_duplicate_key_hint(self):
+        import tempfile
+        with tempfile.NamedTemporaryFile(delete=False) as fh:
+            fh.write(b"x")
+            path = fh.name
+        api = self._api(lambda request: err(409, "duplicate_idempotency_key", "重复请求"))
+        result = self.invoke(["attachments", "upload", path], api=api)
+        self.assertEqual(result.exit_code, 1)
+        self.assertIn("duplicate_idempotency_key", result.output)
+        self.assertIn("不要盲目重试", result.output)
+
+    def test_attachments_list_and_download(self):
+        import hashlib
+        payload = b"file-content"
+        sha = hashlib.sha256(payload).hexdigest()
+
+        def handler(request):
+            if request.url.path == "/api/v1/attachments":
+                return ok({"items": [{"id": "att_1", "original_name": "a.txt"}], "total": 1})
+            if request.url.path == "/api/v1/attachments/att_1":
+                return ok({"id": "att_1", "original_name": "a.txt", "sha256": sha})
+            return httpx.Response(200, content=payload)
+
+        api = self._api(handler)
+        result = self.invoke(["attachments", "list"], api=api)
+        self.assertEqual(result.exit_code, 0, result.output)
+        self.assertIn("att_1", result.output)
+
+        import tempfile
+        with tempfile.TemporaryDirectory() as tmp:
+            out = tmp + "/dl.bin"
+            result = self.invoke(["attachments", "download", "att_1", "--output", out], api=api)
+            self.assertEqual(result.exit_code, 0, result.output)
+            self.assertIn(sha, result.output)
+            self.assertIn('"sha256_match": true', result.output)
+            with open(out, "rb") as fh:
+                self.assertEqual(fh.read(), payload)
+
+
+class TestCliP1(BaseCliTest):
+    def _api(self, handler):
+        return make_api(handler, access_token="at_1", refresh_token="rt_1", csrf_token="csrf_1")
+
+    def test_daily_report_submit_blocked_exit_1(self):
+        api = self._api(lambda request: ok({
+            "report": {"id": "rep_1", "status": "draft"},
+            "warnings": [{"code": "no_logs", "message": "日报没有任何日志"}],
+            "blocked": True}))
+        result = self.invoke(["daily-report", "submit", "rep_1"], api=api)
+        self.assertEqual(result.exit_code, 1)
+        self.assertIn("blocked", result.output)
+        self.assertIn("--force", result.output)
+
+    def test_daily_report_submit_force_success(self):
+        captured = {}
+
+        def handler(request):
+            captured["body"] = request.read().decode()
+            return ok({"report": {"id": "rep_1", "status": "submitted"},
+                       "warnings": [], "blocked": False})
+
+        api = self._api(handler)
+        result = self.invoke(["daily-report", "submit", "rep_1", "--force"], api=api)
+        self.assertEqual(result.exit_code, 0, result.output)
+        self.assertIn('"force":true', captured["body"])
+        self.assertIn("submitted", result.output)
+
+    def test_daily_report_ai_parse(self):
+        api = self._api(lambda request: ok({"status": "ok", "candidates": [
+            {"category": "cryo", "content": "降温到 4.2K", "confidence": 0.9}]}))
+        result = self.invoke(["daily-report", "ai-parse", "rep_1"], api=api)
+        self.assertEqual(result.exit_code, 0, result.output)
+        self.assertIn("clarify_candidates" not in result.output and "ok", result.output)
+
+    def test_logs_update_confirm(self):
+        captured = {}
+
+        def handler(request):
+            captured["body"] = request.read().decode()
+            return ok({"id": "log_1", "content_status": "confirmed"})
+
+        api = self._api(handler)
+        result = self.invoke(["logs", "update", "log_1", "--confirm"], api=api)
+        self.assertEqual(result.exit_code, 0, result.output)
+        self.assertIn("confirmed", captured["body"])
+
+    def test_issues_update_and_comment(self):
+        api = self._api(lambda request: ok({"id": "iss_1", "severity": "critical"}))
+        result = self.invoke(["issues", "update", "iss_1", "--severity", "critical"], api=api)
+        self.assertEqual(result.exit_code, 0, result.output)
+
+        captured = {}
+
+        def handler(request):
+            captured["path"] = request.url.path
+            captured["body"] = request.read().decode()
+            return ok({"id": "cmt_1", "content": "已核实"})
+
+        api2 = self._api(handler)
+        result2 = self.invoke(["issues", "comment", "iss_1", "--content", "已核实"], api=api2)
+        self.assertEqual(result2.exit_code, 0, result2.output)
+        self.assertEqual(captured["path"], "/api/v1/issues/iss_1/comments")
+
+    def test_projects_members_flow(self):
+        captured = {}
+
+        def handler(request):
+            captured["method"] = request.method
+            captured["path"] = request.url.path
+            captured["body"] = request.read().decode()
+            return ok({"items": [{"user_id": "usr_2", "role": "viewer"}], "total": 1})
+
+        api = self._api(handler)
+        result = self.invoke(["projects", "members", "list", "prj_1"], api=api)
+        self.assertEqual(result.exit_code, 0, result.output)
+        self.assertEqual(captured["method"], "GET")
+
+        result2 = self.invoke(["projects", "members", "add", "prj_1", "usr_2",
+                               "--role", "viewer"], api=api)
+        self.assertEqual(result2.exit_code, 0, result2.output)
+        self.assertIn('"role":"viewer"', captured["body"])
+
+    def test_projects_transition_ignore_warnings(self):
+        captured = {}
+
+        def handler(request):
+            captured["body"] = request.read().decode()
+            return ok({"id": "prj_1", "status": "completed"})
+
+        api = self._api(handler)
+        result = self.invoke(["projects", "transition", "prj_1", "--action", "complete",
+                              "--ignore-warnings", "--reason", "遗留 issue 不阻塞"], api=api)
+        self.assertEqual(result.exit_code, 0, result.output)
+        self.assertIn('"ignore_warnings":true', captured["body"])
+        self.assertIn("遗留 issue 不阻塞", captured["body"])
+
+    def test_test_data_batch_csv_file(self):
+        import tempfile
+        csv_text = ("data_type,measurement,value,unit\n"
+                    "cryo,target_temp,4.2,K\n"
+                    "pressure,cell_pressure,912,\n")
+        with tempfile.NamedTemporaryFile("w", suffix=".csv", delete=False,
+                                         encoding="utf-8") as fh:
+            fh.write(csv_text)
+            path = fh.name
+        captured = {}
+
+        def handler(request):
+            captured["path"] = request.url.path
+            captured["body"] = request.read().decode()
+            return ok({"created": 2})
+
+        api = self._api(handler)
+        result = self.invoke(["test-data", "batch", "prj_1", "--file", path], api=api)
+        self.assertEqual(result.exit_code, 0, result.output)
+        self.assertEqual(captured["path"], "/api/v1/projects/prj_1/test-data/batch")
+        body = json.loads(captured["body"])
+        self.assertEqual(body[0], {"data_type": "cryo", "measurement": "target_temp",
+                                   "value": 4.2, "unit": "K"})
+
+    def test_test_data_batch_422_details_passthrough(self):
+        api = self._api(lambda request: httpx.Response(422, json={
+            "error": {"code": "batch_validation_failed", "message": "部分行校验失败",
+                      "details": {"errors": [{"index": 1, "field": "value",
+                                              "code": "required"}]}},
+            "request_id": "req_422"}))
+        result = self.invoke(["test-data", "batch", "prj_1",
+                              "--json", '[{"data_type":"cryo","measurement":"m","value":1},'
+                                         '{"data_type":"cryo","measurement":"m2"}]'], api=api)
+        self.assertEqual(result.exit_code, 1)
+        self.assertIn("batch_validation_failed", result.output)
+        self.assertIn("errors", result.output)  # 行级错误在 details 原样透出
+        self.assertIn("req_422", result.output)
+
+    def test_todos_add_and_done(self):
+        captured = {}
+
+        def handler(request):
+            captured["method"] = request.method
+            captured["path"] = request.url.path
+            return ok({"id": "td_1", "title": "换气瓶", "status": "done"})
+
+        api = self._api(handler)
+        result = self.invoke(["todos", "add", "换气瓶", "--priority", "high"], api=api)
+        self.assertEqual(result.exit_code, 0, result.output)
+        result2 = self.invoke(["todos", "done", "td_1"], api=api)
+        self.assertEqual(result2.exit_code, 0, result2.output)
+        self.assertEqual(captured["path"], "/api/v1/todos/td_1/done")
+
+    def test_audit_verify(self):
+        api = self._api(lambda request: ok({"valid": True, "checked": 42, "chain_intact": True}))
+        result = self.invoke(["audit", "verify", "--from-id", "1", "--to-id", "42"], api=api)
+        self.assertEqual(result.exit_code, 0, result.output)
+        self.assertIn("chain_intact", result.output)
+
+    def test_attachments_link(self):
+        captured = {}
+
+        def handler(request):
+            captured["path"] = request.url.path
+            captured["body"] = request.read().decode()
+            return ok({"id": "lnk_1", "attachment_id": "att_1", "entity_type": "log",
+                       "entity_id": "log_1"})
+
+        api = self._api(handler)
+        result = self.invoke(["attachments", "link", "att_1", "--entity-type", "log",
+                              "--entity-id", "log_1"], api=api)
+        self.assertEqual(result.exit_code, 0, result.output)
+        self.assertEqual(captured["path"], "/api/v1/attachments/att_1/links")
+        self.assertIn("log_1", captured["body"])
+
+    def test_experiences_create_linked(self):
+        captured = {}
+
+        def handler(request):
+            captured["body"] = request.read().decode()
+            return ok({"id": "exp_1", "status": "candidate"})
+
+        api = self._api(handler)
+        result = self.invoke(["experiences", "create", "--title", "经验", "--content", "内容",
+                              "--project-id", "prj_1", "--tag", "cryo",
+                              "--linked-project", "prj_2:primary"], api=api)
+        self.assertEqual(result.exit_code, 0, result.output)
+        body = json.loads(captured["body"])
+        self.assertEqual(body["tags"], ["cryo"])
+        self.assertEqual(body["linked_projects"],
+                         [{"project_id": "prj_2", "relation": "primary"}])
+
+    def test_runs_create(self):
+        captured = {}
+
+        def handler(request):
+            captured["body"] = request.read().decode()
+            return ok({"id": "run_1", "name": "第 3 轮降温", "status": "planned"})
+
+        api = self._api(handler)
+        result = self.invoke(["runs", "create", "prj_1", "--name", "第 3 轮降温",
+                              "--run-type", "cooldown", "--gas-type", "He",
+                              "--target-temp", "4.2", "--device", "rfq",
+                              "--device", "rf_carpet"], api=api)
+        self.assertEqual(result.exit_code, 0, result.output)
+        body = json.loads(captured["body"])
+        self.assertEqual(body["devices"], ["rfq", "rf_carpet"])
+        self.assertEqual(body["target_temp"], 4.2)
+
+
+class TestCliP2(BaseCliTest):
+    def _api(self, handler):
+        return make_api(handler, access_token="at_1", refresh_token="rt_1", csrf_token="csrf_1")
+
+    def test_login_still_works_as_group(self):
+        stub = StubAPI(login_data=TOKENS)
+        with mock.patch.object(cli_module, "LabctlAPI", return_value=stub):
+            result = self.runner.invoke(cli, ["login", "zhangsan"], input="secret\n")
+        self.assertEqual(result.exit_code, 0, result.output)
+        data = auth.load_token()
+        self.assertEqual(data["username"], "zhangsan")
+
+    def test_login_whoami_still_works(self):
+        api = self._api(lambda request: ok({"user": {"username": "zhangsan"}}))
+        result = self.invoke(["login", "--whoami"], api=api)
+        self.assertEqual(result.exit_code, 0, result.output)
+
+    def test_login_set_language(self):
+        captured = {}
+
+        def handler(request):
+            captured["path"] = request.url.path
+            captured["body"] = request.read().decode()
+            return ok({"user": {"username": "zhangsan", "language": "en"}})
+
+        api = self._api(handler)
+        result = self.invoke(["login", "set-language", "en"], api=api)
+        self.assertEqual(result.exit_code, 0, result.output)
+        self.assertEqual(captured["path"], "/api/v1/auth/profile")
+        self.assertIn('"language":"en"', captured["body"])
+
+    def test_login_password_prompts(self):
+        captured = {}
+
+        def handler(request):
+            captured["body"] = request.read().decode()
+            return ok({"success": True})
+
+        api = self._api(handler)
+        patcher = mock.patch.object(cli_module, "build_api", return_value=api)
+        with patcher:
+            result = self.runner.invoke(cli, ["login", "password"],
+                                        input="old_secret\nNewStrong!2026\nNewStrong!2026\n")
+        self.assertEqual(result.exit_code, 0, result.output)
+        self.assertIn("old_secret", captured["body"])
+
+    def test_sensors_history(self):
+        captured = {}
+
+        def handler(request):
+            captured["params"] = dict(request.url.params)
+            return ok({"points": [{"time": "2026-09-01T10:00:00Z", "tag": "p",
+                                   "value": 912.3}]})
+
+        api = self._api(handler)
+        result = self.invoke(["sensors", "history", "--tag", "cell_pressure",
+                              "--from", "-24h", "--interval", "5m"], api=api)
+        self.assertEqual(result.exit_code, 0, result.output)
+        self.assertEqual(captured["params"], {"tag": "cell_pressure", "from": "-24h",
+                                              "interval": "5m"})
+
+    def test_ask_chat(self):
+        api = self._api(lambda request: ok({"answer": "上周降温到 4.2K", "question": "…"}))
+        result = self.invoke(["ask", "chat", "上周降温到多少K？"], api=api)
+        self.assertEqual(result.exit_code, 0, result.output)
+        self.assertIn("4.2K", result.output)
+
+    def test_daily_report_by_date(self):
+        api = self._api(lambda request: ok({"id": "rep_9", "report_date": "2026-08-30"}))
+        result = self.invoke(["daily-report", "by-date", "--date", "2026-08-30",
+                              "--latest"], api=api)
+        self.assertEqual(result.exit_code, 0, result.output)
+        self.assertIn("rep_9", result.output)
+
+    def test_instruments_readonly(self):
+        api = self._api(lambda request: ok([{"id": "keysight_33210a", "state": "online"}]))
+        result = self.invoke(["instruments", "list"], api=api)
+        self.assertEqual(result.exit_code, 0, result.output)
+
+        api2 = self._api(lambda request: ok(
+            {"instrument_id": "keysight_33210a", "state": "online", "rate_limited": False}))
+        result2 = self.invoke(["instruments", "status", "keysight_33210a"], api=api2)
+        self.assertEqual(result2.exit_code, 0, result2.output)
+
+    def test_agent_candidates_flow(self):
+        api = self._api(lambda request: ok(
+            {"items": [{"id": "cand_1", "action_type": "create_log",
+                        "status": "pending_review"}], "total": 1}))
+        result = self.invoke(["agent", "candidates", "list"], api=api)
+        self.assertEqual(result.exit_code, 0, result.output)
+
+        api2 = self._api(lambda request: ok({"id": "cand_1", "status": "approved"}))
+        result2 = self.invoke(["agent", "candidates", "approve", "cand_1"], api=api2)
+        self.assertEqual(result2.exit_code, 0, result2.output)
+
+    def test_admin_users_create(self):
+        api = self._api(lambda request: ok({"user": {"id": "usr_9", "username": "lisi"},
+                                            "temporary_password": "Tmp!12345"}))
+        result = self.invoke(["admin", "users", "create", "--username", "lisi",
+                              "--role", "member"], api=api)
+        self.assertEqual(result.exit_code, 0, result.output)
+        self.assertIn("temporary_password", result.output)
+
+    def test_automation_rules(self):
+        api = self._api(lambda request: ok({"id": "rule_1", "name": "日报自动解析",
+                                            "enabled": True}))
+        result = self.invoke(["automation", "rules", "create", "--name", "日报自动解析"],
+                             api=api)
+        self.assertEqual(result.exit_code, 0, result.output)
+
+    def test_runs_steps_reorder(self):
+        captured = {}
+
+        def handler(request):
+            captured["path"] = request.url.path
+            captured["body"] = request.read().decode()
+            return ok({"reordered": 2})
+
+        api = self._api(handler)
+        result = self.invoke(["runs", "steps", "reorder", "run_1", "--steps",
+                              '[{"id":"st_2","step_order":1}]'], api=api)
+        self.assertEqual(result.exit_code, 0, result.output)
+        self.assertEqual(captured["path"], "/api/v1/run-steps/reorder")
+        self.assertIn("st_2", captured["body"])
+
+    def test_assembly_list(self):
+        api = self._api(lambda request: ok(
+            {"items": [{"id": "ast_1", "name": "安装真空规", "status": "planned"}],
+             "total": 1}))
+        result = self.invoke(["assembly", "list", "prj_1"], api=api)
+        self.assertEqual(result.exit_code, 0, result.output)
+        self.assertIn("ast_1", result.output)
+
+    def test_rf_matching_create(self):
+        api = self._api(lambda request: ok({"id": "rfm_1", "device": "rfq",
+                                            "frequency_mhz": 18.3, "status": "pass"}))
+        result = self.invoke(["rf-matching", "create", "prj_1", "--device", "rfq",
+                              "--frequency-mhz", "18.3", "--status", "pass",
+                              "--s11", "-15.2"], api=api)
+        self.assertEqual(result.exit_code, 0, result.output)
+
+    def test_test_data_update(self):
+        api = self._api(lambda request: ok({"id": "td_1", "value": 4.5,
+                                            "quality": "outlier"}))
+        result = self.invoke(["test-data", "update", "td_1", "--value", "4.5",
+                              "--quality", "outlier"], api=api)
+        self.assertEqual(result.exit_code, 0, result.output)
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -1,3 +1,5 @@
+import hashlib
+import json
 import os
 import time
 import uuid
@@ -13,11 +15,12 @@ RETRY_COUNT = 3
 class LabctlError(RuntimeError):
     """CLI 统一错误：携带服务端错误码、HTTP 状态与 request_id（透传服务端）。"""
 
-    def __init__(self, message, code="api_error", status=None, request_id=""):
+    def __init__(self, message, code="api_error", status=None, request_id="", details=None):
         super().__init__(message)
         self.code = code
         self.status = status
         self.request_id = request_id or ""
+        self.details = details
 
     def __str__(self):
         text = super().__str__()
@@ -29,7 +32,25 @@ class LabctlError(RuntimeError):
         body = {"code": self.code, "message": str(self)}
         if self.request_id:
             body["request_id"] = self.request_id
+        if self.details is not None:
+            body["details"] = self.details
         return body
+
+
+def _stream_error(response):
+    """流式响应的错误信封解析：透传 code/message/request_id，非 JSON 给通用错误。"""
+    body = response.read()
+    try:
+        payload = json.loads(body.decode("utf-8"))
+    except ValueError:
+        payload = None
+    err = payload.get("error", {}) if isinstance(payload, dict) else {}
+    return LabctlError(
+        err.get("message", f"下载失败（HTTP {response.status_code}）"),
+        code=err.get("code", "api_error"),
+        status=response.status_code,
+        request_id=payload.get("request_id", "") if isinstance(payload, dict) else "",
+    )
 
 
 class LabctlAPI:
@@ -112,11 +133,52 @@ class LabctlAPI:
         self._apply_tokens(data)
         return data
 
-    def request(self, method, path, params=None, json=None, headers=None):
-        return self._request(method, path, params=params, json=json, headers=headers)
+    def request(self, method, path, params=None, json=None, headers=None,
+                data=None, files=None, timeout=None):
+        """发起 API 请求；data/files 用于 multipart/form-data（与 json 互斥），
+        timeout 为 per-call 覆盖（None 走 client 默认 20s，上传建议 120-300s）。"""
+        return self._request(method, path, params=params, json=json, headers=headers,
+                             data=data, files=files, timeout=timeout)
+
+    def download(self, path, dest, params=None, timeout=None):
+        """流式下载二进制响应写盘（附件下载专用），返回 {path, size, sha256}。
+
+        attachments download handler 对 GET 也手动要求 Idempotency-Key 头
+        （handler 级校验，不走 request 的写方法自动逻辑），这里统一补上。
+        流式下载不做 429/5xx 自动重试（大文件重发浪费带宽），失败原样报错。
+        """
+        headers = {}
+        token = os.getenv("LABCTL_SERVICE_TOKEN", "")
+        if not token and not self.access_token:
+            raise LabctlError("未登录：请先执行 labctl login 或设置 LABCTL_SERVICE_TOKEN",
+                              code="not_logged_in")
+        headers["Authorization"] = f"Bearer {token or self.access_token}"
+        headers["Idempotency-Key"] = str(uuid.uuid4())
+        digest = hashlib.sha256()
+        size = 0
+        try:
+            with self.client.stream("GET", self.base_url + path, params=params,
+                                    headers=headers, timeout=timeout) as response:
+                if response.is_error:
+                    raise _stream_error(response)
+                with open(dest, "wb") as fh:
+                    for chunk in response.iter_bytes():
+                        fh.write(chunk)
+                        digest.update(chunk)
+                        size += len(chunk)
+        except httpx.TimeoutException as exc:
+            raise LabctlError("下载超时：请重试或调大 --timeout", code="download_timeout") from exc
+        except httpx.TransportError as exc:
+            raise LabctlError(f"下载连接中断（{exc.__class__.__name__}）",
+                              code="download_disconnected") from exc
+        return {"path": dest, "size": size, "sha256": digest.hexdigest()}
 
     def _request(self, method, path, params=None, json=None, headers=None,
+                 data=None, files=None, timeout=None,
                  authenticate=True, refresh_on_401=True):
+        if (data is not None or files is not None) and json is not None:
+            raise LabctlError("json 与 data/files 互斥，multipart 请求不要传 json",
+                              code="bad_request")
         headers = dict(headers or {})
         token = os.getenv("LABCTL_SERVICE_TOKEN", "")
         if authenticate:
@@ -131,8 +193,17 @@ class LabctlAPI:
         refreshed = False
         for attempt in range(RETRY_COUNT):
             try:
+                # files 必须是内存 bytes（不可是文件句柄）：429/5xx 重试重发时
+                # 句柄第二次读为空；上传命令侧先整体读入再构造。
+                request_kwargs = {"params": params, "json": json, "headers": headers}
+                if data is not None:
+                    request_kwargs["data"] = data
+                if files is not None:
+                    request_kwargs["files"] = files
+                if timeout is not None:
+                    request_kwargs["timeout"] = timeout
                 response = self.client.request(
-                    method, self.base_url + path, params=params, json=json, headers=headers)
+                    method, self.base_url + path, **request_kwargs)
             except (httpx.TimeoutException, httpx.TransportError) as exc:
                 if attempt == RETRY_COUNT - 1:
                     raise LabctlError(
@@ -184,5 +255,6 @@ class LabctlAPI:
                 code=err.get("code", "api_error"),
                 status=response.status_code,
                 request_id=request_id,
+                details=err.get("details"),  # 如 test-data batch 422 的行级 errors[]
             )
         return payload.get("data")
