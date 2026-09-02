@@ -55,6 +55,7 @@ export interface NavEntry {
 export const NAV_ITEMS: NavEntry[] = [
   { path: '/', icon: HomeFilled, titleKey: 'nav.home', shortTitleKey: 'nav.short.home', group: 'main', mobile: true },
   { path: '/projects', icon: FolderOpened, titleKey: 'nav.projects', group: 'main', mobile: true },
+	{ path: '/my-logs', icon: Document, titleKey: 'nav.myLogs', group: 'main' },
   { path: '/todos', icon: Tickets, titleKey: 'nav.todos', shortTitleKey: 'nav.short.todos', group: 'main', mobile: true },
   { path: '/daily-report', icon: Document, titleKey: 'nav.dailyReport', shortTitleKey: 'nav.short.dailyReport', group: 'main', mobile: true },
   { path: '/experiences', icon: Memo, titleKey: 'nav.experiences', group: 'main' },

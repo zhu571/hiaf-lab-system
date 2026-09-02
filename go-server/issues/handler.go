@@ -70,6 +70,21 @@ func (h *Handler) List(w http.ResponseWriter, r *http.Request) {
 	common.WriteSuccess(w, r, result)
 }
 
+func (h *Handler) ListByLog(w http.ResponseWriter, r *http.Request) {
+	claims := middleware.GetUserClaims(r.Context())
+	if claims == nil {
+		common.WriteError(w, r, http.StatusUnauthorized, "unauthorized", "未登录", nil)
+		return
+	}
+	params := IssueListParams{RelatedLogID: r.URL.Query().Get("related_log_id"), Page: queryInt(r, "page", 1), PerPage: queryInt(r, "per_page", 20)}
+	result, err := h.svc.ListByLog(middleware.EffectiveUserID(r.Context()), params)
+	if err != nil {
+		h.writeError(w, r, err, nil)
+		return
+	}
+	common.WriteSuccess(w, r, result)
+}
+
 func (h *Handler) GetByID(w http.ResponseWriter, r *http.Request) {
 	claims := middleware.GetUserClaims(r.Context())
 	if claims == nil {

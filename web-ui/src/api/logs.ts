@@ -9,6 +9,7 @@ export type DailyReport = {
   report_date: string
   author_id: string
   author_name?: string
+	log_count?: number
   raw_text: string
   summary: string
   content_status: string
@@ -17,10 +18,22 @@ export type DailyReport = {
   translations?: TranslationSidecar
 }
 
+export type DailyReportRef = Pick<DailyReport, 'id' | 'report_date' | 'author_id' | 'author_name' | 'content_status' | 'quality_status'> & {
+  can_read_detail: boolean
+}
+
+export type TeamDailyReportProjection = Pick<DailyReport, 'id' | 'report_date' | 'author_id' | 'author_name' | 'content_status' | 'quality_status'> & {
+  project_log_count: number
+  logs?: LogItem[]
+}
+
 export type LogItem = {
   id: string
   project_id: string
+	project_code?: string
+	project_name?: string
   author_id: string
+	author_name?: string
   occurred_at: string
   category: string
   content: string
@@ -53,6 +66,14 @@ export function submitReport(id: string, force = false) {
 
 export function listReports(params: Record<string, string | number> = {}) {
   return request<{ items: DailyReport[]; total: number; page: number }>({ url: '/daily-reports', params: { per_page: 20, ...params } })
+}
+
+export function listTeamReports(projectId: string, params: Record<string, string | number> = {}) {
+  return request<{ items: TeamDailyReportProjection[]; total: number; page: number }>({ url: `/projects/${projectId}/daily-reports`, params })
+}
+
+export function getTeamReport(projectId: string, reportId: string) {
+  return request<TeamDailyReportProjection>({ url: `/projects/${projectId}/daily-reports/${reportId}` })
 }
 
 export function getReport(id: string) {
@@ -102,6 +123,14 @@ export function listProjectLogs(projectId: string, params: Record<string, string
   return request<{ items: LogItem[]; total: number; page: number }>({ url: `/projects/${projectId}/logs`, params })
 }
 
+export function listMyLogs(params: Record<string, string | number> = {}) {
+  return request<{ items: LogItem[]; total: number; page: number }>({ url: '/logs/mine', params })
+}
+
 export function getLog(id: string) {
-  return request<LogItem>({ url: `/logs/${id}` })
+	return request<LogItem>({ url: `/logs/${id}` })
+}
+
+export function listReportsByLog(id: string) {
+  return request<DailyReportRef[]>({ url: `/logs/${id}/daily-reports` })
 }

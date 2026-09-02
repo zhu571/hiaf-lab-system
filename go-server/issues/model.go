@@ -74,15 +74,16 @@ type AddCommentRequest struct {
 }
 
 type IssueListParams struct {
-	Status   string `json:"status,omitempty"`
-	Severity string `json:"severity,omitempty"`
-	Assignee string `json:"assignee,omitempty"`
-	Author   string `json:"author,omitempty"`
-	Search   string `json:"search,omitempty"`
-	Page     int    `json:"page"`
-	PerPage  int    `json:"per_page"`
-	Sort     string `json:"sort,omitempty"`
-	Order    string `json:"order,omitempty"`
+	RelatedLogID string `json:"related_log_id,omitempty"`
+	Status       string `json:"status,omitempty"`
+	Severity     string `json:"severity,omitempty"`
+	Assignee     string `json:"assignee,omitempty"`
+	Author       string `json:"author,omitempty"`
+	Search       string `json:"search,omitempty"`
+	Page         int    `json:"page"`
+	PerPage      int    `json:"per_page"`
+	Sort         string `json:"sort,omitempty"`
+	Order        string `json:"order,omitempty"`
 }
 
 type IssueListResult struct {

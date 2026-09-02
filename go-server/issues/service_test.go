@@ -309,6 +309,13 @@ func (f fakeProjectAccess) HasProjectPermission(projectID, userID string, perm m
 	return fakeRoleHasPermission(role, perm), nil
 }
 
+func (f fakeProjectAccess) ListAllProjectsWithPermission(userID string, perm middleware.Permission) ([]middleware.ProjectSummary, error) {
+	if userID == "admin_1" || fakeRoleHasPermission(f.roles[userID], perm) {
+		return []middleware.ProjectSummary{{ID: "prj_1"}}, nil
+	}
+	return []middleware.ProjectSummary{}, nil
+}
+
 func fakeRoleHasPermission(role string, perm middleware.Permission) bool {
 	switch role {
 	case projects.RoleOwner:
@@ -379,6 +386,10 @@ func (f *fakeIssueRepo) GetByID(id string) (*Issue, error) {
 		return nil, nil
 	}
 	return cloneIssue(*issue), nil
+}
+
+func (f *fakeIssueRepo) ListByLog(logID string, projectIDs []string, params IssueListParams) ([]Issue, int, error) {
+	return []Issue{}, 0, nil
 }
 
 func (f *fakeIssueRepo) List(projectID string, params IssueListParams) ([]Issue, int, error) {

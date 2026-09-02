@@ -38,7 +38,7 @@ describe('MobileNavDrawer', () => {
       }
     })
     const paths = wrapper.findAll('.drawer-link').map((link) => link.attributes('href'))
-    expect(paths).toHaveLength(15)
+    expect(paths).toHaveLength(16)
     expect(paths).toEqual(expect.arrayContaining([
       '/gas-control',
       '/instrument-measure',

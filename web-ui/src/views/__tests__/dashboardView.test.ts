@@ -18,7 +18,8 @@ vi.mock('@/api/instruments', () => ({
 }))
 
 vi.mock('@/api/logs', () => ({
-  listReports: vi.fn().mockResolvedValue({ items: [], total: 0, page: 1 })
+	listReports: vi.fn().mockResolvedValue({ items: [], total: 0, page: 1 }),
+	listTeamReports: vi.fn().mockResolvedValue({ items: [], total: 0, page: 1 })
 }))
 
 vi.mock('@/api/todos', () => ({
@@ -74,7 +75,7 @@ describe('DashboardView 工作台冒烟', () => {
     expect(wrapper.text()).toContain('今日待办')
     expect(wrapper.text()).toContain('设备状态')
     expect(wrapper.text()).toContain('综合简报')
-    expect(wrapper.text()).toContain('团队成员日报')
+		expect(wrapper.text()).toContain('我的日报')
     // 空态（三处 StateBlock el-empty：待办/设备/成员日报；简报恒渲染 7 天卡片）
     expect(wrapper.findAll('.el-empty')).toHaveLength(3)
   })

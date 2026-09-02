@@ -33,6 +33,9 @@
       <el-table-column :label="t('logList.category')" width="110">
         <template #default="{ row }">{{ categoryLabel(row.category) }}</template>
       </el-table-column>
+      <el-table-column :label="t('logList.author')" width="120" show-overflow-tooltip>
+        <template #default="{ row }">{{ row.author_name || row.author_id }}</template>
+      </el-table-column>
       <el-table-column :label="t('logList.content')" min-width="240" show-overflow-tooltip>
         <template #default="{ row }">{{ contentPreview(row) }}</template>
       </el-table-column>
@@ -52,6 +55,7 @@
           <div class="card-fields">
             <span>{{ formatDateTime(row.occurred_at) }}</span>
             <span>{{ categoryLabel(row.category) }}</span>
+            <span>{{ row.author_name || row.author_id }}</span>
             <span>{{ sourceLabel(row.source) }}</span>
             <StatusBadge domain="logStatus" :value="row.content_status" />
           </div>

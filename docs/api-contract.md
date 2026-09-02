@@ -182,7 +182,7 @@ CSRF 豁免路径（`/api/v1/auth/*`）；写端点 handler 级校验 Idempotenc
 ### `GET /api/v1/daily-reports`
 
 参数：`status`、`keyword`、`date`、`page`、`per_page`（`per_page` 超限 → 400 `per_page_too_large`）。
-响应：`{items: [DailyReport], total, page}`。`AuthorID` 强制为当前用户（只能看自己的日报）。
+响应：`{items: [DailyReport], total, page}`，列表项含关联日志聚合字段 `log_count`（无关联为 0）。`AuthorID` 强制为当前用户（只能看自己的日报）。
 
 ### `POST /api/v1/daily-reports/today`
 
@@ -198,6 +198,17 @@ SERVICE_TOKEN 调用（todos scheduler 拉全量日报）：必须显式传 `use
 ### `GET /api/v1/daily-reports/{id}`
 
 单份日报。404 `report_not_found`。
+
+### `GET /api/v1/projects/{id}/daily-reports`
+
+项目团队日报投影。参数：`author_id`、`date`、`date_from`、`date_to`、`status`、`page`、`per_page`。
+仅项目 maintainer/owner 或 system admin；`author_id` 必须是项目 active 成员。响应：
+`{items:[{id,report_date,author_id,author_name,content_status,quality_status,project_log_count}],total,page}`。
+不返回 `raw_text`、`summary`；敏感 GET 审计 action 为 `daily_report.team_list`。
+
+### `GET /api/v1/projects/{id}/daily-reports/{report_id}`
+
+返回同一投影元数据与 `logs`，其中日志严格限制为该项目的关联日志；不返回日报 `raw_text`、全局 `summary` 或其他项目日志。无该项目关联日志时 404；权限同团队列表。审计 action 为 `daily_report.team_view`，detail 不含正文。
 
 ### `PATCH /api/v1/daily-reports/{id}`
 
@@ -270,7 +281,11 @@ SERVICE_TOKEN 调用（todos scheduler 拉全量日报）：必须显式传 `use
 ### `GET /api/v1/projects/{id}/logs`
 
 参数：`page`、`per_page`、`category`、`date_from`、`date_to`、`status`。
-响应：`{items: [Log], total, page}`。权限：项目 `PermRead`（viewer 可读）。
+响应：`{items: [Log], total, page}`，日志项新增 `author_name` 展示字段。权限：项目 `PermRead`（viewer 可读）。
+
+### `GET /api/v1/logs/mine`
+
+参数：`category`、`keyword`、`date_from`、`date_to`、`status`、`page`、`per_page`。固定筛选当前有效用户编写的日志，并限制在其仍有 `PermRead` 的全部项目（含 completed/archived）；`status` 缺省为 `confirmed`。按 `occurred_at DESC, id DESC` 排序。每项新增 `project_code`、`project_name`。
 
 ### `POST /api/v1/projects/{id}/logs`
 
@@ -280,7 +295,15 @@ SERVICE_TOKEN 调用（todos scheduler 拉全量日报）：必须显式传 `use
 
 ### `GET /api/v1/logs/{id}`
 
-返回日志正文、附件、关联 issue、关联仪器数据。404 `log_not_found`；权限在 service 内按日志归属校验。
+返回日志正文及 `author_name` 展示字段；附件与关联数据由各自端点加载。404 `log_not_found`；权限在 service 内按日志归属校验。
+
+### `GET /api/v1/logs/{id}/daily-reports`
+
+返回来源日报裁剪投影数组：`{id,report_date,author_id,author_name?,content_status,quality_status,can_read_detail}`。不返回 `raw_text`/`summary`；仅日报作者本人或 admin 的 `can_read_detail=true`。
+
+### `GET /api/v1/issues?related_log_id={log_id}`
+
+按关联日志反查 Issue，支持 `page`/`per_page`。仅在服务端可读项目集合内查询，total 使用同一权限 WHERE；不可读或无关联统一返回空页。
 
 ### `PATCH /api/v1/logs/{id}`
 
@@ -294,7 +317,7 @@ Agent 只能修改自己创建且未人工确认的草稿。错误：400 `log_vo
 
 ### `GET /api/v1/projects`
 
-参数：`status`。响应：`[ProjectWithStats{id, code, name, status, visibility, member_count, open_issue_count, log_count, ...}]`。
+参数：`status`。响应：`[ProjectWithStats{id, code, name, status, visibility, current_user_role?, member_count, open_issue_count, log_count, ...}]`。
 admin 看全部；其余用户只列自己 active 成员的项目（projects/handler.go:131 起）。
 
 ### `POST /api/v1/projects`

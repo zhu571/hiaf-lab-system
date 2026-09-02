@@ -57,6 +57,7 @@ CI/Agent 场景免交互登录：`echo -e "username\npassword" | labctl login --
 | `login` | 登录 / `--logout` / `--whoami` / `password` / `set-language` | POST /auth/login、/auth/logout、GET /auth/me、POST /auth/change-password、PATCH /auth/profile | 任意启用用户 |
 | `daily-report` | `today` / `history` / `entry` / `submit` / `ai-parse` / `by-date` | POST /daily-reports/today、GET /daily-reports、GET+PATCH /daily-reports/{id}、POST /{id}/submit、POST /{id}/ai-parse、GET /by-date | 日报仅本人可见/可改；submit blocked=true 时退出码 1（加 --force 越过） |
 | `logs` | `list` / `get` / `create` / `update` | GET/POST /projects/{id}/logs、GET/PATCH /logs/{id} | list/get viewer+；create/update member+（update 自己的，maintainer+ 改任意，仅 draft） |
+| `my-logs` | （顶层命令，同 logs 筛选参数 + `--all`） | GET /logs/mine | 本人跨项目日志（含仍可读的 completed/archived 项目） |
 | `projects` | `list` / `get` / `create` / `update` / `transition` / `members list·add·set-role·remove` | GET/POST/PATCH /projects、POST /{id}/transition、GET/POST/PATCH/DELETE /{id}/members… | create 限 maintainer/admin；transition 限 owner/admin（有警告须 `--ignore-warnings`）；members 需 manage_members |
 | `issues` | `list` / `get` / `create` / `update` / `transition` / `comment` | GET/POST /projects/{id}/issues、GET/PATCH /issues/{id}、POST /{id}/transition、POST /{id}/comments | list/get viewer+；create/update member+；comment 按项目 comment_policy |
 | `test-data` | `list` / `entry` / `batch` / `get` / `update` / `invalidate` | GET/POST /projects/{id}/test-data(+batch)、GET/PATCH/DELETE /test-data/{id} | list/get viewer+；写 member+；invalidate 记录者/owner |
@@ -75,14 +76,15 @@ CI/Agent 场景免交互登录：`echo -e "username\npassword" | labctl login --
 | `admin` | `users list·create·set·reset-password` / `invites list·create·revoke` | /admin/users 系列、/admin/invitation-codes 系列 | 全部仅 admin |
 | `automation` | `rules list·create·enable·disable·rm` | /admin/automation/rules 系列 | 全部仅 admin |
 | `agent` | `candidates list·trace·approve·reject` | GET /agent/candidates、/{id}/trace、/{id}/approve、/{id}/reject | 仅 admin/maintainer（Agent 审核队列补充入口） |
-| `instruments` | `list` / `status` / `whitelist` / `parse-result` | GET /instruments、/{id}/status、/whitelist、POST /{id}/parse-result | viewer+（**只读**；写命令刻意不进 CLI，见下） |
+| `instruments` | `list` / `status` / `whitelist` / `parse-result` / `emergency-stop INSTRUMENT_ID [--yes]` | GET /instruments、/{id}/status、/whitelist、POST /{id}/parse-result、POST /{id}/emergency-stop | 前 4 个 viewer+（只读）；emergency-stop 登录即可（唯一写命令例外：TTY 一次确认、无 TTY 须 `--yes`，急停后需 maintainer/admin 人工复核） |
 | `update` | `status` / `run [--no-wait] [--timeout N]` | GET /admin/system/version、POST /admin/system/update、GET /update/stream/{id}（SSE） | 全部限 admin |
 
 **刻意不做的**（后端有端点但不进 CLI）：issues delete（后端无此端点）、alerts report /
 ask execute / agent tasks（SERVICE_TOKEN 或 agent 角色专用内部通道）、translations
-（低频且权限模型复杂）、instruments **写命令**（commands/leases/approvals/gascell/piezo——
-仪器安全链路租约+审批+白名单分级在 Web 有完整 UX 支撑，CLI 略过审批链容易误操作；
-emergency-stop 也暂不进 CLI）。
+（低频且权限模型复杂）、instruments **常规写命令**（commands/leases/approvals/gascell/piezo——
+仪器安全链路租约+审批+白名单分级在 Web 有完整 UX 支撑，CLI 略过审批链容易误操作）。
+唯一例外 emergency-stop：失败方向安全（只下发白名单安全停序列并锁定仪器），带 TTY
+确认且不注册 MCP 工具；其余写入口维持排除。
 
 ## 常用链路示例
 

@@ -27,6 +27,7 @@ const (
 	PermManageExperience Permission = "manage_experience"
 	PermManageMembers    Permission = "manage_members"
 	PermManageProject    Permission = "manage_project"
+	PermReadTeamReports  Permission = "read_team_reports"
 )
 
 var rolePermissions = map[string][]Permission{
@@ -53,6 +54,7 @@ var rolePermissions = map[string][]Permission{
 		PermManageExperience,
 		PermManageMembers,
 		PermManageProject,
+		PermReadTeamReports,
 	},
 	"owner": {
 		PermRead,
@@ -66,7 +68,14 @@ var rolePermissions = map[string][]Permission{
 		PermManageExperience,
 		PermManageMembers,
 		PermManageProject,
+		PermReadTeamReports,
 	},
+}
+
+func IsActiveProjectMember(db *sql.DB, projectID, userID string) (bool, error) {
+	var exists bool
+	err := db.QueryRow(`SELECT EXISTS(SELECT 1 FROM project_members WHERE project_id=$1 AND user_id=$2 AND status='active')`, projectID, userID).Scan(&exists)
+	return exists, err
 }
 
 func HasPermission(db *sql.DB, projectID, userID string, perm Permission) (bool, error) {
@@ -164,7 +173,45 @@ func IsProjectAdmin(ctx context.Context) bool {
 // ProjectSummary 是权限过滤后的项目最小视图，用于服务端注入 AI 解析上下文。
 type ProjectSummary struct {
 	ID   string `json:"id"`
+	Code string `json:"code,omitempty"`
 	Name string `json:"name"`
+}
+
+// ListAllProjectsWithPermission returns every project the user can still read,
+// including completed and archived projects. Active membership is still required.
+func ListAllProjectsWithPermission(db *sql.DB, userID string, perm Permission) ([]ProjectSummary, error) {
+	var userRole string
+	if err := db.QueryRow(`SELECT role FROM users WHERE id = $1`, userID).Scan(&userRole); err != nil {
+		if err == sql.ErrNoRows {
+			return []ProjectSummary{}, nil
+		}
+		return nil, err
+	}
+	query := `SELECT p.id, p.code, p.name, pm.role
+		 FROM project_members pm JOIN projects p ON p.id = pm.project_id
+		 WHERE pm.user_id = $1 AND pm.status = 'active' ORDER BY p.name`
+	args := []any{userID}
+	if userRole == "admin" {
+		query = `SELECT p.id, p.code, p.name, 'owner' FROM projects p ORDER BY p.name`
+		args = nil
+	}
+	rows, err := db.Query(query, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := []ProjectSummary{}
+	for rows.Next() {
+		var p ProjectSummary
+		var role string
+		if err := rows.Scan(&p.ID, &p.Code, &p.Name, &role); err != nil {
+			return nil, err
+		}
+		if userRole == "admin" || roleHasPermission(role, perm) {
+			out = append(out, p)
+		}
+	}
+	return out, rows.Err()
 }
 
 // ListProjectsWithPermission 返回用户拥有指定权限的 active 项目。

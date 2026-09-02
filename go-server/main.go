@@ -411,6 +411,8 @@ func main() {
 			r.Get("/members", projectsHandler.ListMembers)
 			r.Get("/issues", issuesHandler.List)
 			r.Get("/logs", logsHandler.ListLogs)
+			r.With(mw.RequireProjectPermission(db, mw.PermReadTeamReports)).Get("/daily-reports", logsHandler.ListTeamReports)
+			r.With(mw.RequireProjectPermission(db, mw.PermReadTeamReports)).Get("/daily-reports/{report_id}", logsHandler.GetTeamReport)
 			r.Get("/experiment-runs", runsHandler.List)
 			r.Post("/experiment-runs", runsHandler.Create)
 			r.Get("/assembly", assemblyHandler.List)
@@ -540,8 +542,10 @@ func main() {
 		r.Use(mw.AgentContext(db))
 		r.Use(mw.Audit(db))
 		r.Use(mw.RequireIdempotencyKey(db))
+		r.Get("/mine", logsHandler.ListMine)
 		r.Route("/{id}", func(r chi.Router) {
 			r.Get("/", logsHandler.GetLog)
+			r.Get("/daily-reports", logsHandler.GetReportsByLog)
 			r.Patch("/", logsHandler.UpdateLog)
 			r.Post("/translations", logsHandler.Translation)
 			r.Patch("/translations", logsHandler.Translation)
@@ -552,6 +556,7 @@ func main() {
 		r.Use(mw.AgentContext(db))
 		r.Use(mw.Audit(db))
 		r.Use(mw.RequireIdempotencyKey(db))
+		r.Get("/", issuesHandler.ListByLog)
 		r.Route("/{id}", func(r chi.Router) {
 			r.Get("/", issuesHandler.GetByID)
 			r.Patch("/", issuesHandler.Update)

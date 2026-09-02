@@ -8,7 +8,12 @@ import { ApiError } from '@/api/client'
 // LogDetailView 页面测试（log-view-optimization 批）：详情渲染 + 附件区查询 + 404/网络错误分流。
 
 vi.mock('@/api/logs', () => ({
-  getLog: vi.fn()
+  getLog: vi.fn(),
+  listReportsByLog: vi.fn().mockResolvedValue([])
+}))
+
+vi.mock('@/api/issues', () => ({
+  listIssuesByLog: vi.fn().mockResolvedValue({ items: [], total: 0, page: 1 })
 }))
 
 vi.mock('@/api/attachments', () => ({

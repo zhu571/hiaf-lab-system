@@ -11,6 +11,7 @@ export type Project = {
   member_count?: number
   open_issue_count?: number
   log_count?: number
+	current_user_role?: string
   tags?: string[]
 }
 

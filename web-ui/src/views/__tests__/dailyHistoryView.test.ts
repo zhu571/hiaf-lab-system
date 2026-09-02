@@ -2,12 +2,16 @@ import { describe, it, expect, vi, afterEach } from 'vitest'
 import { flushPromises, mount } from '@vue/test-utils'
 import DailyHistoryView from '@/views/DailyHistoryView.vue'
 import { createTestI18n } from '@/test-utils/setup'
+import { createPinia } from 'pinia'
 
 // DailyHistoryView 页面测试（测试方案 §3.2 🟢 smoke）：挂载 + 列表渲染 + 空态。
 
 vi.mock('@/api/logs', () => ({
-  listReports: vi.fn()
+	listReports: vi.fn(),
+	listTeamReports: vi.fn()
 }))
+
+vi.mock('@/api/projects', () => ({ listProjects: vi.fn().mockResolvedValue([]) }))
 
 vi.mock('vue-router', () => ({
   useRouter: () => ({ push: vi.fn() })
@@ -33,7 +37,7 @@ describe('DailyHistoryView 挂载冒烟', () => {
       page: 1
     })
     const wrapper = mount(DailyHistoryView, {
-      global: { plugins: [createTestI18n()], stubs: { ElSelect: true, ElDatePicker: true } }
+			global: { plugins: [createTestI18n(), createPinia()], stubs: { ElSelect: true, ElDatePicker: true } }
     })
     await flushPromises()
     expect(listReports).toHaveBeenCalled()
@@ -42,7 +46,7 @@ describe('DailyHistoryView 挂载冒烟', () => {
 
     vi.mocked(listReports).mockResolvedValueOnce({ items: [], total: 0, page: 1 })
     const emptyWrapper = mount(DailyHistoryView, {
-      global: { plugins: [createTestI18n()], stubs: { ElSelect: true, ElDatePicker: true } }
+			global: { plugins: [createTestI18n(), createPinia()], stubs: { ElSelect: true, ElDatePicker: true } }
     })
     await flushPromises()
     expect(emptyWrapper.find('.el-empty__description').text()).toBe('暂无日报记录')

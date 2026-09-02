@@ -476,7 +476,15 @@ func (h *Handler) EmergencyStop(w http.ResponseWriter, r *http.Request) {
 		common.WriteError(w, r, http.StatusNotFound, "instrument_not_found", "仪器不存在", nil)
 		return
 	}
+	// previous_state / flow_id 必须在 EmergencyStop() 改写 worker 状态并清空
+	// session 前取值；急停尝试（含 503 失败）统一记语义化审计，不记录连接信息。
 	owner := worker.SessionOwner()
+	detail := map[string]any{"instrument_id": id, "previous_state": worker.State()}
+	if owner != "" {
+		detail["flow_id"] = owner
+	}
+	middleware.SetAuditAction(r.Context(), "instrument.emergency_stop")
+	middleware.SetAuditDetail(r.Context(), detail)
 	if err := worker.EmergencyStop(); err != nil {
 		common.WriteError(w, r, http.StatusServiceUnavailable, "instrument_unavailable", err.Error(), nil)
 		return

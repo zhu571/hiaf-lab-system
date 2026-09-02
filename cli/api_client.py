@@ -71,6 +71,7 @@ class LabctlAPI:
         self.access_token = access_token
         self.refresh_token = refresh_token
         self.csrf_token = csrf_token
+        self.last_request_id = ""
         self._restore_csrf_cookie()
 
     @classmethod
@@ -240,8 +241,7 @@ class LabctlAPI:
             return "服务暂不可用（503），请稍后再试"
         return f"服务端错误（HTTP {status}），请稍后再试"
 
-    @staticmethod
-    def _parse_response(response):
+    def _parse_response(self, response):
         try:
             payload = response.json()
         except ValueError:
@@ -257,4 +257,7 @@ class LabctlAPI:
                 request_id=request_id,
                 details=err.get("details"),  # 如 test-data batch 422 的行级 errors[]
             )
+        # 成功路径默认只返回 data；request_id 经实例属性透出，供急停等
+        # 高危写命令在输出中回显（错误路径已随 LabctlError 抛出）。
+        self.last_request_id = request_id
         return payload.get("data")

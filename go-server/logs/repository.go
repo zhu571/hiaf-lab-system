@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"strings"
 	"time"
+
+	"github.com/lib/pq"
 )
 
 type Repository struct {
@@ -96,9 +98,10 @@ func (r *Repository) ListReports(params ReportListParams) ([]DailyReport, int, e
 	args = append(args, params.PerPage, (params.Page-1)*params.PerPage)
 	rows, err := r.db.Query(
 		`SELECT dr.id, dr.report_date, dr.author_id, u.display_name, dr.raw_text, dr.summary,
-		        dr.content_status, dr.quality_status, dr.created_at, dr.updated_at
+		        dr.content_status, dr.quality_status, dr.created_at, dr.updated_at, COALESCE(lc.log_count,0)
 		 FROM daily_reports dr
-		 JOIN users u ON u.id = dr.author_id `+where+fmt.Sprintf(` ORDER BY dr.report_date DESC LIMIT $%d OFFSET $%d`, len(args)-1, len(args)),
+		 JOIN users u ON u.id = dr.author_id
+		 LEFT JOIN (SELECT daily_report_id, COUNT(*) log_count FROM daily_report_log_links GROUP BY daily_report_id) lc ON lc.daily_report_id=dr.id `+where+fmt.Sprintf(` ORDER BY dr.report_date DESC LIMIT $%d OFFSET $%d`, len(args)-1, len(args)),
 		args...,
 	)
 	if err != nil {
@@ -112,7 +115,7 @@ func (r *Repository) ListReports(params ReportListParams) ([]DailyReport, int, e
 		var reportDate time.Time
 		if err := rows.Scan(
 			&item.ID, &reportDate, &item.AuthorID, &item.AuthorName, &item.RawText, &item.Summary,
-			&item.ContentStatus, &item.QualityStatus, &item.CreatedAt, &item.UpdatedAt,
+			&item.ContentStatus, &item.QualityStatus, &item.CreatedAt, &item.UpdatedAt, &item.LogCount,
 		); err != nil {
 			return nil, 0, fmt.Errorf("scan daily report: %w", err)
 		}
@@ -123,6 +126,66 @@ func (r *Repository) ListReports(params ReportListParams) ([]DailyReport, int, e
 		return nil, 0, fmt.Errorf("iterate daily reports: %w", err)
 	}
 	return items, total, nil
+}
+
+func (r *Repository) ListTeamReports(projectID string, params TeamReportListParams) ([]TeamDailyReportProjection, int, error) {
+	params.Page, params.PerPage = normalizePage(params.Page, params.PerPage)
+	where, args := buildTeamReportWhere(projectID, params)
+	from := ` FROM daily_reports dr JOIN users u ON u.id=dr.author_id
+		 JOIN daily_report_log_links link ON link.daily_report_id=dr.id
+		 JOIN logs l ON l.id=link.log_id `
+	var total int
+	if err := r.db.QueryRow(`SELECT COUNT(DISTINCT dr.id)`+from+where, args...).Scan(&total); err != nil {
+		return nil, 0, fmt.Errorf("count team daily reports: %w", err)
+	}
+	args = append(args, params.PerPage, (params.Page-1)*params.PerPage)
+	rows, err := r.db.Query(`SELECT dr.id, dr.report_date, dr.author_id, u.display_name,
+		dr.content_status, dr.quality_status, COUNT(DISTINCT l.id)`+from+where+
+		fmt.Sprintf(` GROUP BY dr.id, u.display_name ORDER BY dr.report_date DESC, dr.id DESC LIMIT $%d OFFSET $%d`, len(args)-1, len(args)), args...)
+	if err != nil {
+		return nil, 0, fmt.Errorf("list team daily reports: %w", err)
+	}
+	defer rows.Close()
+	items := []TeamDailyReportProjection{}
+	for rows.Next() {
+		var item TeamDailyReportProjection
+		var reportDate time.Time
+		if err := rows.Scan(&item.ID, &reportDate, &item.AuthorID, &item.AuthorName, &item.ContentStatus, &item.QualityStatus, &item.ProjectLogCount); err != nil {
+			return nil, 0, fmt.Errorf("scan team daily report: %w", err)
+		}
+		item.ReportDate = reportDate.Format(time.DateOnly)
+		items = append(items, item)
+	}
+	return items, total, rows.Err()
+}
+
+func (r *Repository) GetTeamReport(projectID, reportID string) (*TeamDailyReportProjection, error) {
+	var item TeamDailyReportProjection
+	var reportDate time.Time
+	err := r.db.QueryRow(`SELECT dr.id, dr.report_date, dr.author_id, u.display_name,
+		dr.content_status, dr.quality_status, COUNT(DISTINCT l.id)
+		FROM daily_reports dr JOIN users u ON u.id=dr.author_id
+		JOIN daily_report_log_links link ON link.daily_report_id=dr.id
+		JOIN logs l ON l.id=link.log_id AND l.project_id=$1
+		WHERE dr.id=$2 GROUP BY dr.id, u.display_name`, projectID, reportID).
+		Scan(&item.ID, &reportDate, &item.AuthorID, &item.AuthorName, &item.ContentStatus, &item.QualityStatus, &item.ProjectLogCount)
+	if err == sql.ErrNoRows {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("get team daily report: %w", err)
+	}
+	item.ReportDate = reportDate.Format(time.DateOnly)
+	rows, err := r.db.Query(`SELECT l.id, l.project_id, l.author_id, l.occurred_at, l.category, l.content,
+		l.raw_snippet, l.source, l.content_status, l.created_at, l.updated_at
+		FROM logs l JOIN daily_report_log_links link ON link.log_id=l.id
+		WHERE link.daily_report_id=$1 AND l.project_id=$2 ORDER BY l.occurred_at ASC`, reportID, projectID)
+	if err != nil {
+		return nil, fmt.Errorf("get team daily report logs: %w", err)
+	}
+	defer rows.Close()
+	item.Logs, err = scanLogs(rows)
+	return &item, err
 }
 
 // WeeklyReports 按日期升序返回 [from, to] 周范围内的日报条目（AI-1 周报取数，
@@ -184,6 +247,24 @@ func buildReportWhere(params ReportListParams) (string, []any) {
 	}
 	if len(parts) == 0 {
 		return "", args
+	}
+	return "WHERE " + strings.Join(parts, " AND "), args
+}
+
+func buildTeamReportWhere(projectID string, params TeamReportListParams) (string, []any) {
+	args := []any{projectID}
+	parts := []string{"l.project_id = $1"}
+	for _, filter := range []struct{ value, column string }{{params.AuthorID, "dr.author_id"}, {params.Status, "dr.content_status"}} {
+		if strings.TrimSpace(filter.value) != "" {
+			args = append(args, strings.TrimSpace(filter.value))
+			parts = append(parts, fmt.Sprintf("%s::text = $%d", filter.column, len(args)))
+		}
+	}
+	for _, filter := range []struct{ value, op string }{{params.Date, "="}, {params.DateFrom, ">="}, {params.DateTo, "<="}} {
+		if filter.value != "" {
+			args = append(args, filter.value)
+			parts = append(parts, fmt.Sprintf("dr.report_date %s $%d::date", filter.op, len(args)))
+		}
 	}
 	return "WHERE " + strings.Join(parts, " AND "), args
 }
@@ -268,10 +349,10 @@ func (r *Repository) CreateLog(projectID, authorID string, req CreateLogRequest,
 
 func (r *Repository) GetByID(id string) (*Log, error) {
 	var out Log
-	err := scanLog(r.db.QueryRow(
-		`SELECT id, project_id, author_id, occurred_at, category, content, raw_snippet, source, content_status, created_at, updated_at
-		 FROM logs
-		 WHERE id = $1`,
+	err := scanLogWithAuthor(r.db.QueryRow(
+		`SELECT l.id, l.project_id, l.author_id, l.occurred_at, l.category, l.content, l.raw_snippet, l.source, l.content_status, l.created_at, l.updated_at, u.display_name
+		 FROM logs l JOIN users u ON u.id=l.author_id
+		 WHERE l.id = $1`,
 		id,
 	), &out)
 	if err != nil {
@@ -300,8 +381,8 @@ func (r *Repository) List(projectID string, params LogListParams) ([]Log, int, e
 
 	args = append(args, params.PerPage, (params.Page-1)*params.PerPage)
 	rows, err := r.db.Query(
-		`SELECT id, project_id, author_id, occurred_at, category, content, raw_snippet, source, content_status, created_at, updated_at
-		 FROM logs `+where+fmt.Sprintf(` ORDER BY occurred_at DESC LIMIT $%d OFFSET $%d`, len(args)-1, len(args)),
+		`SELECT l.id, l.project_id, l.author_id, l.occurred_at, l.category, l.content, l.raw_snippet, l.source, l.content_status, l.created_at, l.updated_at, u.display_name
+		 FROM logs l JOIN users u ON u.id=l.author_id `+where+fmt.Sprintf(` ORDER BY l.occurred_at DESC LIMIT $%d OFFSET $%d`, len(args)-1, len(args)),
 		args...,
 	)
 	if err != nil {
@@ -309,11 +390,33 @@ func (r *Repository) List(projectID string, params LogListParams) ([]Log, int, e
 	}
 	defer rows.Close()
 
-	items, err := scanLogs(rows)
+	items, err := scanLogsWithAuthor(rows)
 	if err != nil {
 		return nil, 0, err
 	}
 	return items, total, nil
+}
+
+func (r *Repository) ListMine(authorID string, projectIDs []string, params LogListParams) ([]Log, int, error) {
+	params.Page, params.PerPage = normalizePage(params.Page, params.PerPage)
+	if params.Status == "" {
+		params.Status = LogStatusConfirmed
+	}
+	where, args := buildMineLogWhere(authorID, projectIDs, params)
+	var total int
+	if err := r.db.QueryRow(`SELECT COUNT(*) FROM logs `+where, args...).Scan(&total); err != nil {
+		return nil, 0, fmt.Errorf("count my logs: %w", err)
+	}
+	args = append(args, params.PerPage, (params.Page-1)*params.PerPage)
+	rows, err := r.db.Query(
+		`SELECT l.id, l.project_id, l.author_id, l.occurred_at, l.category, l.content, l.raw_snippet, l.source, l.content_status, l.created_at, l.updated_at, u.display_name
+		 FROM logs l JOIN users u ON u.id=l.author_id `+where+fmt.Sprintf(` ORDER BY l.occurred_at DESC, l.id DESC LIMIT $%d OFFSET $%d`, len(args)-1, len(args)), args...)
+	if err != nil {
+		return nil, 0, fmt.Errorf("list my logs: %w", err)
+	}
+	defer rows.Close()
+	items, err := scanLogsWithAuthor(rows)
+	return items, total, err
 }
 
 func (r *Repository) UpdateLog(id string, req UpdateLogRequest, occurredAt *time.Time) (*Log, error) {
@@ -470,6 +573,32 @@ func buildLogWhere(projectID string, params LogListParams) (string, []any) {
 	return "WHERE " + strings.Join(parts, " AND "), args
 }
 
+func buildMineLogWhere(authorID string, projectIDs []string, params LogListParams) (string, []any) {
+	args := []any{authorID, pq.Array(projectIDs)}
+	parts := []string{"author_id = $1", "project_id = ANY($2::uuid[])"}
+	if params.Category != "" {
+		args = append(args, params.Category)
+		parts = append(parts, fmt.Sprintf("category = $%d", len(args)))
+	}
+	if strings.TrimSpace(params.Keyword) != "" {
+		args = append(args, "%"+strings.TrimSpace(params.Keyword)+"%")
+		parts = append(parts, fmt.Sprintf("content ILIKE $%d", len(args)))
+	}
+	if params.DateFrom != "" {
+		args = append(args, params.DateFrom)
+		parts = append(parts, fmt.Sprintf("occurred_at >= $%d::timestamptz", len(args)))
+	}
+	if params.DateTo != "" {
+		args = append(args, params.DateTo)
+		parts = append(parts, fmt.Sprintf("occurred_at <= $%d::timestamptz", len(args)))
+	}
+	if params.Status != "" {
+		args = append(args, params.Status)
+		parts = append(parts, fmt.Sprintf("content_status = $%d", len(args)))
+	}
+	return "WHERE " + strings.Join(parts, " AND "), args
+}
+
 type rowScanner interface {
 	Scan(dest ...any) error
 }
@@ -521,6 +650,26 @@ func scanLogs(rows *sql.Rows) ([]Log, error) {
 		return nil, fmt.Errorf("iterate logs: %w", err)
 	}
 	return out, nil
+}
+
+func scanLogWithAuthor(row rowScanner, item *Log) error {
+	return row.Scan(
+		&item.ID, &item.ProjectID, &item.AuthorID, &item.OccurredAt, &item.Category,
+		&item.Content, &item.RawSnippet, &item.Source, &item.ContentStatus, &item.CreatedAt, &item.UpdatedAt,
+		&item.AuthorName,
+	)
+}
+
+func scanLogsWithAuthor(rows *sql.Rows) ([]Log, error) {
+	var out []Log
+	for rows.Next() {
+		var item Log
+		if err := scanLogWithAuthor(rows, &item); err != nil {
+			return nil, fmt.Errorf("scan log with author: %w", err)
+		}
+		out = append(out, item)
+	}
+	return out, rows.Err()
 }
 
 func normalizePage(page, perPage int) (int, int) {

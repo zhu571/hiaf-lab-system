@@ -75,6 +75,14 @@ ACL 记录：
 - 报告继承项目读权限，但导出需要 `report.export` 或项目 `export`。
 - 显式 deny 优先于 allow，用于临时冻结用户或敏感对象。
 
+### 2.4.1 团队日报项目投影（2026-09-02）
+
+- 新动作 `read_team_reports`（代码 `PermReadTeamReports`）只授项目 `maintainer`、`owner`；系统 `admin` 按既有规则直通。
+- `member`、`viewer`、非该项目的 system maintainer，以及 suspended/移除成员显式 deny；个人日报端点权限不变。
+- 权限只继承到该项目的日报投影：列表仅含元数据与 `project_log_count`，详情仅含关联到该项目的日志；禁止返回个人日报 `raw_text`、全局 `summary` 或其他项目日志。
+- `author_id` 过滤仅接受项目 active 成员。历史成员已关联的项目日志投影仍可在不指定 author 时出现，但不会扩大个人正文权限。
+- 两个敏感 GET 必须审计：`daily_report.team_list` 只记 project_id/author filter，`daily_report.team_view` 只记 project_id/report_id；均不得记录日报或日志正文。沿用生产审计不少于 2 年的保留规则。
+
 ### 2.5 Agent 权限边界
 
 Agent 账号本身没有业务对象所有权。每次动作必须带：

@@ -136,6 +136,28 @@ func (r *Repository) List(projectID string, params IssueListParams) ([]Issue, in
 	return items, total, nil
 }
 
+func (r *Repository) ListByLog(logID string, projectIDs []string, params IssueListParams) ([]Issue, int, error) {
+	params.Page, params.PerPage = normalizePage(params.Page, params.PerPage)
+	where := `FROM issues i JOIN issue_log_links link ON link.issue_id = i.id
+		 WHERE link.log_id = $1 AND i.project_id = ANY($2::uuid[])`
+	args := []any{logID, pq.Array(projectIDs)}
+	var total int
+	if err := r.db.QueryRow(`SELECT COUNT(*) `+where, args...).Scan(&total); err != nil {
+		return nil, 0, fmt.Errorf("count issues by log: %w", err)
+	}
+	args = append(args, params.PerPage, (params.Page-1)*params.PerPage)
+	rows, err := r.db.Query(`SELECT i.id, i.project_id, i.title, i.description, i.status, i.severity,
+		i.author_id, i.assignee_id, i.ai_generated, i.agent_task_id, i.candidate_id, i.run_id,
+		i.report_date, i.occurred_at, i.resolved_at, i.created_at, i.updated_at `+where+
+		` ORDER BY i.updated_at DESC, i.id DESC LIMIT $3 OFFSET $4`, args...)
+	if err != nil {
+		return nil, 0, fmt.Errorf("list issues by log: %w", err)
+	}
+	defer rows.Close()
+	items, err := scanIssues(rows)
+	return items, total, err
+}
+
 func (r *Repository) Update(id string, req UpdateIssueRequest) (*Issue, error) {
 	var out Issue
 	err := scanIssue(r.db.QueryRow(

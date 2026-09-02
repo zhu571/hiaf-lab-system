@@ -92,9 +92,10 @@ type UpdateMemberRequest struct {
 
 type ProjectWithStats struct {
 	Project
-	MemberCount    int `json:"member_count"`
-	OpenIssueCount int `json:"open_issue_count"`
-	LogCount       int `json:"log_count"`
+	CurrentUserRole string `json:"current_user_role,omitempty"`
+	MemberCount     int    `json:"member_count"`
+	OpenIssueCount  int    `json:"open_issue_count"`
+	LogCount        int    `json:"log_count"`
 }
 
 type StatusTransitionRequest struct {
