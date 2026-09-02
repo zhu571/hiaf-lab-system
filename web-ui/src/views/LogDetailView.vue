@@ -19,7 +19,7 @@
             </el-descriptions-item>
             <el-descriptions-item :label="t('logDetail.occurredAt')">{{ formatDateTime(log.occurred_at) }}</el-descriptions-item>
             <el-descriptions-item :label="t('logDetail.category')">{{ categoryLabel(log.category) }}</el-descriptions-item>
-            <el-descriptions-item :label="t('logDetail.author')">{{ log.author_id }}</el-descriptions-item>
+							<el-descriptions-item :label="t('logDetail.author')">{{ log.author_name || log.author_id }}</el-descriptions-item>
             <el-descriptions-item :label="t('logDetail.source')">{{ sourceLabel(log.source) }}</el-descriptions-item>
             <el-descriptions-item :label="t('logDetail.status')"><StatusBadge domain="logStatus" :value="log.content_status" /></el-descriptions-item>
             <el-descriptions-item :label="t('logDetail.translationStatus')"><StatusBadge domain="translation" :value="contentLocalized.status" /></el-descriptions-item>
@@ -36,6 +36,31 @@
               <p class="raw-snippet">{{ log.raw_snippet }}</p>
             </el-collapse-item>
           </el-collapse>
+        </section>
+        <section class="panel">
+          <h3>{{ t('logDetail.relatedIssues') }}</h3>
+          <StateBlock :loading="issuesLoading" :error="issuesError" :error-text="t('logDetail.relatedIssuesFailed')" @retry="loadIssues">
+            <el-empty v-if="!relatedIssues?.length" :description="t('logDetail.noRelatedIssues')" />
+            <el-space v-else direction="vertical" alignment="start">
+              <el-button v-for="issue in relatedIssues" :key="issue.id" link type="primary" @click="openIssue(issue)">
+                {{ issue.title }} · {{ issue.severity }} · {{ issue.status }}
+              </el-button>
+            </el-space>
+          </StateBlock>
+        </section>
+        <section class="panel">
+          <h3>{{ t('logDetail.sourceReports') }}</h3>
+          <StateBlock :loading="reportsLoading" :error="reportsError" :error-text="t('logDetail.sourceReportsFailed')" @retry="loadReports">
+            <el-empty v-if="!sourceReports?.length" :description="t('logDetail.noSourceReports')" />
+            <div v-else class="report-refs">
+              <div v-for="report in sourceReports" :key="report.id">
+                <el-button v-if="report.can_read_detail" link type="primary" @click="router.push(`/daily-reports/${report.id}`)">
+                  {{ report.report_date }} · {{ report.author_name || report.author_id }}
+                </el-button>
+                <span v-else>{{ report.report_date }} · {{ report.author_name || report.author_id }} — {{ t('logDetail.projectProjectionOnly') }}</span>
+              </div>
+            </div>
+          </StateBlock>
         </section>
         <section class="panel">
           <h3>{{ t('logDetail.attachments') }}</h3>
@@ -61,7 +86,8 @@ import { useMobile } from '@/composables/useMobile'
 import { formatDateTime } from '@/utils/datetime'
 import { logCategoryKey, logSourceKey } from '@/utils/logMeta'
 import { resolveLocalizedText } from '@/utils/contentLanguage'
-import { getLog, type LogItem } from '@/api/logs'
+import { getLog, listReportsByLog, type DailyReportRef, type LogItem } from '@/api/logs'
+import { listIssuesByLog, type Issue } from '@/api/issues'
 import { useProjectStore } from '@/stores/project'
 
 const route = useRoute()
@@ -86,6 +112,13 @@ const { data: log, loading, error, run } = useAsyncData<LogItem>(
 )
 
 const notFound = computed(() => error.value?.kind === 'not_found')
+
+const { data: relatedIssues, loading: issuesLoading, error: issuesError, run: loadIssues } = useAsyncData<Issue[]>(
+  async () => (await listIssuesByLog(logId.value)).items ?? [], { watch: [logId] }
+)
+const { data: sourceReports, loading: reportsLoading, error: reportsError, run: loadReports } = useAsyncData<DailyReportRef[]>(
+  () => listReportsByLog(logId.value), { watch: [logId] }
+)
 
 const projectName = computed(() => {
   const id = log.value?.project_id || ''
@@ -115,6 +148,10 @@ function goBack() {
 function goProject() {
   if (log.value?.project_id) router.push(`/projects/${log.value.project_id}/logs`)
 }
+
+function openIssue(issue: Issue) {
+  router.push(`/projects/${issue.project_id}/issues?issue_id=${encodeURIComponent(issue.id)}`)
+}
 </script>
 
 <style scoped>
@@ -142,5 +179,10 @@ function goProject() {
   line-height: 1.6;
   overflow-wrap: anywhere;
   white-space: pre-wrap;
+}
+
+.report-refs {
+  display: grid;
+  gap: 8px;
 }
 </style>

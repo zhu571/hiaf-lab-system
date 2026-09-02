@@ -163,6 +163,14 @@ func (f logsAccess) ListProjectsWithPermission(userID string, perm middleware.Pe
 	return []middleware.ProjectSummary{{ID: logsDBProject, Name: "DB 项目"}}, nil
 }
 
+func (f logsAccess) ListAllProjectsWithPermission(userID string, perm middleware.Permission) ([]middleware.ProjectSummary, error) {
+	return f.ListProjectsWithPermission(userID, perm)
+}
+
+func (f logsAccess) IsActiveProjectMember(projectID, userID string) (bool, error) {
+	return true, nil
+}
+
 func logsSvc(db *sql.DB, access ProjectAccessChecker) *Service {
 	return NewService(NewRepository(db), "Asia/Shanghai", access)
 }
@@ -577,6 +585,12 @@ func TestDBListReports(t *testing.T) {
 	if total < 1 || list[0].ID != logsDBReportA {
 		t.Fatalf("list reports: %+v total=%d", list, total)
 	}
+	// E2：列表返回关联日志计数（种子 A 报告链接日志 A，共 1 条；无关联为 0）
+	for _, report := range list {
+		if report.ID == logsDBReportA && report.LogCount != 1 {
+			t.Fatalf("report A log_count = %d, want 1", report.LogCount)
+		}
+	}
 	// status / date / keyword 过滤
 	byStatus, total, err := svc.ListReports(ReportListParams{AuthorID: logsDBUserA, Status: ReportStatusDraft})
 	if err != nil || total < 1 {
@@ -633,6 +647,10 @@ func TestDBListLogsAndGetLog(t *testing.T) {
 	if result.Total != 1 || result.Items[0].ID != logsDBLogB {
 		t.Fatalf("default confirmed list: %+v", result)
 	}
+	// E1：列表返回 author 展示名（种子 users.display_name = Logs DB Test）
+	if result.Items[0].AuthorName != "Logs DB Test" {
+		t.Fatalf("log B author_name = %q, want Logs DB Test", result.Items[0].AuthorName)
+	}
 	// status=draft → 日志 A（测试期间可能有多条临时日志，断言包含即可）
 	draftResult, err := svc.ListLogs(logsDBProject, logsDBUserA, "member", LogListParams{Status: LogStatusDraft})
 	if err != nil {
@@ -673,6 +691,9 @@ func TestDBListLogsAndGetLog(t *testing.T) {
 	}
 	if item.ID != logsDBLogA {
 		t.Fatalf("get log: %+v", item)
+	}
+	if item.AuthorName != "Logs DB Test" {
+		t.Fatalf("get log author_name = %q, want Logs DB Test", item.AuthorName)
 	}
 }
 

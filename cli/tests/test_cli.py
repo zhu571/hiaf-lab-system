@@ -333,6 +333,25 @@ class TestCliSubcommands(BaseCliTest):
         self.assertEqual(paths[-1],
                          "/api/v1/projects/00000000-0000-0000-0000-000000000001/logs")
 
+    def test_my_logs_filters_and_human_project_code(self):
+        captured = {}
+
+        def handler(request):
+            captured["path"] = request.url.path
+            captured["params"] = dict(request.url.params)
+            return ok({"items": [{"id": "12345678-aaaa", "project_code": "HIAF",
+                                   "occurred_at": "2026-08-30T10:20:30+08:00",
+                                   "category": "cryo", "content_status": "confirmed",
+                                   "content": "稳定运行"}], "total": 1, "page": 1})
+
+        result = self.invoke(["--human", "my-logs", "--keyword", "稳定",
+                              "--date", "2026-08-30"], api=self._api(handler))
+        self.assertEqual(result.exit_code, 0, result.output)
+        self.assertEqual(captured["path"], "/api/v1/logs/mine")
+        self.assertEqual(captured["params"]["keyword"], "稳定")
+        self.assertEqual(captured["params"]["date_from"], "2026-08-30T00:00:00+08:00")
+        self.assertIn("HIAF | 12345678", result.output)
+
     def test_logs_get_human_sections(self):
         api = self._api(lambda request: ok({
             "id": "log_1", "project_id": "prj_1", "author_id": "usr_1",
@@ -882,6 +901,62 @@ class TestCliP2(BaseCliTest):
             {"instrument_id": "keysight_33210a", "state": "online", "rate_limited": False}))
         result2 = self.invoke(["instruments", "status", "keysight_33210a"], api=api2)
         self.assertEqual(result2.exit_code, 0, result2.output)
+
+    def test_instruments_emergency_stop_with_yes(self):
+        captured = {}
+
+        def handler(request):
+            captured["method"] = request.method
+            captured["path"] = request.url.path
+            captured["idempotency_key"] = request.headers.get("Idempotency-Key")
+            if request.method == "GET":
+                return ok([{"id": "e5063a", "name": "E5063A 频谱仪", "state": "running"}])
+            return ok({"status": "emergency_stop_queued"})
+
+        result = self.invoke(["instruments", "emergency-stop", "e5063a", "--yes"],
+                             api=self._api(handler))
+        self.assertEqual(result.exit_code, 0, result.output)
+        self.assertEqual(captured["path"], "/api/v1/instruments/e5063a/emergency-stop")
+        self.assertTrue(captured["idempotency_key"])  # 写请求自动带幂等键
+        payload = json.loads(result.output)
+        self.assertEqual(payload["status"], "emergency_stop_queued")
+        self.assertEqual(payload["request_id"], "req_test_ok")
+
+    def test_instruments_emergency_stop_human_hint(self):
+        def handler(request):
+            if request.method == "GET":
+                return ok([{"id": "e5063a", "name": "E5063A 频谱仪", "state": "running"}])
+            return ok({"status": "emergency_stop_queued"}, request_id="req_stop_1")
+
+        result = self.invoke(["--human", "instruments", "emergency-stop", "e5063a", "--yes"],
+                             api=self._api(handler))
+        self.assertEqual(result.exit_code, 0, result.output)
+        self.assertIn("emergency_stop_queued", result.output)
+        self.assertIn("req_stop_1", result.output)
+        self.assertIn("人工复核", result.output)
+
+    def test_instruments_emergency_stop_requires_yes_without_tty(self):
+        posts = []
+
+        def handler(request):
+            if request.method == "POST":
+                posts.append(request.url.path)
+            return ok([{"id": "e5063a", "name": "E5063A 频谱仪", "state": "running"}])
+
+        result = self.invoke(["instruments", "emergency-stop", "e5063a"],
+                             api=self._api(handler))
+        self.assertNotEqual(result.exit_code, 0)  # CliRunner 无 TTY：必须显式 --yes
+        self.assertEqual(posts, [])  # 未发出急停 POST
+        self.assertIn("confirmation_required", result.output)
+
+    def test_instruments_emergency_stop_unknown_instrument(self):
+        def handler(request):
+            return ok([])
+
+        result = self.invoke(["instruments", "emergency-stop", "nope", "--yes"],
+                             api=self._api(handler))
+        self.assertNotEqual(result.exit_code, 0)
+        self.assertIn("instrument_not_found", result.output)
 
     def test_agent_candidates_flow(self):
         api = self._api(lambda request: ok(

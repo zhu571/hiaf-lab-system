@@ -12,9 +12,11 @@ import json
 import mimetypes
 import os
 import re
+import sys
 import uuid
 from urllib.parse import urlsplit
 
+import click
 import httpx
 
 from cli.api_client import LabctlError
@@ -759,7 +761,7 @@ def run_agent_candidates_reject(api, candidate_id, reason=""):
                        json={"reason": reason})
 
 
-# ---------------------------------------------------------------- P2: instruments 只读
+# ---------------------------------------------------------------- P2: instruments（只读 + emergency-stop 唯一写命令例外）
 def run_instruments_list(api):
     return api.request("GET", "/api/v1/instruments")
 
@@ -780,6 +782,36 @@ def run_instruments_parse_result(api, instrument_id, command, response):
     _require(response, "response")
     return api.request("POST", f"/api/v1/instruments/{instrument_id}/parse-result",
                        json={"command": command, "response": response})
+
+
+def run_instruments_emergency_stop(api, instrument_id, yes=False):
+    """紧急停止仪器（instruments 组唯一写命令，例外理由见 cli.py 组说明）。
+
+    只调后端既有 emergency-stop 端点（下发白名单安全停序列并锁定仪器），CLI
+    不实现自己的急停序列，也不做 lease/approval 前置——紧急入口不依赖正常
+    控制链。急停后仪器进入 locked_until_manual_check，需 maintainer/admin
+    人工复核恢复。不注册为 MCP 工具，Agent 不可经自然语言触发。
+    """
+    _require(instrument_id, "instrument_id")
+    instruments = api.request("GET", "/api/v1/instruments")
+    target = next((item for item in instruments if item.get("id") == instrument_id), None)
+    if target is None:
+        raise LabctlError(f"仪器不存在：{instrument_id}", code="instrument_not_found", status=404)
+    if not yes:
+        if not sys.stdin.isatty():
+            raise LabctlError("非交互环境（无 TTY）执行急停必须显式 --yes",
+                              code="confirmation_required")
+        click.echo(
+            f"仪器：{target.get('name') or instrument_id}（id={instrument_id}）\n"
+            f"当前 state：{target.get('state', '-')}\n"
+            "急停将立即中断当前任务并把仪器锁定为 locked_until_manual_check，"
+            "急停后需人工检查。",
+            err=True)
+        click.confirm("确认执行紧急停止？", abort=True, err=True)
+    data = api.request("POST", f"/api/v1/instruments/{instrument_id}/emergency-stop")
+    result = dict(data) if isinstance(data, dict) else {"data": data}
+    result["request_id"] = api.last_request_id
+    return result
 
 
 # ---------------------------------------------------------------- P2: auth 自助
@@ -895,10 +927,8 @@ def _resolve_project(api, value):
     raise LabctlError(f"未找到项目：{value}", code="bad_request")
 
 
-def run_logs_list(api, project_id, category=None, date_from=None, date_to=None, status=None,
-                  page=1, per_page=20, date_value=None, all_pages=False,
-                  resolve_project=False):
-    _require(project_id, "project_id")
+def _log_list_params(category=None, keyword=None, date_from=None, date_to=None, status=None,
+                     page=1, per_page=20, date_value=None):
     if page < 1 or not 1 <= per_page <= 100:
         raise LabctlError("page 须 >= 1，per_page 须为 1-100", code="bad_request")
     if status and status not in LOG_STATUSES:
@@ -914,17 +944,12 @@ def run_logs_list(api, project_id, category=None, date_from=None, date_to=None, 
             raise LabctlError(f"无效日期：{date_value}", code="bad_request") from exc
     else:
         date_from, date_to = _log_time(date_from), _log_time(date_to, end=True)
-    if resolve_project:
-        project_id = _resolve_project(api, project_id)
+    return _clean({"category": category, "keyword": keyword, "date_from": date_from,
+                   "date_to": date_to, "status": status, "page": page,
+                   "per_page": per_page})
 
-    def fetch(current_page):
-        return api.request("GET", f"/api/v1/projects/{project_id}/logs",
-                           params=_clean({"category": category, "date_from": date_from,
-                                          "date_to": date_to, "status": status,
-                                          "page": current_page, "per_page": per_page}))
 
-    if not all_pages:
-        return fetch(page)
+def _all_log_pages(fetch, per_page):
     items = []
     current_page = 1
     while True:
@@ -936,6 +961,38 @@ def run_logs_list(api, project_id, category=None, date_from=None, date_to=None, 
         if current_page * per_page >= total:
             return {"items": items, "total": total}
         current_page += 1
+
+
+def run_logs_list(api, project_id, category=None, date_from=None, date_to=None, status=None,
+                  page=1, per_page=20, date_value=None, all_pages=False,
+                  resolve_project=False):
+    _require(project_id, "project_id")
+    params = _log_list_params(category=category, date_from=date_from, date_to=date_to,
+                              status=status, page=page, per_page=per_page,
+                              date_value=date_value)
+    if resolve_project:
+        project_id = _resolve_project(api, project_id)
+
+    def fetch(current_page):
+        return api.request("GET", f"/api/v1/projects/{project_id}/logs",
+                           params={**params, "page": current_page})
+
+    if not all_pages:
+        return fetch(page)
+    return _all_log_pages(fetch, per_page)
+
+
+def run_my_logs(api, category=None, keyword=None, date_from=None, date_to=None, status=None,
+                page=1, per_page=20, date_value=None, all_pages=False):
+    params = _log_list_params(category=category, keyword=keyword, date_from=date_from,
+                              date_to=date_to, status=status, page=page,
+                              per_page=per_page, date_value=date_value)
+
+    def fetch(current_page):
+        return api.request("GET", "/api/v1/logs/mine",
+                           params={**params, "page": current_page})
+
+    return _all_log_pages(fetch, per_page) if all_pages else fetch(page)
 
 
 def run_logs_get(api, log_id):

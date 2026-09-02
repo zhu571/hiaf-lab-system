@@ -38,6 +38,7 @@ type DailyReport struct {
 	ReportDate    string               `json:"report_date"`
 	AuthorID      string               `json:"author_id"`
 	AuthorName    string               `json:"author_name,omitempty"`
+	LogCount      int                  `json:"log_count"`
 	RawText       string               `json:"raw_text"`
 	Summary       string               `json:"summary"`
 	ContentStatus string               `json:"content_status"`
@@ -48,10 +49,23 @@ type DailyReport struct {
 	Translations  translations.Sidecar `json:"translations,omitempty"`
 }
 
+type DailyReportRef struct {
+	ID            string `json:"id"`
+	ReportDate    string `json:"report_date"`
+	AuthorID      string `json:"author_id"`
+	AuthorName    string `json:"author_name,omitempty"`
+	ContentStatus string `json:"content_status"`
+	QualityStatus string `json:"quality_status"`
+	CanReadDetail bool   `json:"can_read_detail"`
+}
+
 type Log struct {
 	ID            string               `json:"id"`
 	ProjectID     string               `json:"project_id"`
+	ProjectCode   string               `json:"project_code,omitempty"`
+	ProjectName   string               `json:"project_name,omitempty"`
 	AuthorID      string               `json:"author_id"`
+	AuthorName    string               `json:"author_name,omitempty"`
 	OccurredAt    time.Time            `json:"occurred_at"`
 	Category      string               `json:"category"`
 	Content       string               `json:"content"`
@@ -141,6 +155,33 @@ type ReportListParams struct {
 	DateTo   string `json:"date_to,omitempty"`
 	Page     int    `json:"page"`
 	PerPage  int    `json:"per_page"`
+}
+
+type TeamReportListParams struct {
+	AuthorID string `json:"author_id,omitempty"`
+	Status   string `json:"status,omitempty"`
+	Date     string `json:"date,omitempty"`
+	DateFrom string `json:"date_from,omitempty"`
+	DateTo   string `json:"date_to,omitempty"`
+	Page     int    `json:"page"`
+	PerPage  int    `json:"per_page"`
+}
+
+type TeamDailyReportProjection struct {
+	ID              string `json:"id"`
+	ReportDate      string `json:"report_date"`
+	AuthorID        string `json:"author_id"`
+	AuthorName      string `json:"author_name"`
+	ContentStatus   string `json:"content_status"`
+	QualityStatus   string `json:"quality_status"`
+	ProjectLogCount int    `json:"project_log_count"`
+	Logs            []Log  `json:"logs,omitempty"`
+}
+
+type TeamReportListResult struct {
+	Items []TeamDailyReportProjection `json:"items"`
+	Total int                         `json:"total"`
+	Page  int                         `json:"page"`
 }
 
 // AiParseLogEntry 是 AI 整理产出的一条候选日志（草稿，未入库）。

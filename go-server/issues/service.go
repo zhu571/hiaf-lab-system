@@ -31,6 +31,7 @@ type ProjectAccessChecker interface {
 	ProjectStatus(projectID string) (string, error)
 	ProjectCommentPolicy(projectID string) (string, error)
 	HasProjectPermission(projectID, userID string, perm middleware.Permission) (bool, error)
+	ListAllProjectsWithPermission(userID string, perm middleware.Permission) ([]middleware.ProjectSummary, error)
 }
 
 type AgentTaskValidator interface {
@@ -41,6 +42,7 @@ type issueRepository interface {
 	Create(projectID, authorID string, req CreateIssueRequest, occurredAt time.Time, reportDate string) (*Issue, error)
 	GetByID(id string) (*Issue, error)
 	List(projectID string, params IssueListParams) ([]Issue, int, error)
+	ListByLog(logID string, projectIDs []string, params IssueListParams) ([]Issue, int, error)
 	Update(id string, req UpdateIssueRequest) (*Issue, error)
 	TransitionStatus(id, targetStatus, userID, comment string, addComment bool) (*Issue, error)
 	AddComment(issueID, authorID, content string) (*Comment, error)
@@ -176,6 +178,33 @@ func (s *Service) List(projectID, userID, userRole string, params IssueListParam
 	page := params.Page
 	if page < 1 {
 		page = 1
+	}
+	return &IssueListResult{Items: items, Total: total, Page: page}, nil
+}
+
+func (s *Service) ListByLog(userID string, params IssueListParams) (*IssueListResult, error) {
+	params.RelatedLogID = strings.TrimSpace(params.RelatedLogID)
+	if params.RelatedLogID == "" || params.PerPage > 100 {
+		return nil, ErrInvalidInput
+	}
+	projects, err := s.access.ListAllProjectsWithPermission(userID, middleware.PermRead)
+	if err != nil {
+		return nil, err
+	}
+	ids := make([]string, 0, len(projects))
+	for _, project := range projects {
+		ids = append(ids, project.ID)
+	}
+	page := params.Page
+	if page < 1 {
+		page = 1
+	}
+	if len(ids) == 0 {
+		return &IssueListResult{Items: []Issue{}, Page: page}, nil
+	}
+	items, total, err := s.repo.ListByLog(params.RelatedLogID, ids, params)
+	if err != nil {
+		return nil, err
 	}
 	return &IssueListResult{Items: items, Total: total, Page: page}, nil
 }
@@ -416,4 +445,8 @@ func (a ProjectAccessAdapter) ProjectCommentPolicy(projectID string) (string, er
 
 func (a ProjectAccessAdapter) HasProjectPermission(projectID, userID string, perm middleware.Permission) (bool, error) {
 	return middleware.HasPermission(a.DB, projectID, userID, perm)
+}
+
+func (a ProjectAccessAdapter) ListAllProjectsWithPermission(userID string, perm middleware.Permission) ([]middleware.ProjectSummary, error) {
+	return middleware.ListAllProjectsWithPermission(a.DB, userID, perm)
 }

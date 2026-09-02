@@ -7,13 +7,15 @@ import { createTestI18n } from '@/test-utils/setup'
 import { listReports } from '@/api/logs'
 import type { DailyReport } from '@/api/logs'
 import { resetDashboardReports, useDashboardReports } from '@/components/business/dashboard/useDashboardReports'
+import { createPinia, setActivePinia } from 'pinia'
 
 // BriefPanel / MemberReportPanel 组件测试（R6 §7.1 拆分）：
 // 两块面板共用 useDashboardReports 单例——单次取数、selectedDate 双向同步；
 // 每个用例经 reset() + 卸载复位挂载计数，保证访问级重新取数语义。
 
 vi.mock('@/api/logs', () => ({
-  listReports: vi.fn()
+	listReports: vi.fn(),
+	listTeamReports: vi.fn()
 }))
 
 vi.mock('vue-router', () => ({
@@ -58,15 +60,18 @@ const yesterday = localDate(new Date(Date.now() - 86400000))
 let wrappers: Array<ReturnType<typeof mount>> = []
 
 function mountBoth() {
+	const pinia = createPinia()
+	setActivePinia(pinia)
   wrappers = [
-    mount(BriefPanel, { global: { plugins: [createTestI18n()], stubs: { teleport: true } } }),
-    mount(MemberReportPanel, { global: { plugins: [createTestI18n()], stubs: { ElDatePicker: true, teleport: true } } })
+		mount(BriefPanel, { global: { plugins: [createTestI18n(), pinia], stubs: { teleport: true } } }),
+		mount(MemberReportPanel, { global: { plugins: [createTestI18n(), pinia], stubs: { ElDatePicker: true, teleport: true } } })
   ]
   return wrappers
 }
 
 describe('useDashboardReports 单例', () => {
   beforeEach(() => {
+		setActivePinia(createPinia())
     mockedListReports.mockClear()
     resetDashboardReports()
   })

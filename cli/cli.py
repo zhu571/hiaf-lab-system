@@ -94,7 +94,9 @@ def render_human(result):
                          and "content" in item for item in items):
             heading = (f"第 {result['page']} 页 / 共 {result.get('total', len(items))} 条"
                        if "page" in result else f"共 {result.get('total', len(items))} 条")
-            return "\n".join([heading] + [_render_log_line(item) for item in items])
+            render = (_render_my_log_line if any(item.get("project_code") for item in items)
+                      else _render_log_line)
+            return "\n".join([heading] + [render(item) for item in items])
         if items and all(isinstance(item, dict) and "summary" in item
                          and ("report_date" in item or "date" in item) for item in items):
             return "\n".join(
@@ -107,6 +109,13 @@ def render_human(result):
         return "\n".join(lines) if lines else "(空)"
     if "occurred_at" in result and "content" in result:
         return _render_log_detail(result)
+    if result.get("status") == "emergency_stop_queued":
+        return "\n".join([
+            f"status: {result['status']}",
+            f"request_id: {result.get('request_id') or '-'}",
+            "急停序列已入队：仪器将锁定为 locked_until_manual_check，"
+            "等待 maintainer/admin 人工复核后恢复。",
+        ])
     for key in ("id", "code", "name", "title", "status", "date", "category", "level",
                 "source", "username", "message", "success", "total"):
         if key in result:
@@ -146,6 +155,10 @@ def _render_log_line(item):
     return (f"{str(item.get('id', '-'))[:8]} | {_local_time(item.get('occurred_at'))} | "
             f"{item.get('category', '-')} | {item.get('content_status', item.get('status', '-'))} | "
             f"{_preview(item.get('content', ''))}")
+
+
+def _render_my_log_line(item):
+    return f"{item.get('project_code', '-')} | {_render_log_line(item)}"
 
 
 def _render_log_detail(item):
@@ -805,6 +818,24 @@ def alerts_get(ctx, alert_id):
 
 
 # ---------------------------------------------------------------- logs
+@cli.command("my-logs")
+@click.option("--category", type=click.Choice(commands.LOG_CATEGORIES))
+@click.option("--keyword")
+@click.option("--date", "date_value", help="自然日 YYYY-MM-DD")
+@click.option("--date-from", help="YYYY-MM-DD 或 RFC3339")
+@click.option("--date-to", help="YYYY-MM-DD 或 RFC3339")
+@click.option("--status", type=click.Choice(commands.LOG_STATUSES))
+@click.option("--page", default=1, type=int, show_default=True)
+@click.option("--per-page", default=20, type=int, show_default=True)
+@click.option("--all", "all_pages", is_flag=True, help="拉取全部匹配日志（最多 1000 条）")
+@click.pass_context
+def my_logs(ctx, category, keyword, date_value, date_from, date_to, status, page, per_page, all_pages):
+    """跨项目查看当前用户编写的日志。"""
+    run_command(ctx, commands.run_my_logs, category=category, keyword=keyword,
+                date_value=date_value, date_from=date_from, date_to=date_to,
+                status=status, page=page, per_page=per_page, all_pages=all_pages)
+
+
 @cli.group("logs")
 def logs():
     """日志：list / get"""
@@ -1554,10 +1585,12 @@ def agent_candidates_reject(ctx, candidate_id, reason):
 # ---------------------------------------------------------------- instruments
 @cli.group("instruments")
 def instruments():
-    """仪器（只读）：list / status / whitelist / parse-result
+    """仪器：list / status / whitelist / parse-result / emergency-stop
 
-    写命令（commands/leases/approvals/gascell/piezo）刻意不进 CLI——仪器安全链路
-    （租约+审批+白名单分级）在 Web 有完整 UX 支撑，CLI 略过审批链容易误操作。
+    常规写命令（commands/leases/approvals/gascell/piezo）刻意不进 CLI——仪器
+    安全链路（租约+审批+白名单分级）在 Web 有完整 UX 支撑，CLI 略过审批链
+    容易误操作。唯一例外 emergency-stop：失败方向安全（只下发白名单安全停
+    序列并锁定仪器），TTY 下须一次确认、自动化须 --yes；不注册 MCP 工具。
     """
 
 
@@ -1592,6 +1625,16 @@ def instruments_parse_result(ctx, instrument_id, command, response):
     """只读解析仪器响应（不发命令，viewer+）"""
     run_command(ctx, commands.run_instruments_parse_result, instrument_id=instrument_id,
                 command=command, response=response)
+
+
+@instruments.command("emergency-stop")
+@click.argument("instrument_id")
+@click.option("--yes", is_flag=True, help="跳过确认（无 TTY / 自动化场景必须显式给出）")
+@click.pass_context
+def instruments_emergency_stop(ctx, instrument_id, yes):
+    """紧急停止仪器（唯一写命令；急停后需 maintainer/admin 人工检查恢复）"""
+    run_command(ctx, commands.run_instruments_emergency_stop,
+                instrument_id=instrument_id, yes=yes)
 
 
 # ---------------------------------------------------------------- update

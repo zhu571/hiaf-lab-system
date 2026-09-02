@@ -138,6 +138,11 @@ Hioki：
 
 紧急停止后仪器进入 `locked_until_manual_check`，必须由具备 `instrument_operator` 或 admin 权限的人确认恢复。
 
+### 4.4 审计与 CLI 入口
+
+- 每次急停尝试（含 503 失败）落一条语义化审计：action `instrument.emergency_stop`，detail `{instrument_id, previous_state, flow_id?}`；不记录敏感连接信息。
+- `labctl instruments emergency-stop ID [--yes]` 是仪器的唯一 CLI 写入口（人工命令，不注册 MCP 工具，Agent 不可经自然语言触发）：TTY 下先显示仪器名与当前 state 并要求一次确认，无 TTY / 自动化必须显式 `--yes`。
+
 ## 5. 人工确认流程
 
 以下操作必须人工确认：

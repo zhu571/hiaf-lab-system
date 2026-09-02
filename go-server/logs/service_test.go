@@ -160,6 +160,32 @@ func TestUpdateLogRequiresCurrentProjectAccess(t *testing.T) {
 	}
 }
 
+func TestListMineAddsProjectProjection(t *testing.T) {
+	repo := newFakeRepo(DailyReport{ID: "r1"}, []Log{testLog("l1", "prj_1", LogStatusConfirmed, "mine", "2026-09-01T00:00:00Z")})
+	svc := NewService(repo, "Asia/Shanghai", fakeAccess{projects: []middleware.ProjectSummary{{ID: "prj_1", Code: "P1", Name: "Project One"}}})
+	result, err := svc.ListMine("usr_1", LogListParams{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(result.Items) != 1 || result.Items[0].ProjectCode != "P1" || result.Items[0].ProjectName != "Project One" {
+		t.Fatalf("unexpected mine projection: %+v", result.Items)
+	}
+}
+
+func TestTeamReportRequiresPermissionAndReturnsProjection(t *testing.T) {
+	repo := newFakeRepo(DailyReport{ID: "r1"}, nil)
+	repo.team = []TeamDailyReportProjection{{ID: "r1", ProjectLogCount: 2}}
+	denied := NewService(repo, "Asia/Shanghai", fakeAccess{})
+	if _, err := denied.ListTeamReports("prj_1", "usr_1", TeamReportListParams{}); !errors.Is(err, ErrForbidden) {
+		t.Fatalf("denied err=%v", err)
+	}
+	allowed := NewService(repo, "Asia/Shanghai", fakeAccess{canAccess: true})
+	result, err := allowed.ListTeamReports("prj_1", "usr_1", TeamReportListParams{})
+	if err != nil || len(result.Items) != 1 || result.Items[0].ProjectLogCount != 2 {
+		t.Fatalf("result=%+v err=%v", result, err)
+	}
+}
+
 func TestUpdateLogConfirmsDraft(t *testing.T) {
 	report := testReport("usr_1", ReportStatusDraft, "worked")
 	item := testLog("log_1", "prj_1", LogStatusDraft, "old", "2026-07-14T10:00:00+08:00")
@@ -228,10 +254,19 @@ func (f fakeAccess) ListProjectsWithPermission(userID string, perm middleware.Pe
 	return f.projects, nil
 }
 
+func (f fakeAccess) ListAllProjectsWithPermission(userID string, perm middleware.Permission) ([]middleware.ProjectSummary, error) {
+	return f.ListProjectsWithPermission(userID, perm)
+}
+
+func (f fakeAccess) IsActiveProjectMember(projectID, userID string) (bool, error) {
+	return f.canAccess, nil
+}
+
 type fakeRepo struct {
 	reports map[string]*DailyReport
 	logs    map[string]*Log
 	links   map[string][]string
+	team    []TeamDailyReportProjection
 }
 
 func newFakeRepo(report DailyReport, items []Log) *fakeRepo {
@@ -262,6 +297,31 @@ func (f *fakeRepo) GetReportByID(id string) (*DailyReport, error) {
 		return nil, nil
 	}
 	return cloneReport(*report), nil
+}
+
+func (f *fakeRepo) GetReportsByLog(logID string) ([]DailyReport, error) {
+	out := []DailyReport{}
+	for reportID, logIDs := range f.links {
+		for _, id := range logIDs {
+			if id == logID && f.reports[reportID] != nil {
+				out = append(out, *cloneReport(*f.reports[reportID]))
+			}
+		}
+	}
+	return out, nil
+}
+
+func (f *fakeRepo) ListTeamReports(projectID string, params TeamReportListParams) ([]TeamDailyReportProjection, int, error) {
+	return f.team, len(f.team), nil
+}
+
+func (f *fakeRepo) GetTeamReport(projectID, reportID string) (*TeamDailyReportProjection, error) {
+	for i := range f.team {
+		if f.team[i].ID == reportID {
+			return &f.team[i], nil
+		}
+	}
+	return nil, nil
 }
 
 func (f *fakeRepo) GetReportByDate(authorID, reportDate string) (*DailyReport, error) {
@@ -373,6 +433,10 @@ func (f *fakeRepo) List(projectID string, params LogListParams) ([]Log, int, err
 		}
 	}
 	return out, len(out), nil
+}
+
+func (f *fakeRepo) ListMine(authorID string, projectIDs []string, params LogListParams) ([]Log, int, error) {
+	return f.List("prj_1", params)
 }
 
 func (f *fakeRepo) UpdateLog(id string, req UpdateLogRequest, occurredAt *time.Time) (*Log, error) {

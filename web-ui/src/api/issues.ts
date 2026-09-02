@@ -25,6 +25,10 @@ export function listIssues(projectId: string, params: Record<string, string | nu
   return request<{ items: Issue[]; total: number; page: number }>({ url: `/projects/${projectId}/issues`, params })
 }
 
+export function listIssuesByLog(logId: string, params: Record<string, string | number> = {}) {
+  return request<{ items: Issue[]; total: number; page: number }>({ url: '/issues', params: { related_log_id: logId, ...params } })
+}
+
 export const listProjectIssues = listIssues
 
 export function getIssue(id: string) {

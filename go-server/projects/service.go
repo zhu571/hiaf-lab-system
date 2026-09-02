@@ -113,6 +113,13 @@ func (s *Service) List(userID, userRole, status string) ([]ProjectWithStats, err
 		if err != nil {
 			return nil, err
 		}
+		if userRole == auth.RoleAdmin {
+			item.CurrentUserRole = "admin"
+		} else if member, err := s.repo.GetMember(p.ID, userID); err != nil {
+			return nil, err
+		} else if member != nil {
+			item.CurrentUserRole = member.Role
+		}
 		out = append(out, *item)
 	}
 	return out, nil

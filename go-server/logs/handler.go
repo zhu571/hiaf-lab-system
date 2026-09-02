@@ -145,6 +145,20 @@ func (h *Handler) GetReportByID(w http.ResponseWriter, r *http.Request) {
 	common.WriteSuccess(w, r, report)
 }
 
+func (h *Handler) GetReportsByLog(w http.ResponseWriter, r *http.Request) {
+	claims := middleware.GetUserClaims(r.Context())
+	if claims == nil {
+		common.WriteError(w, r, http.StatusUnauthorized, "unauthorized", "未登录", nil)
+		return
+	}
+	reports, err := h.svc.GetReportsByLog(chi.URLParam(r, "id"), middleware.EffectiveUserID(r.Context()), claims.Role)
+	if err != nil {
+		h.writeError(w, r, err, nil)
+		return
+	}
+	common.WriteSuccess(w, r, reports)
+}
+
 func (h *Handler) ListReports(w http.ResponseWriter, r *http.Request) {
 	claims := middleware.GetUserClaims(r.Context())
 	if claims == nil {
@@ -167,6 +181,60 @@ func (h *Handler) ListReports(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	common.WriteSuccess(w, r, map[string]any{"items": reports, "total": total, "page": params.Page})
+}
+
+func (h *Handler) ListMine(w http.ResponseWriter, r *http.Request) {
+	if middleware.GetUserClaims(r.Context()) == nil {
+		common.WriteError(w, r, http.StatusUnauthorized, "unauthorized", "未登录", nil)
+		return
+	}
+	params := LogListParams{
+		Category: r.URL.Query().Get("category"), Keyword: r.URL.Query().Get("keyword"),
+		DateFrom: r.URL.Query().Get("date_from"), DateTo: r.URL.Query().Get("date_to"),
+		Status: r.URL.Query().Get("status"), Page: queryInt(r, "page", 1), PerPage: queryInt(r, "per_page", 20),
+	}
+	result, err := h.svc.ListMine(middleware.EffectiveUserID(r.Context()), params)
+	if err != nil {
+		h.writeError(w, r, err, nil)
+		return
+	}
+	common.WriteSuccess(w, r, result)
+}
+
+func (h *Handler) ListTeamReports(w http.ResponseWriter, r *http.Request) {
+	middleware.SetAuditAction(r.Context(), "daily_report.team_list")
+	claims := middleware.GetUserClaims(r.Context())
+	if claims == nil {
+		common.WriteError(w, r, http.StatusUnauthorized, "unauthorized", "未登录", nil)
+		return
+	}
+	params := TeamReportListParams{AuthorID: strings.TrimSpace(r.URL.Query().Get("author_id")), Status: r.URL.Query().Get("status"),
+		Date: r.URL.Query().Get("date"), DateFrom: r.URL.Query().Get("date_from"), DateTo: r.URL.Query().Get("date_to"),
+		Page: queryInt(r, "page", 1), PerPage: queryInt(r, "per_page", 20)}
+	middleware.SetAuditDetail(r.Context(), map[string]any{"project_id": chi.URLParam(r, "id"), "author_id": params.AuthorID})
+	result, err := h.svc.ListTeamReports(chi.URLParam(r, "id"), middleware.EffectiveUserID(r.Context()), params)
+	if err != nil {
+		h.writeError(w, r, err, nil)
+		return
+	}
+	common.WriteSuccess(w, r, result)
+}
+
+func (h *Handler) GetTeamReport(w http.ResponseWriter, r *http.Request) {
+	middleware.SetAuditAction(r.Context(), "daily_report.team_view")
+	claims := middleware.GetUserClaims(r.Context())
+	if claims == nil {
+		common.WriteError(w, r, http.StatusUnauthorized, "unauthorized", "未登录", nil)
+		return
+	}
+	projectID, reportID := chi.URLParam(r, "id"), chi.URLParam(r, "report_id")
+	middleware.SetAuditDetail(r.Context(), map[string]any{"project_id": projectID, "report_id": reportID})
+	result, err := h.svc.GetTeamReport(projectID, reportID, middleware.EffectiveUserID(r.Context()))
+	if err != nil {
+		h.writeError(w, r, err, nil)
+		return
+	}
+	common.WriteSuccess(w, r, result)
 }
 
 func (h *Handler) SubmitReport(w http.ResponseWriter, r *http.Request) {

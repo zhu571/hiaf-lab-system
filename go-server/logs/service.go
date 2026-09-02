@@ -54,6 +54,8 @@ type ProjectAccessChecker interface {
 	ProjectStatus(projectID string) (string, error)
 	HasProjectPermission(projectID, userID string, perm middleware.Permission) (bool, error)
 	ListProjectsWithPermission(userID string, perm middleware.Permission) ([]middleware.ProjectSummary, error)
+	ListAllProjectsWithPermission(userID string, perm middleware.Permission) ([]middleware.ProjectSummary, error)
+	IsActiveProjectMember(projectID, userID string) (bool, error)
 }
 
 type logRepository interface {
@@ -68,9 +70,13 @@ type logRepository interface {
 	CreateLog(projectID, authorID string, req CreateLogRequest, occurredAt time.Time) (*Log, error)
 	GetByID(id string) (*Log, error)
 	List(projectID string, params LogListParams) ([]Log, int, error)
+	ListMine(authorID string, projectIDs []string, params LogListParams) ([]Log, int, error)
 	UpdateLog(id string, req UpdateLogRequest, occurredAt *time.Time) (*Log, error)
 	LinkLogToReport(reportID, logID string) error
 	GetLogsByReport(reportID string) ([]Log, error)
+	GetReportsByLog(logID string) ([]DailyReport, error)
+	ListTeamReports(projectID string, params TeamReportListParams) ([]TeamDailyReportProjection, int, error)
+	GetTeamReport(projectID, reportID string) (*TeamDailyReportProjection, error)
 }
 
 type Service struct {
@@ -362,6 +368,68 @@ func (s *Service) ListReports(params ReportListParams) ([]DailyReport, int, erro
 	return items, total, nil
 }
 
+func (s *Service) ListTeamReports(projectID, userID string, params TeamReportListParams) (*TeamReportListResult, error) {
+	ok, err := s.access.HasProjectPermission(projectID, userID, middleware.PermReadTeamReports)
+	if err != nil {
+		return nil, err
+	}
+	if !ok {
+		return nil, ErrForbidden
+	}
+	if params.PerPage > 100 {
+		params.PerPage = 100
+	}
+	if !validOptionalReportStatus(params.Status) {
+		return nil, ErrInvalidInput
+	}
+	for _, value := range []string{params.Date, params.DateFrom, params.DateTo} {
+		if value != "" {
+			if _, err := time.Parse(time.DateOnly, value); err != nil {
+				return nil, ErrInvalidInput
+			}
+		}
+	}
+	if params.DateFrom != "" && params.DateTo != "" && params.DateFrom > params.DateTo {
+		return nil, ErrInvalidInput
+	}
+	if params.AuthorID != "" {
+		active, err := s.access.IsActiveProjectMember(projectID, params.AuthorID)
+		if err != nil {
+			return nil, err
+		}
+		if !active {
+			return nil, ErrInvalidInput
+		}
+	}
+	items, total, err := s.repo.ListTeamReports(projectID, params)
+	if err != nil {
+		return nil, err
+	}
+	page := params.Page
+	if page < 1 {
+		page = 1
+	}
+	return &TeamReportListResult{Items: items, Total: total, Page: page}, nil
+}
+
+func (s *Service) GetTeamReport(projectID, reportID, userID string) (*TeamDailyReportProjection, error) {
+	ok, err := s.access.HasProjectPermission(projectID, userID, middleware.PermReadTeamReports)
+	if err != nil {
+		return nil, err
+	}
+	if !ok {
+		return nil, ErrForbidden
+	}
+	item, err := s.repo.GetTeamReport(projectID, reportID)
+	if err != nil {
+		return nil, err
+	}
+	if item == nil {
+		return nil, ErrReportNotFound
+	}
+	return item, nil
+}
+
 func (s *Service) CreateLog(projectID, userID, userRole string, req CreateLogRequest) (*Log, error) {
 	if strings.TrimSpace(projectID) == "" || strings.TrimSpace(req.Content) == "" {
 		return nil, ErrInvalidInput
@@ -527,6 +595,51 @@ func (s *Service) ListLogs(projectID, userID, userRole string, params LogListPar
 	return &LogListResult{Items: items, Total: total, Page: page}, nil
 }
 
+func (s *Service) ListMine(userID string, params LogListParams) (*LogListResult, error) {
+	params.Keyword = strings.TrimSpace(params.Keyword)
+	if params.PerPage > 100 {
+		params.PerPage = 100
+	}
+	if !validOptionalStatus(params.Status) || !validOptionalCategory(params.Category) {
+		return nil, ErrInvalidInput
+	}
+	if err := validateOptionalRFC3339(params.DateFrom); err != nil {
+		return nil, err
+	}
+	if err := validateOptionalRFC3339(params.DateTo); err != nil {
+		return nil, err
+	}
+	projects, err := s.access.ListAllProjectsWithPermission(userID, middleware.PermRead)
+	if err != nil {
+		return nil, err
+	}
+	page := params.Page
+	if page < 1 {
+		page = 1
+	}
+	if len(projects) == 0 {
+		return &LogListResult{Items: []Log{}, Page: page}, nil
+	}
+	ids := make([]string, 0, len(projects))
+	byID := make(map[string]middleware.ProjectSummary, len(projects))
+	for _, project := range projects {
+		ids = append(ids, project.ID)
+		byID[project.ID] = project
+	}
+	items, total, err := s.repo.ListMine(userID, ids, params)
+	if err != nil {
+		return nil, err
+	}
+	for i := range items {
+		items[i].ProjectCode = byID[items[i].ProjectID].Code
+		items[i].ProjectName = byID[items[i].ProjectID].Name
+	}
+	if err := s.attachLogTranslations(context.Background(), items); err != nil {
+		return nil, err
+	}
+	return &LogListResult{Items: items, Total: total, Page: page}, nil
+}
+
 func (s *Service) GetLog(id, userID, userRole string) (*Log, error) {
 	item, err := s.repo.GetByID(id)
 	if err != nil {
@@ -548,6 +661,26 @@ func (s *Service) GetLog(id, userID, userRole string) (*Log, error) {
 	}
 	*item = items[0]
 	return item, nil
+}
+
+func (s *Service) GetReportsByLog(id, userID, userRole string) ([]DailyReportRef, error) {
+	if _, err := s.GetLog(id, userID, userRole); err != nil {
+		return nil, err
+	}
+	reports, err := s.repo.GetReportsByLog(id)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]DailyReportRef, 0, len(reports))
+	for _, report := range reports {
+		out = append(out, DailyReportRef{
+			ID: report.ID, ReportDate: report.ReportDate, AuthorID: report.AuthorID,
+			AuthorName: report.AuthorName, ContentStatus: report.ContentStatus,
+			QualityStatus: report.QualityStatus,
+			CanReadDetail: report.AuthorID == userID || userRole == "admin",
+		})
+	}
+	return out, nil
 }
 
 func (s *Service) UpdateLog(id, userID, userRole string, req UpdateLogRequest) (*Log, error) {
@@ -981,4 +1114,12 @@ func (a ProjectAccessAdapter) HasProjectPermission(projectID, userID string, per
 
 func (a ProjectAccessAdapter) ListProjectsWithPermission(userID string, perm middleware.Permission) ([]middleware.ProjectSummary, error) {
 	return middleware.ListProjectsWithPermission(a.DB, userID, perm)
+}
+
+func (a ProjectAccessAdapter) ListAllProjectsWithPermission(userID string, perm middleware.Permission) ([]middleware.ProjectSummary, error) {
+	return middleware.ListAllProjectsWithPermission(a.DB, userID, perm)
+}
+
+func (a ProjectAccessAdapter) IsActiveProjectMember(projectID, userID string) (bool, error) {
+	return middleware.IsActiveProjectMember(a.DB, projectID, userID)
 }

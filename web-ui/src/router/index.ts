@@ -30,6 +30,8 @@ const ProjectLayout = () => import('@/layouts/ProjectLayout.vue')
 const ProjectDashboard = () => import('@/components/business/ProjectDashboard.vue')
 const ProjectLogsView = () => import('../views/ProjectLogsView.vue')
 const LogDetailView = () => import('../views/LogDetailView.vue')
+const MyLogsView = () => import('../views/MyLogsView.vue')
+const TeamDailyReportDetailView = () => import('../views/TeamDailyReportDetailView.vue')
 const ManualView = () => import('../views/ManualView.vue')
 const AlertCenterView = () => import('../views/AlertCenterView.vue')
 
@@ -39,6 +41,7 @@ const router = createRouter({
     { path: '/', component: () => import('@/views/DashboardView.vue'), meta: { titleKey: 'nav.home' } },
     { path: '/login', component: LoginView, meta: { public: true } },
     { path: '/projects', component: ProjectsView, meta: { titleKey: 'nav.projects' } },
+		{ path: '/my-logs', component: MyLogsView, meta: { titleKey: 'nav.myLogs' } },
     {
       path: '/daily-report',
       component: DailyReportShell,
@@ -76,6 +79,7 @@ const router = createRouter({
     { path: '/manual', component: ManualView, meta: { titleKey: 'nav.manual' } },
     { path: '/daily-reports/:id', component: DailyReportDetailView, meta: { titleKey: 'mobile.title.dailyReportDetail' } },
     { path: '/logs/:id', component: LogDetailView, meta: { titleKey: 'mobile.title.logDetail' } },
+		{ path: '/projects/:id/daily-reports/:reportId', component: TeamDailyReportDetailView, meta: { titleKey: 'mobile.title.dailyReportDetail' } },
     { path: '/admin/users', component: AdminUsersView, meta: { admin: true, titleKey: 'nav.adminUsers' } },
     { path: '/agent-candidates', component: AgentCandidatesView, meta: { reviewer: true, titleKey: 'nav.aiReview' } },
     // 兼容重定向：保留旧链接不 404

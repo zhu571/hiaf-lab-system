@@ -1,1 +1,0 @@
-import{g as e}from"./index-DkmUAFUI.js";function s(t,a){return e({url:`/projects/${t}/test-data`,method:"POST",data:a})}function o(t,a){return e({url:`/projects/${t}/test-data/batch`,method:"POST",data:a})}function u(t,a={}){return e({url:`/projects/${t}/test-data`,params:a})}function c(t){return e({url:`/test-data/${t}`,method:"DELETE"})}export{s as a,o as c,c as d,u as l};
