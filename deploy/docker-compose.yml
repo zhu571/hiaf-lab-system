@@ -127,7 +127,9 @@ services:
       INFLUX_TOKEN_FILE: /run/secrets/influxdb_token
       INFLUX_ORG: ${INFLUXDB_ORG:-lab-org}
       INFLUX_BUCKET: ${INFLUXDB_BUCKET:-lab-bucket}
-      SENSOR_DB_PATH: /data/sensor_history.db
+      # 空串 = 停用 SQLite 落盘（同一批数据已由 InfluxDB 全量承载）
+      # 第 143 行挂载暂留，用于归档旧库；归档完成后一并删除
+      SENSOR_DB_PATH: ""
       # ntfy 发布凭据（lab-system 主题 todo-publisher 的 Bearer token；deny-all 下无凭据发
       # 送会被 403 静默丢弃，P0-1 修复：IOC 仪器域告警恢复）
       NTFY_PUBLISH_TOKEN_FILE: /run/secrets/ntfy_publish_token

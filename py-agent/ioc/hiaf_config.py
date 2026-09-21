@@ -187,7 +187,8 @@ HYST_STEP_BIG = 0.5
 HYST_SWITCH_TIME = 600.0
 
 # ── SQLite logging ──
-DB_PATH = Path(os.getenv("SENSOR_DB_PATH", "/data/sensor_history.db"))
+# 空串 = 停用 SQLite 落盘（同一批数据已由 InfluxDB 全量承载，见 hiaf_storage.py）
+DB_PATH = os.getenv("SENSOR_DB_PATH", "")
 SQLITE_FLUSH_SEC = 30.0
 SENSOR_CHANGE_REL = 0.005
 SENSOR_CHANGE_ABS = 0.1

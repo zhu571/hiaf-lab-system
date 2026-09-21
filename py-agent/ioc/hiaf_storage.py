@@ -65,6 +65,8 @@ class HiafStorage:
         self._write_backlog: list[dict] = []
 
     async def init_db(self) -> None:
+        if not self._db_path:            # 停用落盘：空路径不建库
+            return
         if self._db is not None:
             return
         try:
@@ -100,6 +102,8 @@ class HiafStorage:
         return abs_diff > max(rel_thresh, SENSOR_CHANGE_ABS)
 
     async def maybe_write_sensors(self, sensor_values: dict[str, float]) -> None:
+        if not self._db_path:            # 停用落盘：空路径不建库
+            return
         if self._db is None:
             await self.init_db()
             if self._db is None:
