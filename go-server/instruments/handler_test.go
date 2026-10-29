@@ -490,7 +490,7 @@ func TestHandlerGasCell(t *testing.T) {
 	if rec.Code != http.StatusBadRequest {
 		t.Fatalf("setpoint bad json = %d", rec.Code)
 	}
-	rec = insRequest(t, router, http.MethodPost, "/api/v1/instruments/piezo/setpoint", maintainer, "k10", `{"value":150}`)
+	rec = insRequest(t, router, http.MethodPost, "/api/v1/instruments/piezo/setpoint", maintainer, "k10", `{"value":30001}`)
 	if rec.Code != http.StatusServiceUnavailable {
 		t.Fatalf("setpoint out of range = %d, body=%s", rec.Code, rec.Body.String())
 	}

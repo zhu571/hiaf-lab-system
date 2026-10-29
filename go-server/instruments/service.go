@@ -29,7 +29,7 @@ type Service struct {
 
 const (
 	piezoSetpointMin = 0.0
-	piezoSetpointMax = 100.0
+	piezoSetpointMax = 30000.0
 )
 
 var (

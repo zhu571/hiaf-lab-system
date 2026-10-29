@@ -37,7 +37,7 @@
         <el-tag type="warning">maintainer / admin</el-tag>
       </div>
       <el-form class="control-grid" label-position="top" @submit.prevent>
-        <el-form-item label="Setpoint (Pa)"><el-input-number v-model="form.setpoint" :min="0" :max="10000" :controls="false" /></el-form-item>
+        <el-form-item label="Setpoint (Pa)"><el-input-number v-model="form.setpoint" :min="0" :max="30000" :controls="false" /></el-form-item>
         <el-form-item label="Kp"><el-input-number v-model="form.kp" :min="0" :max="1" :controls="false" /></el-form-item>
         <el-form-item label="Ki"><el-input-number v-model="form.ki" :min="0" :max="1" :controls="false" /></el-form-item>
         <el-form-item class="control-actions"><el-button type="primary" :loading="writeBusy" @click="applyParams">{{ t('gasControl.applyParams') }}</el-button></el-form-item>
