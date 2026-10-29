@@ -543,14 +543,14 @@ const sections: ManualSection[] = [
         '6 张状态卡：A1 气压（Pa）、设定值、阀门开度（%）、控制误差、运行状态、控制周期计数；数据质量异常时显示「数据失效」。',
         '实时曲线：气压 / 设定值（左轴 Pa）与阀位（右轴 %），保留最近 120 个采样点。',
         '数据通过 SSE 实时推送，断线自动重连，丢帧自动重新拉取快照。',
-        '控制面板（仅 maintainer / admin）：修改设定值（0–10000 Pa）、Kp / Ki（0–1）、启动 / 停止闭环控制；手动阀位（0–100%）仅在闭环停止时可用。',
+        '控制面板（仅 maintainer / admin）：修改设定值（0–30000 Pa）、Kp / Ki（0–1）、启动 / 停止闭环控制；手动阀位（0–100%）仅在闭环停止时可用。',
         'A5 超压联锁触发时顶部出现红色告警；确认现场安全后可「清除联锁」。A5Max 阈值（0.01–1000 Pa）可修改，操作前有确认提示。'
       ],
       en: [
         'Six status cards: A1 pressure (Pa), setpoint, valve opening (%), control error, running state and cycle counter; bad data quality is flagged as stale.',
         'Real-time chart: pressure / setpoint (left axis, Pa) and valve position (right axis, %), keeping the last 120 samples.',
         'Data streams over SSE with automatic reconnect; a missed frame triggers a snapshot refetch.',
-        'Control panel (maintainer / admin only): change setpoint (0–10000 Pa), Kp / Ki (0–1), start / stop the closed loop; manual valve position (0–100%) is available only while the loop is stopped.',
+        'Control panel (maintainer / admin only): change setpoint (0–30000 Pa), Kp / Ki (0–1), start / stop the closed loop; manual valve position (0–100%) is available only while the loop is stopped.',
         'When the A5 over-pressure interlock trips, a red banner appears; after confirming site safety you can clear it. The A5Max threshold (0.01–1000 Pa) is editable behind a confirmation prompt.'
       ]
     },
