@@ -25,6 +25,7 @@ import (
 	"github.com/zhu571/hiaf-lab-system/go-server/auth"
 	"github.com/zhu571/hiaf-lab-system/go-server/automation"
 	"github.com/zhu571/hiaf-lab-system/go-server/common"
+	"github.com/zhu571/hiaf-lab-system/go-server/electrical"
 	"github.com/zhu571/hiaf-lab-system/go-server/experiences"
 	"github.com/zhu571/hiaf-lab-system/go-server/instruments"
 	"github.com/zhu571/hiaf-lab-system/go-server/issues"
@@ -245,6 +246,12 @@ func main() {
 		instrumentsHandler.StartFlowRecovery(context.Background())
 	}
 	sensorsHandler := sensors.NewHandler(sensorsSvc)
+	electricalSvc, err := electrical.NewServiceFromEnv()
+	if err != nil {
+		slog.Error("failed to create electrical monitor service", "error", err)
+		os.Exit(1)
+	}
+	electricalHandler := electrical.NewHandler(electricalSvc)
 
 	repoRoot := commonEnv("REPO_ROOT", "/opt/hiaf-lab-system")
 	systemSvc := system.NewService(repoRoot)
@@ -671,6 +678,15 @@ func main() {
 		r.Get("/latest", sensorsHandler.Latest)
 		r.Get("/history", sensorsHandler.History)
 	})
+	r.Route("/api/v1/electrical", func(r chi.Router) {
+		r.Use(mw.AuthRequired)
+		r.Use(mw.AgentContext(db))
+		r.Use(mw.Audit(db))
+		r.Use(mw.RequireIdempotencyKey(db))
+		r.Get("/latest", electricalHandler.Latest)
+		r.Get("/history", electricalHandler.History)
+		r.Post("/single-shot", electricalHandler.SingleShot)
+	})
 	r.Route("/api/v1/todos", func(r chi.Router) {
 		r.Use(mw.AuthRequired)
 		r.Use(mw.AgentContext(db))
@@ -770,6 +786,8 @@ func main() {
 		go weeklySched.Run(ctx)
 		slog.Info("weekly scheduler enabled")
 	}
+	// 电器监控：代码默认只提供单次采集；ELECTRICAL_MONITOR_ENABLED=true 时启动常驻 worker。
+	go electricalSvc.Run(ctx)
 	// ask_history 快照保留任务（P2-3）：立即执行一次 + 每 24h，90 天前快照置 NULL。
 	go askSvc.StartRetentionTask(ctx)
 	// 告警中心维护任务：TTL 24h 兜底（启动立即 + 每小时）+ 90 天滚动清理（每日 04:00）。

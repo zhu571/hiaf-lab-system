@@ -26,7 +26,7 @@ function allEntries(): Array<[StatusDomain, string, StatusMeta]> {
 }
 
 describe('注册表结构与完整性', () => {
-  it('十域起步 + 行为兼容核对补登域 + 美术 S4 派生态域 + 日志查看批两域，共 18 个 domain', () => {
+  it('既有十八域 + 电器采集健康域，共 19 个 domain', () => {
     expect(ALL_DOMAINS).toEqual([
       'runStatus',
       'stepStatus',
@@ -45,7 +45,8 @@ describe('注册表结构与完整性', () => {
       'invitationCode',
       'translation',
       'logStatus',
-      'reportQuality'
+      'reportQuality',
+      'electricalHealth'
     ])
   })
 

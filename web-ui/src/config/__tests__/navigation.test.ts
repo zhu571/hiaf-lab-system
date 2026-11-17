@@ -44,8 +44,8 @@ describe('filterNavByRole：角色矩阵', () => {
 })
 
 describe('NAV_ITEMS 实际配置（对齐 AppLayout 三组派生）', () => {
-  it('配置完整性：16 项、path 唯一、titleKey 非空', () => {
-    expect(NAV_ITEMS).toHaveLength(16)
+  it('配置完整性：17 项、path 唯一、titleKey 非空', () => {
+    expect(NAV_ITEMS).toHaveLength(17)
     const paths = NAV_ITEMS.map((i) => i.path)
     expect(new Set(paths).size).toBe(paths.length)
     for (const i of NAV_ITEMS) {
@@ -68,17 +68,21 @@ describe('NAV_ITEMS 实际配置（对齐 AppLayout 三组派生）', () => {
     expect(aiReview?.minRole).toBe('maintainer')
   })
 
-  it('桌面系统组（admin）：7 项且不含仅移动端 settings；admin/users 仅 admin 可见；顺序按 section 聚类（device 在前）', () => {
+  it('桌面系统组（admin）：8 项且不含仅移动端 settings；电器监控为设备组第 4 项', () => {
     const systemAdmin = filterNavByRole(NAV_ITEMS.filter((i) => i.group === 'system' && !i.mobile), 'admin')
     expect(systemAdmin.map((i) => i.path)).toEqual([
       '/gas-control',
       '/instrument-measure',
       '/sensors',
+      '/electrical',
       '/alerts',
       '/audit',
       '/admin/users',
       '/manual'
     ])
+    const electrical = systemAdmin.find((i) => i.path === '/electrical')
+    expect(electrical).toMatchObject({ titleKey: 'nav.electrical', section: 'device' })
+    expect(electrical?.minRole).toBeUndefined()
     const systemViewer = filterNavByRole(NAV_ITEMS.filter((i) => i.group === 'system' && !i.mobile), 'viewer')
     expect(systemViewer.find((i) => i.path === '/admin/users')).toBeUndefined()
   })
@@ -140,11 +144,11 @@ describe('groupNavBySection：系统组 section 聚类（nav-menu-redesign 方�
     expect(groupNavBySection([])).toEqual([])
   })
 
-  it('实际配置：桌面系统组（viewer）聚类为 device 3 项 + manage 3 项', () => {
+  it('实际配置：桌面系统组（viewer）聚类为 device 4 项 + manage 3 项', () => {
     const systemViewer = filterNavByRole(NAV_ITEMS.filter((i) => i.group === 'system' && !i.mobile), 'viewer')
     const groups = groupNavBySection(systemViewer)
     expect(groups.map((g) => [g.section, g.items.length])).toEqual([
-      ['device', 3],
+      ['device', 4],
       ['manage', 3]
     ])
   })

@@ -773,6 +773,44 @@ AuthRequired 阶段 401。同值 role、仅改 display_name / language **不递�
 > **未实现**（main.go 无注册）。当前时序数据由 IOC 侧直写 InfluxDB
 > （py-agent/ioc/hiaf_storage.py，EPICS PV 采样入库），Go 侧只提供读取端点，无设备推送通道。
 
+## 3.13.1 电器监控模块（已实现）
+
+路由：`/api/v1/electrical`，全员 JWT；组级中间件为 AuthRequired + AgentContext + Audit +
+RequireIdempotencyKey（GET 自动豁免）。复用现有 InfluxDB，measurement 为
+`electrical_samples`，标签为 `source/channel/metric/unit/mapping/signature`，数值字段
+`value`、文本字段 `text_value`，另存 `quality/seq/raw`；`seq` 是字段而非标签。
+
+常驻采集由 `ELECTRICAL_MONITOR_ENABLED` 控制：Go 代码默认 `false`，Compose 默认
+`true`。MESTEK/6485 使用持久 TCP 连接只收不发、断线退避重连；四台 SCPI 设备各有
+独立 worker，约 2 秒一轮且只执行固定查询。MESTEK 只有在看到匹配请求且起始寄存器
+满足 `start % 100 == 0` 时才以 `start/100` 映射 CH；仅应答流保留原始帧与静态
+`signature`，`channel=UNMAPPED`、`mapping=unmapped`，不得由特征组推断通道数。
+
+### `GET /api/v1/electrical/latest`
+
+返回内存中的最新样本与采集/写入健康：`{continuous_enabled, updated_at, write_backlog,
+sources, samples}`。`sources[]` 含连接状态、最后样本时间、采集错误、Influx 写入错误、
+最大间隔、CRC/残缺/配对计数及 MESTEK 映射状态。服务启动但连续采集关闭时，
+`sources[].status=disabled`；单次采集仍可更新最新样本。
+
+### `GET /api/v1/electrical/history`
+
+参数：`source`、`channel`、`metric`（均可选）、`from`（默认 `-15m`）、`to`（默认
+`now()`）、`limit`（默认 1000，范围 1–5000）。时间接受 Flux duration 或 RFC3339。
+响应 `{points: Sample[]}`，按时间升序。非法参数 400 `bad_request`；InfluxDB 不可达
+503 `electrical_storage_error`。
+
+### `POST /api/v1/electrical/single-shot`
+
+立即查询全部 SCPI 设备并等待下一帧 MESTEK/6485 被动数据；连续采集关闭时使用临时
+只读连接，不启动常驻 worker。全局单飞，同一用户默认 5 秒限频；写接口必须带
+`Idempotency-Key` 并写审计，审计只记录样本数和各源错误，不记录连接凭据。
+
+响应 `{started_at, finished_at, samples, sources, errors?}`；部分设备失败时仍返回已
+获得样本并在 `errors` 标明来源。错误：409 `single_shot_in_progress`、429
+`rate_limited`（details 含 `retry_after_seconds`）、502 `acquisition_failed`、504
+`acquisition_timeout`。
+
 ## 3.14 仪器控制模块（含安全租约与多步流程）
 
 路由：main.go:505-551（instruments）、548-551（ws）。控制类端点限 maintainer/admin；急停/翻译全员可触发。
