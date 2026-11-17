@@ -23,6 +23,7 @@ const AttachmentView = () => import('../views/AttachmentView.vue')
 const InstrumentMeasureView = () => import('../views/InstrumentMeasureView.vue')
 const GasControlView = () => import('../views/GasControlView.vue')
 const SensorsView = () => import('../views/SensorsView.vue')
+const ElectricalMonitorView = () => import('../views/ElectricalMonitorView.vue')
 const TodoView = () => import('../views/TodoView.vue')
 const DailyReportDetailView = () => import('../views/DailyReportDetailView.vue')
 const DailyReportShell = () => import('@/layouts/DailyReportShell.vue')
@@ -71,6 +72,7 @@ const router = createRouter({
     { path: '/instrument-measure', component: InstrumentMeasureView, meta: { titleKey: 'nav.instruments' } },
     { path: '/gas-control', component: GasControlView, meta: { titleKey: 'nav.gasControl' } },
     { path: '/sensors', component: SensorsView, meta: { titleKey: 'nav.sensors' } },
+    { path: '/electrical', component: ElectricalMonitorView, meta: { titleKey: 'nav.electrical' } },
     { path: '/todos', component: TodoView, meta: { titleKey: 'nav.todos' } },
     { path: '/experiences', component: ExperiencesView, meta: { titleKey: 'nav.experiences' } },
     { path: '/audit', component: AuditView, meta: { titleKey: 'nav.audit' } },

@@ -773,6 +773,58 @@ AuthRequired 阶段 401。同值 role、仅改 display_name / language **不递�
 > **未实现**（main.go 无注册）。当前时序数据由 IOC 侧直写 InfluxDB
 > （py-agent/ioc/hiaf_storage.py，EPICS PV 采样入库），Go 侧只提供读取端点，无设备推送通道。
 
+## 3.13.1 电器监控模块（已实现）
+
+路由：`/api/v1/electrical`，全员 JWT；组级中间件为 AuthRequired + AgentContext + Audit +
+RequireIdempotencyKey（GET 自动豁免）。复用现有 InfluxDB，measurement 为
+`electrical_samples`，标签为 `source/channel/metric/unit/mapping/signature`，数值字段
+`value`、文本字段 `text_value`，另存 `quality/seq/raw`；`seq` 是字段而非标签。
+
+常驻采集由 `ELECTRICAL_MONITOR_ENABLED` 控制：Go 代码默认 `false`，Compose 默认
+`true`。6485 使用持久 TCP 连接只收不发、断线退避重连；四台 SCPI 设备各有独立
+worker，约 2 秒一轮且只执行固定查询。
+
+MESTEK 默认 `ELECTRICAL_MESTEK_ACTIVE_READ=true`，按 `ELECTRICAL_MESTEK_READ_INTERVAL`
+（默认 `10s`）主动读取完整快照。只允许固定 FC03 寄存器读取，绝不写寄存器；一请求一连接，
+300 ms 应答窗口，最多 3 次尝试且失败间隔 120 ms，所有事务经同一 context-aware gate 串行。
+每轮先读 `(0x14,0,5)`、`(0x15,0,5)` 表头并核对通道数／站号，再逐路读取 16 个寄存器：
+`0x14` 本地 CH1–CH3 映射全局 CH1–CH3，`0x15` 本地 CH1–CH10 映射全局 CH4–CH13。
+应答必须匹配从站号、字节数和 CRC；通道身份只来自本次请求。单路失败保留空态并清除该路
+旧当前值，不得用迟到帧、其他通道或旧快照补齐。`setI_A` 是已有应答内 `+11` 的只读回读
+（除以 1000，单位 A），不增加事务或写操作；最新现场方法论尚未确认其语义，UI 明确标为待标定。
+界面为四张卡片：MESTEK 13 路设定／实测表、三路信号源幅值／频率、RIGOL 四路加 Tek 当前
+已核对的 CH1／CH2 共六个测量值，以及带趋势的 6485 皮安计；其他通道和原始帧仍后台采集。
+
+设为 `false` 可切回完全被动、只收不发模式。此时只有观测到匹配请求才能映射通道；仅应答流
+保留原始帧与静态 `signature`，`channel=UNMAPPED`、`mapping=unmapped`，不得由特征组
+推断通道数。主动 FC03 是只读但仍占用共享总线，不等于零影响；需要零打扰时必须用被动模式。
+
+### `GET /api/v1/electrical/latest`
+
+返回内存中的最新样本与采集/写入健康：`{continuous_enabled, updated_at, write_backlog,
+sources, samples}`。`sources[]` 含连接状态、最后样本时间、采集错误、Influx 写入错误、
+最大间隔、CRC/残缺/配对计数及 MESTEK 映射状态。服务启动但连续采集关闭时，
+`sources[].status=disabled`；单次采集仍可更新最新样本。
+
+### `GET /api/v1/electrical/history`
+
+参数：`source`、`channel`、`metric`（均可选）、`from`（默认 `-15m`）、`to`（默认
+`now()`）、`limit`（默认 1000，范围 1–5000）。时间接受 Flux duration 或 RFC3339。
+响应 `{points: Sample[]}`，按时间升序。非法参数 400 `bad_request`；InfluxDB 不可达
+503 `electrical_storage_error`。
+
+### `POST /api/v1/electrical/single-shot`
+
+立即查询全部 SCPI 设备，并按当前模式读取 MESTEK、等待 6485 被动数据。MESTEK 主动模式
+通过共享串行 gate 执行一次 13 路 FC03 快照，不与常驻快照并发；被动模式等待下一帧。连续
+采集关闭时不启动常驻 worker。单次采集默认超时 30 秒，全局单飞，同一用户默认 5 秒限频；
+写接口必须带 `Idempotency-Key` 并写审计，审计只记录样本数和各源错误，不记录连接凭据。
+
+响应 `{started_at, finished_at, samples, sources, errors?}`；部分设备失败时仍返回已
+获得样本并在 `errors` 标明来源。错误：409 `single_shot_in_progress`、429
+`rate_limited`（details 含 `retry_after_seconds`）、502 `acquisition_failed`、504
+`acquisition_timeout`。
+
 ## 3.14 仪器控制模块（含安全租约与多步流程）
 
 路由：main.go:505-551（instruments）、548-551（ws）。控制类端点限 maintainer/admin；急停/翻译全员可触发。

@@ -65,6 +65,7 @@ export type StatusDomain =
   | 'translation'
   | 'logStatus'
   | 'reportQuality'
+  | 'electricalHealth'
 
 const FAMILY: Record<StatusTone, { graphic: string; text: string; soft: string }> = {
   success: { graphic: '--ok', text: '--ok-text', soft: '--ok-soft' },
@@ -178,6 +179,12 @@ export const STATUS_META: Record<StatusDomain, Record<string, StatusMeta>> = {
     unchecked: meta('info', 'reportQuality.unchecked'),
     passed: meta('success', 'reportQuality.passed'),
     warnings: meta('warning', 'reportQuality.warnings')
+  },
+  electricalHealth: {
+    disabled: meta('info', 'electrical.health.disabled'),
+    connecting: meta('primary', 'electrical.health.connecting'),
+    ok: meta('success', 'electrical.health.ok'),
+    degraded: meta('warning', 'electrical.health.degraded')
   }
 }
 

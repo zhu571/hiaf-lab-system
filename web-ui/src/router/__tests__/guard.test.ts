@@ -185,13 +185,13 @@ describe('路由守卫：catch-all 404', () => {
   })
 })
 
-describe('路由可达性：28 条组件路由懒加载全部可解析', () => {
+describe('路由可达性：组件路由懒加载全部可解析', () => {
   it('admin 登录态逐条访问全部组件路由，均到达目标路径（lazy import 模块无解析失败）', async () => {
     const store = useAuthStore()
     store.user = makeUser({ role: 'admin' })
     store.ready = true
 
-    // router/index.ts:6-32,37 全部 28 个懒加载组件路由（含 /projects/:id 6 子页、/daily-report 2 子页）
+    // 覆盖 router/index.ts 的懒加载组件路由（含项目子页与日报子页）。
     const routes = [
       '/',
       '/login',
@@ -210,6 +210,7 @@ describe('路由可达性：28 条组件路由懒加载全部可解析', () => {
       '/instrument-measure',
       '/gas-control',
       '/sensors',
+      '/electrical',
       '/todos',
       '/experiences',
       '/audit',
