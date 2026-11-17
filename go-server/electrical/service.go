@@ -28,11 +28,12 @@ func (e *RateLimitError) Error() string {
 type dialContextFunc func(ctx context.Context, network, address string) (net.Conn, error)
 
 type Service struct {
-	cfg     Config
-	influx  *InfluxClient
-	devices map[string]*SCPIDevice
-	dial    dialContextFunc
-	now     func() time.Time
+	cfg        Config
+	influx     *InfluxClient
+	devices    map[string]*SCPIDevice
+	dial       dialContextFunc
+	now        func() time.Time
+	mestekGate chan struct{}
 
 	mu        sync.RWMutex
 	latest    map[string]Sample
@@ -68,8 +69,11 @@ func NewService(cfg Config, influx *InfluxClient) *Service {
 	if cfg.ReconnectDelay <= 0 {
 		cfg.ReconnectDelay = 2 * time.Second
 	}
+	if cfg.MESTEKReadInterval <= 0 {
+		cfg.MESTEKReadInterval = 10 * time.Second
+	}
 	if cfg.SingleShotTimeout <= 0 {
-		cfg.SingleShotTimeout = 18 * time.Second
+		cfg.SingleShotTimeout = 30 * time.Second
 	}
 	if cfg.SingleShotMinInterval <= 0 {
 		cfg.SingleShotMinInterval = 5 * time.Second
@@ -83,14 +87,20 @@ func NewService(cfg Config, influx *InfluxClient) *Service {
 	s := &Service{
 		cfg: cfg, influx: influx, devices: make(map[string]*SCPIDevice),
 		dial: (&net.Dialer{Timeout: 3 * time.Second}).DialContext, now: time.Now,
-		latest: make(map[string]Sample), health: make(map[string]SourceHealth),
+		mestekGate: make(chan struct{}, 1),
+		latest:     make(map[string]Sample), health: make(map[string]SourceHealth),
 		waiters: make(map[string][]chan []Sample), lastSingle: make(map[string]time.Time),
 		backlog: make([]Sample, 0, cfg.BacklogCapacity),
 	}
 	for _, source := range sourceOrder {
 		mode := "scpi"
-		if source == SourceMESTEK || source == Source6485 {
+		if source == Source6485 {
 			mode = "passive"
+		} else if source == SourceMESTEK {
+			mode = "modbus_active"
+			if !cfg.MESTEKActiveRead {
+				mode = "passive"
+			}
 		}
 		status := "connecting"
 		if !cfg.Enabled {
@@ -162,6 +172,10 @@ func (s *Service) collectSCPI(ctx context.Context, device *SCPIDevice) ([]Sample
 }
 
 func (s *Service) runMESTEK(ctx context.Context) {
+	if s.cfg.MESTEKActiveRead {
+		s.runActiveMESTEK(ctx)
+		return
+	}
 	parser := NewModbusParser()
 	for ctx.Err() == nil {
 		conn, err := s.dial(ctx, "tcp", s.cfg.MESTEKAddr)
@@ -524,6 +538,11 @@ func (s *Service) flushBacklog(ctx context.Context) {
 	}
 }
 
+type acquisitionResult struct {
+	samples []Sample
+	err     error
+}
+
 func (s *Service) SingleShot(ctx context.Context, userID string) (SingleShotResult, error) {
 	if !s.singleRunning.CompareAndSwap(false, true) {
 		return SingleShotResult{}, ErrSingleShotRunning
@@ -543,7 +562,7 @@ func (s *Service) SingleShot(ctx context.Context, userID string) (SingleShotResu
 	defer cancel()
 	result := SingleShotResult{StartedAt: started, Errors: make(map[string]string)}
 	continuous := s.continuousRunning()
-	mestekCh := s.passiveShot(shotCtx, SourceMESTEK, continuous)
+	mestekCh := s.mestekShot(shotCtx, continuous)
 	keithleyCh := s.passiveShot(shotCtx, Source6485, continuous)
 	type deviceResult struct {
 		source  string
@@ -571,15 +590,21 @@ func (s *Service) SingleShot(ctx context.Context, userID string) (SingleShotResu
 			break
 		}
 	}
-	for source, ch := range map[string]<-chan []Sample{SourceMESTEK: mestekCh, Source6485: keithleyCh} {
+	passiveResults := []struct {
+		source string
+		ch     <-chan acquisitionResult
+	}{{SourceMESTEK, mestekCh}, {Source6485, keithleyCh}}
+	for _, pending := range passiveResults {
 		select {
-		case item := <-ch:
-			result.Samples = append(result.Samples, item...)
-			if len(item) == 0 {
-				result.Errors[source] = "no passive frame received"
+		case item := <-pending.ch:
+			result.Samples = append(result.Samples, item.samples...)
+			if item.err != nil {
+				result.Errors[pending.source] = item.err.Error()
+			} else if len(item.samples) == 0 {
+				result.Errors[pending.source] = "no passive frame received"
 			}
 		case <-shotCtx.Done():
-			result.Errors[source] = shotCtx.Err().Error()
+			result.Errors[pending.source] = shotCtx.Err().Error()
 		}
 	}
 	result.FinishedAt = s.now()
@@ -596,11 +621,32 @@ func (s *Service) SingleShot(ctx context.Context, userID string) (SingleShotResu
 	return result, nil
 }
 
-func (s *Service) passiveShot(ctx context.Context, source string, continuous bool) <-chan []Sample {
-	if continuous {
-		return s.addWaiter(ctx, source)
+func (s *Service) mestekShot(ctx context.Context, continuous bool) <-chan acquisitionResult {
+	if !s.cfg.MESTEKActiveRead {
+		return s.passiveShot(ctx, SourceMESTEK, continuous)
 	}
-	ch := make(chan []Sample, 1)
+	ch := make(chan acquisitionResult, 1)
+	go func() {
+		samples, err := s.collectActiveMESTEK(ctx)
+		ch <- acquisitionResult{samples: samples, err: err}
+	}()
+	return ch
+}
+
+func (s *Service) passiveShot(ctx context.Context, source string, continuous bool) <-chan acquisitionResult {
+	ch := make(chan acquisitionResult, 1)
+	if continuous {
+		waiter := s.addWaiter(ctx, source)
+		go func() {
+			select {
+			case samples := <-waiter:
+				ch <- acquisitionResult{samples: samples}
+			case <-ctx.Done():
+				ch <- acquisitionResult{err: ctx.Err()}
+			}
+		}()
+		return ch
+	}
 	go func() {
 		var samples []Sample
 		var err error
@@ -612,7 +658,7 @@ func (s *Service) passiveShot(ctx context.Context, source string, continuous boo
 		if err != nil {
 			s.noteSourceError(source, err, true)
 		}
-		ch <- s.record(samples)
+		ch <- acquisitionResult{samples: s.record(samples), err: err}
 	}()
 	return ch
 }

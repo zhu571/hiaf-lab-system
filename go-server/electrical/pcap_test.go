@@ -54,7 +54,13 @@ func TestDecodeMESTEKPCAPBidirectionalAndMissingResponse(t *testing.T) {
 	responseSeq := uint32(9000)
 	for channel := 1; channel <= 13; channel++ {
 		at := start.Add(time.Duration(channel) * 30 * time.Millisecond)
-		request := testRequest(0x14, uint16(channel*100), 20)
+		unit := byte(0x14)
+		local := channel
+		if channel > 3 {
+			unit = 0x15
+			local = channel - 3
+		}
+		request := testRequest(unit, uint16(local*100), 20)
 		// Split one request across TCP segments to exercise reassembly.
 		if channel == 1 {
 			appendPCAPPacket(&capture, order, at, client, server, 51000, 4001, requestSeq, request[:3])
@@ -68,7 +74,7 @@ func TestDecodeMESTEKPCAPBidirectionalAndMissingResponse(t *testing.T) {
 		if channel == 13 {
 			continue // missing final response must remain detectable at capture end
 		}
-		response := testResponse(0x14, testRegisters())
+		response := testResponse(unit, testRegisters())
 		appendPCAPPacket(&capture, order, at.Add(10*time.Millisecond), server, client, 4001, 51000, responseSeq, response)
 		responseSeq += uint32(len(response))
 	}

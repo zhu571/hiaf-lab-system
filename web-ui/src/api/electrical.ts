@@ -17,7 +17,7 @@ export type ElectricalSample = {
 
 export type ElectricalSourceHealth = {
   source: string
-  mode: 'passive' | 'scpi'
+  mode: 'passive' | 'modbus_active' | 'scpi'
   status: 'disabled' | 'connecting' | 'ok' | 'degraded'
   connected: boolean
   last_sample_at?: string

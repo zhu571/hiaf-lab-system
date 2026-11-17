@@ -52,6 +52,7 @@ func TestLiveSingleShotSmoke(t *testing.T) {
 	defer influx.Close()
 
 	cfg := DefaultConfig()
+	cfg.MESTEKActiveRead = false // this smoke test enforces a zero-write passive socket
 	cfg.Enabled = false
 	cfg.SingleShotTimeout = 30 * time.Second
 	client := NewInfluxClient(InfluxConfig{Addr: influx.URL, Token: "live-smoke-token", Org: "lab", Bucket: "electrical-smoke"})

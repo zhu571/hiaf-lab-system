@@ -41,6 +41,7 @@ func passiveTestDial(cfg Config, writes *atomic.Int64) dialContextFunc {
 
 func TestSingleShotQueriesAndPassiveNeverWrites(t *testing.T) {
 	cfg := DefaultConfig()
+	cfg.MESTEKActiveRead = false
 	cfg.Enabled = false
 	cfg.Devices = []DeviceConfig{{Source: SourceRIGOL, Addr: "rigol:5555"}}
 	var writes atomic.Int64
@@ -55,8 +56,8 @@ func TestSingleShotQueriesAndPassiveNeverWrites(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(result.Samples) != 10 { // four RIGOL + four MESTEK values/raw + one 6485
-		t.Fatalf("single-shot samples = %d, want 10", len(result.Samples))
+	if len(result.Samples) != 11 { // four RIGOL + five MESTEK values/raw + one 6485
+		t.Fatalf("single-shot samples = %d, want 11", len(result.Samples))
 	}
 	if writes.Load() != 0 {
 		t.Fatalf("passive sockets wrote %d times", writes.Load())
@@ -78,6 +79,7 @@ func TestSingleShotQueriesAndPassiveNeverWrites(t *testing.T) {
 
 func TestContinuousPassiveRun(t *testing.T) {
 	cfg := DefaultConfig()
+	cfg.MESTEKActiveRead = false
 	cfg.Enabled = true
 	cfg.Devices = nil
 	cfg.ReconnectDelay = 10 * time.Millisecond
@@ -114,6 +116,7 @@ func TestContinuousPassiveRun(t *testing.T) {
 
 func TestSingleShotTimeoutRemovesPassiveWaiters(t *testing.T) {
 	cfg := DefaultConfig()
+	cfg.MESTEKActiveRead = false
 	cfg.Enabled = true
 	cfg.Devices = nil
 	cfg.SingleShotTimeout = 20 * time.Millisecond

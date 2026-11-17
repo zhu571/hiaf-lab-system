@@ -188,8 +188,8 @@ func (p *ModbusParser) acceptFrame(kind string, raw []byte, at time.Time) Modbus
 	if match >= 0 {
 		req := requests[match]
 		p.pending[key] = append(requests[:match], requests[match+1:]...)
-		if req.start%100 == 0 {
-			frame.Channel = fmt.Sprintf("CH%d", req.start/100)
+		if channel, ok := mestekChannel(frame.Unit, req.start); ok {
+			frame.Channel = channel
 			frame.Mapping = MappingPaired
 			p.Stats.MappedFrames++
 		}
@@ -221,6 +221,27 @@ func (p *ModbusParser) Finalize() {
 		p.pending[key] = nil
 	}
 	p.Stats.PartialBytes = len(p.buffer)
+}
+
+// mestekChannel maps the two physical modules into one unambiguous CH1..CH13
+// display space: unit 0x14 owns CH1..CH3; unit 0x15 owns CH4..CH13.
+// The register address in the observed request is the only channel evidence.
+func mestekChannel(unit byte, start uint16) (string, bool) {
+	if start == 0 || start%100 != 0 {
+		return "", false
+	}
+	local := int(start / 100)
+	switch unit {
+	case 0x14:
+		if local >= 1 && local <= 3 {
+			return fmt.Sprintf("CH%d", local), true
+		}
+	case 0x15:
+		if local >= 1 && local <= 10 {
+			return fmt.Sprintf("CH%d", local+3), true
+		}
+	}
+	return "", false
 }
 
 func responseSignature(unit, fc byte, registers []uint16) string {
@@ -260,6 +281,9 @@ func (f ModbusFrame) Samples() []Sample {
 			{metric: "U_V", unit: "V", value: float64(f.Registers[6]) / 100},
 			{metric: "I_A", unit: "A", value: float64(f.Registers[7]) / 1000},
 			{metric: "setU_V", unit: "V", value: float64(f.Registers[10]) / 100},
+			// FC03-only readback. The latest field methodology still requires
+			// on-site confirmation of +11 semantics before treating it as SetI.
+			{metric: "setI_A", unit: "A", value: float64(f.Registers[11]) / 1000},
 		}
 		for _, item := range values {
 			value := item.value

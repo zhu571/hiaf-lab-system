@@ -5,6 +5,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"math"
 	"net"
 	"strconv"
 	"strings"
@@ -17,7 +18,10 @@ var scpiCommands = map[string][]string{
 		":MEAS:VPP? CHAN1", ":MEAS:VPP? CHAN2", ":MEAS:VPP? CHAN3", ":MEAS:VPP? CHAN4",
 	},
 	SourceTek: {
-		":MEASU:MEAS1:TYPE?", ":MEASU:MEAS1:SOURCE?", ":MEASU:MEAS1:VALUE?",
+		":MEASU:MEAS1:TYPE?", ":MEASU:MEAS1:SOURCE?", ":MEASU:MEAS1:UNITS?", ":MEASU:MEAS1:VALUE?",
+		":MEASU:MEAS2:TYPE?", ":MEASU:MEAS2:SOURCE?", ":MEASU:MEAS2:UNITS?", ":MEASU:MEAS2:VALUE?",
+		":MEASU:MEAS3:TYPE?", ":MEASU:MEAS3:SOURCE?", ":MEASU:MEAS3:UNITS?", ":MEASU:MEAS3:VALUE?",
+		":MEASU:MEAS4:TYPE?", ":MEASU:MEAS4:SOURCE?", ":MEASU:MEAS4:UNITS?", ":MEASU:MEAS4:VALUE?",
 	},
 	Source33512B: {
 		":SOUR1:APPL?", ":OUTP1?", ":SOUR2:APPL?", ":OUTP2?",
@@ -73,38 +77,39 @@ func (d *SCPIDevice) Collect(ctx context.Context) ([]Sample, error) {
 				errs = append(errs, command+": "+err.Error())
 				continue
 			}
+			if !validMeasurementValue(value) {
+				continue
+			}
 			samples = append(samples, numericSample(d.cfg.Source, fmt.Sprintf("CH%d", channel+1), "vpp_V", "V", value, response))
 		}
 	case SourceTek:
-		var typ, source, rawValue string
-		var ok bool
-		if typ, ok = ask(commands[0]); !ok {
-			typ = ""
-		}
-		if source, ok = ask(commands[1]); !ok {
-			source = "MEAS1"
-		}
-		if rawValue, ok = ask(commands[2]); ok {
-			value, err := parseSCPIFloat(rawValue)
-			if err != nil {
-				errs = append(errs, commands[2]+": "+err.Error())
-			} else {
-				channel := strings.Trim(strings.TrimSpace(source), "\"")
-				if channel == "" {
-					channel = "MEAS1"
-				}
-				unit := ""
-				if strings.EqualFold(strings.TrimSpace(typ), "PK2PK") {
-					unit = "V"
-				}
-				samples = append(samples, numericSample(d.cfg.Source, channel, "measurement_value", unit, value, rawValue))
+		for slot := 1; slot <= 4; slot++ {
+			base := (slot - 1) * 4
+			typ, _ := ask(commands[base])
+			source, sourceOK := ask(commands[base+1])
+			if !sourceOK {
+				source = fmt.Sprintf("MEAS%d", slot)
 			}
-		}
-		if typ != "" {
-			samples = append(samples, textSample(d.cfg.Source, "MEAS1", "type", typ, typ))
-		}
-		if source != "" {
-			samples = append(samples, textSample(d.cfg.Source, "MEAS1", "source", source, source))
+			units, _ := ask(commands[base+2])
+			channel := normalizeScopeChannel(source, slot)
+			if rawValue, ok := ask(commands[base+3]); ok {
+				value, err := parseSCPIFloat(rawValue)
+				if err != nil {
+					errs = append(errs, commands[base+3]+": "+err.Error())
+				} else if validMeasurementValue(value) {
+					unit := strings.Trim(strings.TrimSpace(units), "\"")
+					if unit == "" && strings.EqualFold(strings.TrimSpace(typ), "PK2PK") {
+						unit = "V"
+					}
+					samples = append(samples, numericSample(d.cfg.Source, channel, "measurement_value", unit, value, rawValue))
+				}
+			}
+			if typ != "" {
+				samples = append(samples, textSample(d.cfg.Source, channel, "type", strings.Trim(strings.TrimSpace(typ), "\""), typ))
+			}
+			if source != "" {
+				samples = append(samples, textSample(d.cfg.Source, channel, "source", strings.Trim(strings.TrimSpace(source), "\""), source))
+			}
 		}
 	case Source33512B:
 		for channel := 1; channel <= 2; channel++ {
@@ -183,10 +188,28 @@ func allowedSCPICommand(command string) bool {
 
 func parseSCPIFloat(raw string) (float64, error) {
 	value, err := strconv.ParseFloat(strings.Trim(strings.TrimSpace(raw), "\""), 64)
-	if err != nil {
+	if err != nil || math.IsNaN(value) || math.IsInf(value, 0) {
 		return 0, fmt.Errorf("invalid numeric response %q", raw)
 	}
 	return value, nil
+}
+
+// Tek and RIGOL use a very large finite sentinel when a measurement is not
+// available. It is not a physical voltage and must never reach the UI/graphs.
+func validMeasurementValue(value float64) bool {
+	return !math.IsNaN(value) && !math.IsInf(value, 0) && math.Abs(value) < 9.9e37
+}
+
+func normalizeScopeChannel(source string, slot int) string {
+	normalized := strings.ToUpper(strings.Trim(strings.TrimSpace(source), "\""))
+	normalized = strings.TrimPrefix(normalized, "CHAN")
+	normalized = strings.TrimPrefix(normalized, "CH")
+	switch normalized {
+	case "1", "2", "3", "4":
+		return "CH" + normalized
+	default:
+		return fmt.Sprintf("MEAS%d", slot)
+	}
 }
 
 func parseApply(source, channel, response string) []Sample {

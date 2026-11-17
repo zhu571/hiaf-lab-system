@@ -2,7 +2,6 @@
   <div class="electrical-page">
     <header class="page-header">
       <div>
-        <p class="eyebrow">Electrical</p>
         <h1>{{ t('electrical.title') }}</h1>
         <p class="subtitle">{{ t('electrical.subtitle') }}</p>
       </div>
@@ -21,7 +20,7 @@
 
     <StateBlock :loading="loading && !latest" :error="latest ? null : loadError" :error-text="errorMessage" @retry="refreshLatest">
       <div v-if="latest" class="monitor-content">
-        <section class="overview">
+        <section class="overview" aria-label="Acquisition overview">
           <div class="overview-status">
             <el-tag :type="latest.continuous_enabled ? 'success' : 'info'">
               {{ latest.continuous_enabled ? t('electrical.backendContinuous') : t('electrical.backendOnDemand') }}
@@ -39,83 +38,204 @@
         </section>
 
         <el-alert v-if="loadError" :title="errorMessage" type="warning" :closable="false" show-icon />
-        <el-empty v-if="allSamples.length === 0" :description="t('electrical.empty')" />
+        <el-alert v-if="allSamples.length === 0" :title="t('electrical.empty')" type="info" :closable="false" show-icon />
+        <el-alert v-if="historyError" :title="t('electrical.historyFailed')" type="warning" :closable="false" show-icon>
+          <el-button size="small" @click="loadHistory">{{ t('electrical.retry') }}</el-button>
+        </el-alert>
 
-        <div class="sources-grid">
-          <article v-for="section in sourceSections" :key="section.source" class="source-card" :class="{ 'mestek-card': section.source === 'mestek' }">
+        <div class="primary-grid">
+          <section class="source-card mestek-card" data-source="mestek">
             <header class="source-header">
               <div class="source-heading">
                 <div class="source-title">
-                  <h2>{{ sourceLabel(section.source) }}</h2>
-                  <el-tag size="small" effect="plain">{{ modeLabel(section.mode) }}</el-tag>
+                  <h2>{{ sourceLabel('mestek') }}</h2>
+                  <el-tag size="small" effect="plain">{{ modeLabel(healthFor('mestek')?.mode || 'modbus_active') }}</el-tag>
                 </div>
-                <el-tag v-if="section.source === 'mestek'" size="small" :type="section.health?.mapping === 'request_response' ? 'success' : 'warning'">
-                  {{ mappingLabel(section.health?.mapping || section.samples[0]?.mapping) }}
-                </el-tag>
+                <div class="source-meta">
+                  <span>{{ t('electrical.channelCoverage', { read: readCount('mestek', MESTEK_CHANNELS, 'U_V'), total: 13 }) }}</span>
+                  <span v-if="healthFor('mestek')?.last_sample_at">{{ t('electrical.lastSample', { time: formatDateTime(healthFor('mestek')!.last_sample_at!) }) }}</span>
+                </div>
               </div>
-              <StatusBadge domain="electricalHealth" :value="section.health?.status || 'connecting'" />
+              <StatusBadge domain="electricalHealth" :value="healthFor('mestek')?.status || 'connecting'" />
             </header>
+            <el-alert
+              v-for="message in healthAlerts('mestek')"
+              :key="message"
+              class="source-alert"
+              :title="message"
+              type="warning"
+              :closable="false"
+              show-icon
+            />
 
-            <div class="source-meta">
-              <span>{{ section.health?.last_sample_at ? t('electrical.lastSample', { time: formatDateTime(section.health.last_sample_at) }) : t('electrical.noSample') }}</span>
-              <span>{{ t('electrical.sampleCount', { count: section.health?.sample_count ?? 0 }) }}</span>
-              <span>{{ t('electrical.sourceErrors', { count: section.health?.error_count ?? 0 }) }}</span>
-              <span>{{ t('electrical.writeErrors', { count: section.health?.write_errors ?? 0 }) }}</span>
-            </div>
-            <p v-if="section.source === 'mestek'" class="frame-stats">
-              {{ t('electrical.frameStats', {
-                requests: section.health?.request_frames ?? 0,
-                responses: section.health?.response_frames ?? 0,
-                crc: section.health?.crc_errors ?? 0,
-                pairing: section.health?.pairing_errors ?? 0
-              }) }}
-            </p>
-            <div v-if="section.health?.last_error || section.health?.storage_error" class="source-errors">
-              <p v-if="section.health.last_error"><strong>{{ t('electrical.acquisitionError') }}:</strong> {{ section.health.last_error }}</p>
-              <p v-if="section.health.storage_error"><strong>{{ t('electrical.storageError') }}:</strong> {{ section.health.storage_error }}</p>
-            </div>
+            <table class="mestek-table" :aria-label="sourceLabel('mestek')">
+              <thead>
+                <tr>
+                  <th scope="col">{{ t('electrical.channel') }}</th>
+                  <th scope="col">{{ metricLabel('setU_V') }} <span class="column-unit">V</span></th>
+                  <th scope="col">{{ metricLabel('setI_A') }} <span class="column-unit">A</span></th>
+                  <th scope="col">{{ metricLabel('U_V') }} <span class="column-unit">V</span></th>
+                  <th scope="col">{{ metricLabel('I_A') }} <span class="column-unit">A</span></th>
+                  <th scope="col">{{ t('electrical.arcStatus') }}</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr v-for="channel in MESTEK_CHANNELS" :key="channel" class="mestek-row" :data-channel="channel">
+                  <th scope="row">{{ channel }}</th>
+                  <td
+                    v-for="metric in MESTEK_METRICS"
+                    :key="metric"
+                    class="reading-cell"
+                    :class="{ missing: numericValue('mestek', channel, metric) === undefined }"
+                    :data-metric="metric"
+                    :data-label="metricLabel(metric)"
+                  >{{ formatReading(numericValue('mestek', channel, metric)) }}</td>
+                  <td class="arc-cell" :data-label="t('electrical.arcStatus')">
+                    <div
+                      class="arc-status"
+                      :class="arcState(channel)"
+                      :title="t('electrical.arcThreshold')"
+                      :data-state="arcState(channel)"
+                    >
+                      <span class="arc-dot" aria-hidden="true"></span>
+                      <span>{{ arcLabel(channel) }}</span>
+                    </div>
+                  </td>
+                </tr>
+              </tbody>
+            </table>
+            <p class="card-note">{{ t('electrical.setCurrentNote') }}</p>
+            <p v-if="unmappedCount" class="card-note">{{ t('electrical.unmappedHidden', { count: unmappedCount }) }}</p>
+          </section>
 
-            <el-table v-if="section.samples.length" :data="section.samples" :row-key="sampleKey" size="small" :max-height="360">
-              <el-table-column prop="channel" :label="t('electrical.channel')" width="110" />
-              <el-table-column :label="t('electrical.metric')" min-width="145">
-                <template #default="{ row }">{{ metricLabel(row.metric) }}</template>
-              </el-table-column>
-              <el-table-column :label="t('electrical.value')" min-width="180">
-                <template #default="{ row }">
-                  <span class="sample-value" :class="{ raw: row.metric === 'frame' }" :title="row.text_value || row.raw">{{ displayValue(row) }}</span>
-                </template>
-              </el-table-column>
-              <el-table-column v-if="section.source === 'mestek'" :label="t('electrical.mapping')" min-width="170">
-                <template #default="{ row }">{{ mappingLabel(row.mapping) }}</template>
-              </el-table-column>
-              <el-table-column :label="t('electrical.quality')" width="80">
-                <template #default="{ row }">{{ qualityLabel(row.quality) }}</template>
-              </el-table-column>
-              <el-table-column :label="t('electrical.time')" width="165">
-                <template #default="{ row }">{{ formatDateTime(row.time) }}</template>
-              </el-table-column>
-            </el-table>
-            <p v-else-if="allSamples.length" class="source-empty">{{ t('electrical.noSample') }}</p>
-          </article>
+          <section class="source-card generator-card" data-card="generators">
+            <header class="source-header">
+              <div class="source-heading">
+                <div class="source-title">
+                  <h2>{{ t('electrical.generatorTitle') }}</h2>
+                  <el-tag size="small" effect="plain">{{ t('electrical.scpiReadOnly') }}</el-tag>
+                </div>
+                <div class="source-meta">
+                  <span>{{ t('electrical.channelCoverage', { read: generatorReadCount, total: 3 }) }}</span>
+                </div>
+              </div>
+              <StatusBadge domain="electricalHealth" :value="sourceStatus(...GENERATOR_SOURCES)" />
+            </header>
+            <el-alert
+              v-for="message in healthAlerts(...GENERATOR_SOURCES)"
+              :key="message"
+              class="source-alert"
+              :title="message"
+              type="warning"
+              :closable="false"
+              show-icon
+            />
+            <div class="generator-list">
+              <article
+                v-for="row in GENERATOR_ROWS"
+                :key="`${row.source}-${row.channel}`"
+                class="generator-row"
+                :data-source="row.source"
+                :data-channel="row.channel"
+              >
+                <header class="generator-name">
+                  <strong>{{ sourceLabel(row.source) }}</strong>
+                  <span>{{ row.channel }}</span>
+                </header>
+                <div class="generator-values">
+                  <div v-for="metric in GENERATOR_METRICS" :key="metric" class="generator-reading" :data-metric="metric">
+                    <span>{{ metricLabel(metric) }}</span>
+                    <div class="numeric-reading" :class="{ missing: numericValue(row.source, row.channel, metric) === undefined }">
+                      <strong>{{ formatReading(numericValue(row.source, row.channel, metric)) }}</strong>
+                      <span v-if="numericValue(row.source, row.channel, metric) !== undefined">{{ sampleFor(row.source, row.channel, metric)?.unit }}</span>
+                    </div>
+                  </div>
+                </div>
+              </article>
+            </div>
+          </section>
+
+          <section class="source-card scopes-card" data-card="scopes">
+            <header class="source-header">
+              <div class="source-heading">
+                <div class="source-title">
+                  <h2>{{ t('electrical.scopesTitle') }}</h2>
+                  <el-tag size="small" effect="plain">{{ t('electrical.scpiReadOnly') }}</el-tag>
+                </div>
+                <div class="source-meta">
+                  <span>{{ t('electrical.measurementCount', { count: scopeReadCount }) }}</span>
+                </div>
+              </div>
+              <StatusBadge domain="electricalHealth" :value="sourceStatus(...SCOPE_SOURCES)" />
+            </header>
+            <el-alert
+              v-for="message in healthAlerts(...SCOPE_SOURCES)"
+              :key="message"
+              class="source-alert"
+              :title="message"
+              type="warning"
+              :closable="false"
+              show-icon
+            />
+            <div class="scope-list">
+              <article
+                v-for="row in SCOPE_ROWS"
+                :key="`${row.source}-${row.channel}`"
+                class="scope-reading"
+                :data-source="row.source"
+                :data-channel="row.channel"
+                :data-metric="row.metric"
+              >
+                <div class="scope-identity">
+                  <strong>{{ scopeBrand(row.source) }}</strong>
+                  <span>{{ row.channel }}</span>
+                </div>
+                <span class="measurement-kind">{{ metricLabel(row.metric) }}</span>
+                <div class="numeric-reading scope-value" :class="{ missing: numericValue(row.source, row.channel, row.metric) === undefined }">
+                  <strong>{{ formatReading(numericValue(row.source, row.channel, row.metric)) }}</strong>
+                  <span v-if="numericValue(row.source, row.channel, row.metric) !== undefined">{{ sampleFor(row.source, row.channel, row.metric)?.unit }}</span>
+                </div>
+              </article>
+            </div>
+            <p class="card-note">{{ t('electrical.scopesNote') }}</p>
+          </section>
         </div>
 
-        <section class="trend-card">
-          <div class="section-title">
-            <div>
-              <h2>{{ t('electrical.trendTitle') }}</h2>
-              <p>{{ t('electrical.trendHint') }}</p>
+        <section class="source-card keithley6485-card" data-source="keithley6485">
+          <header class="source-header">
+            <div class="source-heading">
+              <div class="source-title">
+                <h2>{{ sourceLabel('keithley6485') }}</h2>
+                <el-tag size="small" effect="plain">{{ modeLabel(healthFor('keithley6485')?.mode || 'passive') }}</el-tag>
+              </div>
+              <div class="source-meta">
+                <span v-if="healthFor('keithley6485')?.last_sample_at">{{ t('electrical.lastSample', { time: formatDateTime(healthFor('keithley6485')!.last_sample_at!) }) }}</span>
+              </div>
             </div>
-          </div>
-          <div class="trend-controls">
-            <el-select v-model="trendSource" :aria-label="t('electrical.trendSource')" :disabled="!trendSources.length" class="trend-source">
-              <el-option v-for="source in trendSources" :key="source" :label="sourceLabel(source)" :value="source" />
-            </el-select>
-            <el-select v-model="trendMetric" :aria-label="t('electrical.trendMetric')" :disabled="!trendMetricOptions.length" class="trend-metric">
-              <el-option v-for="option in trendMetricOptions" :key="option.value" :label="option.label" :value="option.value" />
-            </el-select>
-          </div>
-          <SensorTrendChart v-if="trendGroups.length" :groups="trendGroups" :window-key="trendWindowKey" :window-size-ms="TREND_WINDOW_MS" />
-          <el-empty v-else :description="t('electrical.noTrend')" :image-size="72" />
+            <StatusBadge domain="electricalHealth" :value="healthFor('keithley6485')?.status || 'connecting'" />
+          </header>
+          <el-alert
+            v-for="message in healthAlerts('keithley6485')"
+            :key="message"
+            class="source-alert"
+            :title="message"
+            type="warning"
+            :closable="false"
+            show-icon
+          />
+          <ElectricalMetricPanel
+            class="pico-current"
+            data-channel="CH1"
+            data-metric="current_A"
+            :label="metricLabel('current_A')"
+            :value="numericValue('keithley6485', 'CH1', 'current_A')"
+            :unit="sampleFor('keithley6485', 'CH1', 'current_A')?.unit"
+            :points="trendPoints"
+            :color="picoColor"
+            :empty-text="t('electrical.noTrendPoints')"
+            :trend-label="t('electrical.trendLabel', { channel: 'CH1', metric: metricLabel('current_A') })"
+          />
+          <p class="trend-footnote">{{ t('electrical.trendHint') }}</p>
         </section>
       </div>
     </StateBlock>
@@ -127,50 +247,69 @@ import { computed, onMounted, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { ElMessage } from 'element-plus'
 import {
+  getElectricalHistory,
   getElectricalLatest,
   singleShotElectrical,
   type ElectricalLatest,
   type ElectricalSample,
-  type ElectricalSingleShotResult
+  type ElectricalSingleShotResult,
+  type ElectricalSourceHealth
 } from '../api/electrical'
 import { isApiError } from '../api/client'
 import { usePolling } from '../composables/usePolling'
 import { showApiError } from '../composables/useNotify'
 import { useTheme } from '../composables/useTheme'
-import SensorTrendChart from '@/components/business/SensorTrendChart.vue'
+import ElectricalMetricPanel from '@/components/business/ElectricalMetricPanel.vue'
 import StateBlock from '@/components/base/StateBlock.vue'
 import StatusBadge from '@/components/base/StatusBadge.vue'
-import { chartPalette, LINE_DASHES, type ChartGroup, type ChartPoint } from '@/utils/chartTheme'
+import { chartPalette, type ChartPoint } from '@/utils/chartTheme'
 import { formatDateTime } from '@/utils/datetime'
+import {
+  electricalSampleKey,
+  electricalSeriesKey,
+  mergeElectricalTrend,
+  mestekArcState,
+  type MestekArcState
+} from '@/utils/electricalTrend'
 
 const { t } = useI18n()
-const TREND_WINDOW_MS = 10 * 60 * 1000
-const TREND_POINT_LIMIT = 120
 
-const SOURCE_DEFINITIONS = [
-  { source: 'mestek', labelKey: 'electrical.sources.mestek', mode: 'passive' },
-  { source: 'keithley6485', labelKey: 'electrical.sources.keithley6485', mode: 'passive' },
-  { source: 'rigol_dho814', labelKey: 'electrical.sources.rigol_dho814', mode: 'scpi' },
-  { source: 'tek_mdo3034', labelKey: 'electrical.sources.tek_mdo3034', mode: 'scpi' },
-  { source: 'agilent_33512b', labelKey: 'electrical.sources.agilent_33512b', mode: 'scpi' },
-  { source: 'agilent_33210a', labelKey: 'electrical.sources.agilent_33210a', mode: 'scpi' }
-] as const
+function channelRange(count: number) {
+  return Array.from({ length: count }, (_, index) => `CH${index + 1}`)
+}
 
+const MESTEK_CHANNELS = channelRange(13)
+const MESTEK_METRICS = ['setU_V', 'setI_A', 'U_V', 'I_A']
+const GENERATOR_SOURCES = ['agilent_33512b', 'agilent_33210a']
+const GENERATOR_ROWS = [
+  { source: 'agilent_33512b', channel: 'CH1' },
+  { source: 'agilent_33512b', channel: 'CH2' },
+  { source: 'agilent_33210a', channel: 'CH1' }
+]
+const GENERATOR_METRICS = ['amplitude_V', 'frequency_Hz']
+const SCOPE_SOURCES = ['rigol_dho814', 'tek_mdo3034']
+const SCOPE_ROWS = [
+  ...channelRange(4).map((channel) => ({ source: 'rigol_dho814', channel, metric: 'vpp_V' })),
+  ...channelRange(2).map((channel) => ({ source: 'tek_mdo3034', channel, metric: 'measurement_value' }))
+]
+const SOURCE_LABEL_KEYS: Record<string, string> = {
+  mestek: 'electrical.sources.mestek',
+  keithley6485: 'electrical.sources.keithley6485',
+  rigol_dho814: 'electrical.sources.rigol_dho814',
+  tek_mdo3034: 'electrical.sources.tek_mdo3034',
+  agilent_33512b: 'electrical.sources.agilent_33512b',
+  agilent_33210a: 'electrical.sources.agilent_33210a'
+}
 const METRIC_LABEL_KEYS: Record<string, string> = {
-  output_enabled: 'electrical.metrics.output_enabled',
-  U_V: 'electrical.metrics.U_V',
   I_A: 'electrical.metrics.I_A',
+  U_V: 'electrical.metrics.U_V',
   setU_V: 'electrical.metrics.setU_V',
-  frame: 'electrical.metrics.frame',
+  setI_A: 'electrical.metrics.setI_A',
   current_A: 'electrical.metrics.current_A',
   vpp_V: 'electrical.metrics.vpp_V',
   measurement_value: 'electrical.metrics.measurement_value',
-  type: 'electrical.metrics.type',
-  source: 'electrical.metrics.source',
-  waveform: 'electrical.metrics.waveform',
   frequency_Hz: 'electrical.metrics.frequency_Hz',
-  amplitude_V: 'electrical.metrics.amplitude_V',
-  offset_V: 'electrical.metrics.offset_V'
+  amplitude_V: 'electrical.metrics.amplitude_V'
 }
 
 const latest = ref<ElectricalLatest>()
@@ -178,30 +317,134 @@ const continuousView = ref(true)
 const loading = ref(true)
 const refreshing = ref(false)
 const shotRunning = ref(false)
+const historyLoading = ref(false)
 const loadError = ref<Error | null>(null)
+const historyError = ref(false)
+const trendHistory = ref<Record<string, ChartPoint[]>>({})
 
 const allSamples = computed(() => latest.value?.samples ?? [])
 const totalWriteErrors = computed(() => (latest.value?.sources ?? []).reduce((total, source) => total + source.write_errors, 0))
 const errorMessage = computed(() => loadError.value ? `${t('electrical.loadFailed')}: ${loadError.value.message}` : '')
-const sourceSections = computed(() => SOURCE_DEFINITIONS.map((definition) => ({
-  ...definition,
-  health: latest.value?.sources?.find((health) => health.source === definition.source),
-  samples: allSamples.value
-    .filter((sample) => sample.source === definition.source)
-    .sort((a, b) => a.channel.localeCompare(b.channel, undefined, { numeric: true }) || a.metric.localeCompare(b.metric) || (a.signature || '').localeCompare(b.signature || ''))
-})))
+const sampleLookup = computed(() => {
+  const result = new Map<string, ElectricalSample>()
+  for (const sample of allSamples.value) {
+    if (sample.channel === 'UNMAPPED') continue
+    const key = electricalSeriesKey(sample.source, sample.channel, sample.metric)
+    const previous = result.get(key)
+    if (!previous || Date.parse(sample.time) >= Date.parse(previous.time)) result.set(key, sample)
+  }
+  return result
+})
+const generatorReadCount = computed(() => GENERATOR_ROWS.filter((row) => numericValue(row.source, row.channel, 'amplitude_V') !== undefined).length)
+const scopeReadCount = computed(() => SCOPE_ROWS.filter((row) => numericValue(row.source, row.channel, row.metric) !== undefined).length)
+const unmappedCount = computed(() => allSamples.value.filter((sample) => sample.source === 'mestek' && sample.channel === 'UNMAPPED').length)
+const trendPoints = computed(() => trendHistory.value[electricalSeriesKey('keithley6485', 'CH1', 'current_A')] ?? [])
+
+const { state: themeState } = useTheme()
+const picoColor = computed(() => {
+  void themeState.value
+  return chartPalette()[0]
+})
+
+function sampleFor(source: string, channel: string, metric: string) {
+  return sampleLookup.value.get(electricalSeriesKey(source, channel, metric))
+}
+
+function numericValue(source: string, channel: string, metric: string) {
+  const value = sampleFor(source, channel, metric)?.value
+  return typeof value === 'number' && Number.isFinite(value) ? value : undefined
+}
+
+function formatReading(value: number | undefined) {
+  if (typeof value !== 'number' || !Number.isFinite(value)) return '—'
+  if (value === 0) return '0'
+  const absolute = Math.abs(value)
+  if (absolute >= 1e6 || absolute < 1e-3) return value.toExponential(3)
+  return String(Number(value.toPrecision(6)))
+}
+
+function readCount(source: string, channels: string[], metric: string) {
+  return channels.filter((channel) => numericValue(source, channel, metric) !== undefined).length
+}
+
+function healthFor(source: string) {
+  return latest.value?.sources?.find((item) => item.source === source)
+}
+
+function sourceStatus(...sources: string[]): ElectricalSourceHealth['status'] {
+  const health = sources.map(healthFor)
+  if (health.some((item) => item?.status === 'degraded' || item?.connected === false)) return 'degraded'
+  if (health.some((item) => item?.status === 'disabled')) return 'disabled'
+  return health.every((item) => item?.status === 'ok') ? 'ok' : 'connecting'
+}
+
+function healthAlerts(...sources: string[]) {
+  return Array.from(new Set(sources.flatMap((source) => {
+    const health = healthFor(source)
+    return [health?.last_error, health?.storage_error].filter((message): message is string => Boolean(message))
+  })))
+}
+
+function sourceLabel(source: string) {
+  const key = SOURCE_LABEL_KEYS[source]
+  return key ? t(key) : source
+}
+
+function scopeBrand(source: string) {
+  return source === 'rigol_dho814' ? 'RIGOL' : 'Tek'
+}
+
+function modeLabel(mode: ElectricalSourceHealth['mode']) {
+  const labelKeys = {
+    passive: 'electrical.passiveReadOnly',
+    modbus_active: 'electrical.activeReadOnly',
+    scpi: 'electrical.scpiReadOnly'
+  } as const
+  return t(labelKeys[mode])
+}
+
+function metricLabel(metric: string) {
+  const key = METRIC_LABEL_KEYS[metric]
+  return key ? t(key) : metric
+}
+
+function recordTrend(samples: ElectricalSample[]) {
+  trendHistory.value = mergeElectricalTrend(
+    trendHistory.value,
+    samples.filter((sample) => sample.source === 'keithley6485' && sample.channel === 'CH1' && sample.metric === 'current_A')
+  )
+}
+
+function arcState(channel: string): MestekArcState {
+  return mestekArcState(numericValue('mestek', channel, 'I_A'))
+}
+
+function arcLabel(channel: string) {
+  const state = arcState(channel)
+  if (state === 'danger') return t('electrical.arcHigh')
+  if (state === 'unknown') return t('electrical.arcUnknown')
+  return numericValue('mestek', channel, 'I_A') === 0 ? t('electrical.arcZero') : t('electrical.arcSafe')
+}
 
 const polling = usePolling(refreshLatest, 2000)
+const historyPolling = usePolling(loadHistory, 60000)
 onMounted(() => {
   void refreshLatest()
-  if (continuousView.value) polling.start()
+  void loadHistory()
+  if (continuousView.value) {
+    polling.start()
+    historyPolling.start()
+  }
 })
 watch(continuousView, (enabled) => {
   if (enabled) {
     void refreshLatest()
+    void loadHistory()
     polling.start()
+    historyPolling.start()
   } else {
     polling.stop()
+    historyPolling.stop()
   }
 })
 
@@ -219,6 +462,26 @@ async function refreshLatest() {
   } finally {
     loading.value = false
     refreshing.value = false
+  }
+}
+
+async function loadHistory() {
+  if (historyLoading.value) return
+  historyLoading.value = true
+  try {
+    const result = await getElectricalHistory({
+      source: 'keithley6485',
+      channel: 'CH1',
+      metric: 'current_A',
+      from: '-30m',
+      limit: 1000
+    })
+    recordTrend(result.points ?? [])
+    historyError.value = false
+  } catch {
+    historyError.value = true
+  } finally {
+    historyLoading.value = false
   }
 }
 
@@ -255,171 +518,64 @@ function showOperationError(message: string, error: { requestId?: string }) {
 }
 
 function mergeSingleShot(result: ElectricalSingleShotResult) {
-  if (!latest.value) return
-  const samples = new Map(allSamples.value.map((sample) => [sampleKey(sample), sample]))
-  for (const sample of result.samples ?? []) samples.set(sampleKey(sample), sample)
+  const activeMESTEK = result.sources?.some((source) => source.source === 'mestek' && source.mode === 'modbus_active')
+  const retained = activeMESTEK ? allSamples.value.filter((sample) => sample.source !== 'mestek') : allSamples.value
+  const samples = new Map(retained.map((sample) => [electricalSampleKey(sample), sample]))
+  for (const sample of result.samples ?? []) {
+    samples.set(electricalSampleKey(sample), sample)
+  }
   latest.value = {
-    ...latest.value,
+    continuous_enabled: latest.value?.continuous_enabled ?? false,
     updated_at: result.finished_at,
-    sources: result.sources ?? latest.value.sources,
+    write_backlog: latest.value?.write_backlog ?? 0,
+    sources: result.sources ?? latest.value?.sources ?? [],
     samples: Array.from(samples.values())
   }
 }
-
-function sampleKey(sample: ElectricalSample) {
-  return [sample.source, sample.channel, sample.metric, sample.mapping, sample.signature || ''].join('\u0000')
-}
-
-function sourceLabel(source: string) {
-  const definition = SOURCE_DEFINITIONS.find((item) => item.source === source)
-  return definition ? t(definition.labelKey) : source
-}
-
-function modeLabel(mode: 'passive' | 'scpi') {
-  return t(mode === 'passive' ? 'electrical.passiveReadOnly' : 'electrical.scpiReadOnly')
-}
-
-function metricLabel(metric: string) {
-  const key = METRIC_LABEL_KEYS[metric]
-  return key ? t(key) : metric
-}
-
-function mappingLabel(mapping?: string) {
-  if (mapping === 'request_response') return t('electrical.mappingPaired')
-  if (mapping === 'unmapped') return t('electrical.mappingUnmapped')
-  if (mapping === 'direct') return t('electrical.mappingDirect')
-  return t('electrical.mappingUnknown')
-}
-
-function qualityLabel(quality: string) {
-  return quality === 'good' ? t('electrical.qualityGood') : quality || '—'
-}
-
-function displayValue(sample: ElectricalSample) {
-  if (typeof sample.value === 'number' && Number.isFinite(sample.value)) {
-    if (sample.metric === 'output_enabled') return sample.value === 0 ? t('electrical.outputOff') : t('electrical.outputOn')
-    const value = formatNumber(sample.value)
-    return sample.unit ? `${value} ${sample.unit}` : value
-  }
-  return sample.text_value || '—'
-}
-
-function formatNumber(value: number) {
-  if (value === 0) return '0'
-  const absolute = Math.abs(value)
-  if (absolute >= 1e6 || absolute < 1e-3) return value.toExponential(3)
-  return String(Number(value.toPrecision(6)))
-}
-
-type SeriesMeta = Pick<ElectricalSample, 'source' | 'channel' | 'metric' | 'signature'>
-const trendHistory = ref<Record<string, ChartPoint[]>>({})
-const seriesMeta: Record<string, SeriesMeta> = {}
-const lastMarkers = new Map<string, string>()
-const trendSource = ref('')
-const trendMetric = ref('')
-const { state: themeState } = useTheme()
-
-function recordTrend(samples: ElectricalSample[]) {
-  const next = { ...trendHistory.value }
-  let changed = false
-  for (const sample of samples) {
-    if (typeof sample.value !== 'number' || !Number.isFinite(sample.value)) continue
-    const time = Date.parse(sample.time)
-    if (!Number.isFinite(time)) continue
-    const key = sampleKey(sample)
-    const marker = `${sample.seq}:${sample.time}`
-    if (lastMarkers.get(key) === marker) continue
-    lastMarkers.set(key, marker)
-    seriesMeta[key] = { source: sample.source, channel: sample.channel, metric: sample.metric, signature: sample.signature }
-    next[key] = [...(next[key] ?? []), { time, value: sample.value }].slice(-TREND_POINT_LIMIT)
-    changed = true
-  }
-  if (changed) trendHistory.value = next
-}
-
-const numericSamples = computed(() => allSamples.value.filter((sample) => typeof sample.value === 'number' && Number.isFinite(sample.value)))
-const trendSources = computed(() => SOURCE_DEFINITIONS.map((item) => item.source).filter((source) => numericSamples.value.some((sample) => sample.source === source)))
-const trendMetricOptions = computed(() => {
-  const metrics = new Map<string, string>()
-  for (const sample of numericSamples.value) {
-    if (sample.source !== trendSource.value || metrics.has(sample.metric)) continue
-    metrics.set(sample.metric, `${metricLabel(sample.metric)}${sample.unit ? ` (${sample.unit})` : ''}`)
-  }
-  return Array.from(metrics, ([value, label]) => ({ value, label })).sort((a, b) => a.label.localeCompare(b.label))
-})
-
-watch(trendSources, (sources) => {
-  if (!sources.includes(trendSource.value as typeof sources[number])) trendSource.value = sources[0] ?? ''
-}, { immediate: true })
-watch(trendMetricOptions, (options) => {
-  if (options.some((option) => option.value === trendMetric.value)) return
-  const preferred = ['U_V', 'current_A', 'vpp_V', 'measurement_value', 'frequency_Hz', 'amplitude_V', 'output_enabled']
-  trendMetric.value = preferred.find((metric) => options.some((option) => option.value === metric)) ?? options[0]?.value ?? ''
-}, { immediate: true })
-
-const trendGroups = computed<ChartGroup[]>(() => {
-  void themeState.value
-  const palette = chartPalette()
-  return Object.entries(trendHistory.value)
-    .filter(([key]) => {
-      const meta = seriesMeta[key]
-      return meta?.source === trendSource.value && meta.metric === trendMetric.value
-    })
-    .map(([key, points]) => {
-      const meta = seriesMeta[key]
-      const name = meta.channel === 'UNMAPPED' && meta.signature ? `${meta.channel} · ${meta.signature.slice(0, 6)}` : meta.channel
-      return { key, name, points }
-    })
-    .sort((a, b) => a.name.localeCompare(b.name, undefined, { numeric: true }))
-    .map((series, index) => ({
-      name: series.name,
-      color: palette[index % palette.length],
-      dash: LINE_DASHES[index % LINE_DASHES.length],
-      points: series.points
-    }))
-})
-const trendWindowKey = computed(() => `${trendSource.value}:${trendMetric.value}`)
 </script>
 
 <style scoped>
 .electrical-page,
 .monitor-content {
   display: grid;
-  gap: 20px;
+  gap: var(--space-5);
 }
 
 .page-header,
 .overview,
 .source-header,
-.section-title {
+.monitor-actions,
+.continuous-control,
+.overview-status,
+.storage-status {
   align-items: center;
   display: flex;
+}
+
+.page-header,
+.overview,
+.source-header {
   justify-content: space-between;
 }
 
 .page-header {
   align-items: flex-start;
-  gap: 20px;
+  gap: var(--space-5);
 }
 
 .page-header h1,
-.source-title h2,
-.section-title h2 {
+.source-title h2 {
   margin: 0;
 }
 
-.eyebrow {
-  color: var(--brand-600);
-  font-size: 12px;
-  font-weight: 700;
-  letter-spacing: .12em;
-  margin: 0 0 4px;
-  text-transform: uppercase;
+.page-header h1 {
+  font-size: var(--fs-title-xl);
 }
 
 .subtitle,
-.section-title p,
-.continuous-hint {
+.continuous-hint,
+.card-note,
+.trend-footnote {
   color: var(--text-3);
   margin: 5px 0 0;
 }
@@ -434,11 +590,7 @@ const trendWindowKey = computed(() => `${trendSource.value}:${trendMetric.value}
 .continuous-control,
 .overview-status,
 .storage-status,
-.source-title,
-.source-meta,
-.trend-controls {
-  align-items: center;
-  display: flex;
+.source-title {
   flex-wrap: wrap;
   gap: 10px;
 }
@@ -454,129 +606,293 @@ const trendWindowKey = computed(() => `${trendSource.value}:${trendMetric.value}
 }
 
 .continuous-hint {
-  font-size: 12px;
-  max-width: 520px;
+  font-size: var(--fs-caption);
+  max-width: 540px;
   text-align: right;
 }
 
 .overview {
-  background: var(--surface);
-  border: 1px solid var(--border);
-  border-radius: 14px;
-  gap: 14px;
-  padding: 14px 18px;
+  border-bottom: 1px solid var(--border);
+  border-top: 1px solid var(--border);
+  gap: var(--space-3);
+  padding: 12px 2px;
 }
 
 .overview-status {
   color: var(--text-3);
 }
 
-.sources-grid {
+.primary-grid {
   align-items: start;
   display: grid;
-  gap: 16px;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--space-4);
+  grid-template-columns: minmax(0, 1.7fr) minmax(0, 1fr) minmax(0, .85fr);
 }
 
 .source-card,
-.trend-card {
-  background: var(--surface);
-  border: 1px solid var(--border);
-  border-radius: 14px;
-  box-shadow: var(--shadow-sm);
+.source-heading {
   min-width: 0;
-  padding: 18px;
 }
 
-.mestek-card {
-  grid-column: 1 / -1;
+.source-card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-sm);
+  padding: var(--space-5);
 }
 
 .source-header {
   align-items: flex-start;
-  gap: 12px;
-  margin-bottom: 12px;
+  gap: var(--space-3);
 }
 
-.source-heading {
-  display: grid;
-  gap: 8px;
+.source-title {
+  align-items: center;
+  display: flex;
 }
 
 .source-title h2 {
-  font-size: var(--fs-title-sm);
+  font-size: var(--fs-title);
 }
 
 .source-meta {
+  align-items: center;
   color: var(--text-3);
-  font-size: 12px;
-  margin-bottom: 12px;
+  display: flex;
+  flex-wrap: wrap;
+  font-size: var(--fs-caption);
+  gap: 6px 16px;
+  margin-top: 5px;
 }
 
-.frame-stats {
-  color: var(--text-3);
-  font-size: 12px;
-  margin: 0 0 12px;
+.source-alert {
+  margin-top: var(--space-3);
 }
 
-.source-errors {
-  background: var(--warn-soft);
-  border-radius: 8px;
-  color: var(--warn-text);
-  font-size: 12px;
-  margin-bottom: 12px;
-  padding: 10px 12px;
+.mestek-table {
+  border-collapse: collapse;
+  font-size: var(--fs-caption);
+  margin-top: var(--space-3);
+  table-layout: fixed;
+  width: 100%;
 }
 
-.source-errors p {
-  margin: 0;
-  overflow-wrap: anywhere;
-}
-
-.source-errors p + p {
-  margin-top: 6px;
-}
-
-.sample-value {
+.mestek-table th,
+.mestek-table td {
+  border-bottom: 1px solid var(--border);
   font-variant-numeric: tabular-nums;
-}
-
-.sample-value.raw {
-  display: inline-block;
-  max-width: 280px;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  vertical-align: bottom;
+  padding: 9px 4px;
+  text-align: right;
   white-space: nowrap;
 }
 
-.source-empty {
+.mestek-table thead th {
   color: var(--text-3);
-  margin: 18px 0 4px;
+  font-size: var(--fs-caption);
+  font-weight: var(--fw-medium);
+  line-height: 1.35;
+  white-space: normal;
+}
+
+.mestek-table th:first-child {
+  text-align: left;
+  width: 13%;
+}
+
+.mestek-table th:last-child {
   text-align: center;
+  width: 22%;
 }
 
-.trend-card {
+.mestek-table tbody th {
+  font-weight: var(--fw-semibold);
+}
+
+.mestek-table tbody tr:last-child th,
+.mestek-table tbody tr:last-child td {
+  border-bottom: 0;
+}
+
+.column-unit {
+  color: var(--text-3);
+  font-size: var(--fs-caption);
+  font-weight: var(--fw-regular);
+}
+
+.reading-cell.missing,
+.numeric-reading.missing strong {
+  color: var(--text-3);
+}
+
+.arc-status {
+  align-items: center;
+  border-radius: var(--radius-full);
+  display: inline-flex;
+  font-size: var(--fs-caption);
+  font-weight: var(--fw-semibold);
+  gap: 6px;
+  min-height: 24px;
+  padding: 2px 8px;
+  white-space: nowrap;
+}
+
+.arc-dot {
+  background: currentColor;
+  border-radius: 50%;
+  flex: 0 0 auto;
+  height: 7px;
+  width: 7px;
+}
+
+.arc-status.danger {
+  background: var(--danger-soft);
+  color: var(--danger-text);
+}
+
+.arc-status.safe {
+  background: var(--ok-soft);
+  color: var(--ok-text);
+}
+
+.arc-status.unknown {
+  background: var(--info-soft);
+  color: var(--info-text);
+}
+
+.card-note,
+.trend-footnote {
+  font-size: var(--fs-caption);
+  line-height: 1.5;
+}
+
+.card-note {
+  margin-top: var(--space-3);
+}
+
+.generator-list,
+.scope-list {
+  margin-top: var(--space-2);
+}
+
+.generator-row,
+.scope-reading {
+  border-bottom: 1px solid var(--border);
+}
+
+.generator-row:last-child,
+.scope-reading:last-child {
+  border-bottom: 0;
+}
+
+.generator-row {
+  padding: var(--space-4) 0;
+}
+
+.generator-name {
+  align-items: center;
+  display: flex;
+  flex-wrap: wrap;
+  font-size: var(--fs-caption);
+  gap: 8px;
+  justify-content: space-between;
+}
+
+.generator-name span,
+.scope-identity span,
+.measurement-kind {
+  color: var(--text-3);
+}
+
+.generator-values {
   display: grid;
-  gap: 16px;
-  grid-template-columns: minmax(0, 1fr);
+  gap: var(--space-4);
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  margin-top: var(--space-3);
 }
 
-.trend-card :deep(.trend-wrap),
-.trend-card :deep(.chart-box) {
+.generator-reading {
+  display: grid;
+  gap: 4px;
   min-width: 0;
 }
 
-.trend-card :deep(.trend-wrap) {
-  grid-template-columns: minmax(0, 1fr);
+.generator-reading > span,
+.measurement-kind {
+  font-size: var(--fs-caption);
 }
 
-.trend-source {
-  width: 250px;
+.numeric-reading {
+  align-items: baseline;
+  display: flex;
+  flex-wrap: wrap;
+  font-variant-numeric: tabular-nums;
+  gap: 5px;
+  min-width: 0;
 }
 
-.trend-metric {
-  width: 210px;
+.numeric-reading strong {
+  font-size: var(--fs-title);
+  font-weight: var(--fw-semibold);
+  overflow-wrap: anywhere;
+}
+
+.numeric-reading span {
+  color: var(--text-3);
+  font-size: var(--fs-caption);
+}
+
+.scope-reading {
+  align-items: center;
+  display: grid;
+  gap: 4px var(--space-3);
+  grid-template-columns: minmax(0, 1fr) auto;
+  padding: 13px 0;
+}
+
+.scope-identity {
+  align-items: baseline;
+  display: flex;
+  flex-wrap: wrap;
+  font-size: var(--fs-caption);
+  gap: 7px;
+}
+
+.scope-value {
+  grid-column: 2;
+  grid-row: 1 / span 2;
+  justify-content: flex-end;
+}
+
+.pico-current {
+  margin-top: var(--space-4);
+}
+
+.pico-current :deep(.sparkline),
+.pico-current :deep(.sparkline svg) {
+  height: 220px;
+}
+
+.pico-current :deep(.metric-reading) {
+  margin-top: var(--space-2);
+}
+
+.pico-current :deep(.metric-reading strong) {
+  font-size: var(--fs-metric);
+}
+
+.trend-footnote {
+  text-align: right;
+}
+
+@media (max-width: 1200px) {
+  .primary-grid {
+    grid-template-columns: minmax(0, 1.2fr) minmax(0, 1fr);
+  }
+
+  .mestek-card {
+    grid-row: span 2;
+  }
 }
 
 @media (max-width: 1100px) {
@@ -594,12 +910,12 @@ const trendWindowKey = computed(() => `${trendSource.value}:${trendMetric.value}
 }
 
 @media (max-width: 900px) {
-  .sources-grid {
+  .primary-grid {
     grid-template-columns: minmax(0, 1fr);
   }
 
   .mestek-card {
-    grid-column: auto;
+    grid-row: auto;
   }
 }
 
@@ -609,23 +925,67 @@ const trendWindowKey = computed(() => `${trendSource.value}:${trendMetric.value}
     display: grid;
   }
 
-  .monitor-actions {
-    width: 100%;
-  }
-
+  .monitor-actions,
   .continuous-control {
     width: 100%;
   }
 
-  .source-card,
-  .trend-card {
-    padding: 14px;
+  .source-card {
+    padding: var(--space-4);
   }
 
-  .trend-controls,
-  .trend-source,
-  .trend-metric {
-    width: 100%;
+  .trend-footnote {
+    text-align: left;
+  }
+}
+
+@media (max-width: 600px) {
+  .mestek-table,
+  .mestek-table tbody {
+    display: block;
+  }
+
+  .mestek-table thead {
+    display: none;
+  }
+
+  .mestek-table .mestek-row {
+    border-bottom: 1px solid var(--border);
+    display: grid;
+    gap: 8px var(--space-3);
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    padding: var(--space-3) 0;
+  }
+
+  .mestek-table .mestek-row th,
+  .mestek-table .mestek-row td {
+    border: 0;
+    padding: 0;
+    white-space: normal;
+  }
+
+  .mestek-table .mestek-row th {
+    grid-column: 1 / -1;
+  }
+
+  .mestek-table .mestek-row td {
+    align-items: baseline;
+    display: flex;
+    gap: 8px;
+    justify-content: space-between;
+    text-align: right;
+  }
+
+  .mestek-table .mestek-row td::before {
+    color: var(--text-3);
+    content: attr(data-label);
+    font-size: var(--fs-caption);
+    text-align: left;
+  }
+
+  .mestek-table .mestek-row .arc-cell {
+    align-items: center;
+    grid-column: 1 / -1;
   }
 }
 </style>

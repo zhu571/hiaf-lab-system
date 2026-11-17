@@ -3,6 +3,7 @@ package electrical
 import (
 	"encoding/binary"
 	"encoding/hex"
+	"fmt"
 	"testing"
 	"time"
 )
@@ -34,6 +35,7 @@ func testRegisters() []uint16 {
 	registers[6] = 680
 	registers[7] = 2388
 	registers[10] = 680
+	registers[11] = 3000
 	registers[12] = 6000
 	registers[14] = 100
 	return registers
@@ -58,8 +60,8 @@ func TestModbusResponseOnlyStaysUnmapped(t *testing.T) {
 		t.Fatalf("response-only frame acquired an identity: %+v", frame)
 	}
 	samples := frame.Samples()
-	if len(samples) != 5 {
-		t.Fatalf("samples = %d, want 4 readings + raw frame", len(samples))
+	if len(samples) != 6 {
+		t.Fatalf("samples = %d, want 5 readings + raw frame", len(samples))
 	}
 	for _, sample := range samples {
 		if sample.Channel != "UNMAPPED" || sample.Mapping != MappingNone || sample.Raw == "" {
@@ -73,13 +75,21 @@ func TestModbusMapsThirteenChannelsFromRequests(t *testing.T) {
 	start := time.Unix(1000, 0)
 	channels := map[string]bool{}
 	var frames []ModbusFrame
-	for channel := 1; channel <= 13; channel++ {
-		at := start.Add(time.Duration(channel) * 20 * time.Millisecond)
-		request := testRequest(0x14, uint16(channel*100), 20)
-		response := testResponse(0x14, testRegisters())
-		frames = append(frames, parser.Feed(request, at)...)
-		frames = append(frames, parser.Feed(response[:7], at.Add(time.Millisecond))...)
-		frames = append(frames, parser.Feed(response[7:], at.Add(2*time.Millisecond))...)
+	requests := []struct {
+		unit     byte
+		channels int
+	}{{unit: 0x14, channels: 3}, {unit: 0x15, channels: 10}}
+	sequence := 0
+	for _, module := range requests {
+		for local := 1; local <= module.channels; local++ {
+			sequence++
+			at := start.Add(time.Duration(sequence) * 20 * time.Millisecond)
+			request := testRequest(module.unit, uint16(local*100), 20)
+			response := testResponse(module.unit, testRegisters())
+			frames = append(frames, parser.Feed(request, at)...)
+			frames = append(frames, parser.Feed(response[:7], at.Add(time.Millisecond))...)
+			frames = append(frames, parser.Feed(response[7:], at.Add(2*time.Millisecond))...)
+		}
 	}
 	for _, frame := range frames {
 		if frame.Kind == "response" {
@@ -89,11 +99,14 @@ func TestModbusMapsThirteenChannelsFromRequests(t *testing.T) {
 			channels[frame.Channel] = true
 		}
 	}
+	for channel := 1; channel <= 13; channel++ {
+		name := fmt.Sprintf("CH%d", channel)
+		if !channels[name] {
+			t.Errorf("missing %s: %v", name, channels)
+		}
+	}
 	if len(channels) != 13 || parser.Stats.MappedFrames != 13 || parser.Stats.PairingErrors != 0 {
 		t.Fatalf("channels=%v stats=%+v", channels, parser.Stats)
-	}
-	if !channels["CH1"] || !channels["CH13"] {
-		t.Fatalf("missing boundary channels: %v", channels)
 	}
 }
 
