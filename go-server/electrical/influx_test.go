@@ -50,12 +50,15 @@ func TestInfluxWriteLineProtocolAndHistory(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, expected := range []string{
-		"electrical_samples,source=rigol_dho814,channel=CH1,metric=vpp_V,unit=V,mapping=direct,signature=",
+		"electrical_samples,source=rigol_dho814,channel=CH1,metric=vpp_V,unit=V,mapping=direct value=1.25",
 		"value=1.25", `quality="good"`, "seq=7i", "1000000234\n",
 	} {
 		if !strings.Contains(writeBody, expected) {
 			t.Errorf("line protocol missing %q: %s", expected, writeBody)
 		}
+	}
+	if strings.Contains(writeBody, "signature=") {
+		t.Fatalf("empty signature tag was written: %s", writeBody)
 	}
 	if strings.Contains(writeBody, "frame_seq") {
 		t.Fatalf("frame sequence became a tag: %s", writeBody)
@@ -72,6 +75,27 @@ func TestInfluxWriteLineProtocolAndHistory(t *testing.T) {
 		if !strings.Contains(fluxBody, expected) {
 			t.Errorf("Flux missing %q: %s", expected, fluxBody)
 		}
+	}
+}
+
+func TestLineProtocolSkipsEmptyTags(t *testing.T) {
+	value := 1.25
+	line := lineProtocol(Sample{
+		Time: time.Unix(2, 0).UTC(), Source: Source6485, Channel: "CH1", Metric: "current_A",
+		Mapping: MappingDirect, Value: &value, Quality: "good", Seq: 1,
+	})
+	for _, emptyTag := range []string{"unit=", "signature="} {
+		if strings.Contains(line, emptyTag) {
+			t.Errorf("empty tag %q was written: %s", emptyTag, line)
+		}
+	}
+	for _, tag := range []string{"source=keithley6485", "channel=CH1", "metric=current_A", "mapping=direct"} {
+		if !strings.Contains(line, tag) {
+			t.Errorf("non-empty tag %q missing: %s", tag, line)
+		}
+	}
+	if strings.Contains(line, ", ") || strings.Contains(line, " ,") {
+		t.Errorf("stray separator left by skipped tag: %s", line)
 	}
 }
 

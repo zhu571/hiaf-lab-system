@@ -56,7 +56,17 @@
                   <span v-if="healthFor('mestek')?.last_sample_at">{{ t('electrical.lastSample', { time: formatDateTime(healthFor('mestek')!.last_sample_at!) }) }}</span>
                 </div>
               </div>
-              <StatusBadge domain="electricalHealth" :value="healthFor('mestek')?.status || 'connecting'" />
+              <div class="header-status">
+                <StatusBadge domain="electricalHealth" :value="healthFor('mestek')?.status || 'connecting'" />
+                <span
+                  class="connection-dot"
+                  :class="{ online: isConnected('mestek') }"
+                  :title="connectionLabel('mestek')"
+                  :aria-label="connectionLabel('mestek')"
+                  data-connection-source="mestek"
+                  role="img"
+                ></span>
+              </div>
             </header>
             <el-alert
               v-for="message in healthAlerts('mestek')"
@@ -139,7 +149,18 @@
                 :data-channel="row.channel"
               >
                 <header class="generator-name">
-                  <strong>{{ sourceLabel(row.source) }}</strong>
+                  <span class="generator-source">
+                    <strong>{{ sourceLabel(row.source) }}</strong>
+                    <span
+                      v-if="isGeneratorDeviceHead(row.source, row.channel)"
+                      class="connection-dot"
+                      :class="{ online: isConnected(row.source) }"
+                      :title="connectionLabel(row.source)"
+                      :aria-label="connectionLabel(row.source)"
+                      :data-connection-source="row.source"
+                      role="img"
+                    ></span>
+                  </span>
                   <span>{{ row.channel }}</span>
                 </header>
                 <div class="generator-values">
@@ -187,7 +208,18 @@
                 :data-metric="row.metric"
               >
                 <div class="scope-identity">
-                  <strong>{{ scopeBrand(row.source) }}</strong>
+                  <span class="scope-source">
+                    <strong>{{ scopeBrand(row.source) }}</strong>
+                    <span
+                      v-if="isScopeDeviceHead(row.source, row.channel)"
+                      class="connection-dot"
+                      :class="{ online: isConnected(row.source) }"
+                      :title="connectionLabel(row.source)"
+                      :aria-label="connectionLabel(row.source)"
+                      :data-connection-source="row.source"
+                      role="img"
+                    ></span>
+                  </span>
                   <span>{{ row.channel }}</span>
                 </div>
                 <span class="measurement-kind">{{ metricLabel(row.metric) }}</span>
@@ -212,7 +244,17 @@
                 <span v-if="healthFor('keithley6485')?.last_sample_at">{{ t('electrical.lastSample', { time: formatDateTime(healthFor('keithley6485')!.last_sample_at!) }) }}</span>
               </div>
             </div>
-            <StatusBadge domain="electricalHealth" :value="healthFor('keithley6485')?.status || 'connecting'" />
+            <div class="header-status">
+              <StatusBadge domain="electricalHealth" :value="healthFor('keithley6485')?.status || 'connecting'" />
+              <span
+                class="connection-dot"
+                :class="{ online: isConnected('keithley6485') }"
+                :title="connectionLabel('keithley6485')"
+                :aria-label="connectionLabel('keithley6485')"
+                data-connection-source="keithley6485"
+                role="img"
+              ></span>
+            </div>
           </header>
           <el-alert
             v-for="message in healthAlerts('keithley6485')"
@@ -369,6 +411,22 @@ function readCount(source: string, channels: string[], metric: string) {
 
 function healthFor(source: string) {
   return latest.value?.sources?.find((item) => item.source === source)
+}
+
+function isConnected(source: string) {
+  return healthFor(source)?.connected === true
+}
+
+function connectionLabel(source: string) {
+  return isConnected(source) ? t('common.online') : t('common.offline')
+}
+
+function isGeneratorDeviceHead(source: string, channel: string) {
+  return GENERATOR_ROWS.find((row) => row.source === source)?.channel === channel
+}
+
+function isScopeDeviceHead(source: string, channel: string) {
+  return SCOPE_ROWS.find((row) => row.source === source)?.channel === channel
 }
 
 function sourceStatus(...sources: string[]): ElectricalSourceHealth['status'] {
@@ -656,6 +714,26 @@ function mergeSingleShot(result: ElectricalSingleShotResult) {
   font-size: var(--fs-title);
 }
 
+.header-status {
+  align-items: center;
+  display: flex;
+  flex: 0 0 auto;
+  gap: 8px;
+}
+
+.connection-dot {
+  background: var(--danger);
+  border-radius: 50%;
+  display: inline-block;
+  flex: 0 0 auto;
+  height: 8px;
+  width: 8px;
+}
+
+.connection-dot.online {
+  background: var(--ok);
+}
+
 .source-meta {
   align-items: center;
   color: var(--text-3);
@@ -802,6 +880,14 @@ function mergeSingleShot(result: ElectricalSingleShotResult) {
 .scope-identity span,
 .measurement-kind {
   color: var(--text-3);
+}
+
+.generator-name .generator-source,
+.scope-identity .scope-source {
+  align-items: center;
+  color: var(--text-1);
+  display: inline-flex;
+  gap: 7px;
 }
 
 .generator-values {
