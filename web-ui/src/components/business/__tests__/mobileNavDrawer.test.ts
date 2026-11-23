@@ -22,7 +22,7 @@ const admin: UserInfo = {
 }
 
 describe('MobileNavDrawer', () => {
-  it('admin 可达全部 NAV_ITEMS，系统组包含 R2 缺失的 7 项', () => {
+  it('admin 可达全部 NAV_ITEMS，系统组包含设备监控与管理入口', () => {
     const pinia = createPinia()
     setActivePinia(pinia)
     useAuthStore(pinia).user = admin
@@ -38,11 +38,12 @@ describe('MobileNavDrawer', () => {
       }
     })
     const paths = wrapper.findAll('.drawer-link').map((link) => link.attributes('href'))
-    expect(paths).toHaveLength(16)
+    expect(paths).toHaveLength(17)
     expect(paths).toEqual(expect.arrayContaining([
       '/gas-control',
       '/instrument-measure',
       '/sensors',
+      '/electrical',
       '/admin/users',
       '/alerts',
       '/audit',

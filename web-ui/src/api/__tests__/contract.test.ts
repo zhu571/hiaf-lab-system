@@ -6,6 +6,7 @@ import * as assemblyApi from '../assembly'
 import * as attachmentsApi from '../attachments'
 import * as auditApi from '../audit'
 import * as authApi from '../auth'
+import * as electricalApi from '../electrical'
 import * as experiencesApi from '../experiences'
 import * as instrumentsApi from '../instruments'
 import * as issuesApi from '../issues'
@@ -19,7 +20,7 @@ import * as systemApi from '../system'
 import * as testdataApi from '../testdata'
 import * as todosApi from '../todos'
 
-// 19 个业务 api 模块契约冒烟（方案 §3.4-2）：vi.mock './client' 的 request/requestWithMeta，
+// 20 个业务 api 模块契约冒烟（方案 §3.4-2）：vi.mock './client' 的 request/requestWithMeta，
 // 逐函数断言 url/method/params/data 拼装（不发起真实网络）。
 const mocks = vi.hoisted(() => ({
   request: vi.fn(),
@@ -142,6 +143,22 @@ describe('auth.ts', () => {
     await authApi.refresh()
     expect(lastRequestConfig()).toEqual({ url: '/auth/refresh', method: 'POST', data: {} })
     expect(mocks.setCSRFToken).toHaveBeenCalledWith('csrf-2')
+  })
+})
+
+describe('electrical.ts', () => {
+  it('latest/history：GET 路径与历史过滤参数透传', async () => {
+    await electricalApi.getElectricalLatest()
+    expect(lastRequestConfig()).toEqual({ url: '/electrical/latest' })
+
+    const params = { source: 'mestek', channel: 'CH1', metric: 'U_V', from: '-30m', to: 'now()', limit: 200 }
+    await electricalApi.getElectricalHistory(params)
+    expect(lastRequestConfig()).toEqual({ url: '/electrical/history', params })
+  })
+
+  it('singleShot：POST 空对象并经 requestWithMeta 返回 request_id', async () => {
+    await electricalApi.singleShotElectrical()
+    expect(mocks.requestWithMeta).toHaveBeenLastCalledWith({ url: '/electrical/single-shot', method: 'POST', data: {} })
   })
 })
 
