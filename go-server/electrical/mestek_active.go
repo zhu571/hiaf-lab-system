@@ -15,6 +15,13 @@ const (
 	mestekRetryDelay  = 120 * time.Millisecond
 	mestekReadRetries = 3
 
+	// LabVIEW shares the same serial gateway and its poll bursts occasionally
+	// swallow one FC03 reply for the whole retry window. After a complete sweep,
+	// failed channels are retried once after a short settle so the burst can
+	// drain; this recovers bursty drops that a longer read window cannot, because
+	// the reply never arrives at all rather than arriving late.
+	mestekRecoveryDelay = 400 * time.Millisecond
+
 	// LabVIEW is the primary MESTEK client. Losing more than three channels in a
 	// round is treated as a severe miss; three severe misses in a row skip one
 	// interval so the slave client yields the shared serial line.
@@ -157,30 +164,134 @@ func (s *Service) readMESTEKSnapshot(ctx context.Context) ([]Sample, ModbusStats
 	snapshot := &mestekSnapshot{service: s}
 	defer snapshot.close()
 
-	var samples []Sample
-	var missing []string
-	var causes []string
-	mapped := 0
-	incomplete := func() ([]Sample, ModbusStats, error) {
-		snapshot.stats.PartialBytes = snapshot.partialBytes()
-		return samples, snapshot.stats, &MESTEKSnapshotError{Mapped: mapped, Missing: missing, Causes: causes}
+	round := &mestekRound{
+		snapshot:   snapshot,
+		mapped:     make(map[string]bool),
+		headerErr:  make(map[byte]string),
+		channelErr: make(map[string]string),
 	}
-
 	for _, module := range mestekModules {
-		head, err := snapshot.readHolding(ctx, module.unit, 0, 5)
-		if err != nil {
-			causes = append(causes, fmt.Sprintf("unit 0x%02x header: %v", module.unit, err))
-			for local := 1; local <= module.channels; local++ {
-				channel, _ := mestekChannel(module.unit, uint16(local*100))
-				missing = append(missing, channel)
+		round.readModule(ctx, module)
+		if ctx.Err() != nil {
+			break
+		}
+	}
+	if ctx.Err() == nil && len(round.mapped) != 13 && len(round.pending) > 0 {
+		// A dropped reply usually means LabVIEW's poll burst is holding the
+		// shared serial line. Give it a moment to drain, then retry only the
+		// reads that failed instead of repeating the whole 13-channel sweep.
+		if sleepContext(ctx, mestekRecoveryDelay) {
+			round.recover(ctx)
+		}
+	}
+	snapshot.stats.PartialBytes = snapshot.partialBytes()
+	if len(round.mapped) != 13 {
+		return round.samples, snapshot.stats, round.snapshotError()
+	}
+	return round.samples, snapshot.stats, nil
+}
+
+type mestekPendingRead struct {
+	unit    byte
+	start   uint16
+	channel string // empty for a module header read
+}
+
+// mestekRound accumulates one snapshot attempt so a failed read can be retried
+// after the sweep without losing already-mapped channels.
+type mestekRound struct {
+	snapshot   *mestekSnapshot
+	samples    []Sample
+	mapped     map[string]bool
+	pending    []mestekPendingRead
+	headerErr  map[byte]string
+	channelErr map[string]string
+}
+
+func (round *mestekRound) readModule(ctx context.Context, module mestekModule) {
+	head, err := round.snapshot.readHolding(ctx, module.unit, 0, 5)
+	if err != nil {
+		round.headerErr[module.unit] = fmt.Sprintf("unit 0x%02x header: %v", module.unit, err)
+		round.pending = append(round.pending, mestekPendingRead{unit: module.unit})
+		return
+	}
+	if !module.acceptsHeader(head) {
+		round.headerErr[module.unit] = fmt.Sprintf("unit 0x%02x header mismatch: got %v", module.unit, head.Registers)
+		round.pending = append(round.pending, mestekPendingRead{unit: module.unit})
+		return
+	}
+	for local := 1; local <= module.channels; local++ {
+		round.readChannel(ctx, module, uint16(local*100))
+		if ctx.Err() != nil {
+			return
+		}
+	}
+}
+
+func (round *mestekRound) readChannel(ctx context.Context, module mestekModule, start uint16) {
+	channel, _ := mestekChannel(module.unit, start)
+	frame, err := round.snapshot.readHolding(ctx, module.unit, start, 16)
+	if err != nil {
+		round.channelErr[channel] = fmt.Sprintf("%s: %v", channel, err)
+		round.pending = append(round.pending, mestekPendingRead{
+			unit: module.unit, start: start, channel: channel,
+		})
+		return
+	}
+	delete(round.channelErr, channel)
+	round.mapped[channel] = true
+	round.samples = append(round.samples, frame.Samples()...)
+}
+
+// recover re-reads only the reads that failed the sweep, once, after the settle
+// delay. A module header is re-validated first so its channels are never read
+// with an unverified table layout.
+func (round *mestekRound) recover(ctx context.Context) {
+	retriedHeaders := make(map[byte]bool)
+	for _, pending := range round.pending {
+		if ctx.Err() != nil {
+			return
+		}
+		module, ok := mestekModuleByUnit(pending.unit)
+		if !ok {
+			continue
+		}
+		if pending.channel == "" {
+			if retriedHeaders[pending.unit] {
+				continue
 			}
-			if ctx.Err() != nil {
-				return incomplete()
+			retriedHeaders[pending.unit] = true
+			head, err := round.snapshot.readHolding(ctx, module.unit, 0, 5)
+			if err != nil {
+				round.headerErr[module.unit] = fmt.Sprintf("unit 0x%02x header: %v (settle retry)", module.unit, err)
+				continue
+			}
+			if !module.acceptsHeader(head) {
+				round.headerErr[module.unit] = fmt.Sprintf("unit 0x%02x header mismatch: got %v (settle retry)", module.unit, head.Registers)
+				continue
+			}
+			delete(round.headerErr, module.unit)
+			for local := 1; local <= module.channels; local++ {
+				start := uint16(local * 100)
+				if channel, _ := mestekChannel(module.unit, start); round.mapped[channel] {
+					continue
+				}
+				round.readChannel(ctx, module, start)
 			}
 			continue
 		}
-		if len(head.Registers) != 5 || head.Registers[1] != uint16(module.channels) || head.Registers[3] != module.station {
-			causes = append(causes, fmt.Sprintf("unit 0x%02x header mismatch: got %v", module.unit, head.Registers))
+		if round.mapped[pending.channel] {
+			continue
+		}
+		round.readChannel(ctx, module, pending.start)
+	}
+}
+
+func (round *mestekRound) snapshotError() *MESTEKSnapshotError {
+	var missing, causes []string
+	for _, module := range mestekModules {
+		if cause, bad := round.headerErr[module.unit]; bad {
+			causes = append(causes, cause)
 			for local := 1; local <= module.channels; local++ {
 				channel, _ := mestekChannel(module.unit, uint16(local*100))
 				missing = append(missing, channel)
@@ -188,28 +299,34 @@ func (s *Service) readMESTEKSnapshot(ctx context.Context) ([]Sample, ModbusStats
 			continue
 		}
 		for local := 1; local <= module.channels; local++ {
-			start := uint16(local * 100)
-			frame, readErr := snapshot.readHolding(ctx, module.unit, start, 16)
-			channel, _ := mestekChannel(module.unit, start)
-			if readErr != nil {
-				missing = append(missing, channel)
-				if len(causes) < 5 {
-					causes = append(causes, fmt.Sprintf("%s: %v", channel, readErr))
-				}
-				if ctx.Err() != nil {
-					return incomplete()
-				}
+			channel, _ := mestekChannel(module.unit, uint16(local*100))
+			if round.mapped[channel] {
 				continue
 			}
-			mapped++
-			samples = append(samples, frame.Samples()...)
+			missing = append(missing, channel)
+			if len(causes) < 5 {
+				if cause, ok := round.channelErr[channel]; ok {
+					causes = append(causes, cause)
+				}
+			}
 		}
 	}
-	if mapped != 13 {
-		return incomplete()
+	return &MESTEKSnapshotError{Mapped: len(round.mapped), Missing: missing, Causes: causes}
+}
+
+func mestekModuleByUnit(unit byte) (mestekModule, bool) {
+	for _, module := range mestekModules {
+		if module.unit == unit {
+			return module, true
+		}
 	}
-	snapshot.stats.PartialBytes = snapshot.partialBytes()
-	return samples, snapshot.stats, nil
+	return mestekModule{}, false
+}
+
+func (module mestekModule) acceptsHeader(frame ModbusFrame) bool {
+	return len(frame.Registers) == 5 &&
+		frame.Registers[1] == uint16(module.channels) &&
+		frame.Registers[3] == module.station
 }
 
 // mestekSnapshot owns one TCP connection for an entire 13-channel round. Keeping
