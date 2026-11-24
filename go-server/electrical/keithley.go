@@ -55,7 +55,7 @@ func (p *KeithleyParser) Feed(data []byte, at time.Time) []Sample {
 			}
 		}
 		p.lastSample = at
-		sample := numericSample(Source6485, "-", "current_A", "A", value, line)
+		sample := numericSample(Source6485, "CH1", "current_A", "A", value, line)
 		sample.Time = at
 		sample.Mapping = MappingDirect
 		samples = append(samples, sample)

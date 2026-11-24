@@ -145,6 +145,9 @@ func TestKeithleyAndApplyParsing(t *testing.T) {
 	if sample.Value == nil || *sample.Value != 7.919254e-10 || sample.Unit != "A" {
 		t.Fatalf("6485 sample: %+v", sample)
 	}
+	if sample.Source != Source6485 || sample.Channel != "CH1" || sample.Metric != "current_A" {
+		t.Fatalf("6485 identity = (%s, %s, %s), want (%s, CH1, current_A)", sample.Source, sample.Channel, sample.Metric, Source6485)
+	}
 	if _, err := ParseKeithleyLine("not a reading", at); err == nil {
 		t.Fatal("invalid 6485 line accepted")
 	}
