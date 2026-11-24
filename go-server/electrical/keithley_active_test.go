@@ -41,6 +41,9 @@ func TestKeithleyActivePollUsesReadOnlyCommands(t *testing.T) {
 	if len(samples) != 1 || samples[0].Value == nil {
 		t.Fatalf("samples = %+v, want one numeric sample", samples)
 	}
+	if samples[0].Source != Source6485 || samples[0].Channel != "CH1" || samples[0].Metric != "current_A" {
+		t.Fatalf("sample identity = (%s, %s, %s), want (%s, CH1, current_A)", samples[0].Source, samples[0].Channel, samples[0].Metric, Source6485)
+	}
 	if got := *samples[0].Value; got < 7.91e-10 || got > 7.92e-10 {
 		t.Fatalf("parsed value = %v, want ~7.919e-10", got)
 	}
