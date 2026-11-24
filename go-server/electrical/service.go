@@ -108,7 +108,7 @@ func NewService(cfg Config, influx *InfluxClient) *Service {
 			}
 		}
 		status := "connecting"
-		if !cfg.Enabled || (source == SourceMESTEK && !cfg.MESTEKEnabled) {
+		if !cfg.Enabled || (source == SourceMESTEK && !cfg.MESTEKEnabled) || (source == Source6485 && !cfg.KeithleyEnabled) {
 			status = "disabled"
 		}
 		s.health[source] = SourceHealth{Source: source, Mode: mode, Status: status}
@@ -133,8 +133,10 @@ func (s *Service) Run(ctx context.Context) {
 			s.flushLoop(ctx)
 		}()
 		if s.cfg.Enabled {
-			s.wg.Add(1)
-			go func() { defer s.wg.Done(); s.runKeithley(ctx) }()
+			if s.cfg.KeithleyEnabled {
+				s.wg.Add(1)
+				go func() { defer s.wg.Done(); s.runKeithley(ctx) }()
+			}
 			if s.cfg.MESTEKEnabled {
 				s.wg.Add(1)
 				go func() { defer s.wg.Done(); s.runMESTEK(ctx) }()
@@ -573,6 +575,8 @@ func (s *Service) Latest() LatestResult {
 		health := s.health[source]
 		if source == SourceMESTEK && !s.cfg.MESTEKEnabled {
 			health.Status = "disabled"
+		} else if source == Source6485 && !s.cfg.KeithleyEnabled {
+			health.Status = "disabled"
 		} else if health.StorageError != "" || health.LastError != "" {
 			health.Status = "degraded"
 		} else if health.LastSampleAt != nil || health.Connected {
@@ -710,7 +714,10 @@ func (s *Service) SingleShot(ctx context.Context, userID string) (SingleShotResu
 	if s.cfg.MESTEKEnabled {
 		mestekCh = s.mestekShot(shotCtx, continuous)
 	}
-	keithleyCh := s.keithleyShot(shotCtx)
+	var keithleyCh <-chan acquisitionResult
+	if s.cfg.KeithleyEnabled {
+		keithleyCh = s.keithleyShot(shotCtx)
+	}
 	type deviceResult struct {
 		source  string
 		samples []Sample
@@ -745,7 +752,9 @@ func (s *Service) SingleShot(ctx context.Context, userID string) (SingleShotResu
 	if s.cfg.MESTEKEnabled {
 		passiveResults = append(passiveResults, sourceChannel{SourceMESTEK, mestekCh})
 	}
-	passiveResults = append(passiveResults, sourceChannel{Source6485, keithleyCh})
+	if s.cfg.KeithleyEnabled {
+		passiveResults = append(passiveResults, sourceChannel{Source6485, keithleyCh})
+	}
 	for _, pending := range passiveResults {
 		select {
 		case item := <-pending.ch:

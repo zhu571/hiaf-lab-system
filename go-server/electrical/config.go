@@ -27,6 +27,7 @@ type Config struct {
 	MESTEKAddr            string
 	MESTEKActiveRead      bool
 	MESTEKReadInterval    time.Duration
+	KeithleyEnabled       bool
 	KeithleyAddr          string
 	KeithleyReadInterval  time.Duration
 	Devices               []DeviceConfig
@@ -53,6 +54,7 @@ func DefaultConfig() Config {
 		MESTEKActiveRead:      true,
 		MESTEKEnabled:         true,
 		MESTEKReadInterval:    30 * time.Second,
+		KeithleyEnabled:       true,
 		KeithleyReadInterval:  3 * time.Second,
 		QueryInterval:         2 * time.Second,
 		ReconnectDelay:        2 * time.Second,
@@ -95,6 +97,13 @@ func ConfigFromEnv() (Config, error) {
 		cfg.MESTEKReadInterval = interval
 	}
 	cfg.KeithleyAddr = envOr("ELECTRICAL_6485_ADDR", cfg.KeithleyAddr)
+	if raw := os.Getenv("ELECTRICAL_6485_ENABLED"); raw != "" {
+		enabled, err := strconv.ParseBool(raw)
+		if err != nil {
+			return Config{}, fmt.Errorf("ELECTRICAL_6485_ENABLED: %w", err)
+		}
+		cfg.KeithleyEnabled = enabled
+	}
 	if raw := os.Getenv("ELECTRICAL_6485_READ_INTERVAL"); raw != "" {
 		interval, err := time.ParseDuration(raw)
 		if err != nil || interval <= 0 {
