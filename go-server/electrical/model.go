@@ -17,6 +17,20 @@ const (
 
 var sourceOrder = []string{SourceMESTEK, Source6485, SourceRIGOL, SourceTek, Source33512B, Source33210A}
 
+// toggleableSources are the acquisition sources whose runtime on/off switch is
+// persisted in electrical_source_states and can be flipped by an admin. The
+// oscilloscopes (RIGOL/Tek) are always on.
+var toggleableSources = []string{SourceMESTEK, Source6485, Source33512B, Source33210A}
+
+func isToggleableSource(source string) bool {
+	for _, candidate := range toggleableSources {
+		if candidate == source {
+			return true
+		}
+	}
+	return false
+}
+
 // Sample is the unified electrical reading used by memory, InfluxDB and the API.
 // Value and TextValue are mutually exclusive. Seq is a process-local sample sequence,
 // deliberately stored as a field rather than an InfluxDB tag to avoid high cardinality.
@@ -52,6 +66,7 @@ type SourceHealth struct {
 	Source         string             `json:"source"`
 	Mode           string             `json:"mode"`
 	Status         string             `json:"status"`
+	Enabled        bool               `json:"enabled"`
 	Connected      bool               `json:"connected"`
 	LastSampleAt   *time.Time         `json:"last_sample_at,omitempty"`
 	LastError      string             `json:"last_error,omitempty"`
