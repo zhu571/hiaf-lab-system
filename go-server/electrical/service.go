@@ -2,8 +2,10 @@ package electrical
 
 import (
 	"context"
+	"database/sql"
 	"errors"
 	"fmt"
+	"log/slog"
 	"net"
 	"sort"
 	"strings"
@@ -35,6 +37,10 @@ type Service struct {
 	now          func() time.Time
 	mestekGate   chan struct{}
 	keithleyGate chan struct{}
+	repo         *Repository
+
+	sourceMu sync.RWMutex
+	enabled  map[string]bool
 
 	mu            sync.RWMutex
 	latest        map[string]Sample
@@ -57,12 +63,33 @@ type Service struct {
 	wg            sync.WaitGroup
 }
 
-func NewServiceFromEnv() (*Service, error) {
+func NewServiceFromEnv(db *sql.DB) (*Service, error) {
 	cfg, err := ConfigFromEnv()
 	if err != nil {
 		return nil, err
 	}
-	return NewService(cfg, NewInfluxClient(cfg.Influx)), nil
+	svc := NewService(cfg, NewInfluxClient(cfg.Influx))
+	svc.repo = NewRepository(db)
+	// A persistence failure must not take the whole server down: fall back to
+	// the environment defaults (already applied by NewService) and keep running.
+	if err := svc.loadSourceStates(context.Background()); err != nil {
+		slog.Warn("failed to load electrical source states", "error", err)
+	}
+	return svc, nil
+}
+
+// defaultSourceStates derives the initial switch state for every source.
+// MESTEK and the 6485 keep honouring their existing environment flags; the two
+// Agilent function generators have no env switch and default to enabled.
+func defaultSourceStates(cfg Config) map[string]bool {
+	return map[string]bool{
+		SourceMESTEK: cfg.MESTEKEnabled,
+		Source6485:   cfg.KeithleyEnabled,
+		SourceRIGOL:  true,
+		SourceTek:    true,
+		Source33512B: true,
+		Source33210A: true,
+	}
 }
 
 func NewService(cfg Config, influx *InfluxClient) *Service {
@@ -95,6 +122,7 @@ func NewService(cfg Config, influx *InfluxClient) *Service {
 		dial: (&net.Dialer{Timeout: 3 * time.Second}).DialContext, now: time.Now,
 		mestekGate:   make(chan struct{}, 1),
 		keithleyGate: make(chan struct{}, 1),
+		enabled:      defaultSourceStates(cfg),
 		latest:       make(map[string]Sample), health: make(map[string]SourceHealth),
 		waiters: make(map[string][]chan []Sample), lastSingle: make(map[string]time.Time),
 		backlog: make([]Sample, 0, cfg.BacklogCapacity),
@@ -107,16 +135,99 @@ func NewService(cfg Config, influx *InfluxClient) *Service {
 				mode = "passive"
 			}
 		}
+		enabled := s.enabled[source]
 		status := "connecting"
-		if !cfg.Enabled || (source == SourceMESTEK && !cfg.MESTEKEnabled) || (source == Source6485 && !cfg.KeithleyEnabled) {
+		if !cfg.Enabled || !enabled {
 			status = "disabled"
 		}
-		s.health[source] = SourceHealth{Source: source, Mode: mode, Status: status}
+		s.health[source] = SourceHealth{Source: source, Mode: mode, Status: status, Enabled: enabled}
 	}
 	for _, device := range cfg.Devices {
 		s.devices[device.Source] = NewSCPIDevice(device)
 	}
 	return s
+}
+
+// loadSourceStates merges the persisted switches over the environment-derived
+// defaults and writes a row for every source that did not have one yet.
+func (s *Service) loadSourceStates(ctx context.Context) error {
+	if s.repo == nil {
+		return nil
+	}
+	states, err := s.repo.LoadSourceStates(ctx)
+	if err != nil {
+		return err
+	}
+	s.sourceMu.Lock()
+	defaults := make(map[string]bool)
+	for _, source := range toggleableSources {
+		if enabled, ok := states[source]; ok {
+			s.enabled[source] = enabled
+			continue
+		}
+		defaults[source] = s.enabled[source]
+	}
+	s.sourceMu.Unlock()
+	for _, source := range toggleableSources {
+		enabled, ok := defaults[source]
+		if !ok {
+			continue
+		}
+		if err := s.repo.UpsertSourceState(ctx, source, enabled); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (s *Service) sourceEnabled(source string) bool {
+	s.sourceMu.RLock()
+	defer s.sourceMu.RUnlock()
+	return s.enabled[source]
+}
+
+// resolveHealth overlays the persisted switch and the current runtime facts on a
+// stored SourceHealth row. It only takes sourceMu, so it is safe to call while
+// s.mu is read-locked (as Latest does).
+func (s *Service) resolveHealth(health SourceHealth) SourceHealth {
+	enabled := s.sourceEnabled(health.Source)
+	health.Enabled = enabled
+	switch {
+	case !enabled:
+		health.Status = "disabled"
+	case health.StorageError != "" || health.LastError != "":
+		health.Status = "degraded"
+	case health.LastSampleAt != nil || health.Connected:
+		health.Status = "ok"
+	case !s.cfg.Enabled:
+		health.Status = "disabled"
+	default:
+		health.Status = "connecting"
+	}
+	return health
+}
+
+func (s *Service) sourceHealth(source string) SourceHealth {
+	s.mu.RLock()
+	health := s.health[source]
+	s.mu.RUnlock()
+	return s.resolveHealth(health)
+}
+
+// SetSourceEnabled persists the new switch state and applies it to the running
+// acquisition loops immediately. Passing a disabled source makes every loop skip
+// its device without dialing; re-enabling resumes on the next tick.
+func (s *Service) SetSourceEnabled(ctx context.Context, source string, enabled bool) (SourceHealth, error) {
+	if !isToggleableSource(source) {
+		return SourceHealth{}, fmt.Errorf("source %q is not toggleable", source)
+	}
+	if err := s.repo.UpsertSourceState(ctx, source, enabled); err != nil {
+		return SourceHealth{}, err
+	}
+	s.sourceMu.Lock()
+	s.enabled[source] = enabled
+	s.sourceMu.Unlock()
+	return s.sourceHealth(source), nil
 }
 
 // Run owns all background workers. Continuous acquisition is opt-in in code,
@@ -133,14 +244,13 @@ func (s *Service) Run(ctx context.Context) {
 			s.flushLoop(ctx)
 		}()
 		if s.cfg.Enabled {
-			if s.cfg.KeithleyEnabled {
-				s.wg.Add(1)
-				go func() { defer s.wg.Done(); s.runKeithley(ctx) }()
-			}
-			if s.cfg.MESTEKEnabled {
-				s.wg.Add(1)
-				go func() { defer s.wg.Done(); s.runMESTEK(ctx) }()
-			}
+			// Start every worker even if its source boots disabled: the runtime
+			// switch is checked on each tick so an admin can turn it back on
+			// without restarting the process.
+			s.wg.Add(1)
+			go func() { defer s.wg.Done(); s.runKeithley(ctx) }()
+			s.wg.Add(1)
+			go func() { defer s.wg.Done(); s.runMESTEK(ctx) }()
 			for _, device := range s.devices {
 				s.wg.Add(1)
 				go func() { defer s.wg.Done(); s.runSCPI(ctx, device) }()
@@ -160,7 +270,9 @@ func (s *Service) runSCPI(ctx context.Context, device *SCPIDevice) {
 	ticker := time.NewTicker(s.cfg.QueryInterval)
 	defer ticker.Stop()
 	for {
-		_, _ = s.collectSCPI(ctx, device)
+		if s.sourceEnabled(device.cfg.Source) {
+			_, _ = s.collectSCPI(ctx, device)
+		}
 		select {
 		case <-ctx.Done():
 			return
@@ -188,6 +300,12 @@ func (s *Service) runMESTEK(ctx context.Context) {
 	}
 	parser := NewModbusParser()
 	for ctx.Err() == nil {
+		if !s.sourceEnabled(SourceMESTEK) {
+			if !sleepContext(ctx, s.cfg.MESTEKReadInterval) {
+				return
+			}
+			continue
+		}
 		conn, err := s.dial(ctx, "tcp", s.cfg.MESTEKAddr)
 		if err != nil {
 			s.noteSourceError(SourceMESTEK, err, true)
@@ -233,6 +351,12 @@ func (s *Service) runMESTEK(ctx context.Context) {
 func (s *Service) runKeithley(ctx context.Context) {
 	parser := &KeithleyParser{}
 	for ctx.Err() == nil {
+		if !s.sourceEnabled(Source6485) {
+			if !sleepContext(ctx, s.cfg.KeithleyReadInterval) {
+				return
+			}
+			continue
+		}
 		if _, err := s.collectActiveKeithley(ctx, parser); err != nil {
 			s.noteSourceError(Source6485, err, true)
 		} else {
@@ -572,21 +696,7 @@ func (s *Service) Latest() LatestResult {
 		Sources: make([]SourceHealth, 0, len(sourceOrder)), Samples: make([]Sample, 0, len(s.latest)),
 	}
 	for _, source := range sourceOrder {
-		health := s.health[source]
-		if source == SourceMESTEK && !s.cfg.MESTEKEnabled {
-			health.Status = "disabled"
-		} else if source == Source6485 && !s.cfg.KeithleyEnabled {
-			health.Status = "disabled"
-		} else if health.StorageError != "" || health.LastError != "" {
-			health.Status = "degraded"
-		} else if health.LastSampleAt != nil || health.Connected {
-			health.Status = "ok"
-		} else if !s.cfg.Enabled {
-			health.Status = "disabled"
-		} else {
-			health.Status = "connecting"
-		}
-		result.Sources = append(result.Sources, health)
+		result.Sources = append(result.Sources, s.resolveHealth(s.health[source]))
 	}
 	for _, sample := range s.latest {
 		result.Samples = append(result.Samples, sample)
@@ -710,12 +820,14 @@ func (s *Service) SingleShot(ctx context.Context, userID string) (SingleShotResu
 	defer cancel()
 	result := SingleShotResult{StartedAt: started, Errors: make(map[string]string)}
 	continuous := s.continuousRunning()
+	mestekEnabled := s.sourceEnabled(SourceMESTEK)
+	keithleyEnabled := s.sourceEnabled(Source6485)
 	var mestekCh <-chan acquisitionResult
-	if s.cfg.MESTEKEnabled {
+	if mestekEnabled {
 		mestekCh = s.mestekShot(shotCtx, continuous)
 	}
 	var keithleyCh <-chan acquisitionResult
-	if s.cfg.KeithleyEnabled {
+	if keithleyEnabled {
 		keithleyCh = s.keithleyShot(shotCtx)
 	}
 	type deviceResult struct {
@@ -723,14 +835,20 @@ func (s *Service) SingleShot(ctx context.Context, userID string) (SingleShotResu
 		samples []Sample
 		err     error
 	}
-	deviceResults := make(chan deviceResult, len(s.devices))
+	activeDevices := make([]*SCPIDevice, 0, len(s.devices))
 	for _, device := range s.devices {
+		if s.sourceEnabled(device.cfg.Source) {
+			activeDevices = append(activeDevices, device)
+		}
+	}
+	deviceResults := make(chan deviceResult, len(activeDevices))
+	for _, device := range activeDevices {
 		go func() {
 			samples, err := s.collectSCPI(shotCtx, device)
 			deviceResults <- deviceResult{source: device.cfg.Source, samples: samples, err: err}
 		}()
 	}
-	for range s.devices {
+	for range activeDevices {
 		select {
 		case item := <-deviceResults:
 			result.Samples = append(result.Samples, item.samples...)
@@ -749,10 +867,10 @@ func (s *Service) SingleShot(ctx context.Context, userID string) (SingleShotResu
 		ch     <-chan acquisitionResult
 	}
 	passiveResults := make([]sourceChannel, 0, 2)
-	if s.cfg.MESTEKEnabled {
+	if mestekEnabled {
 		passiveResults = append(passiveResults, sourceChannel{SourceMESTEK, mestekCh})
 	}
-	if s.cfg.KeithleyEnabled {
+	if keithleyEnabled {
 		passiveResults = append(passiveResults, sourceChannel{Source6485, keithleyCh})
 	}
 	for _, pending := range passiveResults {

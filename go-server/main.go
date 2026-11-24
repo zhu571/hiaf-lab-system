@@ -246,7 +246,7 @@ func main() {
 		instrumentsHandler.StartFlowRecovery(context.Background())
 	}
 	sensorsHandler := sensors.NewHandler(sensorsSvc)
-	electricalSvc, err := electrical.NewServiceFromEnv()
+	electricalSvc, err := electrical.NewServiceFromEnv(db)
 	if err != nil {
 		slog.Error("failed to create electrical monitor service", "error", err)
 		os.Exit(1)
@@ -686,6 +686,7 @@ func main() {
 		r.Get("/latest", electricalHandler.Latest)
 		r.Get("/history", electricalHandler.History)
 		r.Post("/single-shot", electricalHandler.SingleShot)
+		r.Post("/sources/{source}/enabled", electricalHandler.SetSourceEnabled)
 	})
 	r.Route("/api/v1/todos", func(r chi.Router) {
 		r.Use(mw.AuthRequired)

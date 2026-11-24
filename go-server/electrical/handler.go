@@ -2,11 +2,14 @@ package electrical
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"math"
 	"net/http"
 	"strconv"
 
+	"github.com/go-chi/chi/v5"
+	"github.com/zhu571/hiaf-lab-system/go-server/auth"
 	"github.com/zhu571/hiaf-lab-system/go-server/common"
 	mw "github.com/zhu571/hiaf-lab-system/go-server/middleware"
 )
@@ -57,6 +60,39 @@ func (h *Handler) History(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	common.WriteSuccess(w, r, HistoryResult{Points: points})
+}
+
+type setSourceEnabledRequest struct {
+	Enabled *bool `json:"enabled"`
+}
+
+// SetSourceEnabled POST /api/v1/electrical/sources/{source}/enabled
+// Only an admin may flip a source switch; the change is persisted and applied
+// to the running acquisition loops immediately.
+func (h *Handler) SetSourceEnabled(w http.ResponseWriter, r *http.Request) {
+	claims := mw.GetUserClaims(r.Context())
+	if claims == nil || claims.Role != auth.RoleAdmin {
+		common.WriteError(w, r, http.StatusForbidden, "permission_denied", "仅管理员可切换采集源开关", nil)
+		return
+	}
+	source := chi.URLParam(r, "source")
+	if !isToggleableSource(source) {
+		common.WriteError(w, r, http.StatusBadRequest, "bad_request",
+			"source 必须是 mestek/keithley6485/agilent_33512b/agilent_33210a 之一", nil)
+		return
+	}
+	var req setSourceEnabledRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.Enabled == nil {
+		common.WriteError(w, r, http.StatusBadRequest, "bad_request", "请求体需包含 enabled 布尔值", nil)
+		return
+	}
+	health, err := h.svc.SetSourceEnabled(r.Context(), source, *req.Enabled)
+	if err != nil {
+		common.WriteError(w, r, http.StatusInternalServerError, "internal_error", "更新采集源开关失败", nil)
+		return
+	}
+	mw.SetAuditDetail(r.Context(), map[string]any{"source": source, "enabled": *req.Enabled})
+	common.WriteSuccess(w, r, health)
 }
 
 func (h *Handler) SingleShot(w http.ResponseWriter, r *http.Request) {

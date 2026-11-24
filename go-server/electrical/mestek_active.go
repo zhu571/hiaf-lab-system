@@ -146,6 +146,12 @@ func (s *Service) releaseMESTEK() {
 
 func (s *Service) runActiveMESTEK(ctx context.Context) {
 	for ctx.Err() == nil {
+		if !s.sourceEnabled(SourceMESTEK) {
+			if !sleepContext(ctx, s.cfg.MESTEKReadInterval) {
+				return
+			}
+			continue
+		}
 		_, _ = s.collectActiveMESTEK(ctx)
 		interval := s.cfg.MESTEKReadInterval
 		s.mu.Lock()
