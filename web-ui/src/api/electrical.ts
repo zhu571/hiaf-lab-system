@@ -15,6 +15,14 @@ export type ElectricalSample = {
   seq: number
 }
 
+export type MESTEKUnitHealth = {
+  unit: number
+  mapped: number
+  total: number
+  connected: boolean
+  status: string
+}
+
 export type ElectricalSourceHealth = {
   source: string
   mode: 'passive' | 'modbus_active' | 'scpi'
@@ -34,6 +42,7 @@ export type ElectricalSourceHealth = {
   response_frames: number
   mapped_frames: number
   mapping?: 'unmapped' | 'request_response'
+  units?: MESTEKUnitHealth[]
 }
 
 export type ElectricalLatest = {

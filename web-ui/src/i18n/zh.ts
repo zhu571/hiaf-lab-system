@@ -501,6 +501,8 @@ export default {
     passiveReadOnly: '被动只读',
     activeReadOnly: '主动 FC03 只读',
     scpiReadOnly: '固定查询',
+    unit0x14: '单元 0x14（CH1–CH3）',
+    unit0x15: '单元 0x15（CH4–CH13）',
     lastSample: '最近样本 {time}',
     noSample: '尚无样本',
     sampleCount: '样本 {count}',

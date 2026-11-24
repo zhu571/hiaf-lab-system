@@ -59,11 +59,13 @@
               <div class="header-status">
                 <StatusBadge domain="electricalHealth" :value="healthFor('mestek')?.status || 'connecting'" />
                 <span
+                  v-for="unit in MESTEK_UNITS"
+                  :key="unit"
                   class="connection-dot"
-                  :class="{ online: isConnected('mestek') }"
-                  :title="connectionLabel('mestek')"
-                  :aria-label="connectionLabel('mestek')"
-                  data-connection-source="mestek"
+                  :class="{ online: mestekUnitConnected(unit) }"
+                  :title="mestekUnitConnectionLabel(unit)"
+                  :aria-label="mestekUnitConnectionLabel(unit)"
+                  :data-connection-source="`mestek-${mestekUnitHex(unit)}`"
                   role="img"
                 ></span>
               </div>
@@ -321,6 +323,7 @@ function channelRange(count: number) {
 }
 
 const MESTEK_CHANNELS = channelRange(13)
+const MESTEK_UNITS = [20, 21] as const
 const MESTEK_METRICS = ['setU_V', 'setI_A', 'U_V', 'I_A']
 const GENERATOR_SOURCES = ['agilent_33512b', 'agilent_33210a']
 const GENERATOR_ROWS = [
@@ -419,6 +422,23 @@ function isConnected(source: string) {
 
 function connectionLabel(source: string) {
   return isConnected(source) ? t('common.online') : t('common.offline')
+}
+
+function mestekUnitHealth(unit: number) {
+  return healthFor('mestek')?.units?.find((item) => item.unit === unit)
+}
+
+function mestekUnitConnected(unit: number) {
+  return mestekUnitHealth(unit)?.connected === true
+}
+
+function mestekUnitHex(unit: number) {
+  return `0x${unit.toString(16)}`
+}
+
+function mestekUnitConnectionLabel(unit: number) {
+  const key = unit === 20 ? 'electrical.unit0x14' : 'electrical.unit0x15'
+  return `${t(key)} · ${mestekUnitConnected(unit) ? t('common.online') : t('common.offline')}`
 }
 
 function isGeneratorDeviceHead(source: string, channel: string) {

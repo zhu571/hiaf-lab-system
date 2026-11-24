@@ -2,7 +2,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { flushPromises, mount } from '@vue/test-utils'
 import ElectricalMonitorView from '@/views/ElectricalMonitorView.vue'
 import { createTestI18n } from '@/test-utils/setup'
-import type { ElectricalLatest, ElectricalSample } from '@/api/electrical'
+import type { ElectricalLatest, ElectricalSample, MESTEKUnitHealth } from '@/api/electrical'
 
 vi.mock('@/api/electrical', () => ({
   getElectricalLatest: vi.fn(),
@@ -77,6 +77,13 @@ function makeSamples() {
   return samples
 }
 
+function mestekUnits(connected: [boolean, boolean] = [true, true]): MESTEKUnitHealth[] {
+  return [
+    { unit: 20, mapped: connected[0] ? 3 : 0, total: 3, connected: connected[0], status: connected[0] ? 'ok' : 'degraded' },
+    { unit: 21, mapped: connected[1] ? 10 : 0, total: 10, connected: connected[1], status: connected[1] ? 'ok' : 'degraded' }
+  ]
+}
+
 function makeLatest(): ElectricalLatest {
   return {
     continuous_enabled: true,
@@ -97,7 +104,8 @@ function makeLatest(): ElectricalLatest {
       pairing_errors: 0,
       request_frames: 0,
       response_frames: 0,
-      mapped_frames: 0
+      mapped_frames: 0,
+      ...(source === 'mestek' ? { units: mestekUnits() } : {})
     })),
     samples: makeSamples()
   }
@@ -118,12 +126,18 @@ describe('ElectricalMonitorView 四卡片与重点读数', () => {
   it('显示 MESTEK 13×5、三路信号源、六个示波器读数，且只有皮安计有趋势', async () => {
     const wrapper = await mountView()
     expect(wrapper.findAll('.source-card')).toHaveLength(4)
-    expect(wrapper.findAll('.connection-dot')).toHaveLength(6)
-    for (const source of ['mestek', 'keithley6485', 'rigol_dho814', 'tek_mdo3034', 'agilent_33512b', 'agilent_33210a']) {
+    expect(wrapper.findAll('.connection-dot')).toHaveLength(7)
+    for (const source of ['keithley6485', 'rigol_dho814', 'tek_mdo3034', 'agilent_33512b', 'agilent_33210a']) {
       const dot = wrapper.find(`.connection-dot[data-connection-source="${source}"]`)
       expect(dot.exists()).toBe(true)
       expect(dot.classes()).toContain('online')
       expect(dot.attributes('aria-label')).toBe('在线')
+    }
+    for (const [source, label] of [['mestek-0x14', '单元 0x14（CH1–CH3）'], ['mestek-0x15', '单元 0x15（CH4–CH13）']] as const) {
+      const dot = wrapper.find(`.connection-dot[data-connection-source="${source}"]`)
+      expect(dot.exists()).toBe(true)
+      expect(dot.classes()).toContain('online')
+      expect(dot.attributes('aria-label')).toBe(`${label} · 在线`)
     }
     expect(wrapper.findAll('.mestek-card .mestek-row')).toHaveLength(13)
     expect(wrapper.findAll('.mestek-card .mestek-row td')).toHaveLength(65)
@@ -158,6 +172,22 @@ describe('ElectricalMonitorView 四卡片与重点读数', () => {
     expect(offline.classes()).not.toContain('online')
     expect(offline.attributes('aria-label')).toBe('离线')
     expect(wrapper.find('.connection-dot[data-connection-source="agilent_33210a"]').classes()).toContain('online')
+    wrapper.unmount()
+  })
+
+  it('MESTEK 两个单元指示灯分别跟随 units 的 connected 状态', async () => {
+    const latest = makeLatest()
+    latest.sources = latest.sources.map((item) =>
+      item.source === 'mestek' ? { ...item, units: mestekUnits([true, false]) } : item
+    )
+    vi.mocked(getElectricalLatest).mockResolvedValue(latest)
+    const wrapper = await mountView()
+    const unit14 = wrapper.find('.connection-dot[data-connection-source="mestek-0x14"]')
+    const unit15 = wrapper.find('.connection-dot[data-connection-source="mestek-0x15"]')
+    expect(unit14.classes()).toContain('online')
+    expect(unit14.attributes('aria-label')).toBe('单元 0x14（CH1–CH3） · 在线')
+    expect(unit15.classes()).not.toContain('online')
+    expect(unit15.attributes('aria-label')).toBe('单元 0x15（CH4–CH13） · 离线')
     wrapper.unmount()
   })
 
