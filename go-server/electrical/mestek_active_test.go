@@ -262,6 +262,49 @@ func TestMESTEKActiveTimeoutRetriesOnSameConnection(t *testing.T) {
 	}
 }
 
+func TestMESTEKActiveRecoversFailedChannelAfterSettle(t *testing.T) {
+	var ch13Requests atomic.Int64
+	server := newFakeMESTEKServer(t, func(request []byte, _ int64) []byte {
+		if request[0] == 0x15 && binary.BigEndian.Uint16(request[2:4]) == 1000 {
+			// Drop the three sweep attempts so the channel fails the main round,
+			// then answer the post-settle recovery read.
+			if ch13Requests.Add(1) <= mestekReadRetries {
+				return nil
+			}
+		}
+		return fakeMESTEKResponse(t, request)
+	})
+	cfg := DefaultConfig()
+	cfg.Devices = nil
+	svc := NewService(cfg, nil)
+	svc.dial = server.dial
+	started := time.Now()
+	samples, err := svc.collectActiveMESTEK(context.Background())
+	elapsed := time.Since(started)
+	server.wait()
+	if err != nil {
+		t.Fatalf("round with recoverable channel returned error: %v", err)
+	}
+	if server.connections.Load() != 1 {
+		t.Fatalf("connections = %d, want 1 reused snapshot connection", server.connections.Load())
+	}
+	channels := make(map[string]bool)
+	for _, sample := range samples {
+		if sample.Channel != "UNMAPPED" {
+			channels[sample.Channel] = true
+		}
+	}
+	if len(channels) != 13 {
+		t.Fatalf("channels = %d, want 13 after settle retry", len(channels))
+	}
+	if elapsed < mestekRecoveryDelay {
+		t.Fatalf("round returned in %v, settle delay was not applied", elapsed)
+	}
+	if got := ch13Requests.Load(); got != mestekReadRetries+1 {
+		t.Fatalf("CH13 requests = %d, want %d (3 sweep attempts + 1 recovery)", got, mestekReadRetries+1)
+	}
+}
+
 func float64Ptr(value float64) *float64 {
 	return &value
 }
