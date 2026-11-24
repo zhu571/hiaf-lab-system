@@ -1,11 +1,13 @@
 package electrical
 
 import (
+	"bufio"
 	"context"
 	"errors"
 	"net"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -21,32 +23,48 @@ func (c *writeCountingConn) Write(data []byte) (int, error) {
 	return c.Conn.Write(data)
 }
 
-func passiveTestDial(cfg Config, writes *atomic.Int64) dialContextFunc {
+func passiveTestDial(cfg Config, mestekWrites, keithleyWrites *atomic.Int64) dialContextFunc {
 	return func(ctx context.Context, network, address string) (net.Conn, error) {
 		client, server := net.Pipe()
-		go func() {
-			defer server.Close()
-			switch address {
-			case cfg.MESTEKAddr:
-				_, _ = server.Write(testResponse(0x14, testRegisters()))
-			case cfg.KeithleyAddr:
-				_, _ = server.Write([]byte("+7.919254E-10A,+1.011508E+06,+2.000000E+00\n"))
-			default:
-				_ = server.Close()
-			}
-		}()
+		writes := mestekWrites
+		if address == cfg.KeithleyAddr {
+			writes = keithleyWrites
+			go serveKeithleyTest(server)
+		} else {
+			go func() {
+				defer server.Close()
+				if address == cfg.MESTEKAddr {
+					_, _ = server.Write(testResponse(0x14, testRegisters()))
+				}
+			}()
+		}
 		return &writeCountingConn{Conn: client, writes: writes}, nil
 	}
 }
 
-func TestSingleShotQueriesAndPassiveNeverWrites(t *testing.T) {
+func serveKeithleyTest(server net.Conn) {
+	defer server.Close()
+	reader := bufio.NewReader(server)
+	for {
+		line, err := reader.ReadString('\n')
+		if err != nil {
+			return
+		}
+		switch strings.TrimSpace(line) {
+		case ":READ?":
+			_, _ = server.Write([]byte("+7.919254E-10A,+1.011508E+06,+2.000000E+00\n"))
+		}
+	}
+}
+
+func TestSingleShotMESTEKPassiveAnd6485Active(t *testing.T) {
 	cfg := DefaultConfig()
 	cfg.MESTEKActiveRead = false
 	cfg.Enabled = false
 	cfg.Devices = []DeviceConfig{{Source: SourceRIGOL, Addr: "rigol:5555"}}
-	var writes atomic.Int64
+	var mestekWrites, keithleyWrites atomic.Int64
 	svc := NewService(cfg, nil)
-	svc.dial = passiveTestDial(cfg, &writes)
+	svc.dial = passiveTestDial(cfg, &mestekWrites, &keithleyWrites)
 	for _, device := range svc.devices {
 		device.query = func(ctx context.Context, addr, command string) (string, error) {
 			return "1.25", nil
@@ -59,8 +77,11 @@ func TestSingleShotQueriesAndPassiveNeverWrites(t *testing.T) {
 	if len(result.Samples) != 11 { // four RIGOL + five MESTEK values/raw + one 6485
 		t.Fatalf("single-shot samples = %d, want 11", len(result.Samples))
 	}
-	if writes.Load() != 0 {
-		t.Fatalf("passive sockets wrote %d times", writes.Load())
+	if mestekWrites.Load() != 0 {
+		t.Fatalf("passive MESTEK socket wrote %d times", mestekWrites.Load())
+	}
+	if keithleyWrites.Load() == 0 {
+		t.Fatal("active 6485 poll did not send any command")
 	}
 	if _, err := svc.SingleShot(context.Background(), "user-1"); err == nil {
 		t.Fatal("per-user rate limit not applied")
@@ -77,15 +98,16 @@ func TestSingleShotQueriesAndPassiveNeverWrites(t *testing.T) {
 	svc.singleRunning.Store(false)
 }
 
-func TestContinuousPassiveRun(t *testing.T) {
+func TestContinuousPassiveMESTEKRun(t *testing.T) {
 	cfg := DefaultConfig()
 	cfg.MESTEKActiveRead = false
 	cfg.Enabled = true
 	cfg.Devices = nil
 	cfg.ReconnectDelay = 10 * time.Millisecond
-	var writes atomic.Int64
+	cfg.KeithleyReadInterval = 10 * time.Millisecond
+	var mestekWrites, keithleyWrites atomic.Int64
 	svc := NewService(cfg, nil)
-	svc.dial = passiveTestDial(cfg, &writes)
+	svc.dial = passiveTestDial(cfg, &mestekWrites, &keithleyWrites)
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan struct{})
 	go func() {
@@ -109,8 +131,11 @@ func TestContinuousPassiveRun(t *testing.T) {
 	case <-time.After(2 * time.Second):
 		t.Fatal("continuous workers did not stop")
 	}
-	if writes.Load() != 0 {
-		t.Fatalf("continuous passive sockets wrote %d times", writes.Load())
+	if mestekWrites.Load() != 0 {
+		t.Fatalf("continuous passive MESTEK socket wrote %d times", mestekWrites.Load())
+	}
+	if keithleyWrites.Load() == 0 {
+		t.Fatal("continuous 6485 poll did not send any command")
 	}
 }
 
