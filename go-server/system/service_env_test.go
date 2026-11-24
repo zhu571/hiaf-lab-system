@@ -54,18 +54,60 @@ func TestNewServiceUpdateEnvDefaults(t *testing.T) {
 	}
 }
 
+// writeExecutable 原子落盘一个可执行脚本：先写同目录临时文件、fsync、close，
+// 再 rename 到目标名。rename 后目标名指向一个已完全关闭的 inode，避免 CI 上
+// close 与 fork/exec 的竞态导致 exec 报 ETXTBSY（text file busy）。
+func writeExecutable(t *testing.T, path string, content []byte) {
+	t.Helper()
+	tmp, err := os.CreateTemp(filepath.Dir(path), ".tmp-exec-*")
+	if err != nil {
+		t.Fatal(err)
+	}
+	tmpName := tmp.Name()
+	defer os.Remove(tmpName)
+	if _, err := tmp.Write(content); err != nil {
+		tmp.Close()
+		t.Fatal(err)
+	}
+	if err := tmp.Sync(); err != nil {
+		tmp.Close()
+		t.Fatal(err)
+	}
+	if err := tmp.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chmod(tmpName, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Rename(tmpName, path); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// gitLsRemoteRetry 调用 s.gitLsRemote()；生产实现会吞掉 exec 错误返回空串，
+// 因此这里对空结果做有限次重试，兜住残余的 ETXTBSY 瞬时抖动。
+func gitLsRemoteRetry(t *testing.T, s *Service) string {
+	t.Helper()
+	var got string
+	for i := 0; i < 20; i++ {
+		if got = s.gitLsRemote(); got != "" {
+			return got
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	return got
+}
+
 func TestGitLsRemoteUsesDeployKey(t *testing.T) {
 	dir := t.TempDir()
 	gitHome := filepath.Join(dir, "runner-home")
 	capture := filepath.Join(dir, "ssh-command")
 	git := filepath.Join(dir, "git")
-	if err := os.WriteFile(git, []byte("#!/bin/sh\nprintf '%s\\n' \"$GIT_SSH_COMMAND\" > \"$CAPTURE\"\nprintf '0123456789012345678901234567890123456789\\tHEAD\\n'\n"), 0o755); err != nil {
-		t.Fatal(err)
-	}
+	writeExecutable(t, git, []byte("#!/bin/sh\nprintf '%s\\n' \"$GIT_SSH_COMMAND\" > \"$CAPTURE\"\nprintf '0123456789012345678901234567890123456789\\tHEAD\\n'\n"))
 	t.Setenv("PATH", dir)
 	t.Setenv("CAPTURE", capture)
 	s := &Service{repoRoot: dir, gitHome: gitHome}
-	if got := s.gitLsRemote(); got != "0123456789012345678901234567890123456789" {
+	if got := gitLsRemoteRetry(t, s); got != "0123456789012345678901234567890123456789" {
 		t.Fatalf("gitLsRemote = %q", got)
 	}
 	data, err := os.ReadFile(capture)
