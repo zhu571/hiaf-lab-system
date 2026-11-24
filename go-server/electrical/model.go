@@ -35,27 +35,39 @@ type Sample struct {
 	Seq       uint64    `json:"seq"`
 }
 
+// MESTEKUnitHealth reports one Modbus unit independently: unit 0x14 owns
+// CH1-CH3 and unit 0x15 owns CH4-CH13. Connected means every channel of that
+// unit was mapped in the latest round.
+type MESTEKUnitHealth struct {
+	Unit      int    `json:"unit"`
+	Mapped    int    `json:"mapped"`
+	Total     int    `json:"total"`
+	Connected bool   `json:"connected"`
+	Status    string `json:"status"`
+}
+
 // SourceHealth exposes acquisition and persistence health independently. A device can
 // be acquiring normally while its StorageError reports an InfluxDB backlog/write failure.
 type SourceHealth struct {
-	Source         string     `json:"source"`
-	Mode           string     `json:"mode"`
-	Status         string     `json:"status"`
-	Connected      bool       `json:"connected"`
-	LastSampleAt   *time.Time `json:"last_sample_at,omitempty"`
-	LastError      string     `json:"last_error,omitempty"`
-	StorageError   string     `json:"storage_error,omitempty"`
-	SampleCount    uint64     `json:"sample_count"`
-	ErrorCount     uint64     `json:"error_count"`
-	WriteErrors    uint64     `json:"write_errors"`
-	MaxGapMS       int64      `json:"max_gap_ms"`
-	CRCErrors      uint64     `json:"crc_errors"`
-	PartialBytes   int        `json:"partial_bytes"`
-	PairingErrors  uint64     `json:"pairing_errors"`
-	RequestFrames  uint64     `json:"request_frames"`
-	ResponseFrames uint64     `json:"response_frames"`
-	MappedFrames   uint64     `json:"mapped_frames"`
-	Mapping        string     `json:"mapping,omitempty"`
+	Source         string             `json:"source"`
+	Mode           string             `json:"mode"`
+	Status         string             `json:"status"`
+	Connected      bool               `json:"connected"`
+	LastSampleAt   *time.Time         `json:"last_sample_at,omitempty"`
+	LastError      string             `json:"last_error,omitempty"`
+	StorageError   string             `json:"storage_error,omitempty"`
+	SampleCount    uint64             `json:"sample_count"`
+	ErrorCount     uint64             `json:"error_count"`
+	WriteErrors    uint64             `json:"write_errors"`
+	MaxGapMS       int64              `json:"max_gap_ms"`
+	CRCErrors      uint64             `json:"crc_errors"`
+	PartialBytes   int                `json:"partial_bytes"`
+	PairingErrors  uint64             `json:"pairing_errors"`
+	RequestFrames  uint64             `json:"request_frames"`
+	ResponseFrames uint64             `json:"response_frames"`
+	MappedFrames   uint64             `json:"mapped_frames"`
+	Mapping        string             `json:"mapping,omitempty"`
+	Units          []MESTEKUnitHealth `json:"units,omitempty"`
 }
 
 type LatestResult struct {

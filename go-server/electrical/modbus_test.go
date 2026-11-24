@@ -142,7 +142,7 @@ func TestKeithleyAndApplyParsing(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if sample.Value == nil || *sample.Value != 7.919254e-10 || sample.Unit != "A" {
+	if sample.Value == nil || *sample.Value != 0.7919254 || sample.Unit != "nA" {
 		t.Fatalf("6485 sample: %+v", sample)
 	}
 	if sample.Source != Source6485 || sample.Channel != "CH1" || sample.Metric != "current_A" {

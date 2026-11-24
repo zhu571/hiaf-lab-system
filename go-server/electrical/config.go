@@ -23,9 +23,11 @@ type InfluxConfig struct {
 
 type Config struct {
 	Enabled               bool
+	MESTEKEnabled         bool
 	MESTEKAddr            string
 	MESTEKActiveRead      bool
 	MESTEKReadInterval    time.Duration
+	KeithleyEnabled       bool
 	KeithleyAddr          string
 	KeithleyReadInterval  time.Duration
 	Devices               []DeviceConfig
@@ -50,7 +52,9 @@ func DefaultConfig() Config {
 			{Source: Source33210A, Addr: "10.51.12.220:5025"},
 		},
 		MESTEKActiveRead:      true,
+		MESTEKEnabled:         true,
 		MESTEKReadInterval:    30 * time.Second,
+		KeithleyEnabled:       true,
 		KeithleyReadInterval:  3 * time.Second,
 		QueryInterval:         2 * time.Second,
 		ReconnectDelay:        2 * time.Second,
@@ -71,6 +75,13 @@ func ConfigFromEnv() (Config, error) {
 		cfg.Enabled = enabled
 	}
 	cfg.MESTEKAddr = envOr("ELECTRICAL_MESTEK_ADDR", cfg.MESTEKAddr)
+	if raw := os.Getenv("ELECTRICAL_MESTEK_ENABLED"); raw != "" {
+		enabled, err := strconv.ParseBool(raw)
+		if err != nil {
+			return Config{}, fmt.Errorf("ELECTRICAL_MESTEK_ENABLED: %w", err)
+		}
+		cfg.MESTEKEnabled = enabled
+	}
 	if raw := os.Getenv("ELECTRICAL_MESTEK_ACTIVE_READ"); raw != "" {
 		active, err := strconv.ParseBool(raw)
 		if err != nil {
@@ -86,6 +97,13 @@ func ConfigFromEnv() (Config, error) {
 		cfg.MESTEKReadInterval = interval
 	}
 	cfg.KeithleyAddr = envOr("ELECTRICAL_6485_ADDR", cfg.KeithleyAddr)
+	if raw := os.Getenv("ELECTRICAL_6485_ENABLED"); raw != "" {
+		enabled, err := strconv.ParseBool(raw)
+		if err != nil {
+			return Config{}, fmt.Errorf("ELECTRICAL_6485_ENABLED: %w", err)
+		}
+		cfg.KeithleyEnabled = enabled
+	}
 	if raw := os.Getenv("ELECTRICAL_6485_READ_INTERVAL"); raw != "" {
 		interval, err := time.ParseDuration(raw)
 		if err != nil || interval <= 0 {

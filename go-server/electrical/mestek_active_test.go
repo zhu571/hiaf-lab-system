@@ -172,6 +172,16 @@ func TestMESTEKActiveSnapshotMapsAllThirteenChannels(t *testing.T) {
 	if health.Mode != "modbus_active" || health.MappedFrames != 13 || health.CRCErrors != 1 {
 		t.Fatalf("unexpected active health: %+v", health)
 	}
+	if len(health.Units) != 2 {
+		t.Fatalf("per-unit health = %+v, want two MESTEK units", health.Units)
+	}
+	unit14, unit15 := health.Units[0], health.Units[1]
+	if unit14.Unit != 0x14 || unit14.Mapped != 3 || unit14.Total != 3 || !unit14.Connected || unit14.Status != "ok" {
+		t.Fatalf("unit 0x14 health = %+v, want 3/3 ok", unit14)
+	}
+	if unit15.Unit != 0x15 || unit15.Mapped != 10 || unit15.Total != 10 || !unit15.Connected || unit15.Status != "ok" {
+		t.Fatalf("unit 0x15 health = %+v, want 10/10 ok", unit15)
+	}
 }
 
 func TestMESTEKActiveSnapshotRetainsRecentlyMissingChannel(t *testing.T) {
@@ -208,6 +218,16 @@ func TestMESTEKActiveSnapshotRetainsRecentlyMissingChannel(t *testing.T) {
 	}
 	if server.connections.Load() != 1 {
 		t.Fatalf("connections = %d, want 1 reused snapshot connection", server.connections.Load())
+	}
+	health := svc.Latest().Sources[0]
+	if len(health.Units) != 2 {
+		t.Fatalf("per-unit health = %+v, want two MESTEK units", health.Units)
+	}
+	if unit := health.Units[0]; unit.Unit != 0x14 || unit.Mapped != 3 || !unit.Connected || unit.Status != "ok" {
+		t.Fatalf("unit 0x14 health = %+v, want 3/3 ok", unit)
+	}
+	if unit := health.Units[1]; unit.Unit != 0x15 || unit.Mapped != 9 || unit.Total != 10 || unit.Connected || unit.Status != "degraded" {
+		t.Fatalf("unit 0x15 health = %+v, want 9/10 degraded", unit)
 	}
 }
 
@@ -362,5 +382,69 @@ func TestElectricalDefaultIntervals(t *testing.T) {
 	}
 	if cfg.KeithleyReadInterval != 3*time.Second {
 		t.Fatalf("6485 default interval = %v, want 3s", cfg.KeithleyReadInterval)
+	}
+	if !cfg.MESTEKEnabled {
+		t.Fatal("MESTEK should be enabled by default")
+	}
+}
+
+func TestMESTEKEnabledConfigFromEnv(t *testing.T) {
+	t.Setenv("INFLUXDB_TOKEN", "test-token")
+	t.Setenv("INFLUXDB_ADDR", "http://influx.invalid")
+	t.Setenv("INFLUXDB_ORG", "lab")
+	t.Setenv("INFLUXDB_BUCKET", "electrical")
+	t.Setenv("ELECTRICAL_MESTEK_ENABLED", "false")
+	cfg, err := ConfigFromEnv()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.MESTEKEnabled {
+		t.Fatal("ELECTRICAL_MESTEK_ENABLED=false was ignored")
+	}
+	t.Setenv("ELECTRICAL_MESTEK_ENABLED", "true")
+	cfg, err = ConfigFromEnv()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !cfg.MESTEKEnabled {
+		t.Fatal("ELECTRICAL_MESTEK_ENABLED=true was ignored")
+	}
+	t.Setenv("ELECTRICAL_MESTEK_ENABLED", "not-a-bool")
+	if _, err := ConfigFromEnv(); err == nil {
+		t.Fatal("invalid ELECTRICAL_MESTEK_ENABLED was accepted")
+	}
+}
+
+func TestKeithleyEnabledConfigFromEnv(t *testing.T) {
+	t.Setenv("INFLUXDB_TOKEN", "test-token")
+	t.Setenv("INFLUXDB_ADDR", "http://influx.invalid")
+	t.Setenv("INFLUXDB_ORG", "lab")
+	t.Setenv("INFLUXDB_BUCKET", "electrical")
+	cfg, err := ConfigFromEnv()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !cfg.KeithleyEnabled {
+		t.Fatal("6485 should be enabled by default")
+	}
+	t.Setenv("ELECTRICAL_6485_ENABLED", "false")
+	cfg, err = ConfigFromEnv()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.KeithleyEnabled {
+		t.Fatal("ELECTRICAL_6485_ENABLED=false was ignored")
+	}
+	t.Setenv("ELECTRICAL_6485_ENABLED", "true")
+	cfg, err = ConfigFromEnv()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !cfg.KeithleyEnabled {
+		t.Fatal("ELECTRICAL_6485_ENABLED=true was ignored")
+	}
+	t.Setenv("ELECTRICAL_6485_ENABLED", "not-a-bool")
+	if _, err := ConfigFromEnv(); err == nil {
+		t.Fatal("invalid ELECTRICAL_6485_ENABLED was accepted")
 	}
 }
