@@ -194,6 +194,70 @@ func TestBacklogBoundAndWriteFailureHealth(t *testing.T) {
 	}
 }
 
+func TestDisabledMESTEKDoesNotStartWorker(t *testing.T) {
+	cfg := DefaultConfig()
+	cfg.Enabled = true
+	cfg.MESTEKEnabled = false
+	cfg.Devices = nil
+	cfg.ReconnectDelay = 10 * time.Millisecond
+	cfg.KeithleyReadInterval = 10 * time.Millisecond
+	var mestekDials atomic.Int64
+	svc := NewService(cfg, nil)
+	svc.dial = func(ctx context.Context, network, address string) (net.Conn, error) {
+		if address == cfg.MESTEKAddr {
+			mestekDials.Add(1)
+		}
+		return nil, errors.New("offline")
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan struct{})
+	go func() {
+		svc.Run(ctx)
+		close(done)
+	}()
+	deadline := time.Now().Add(50 * time.Millisecond)
+	for time.Now().Before(deadline) {
+		time.Sleep(5 * time.Millisecond)
+	}
+	cancel()
+	select {
+	case <-done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("disabled MESTEK service did not stop")
+	}
+	if mestekDials.Load() != 0 {
+		t.Fatalf("disabled MESTEK dialed %d times", mestekDials.Load())
+	}
+	for _, health := range svc.Latest().Sources {
+		if health.Source == SourceMESTEK && health.Status != "disabled" {
+			t.Fatalf("MESTEK health = %+v, want disabled", health)
+		}
+	}
+}
+
+func TestSingleShotSkipsDisabledMESTEK(t *testing.T) {
+	cfg := DefaultConfig()
+	cfg.MESTEKEnabled = false
+	cfg.MESTEKActiveRead = false
+	cfg.Devices = nil
+	var mestekWrites, keithleyWrites atomic.Int64
+	svc := NewService(cfg, nil)
+	svc.dial = passiveTestDial(cfg, &mestekWrites, &keithleyWrites)
+	result, err := svc.SingleShot(context.Background(), "user-disabled")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(result.Samples) != 1 || result.Samples[0].Source != Source6485 {
+		t.Fatalf("single-shot samples = %+v, want only the 6485 reading", result.Samples)
+	}
+	if _, failed := result.Errors[SourceMESTEK]; failed {
+		t.Fatalf("disabled MESTEK reported an acquisition error: %+v", result.Errors)
+	}
+	if mestekWrites.Load() != 0 {
+		t.Fatalf("disabled MESTEK socket wrote %d times", mestekWrites.Load())
+	}
+}
+
 func TestHandlers(t *testing.T) {
 	cfg := DefaultConfig()
 	cfg.Devices = nil

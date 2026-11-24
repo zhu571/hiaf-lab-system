@@ -23,6 +23,7 @@ type InfluxConfig struct {
 
 type Config struct {
 	Enabled               bool
+	MESTEKEnabled         bool
 	MESTEKAddr            string
 	MESTEKActiveRead      bool
 	MESTEKReadInterval    time.Duration
@@ -50,6 +51,7 @@ func DefaultConfig() Config {
 			{Source: Source33210A, Addr: "10.51.12.220:5025"},
 		},
 		MESTEKActiveRead:      true,
+		MESTEKEnabled:         true,
 		MESTEKReadInterval:    30 * time.Second,
 		KeithleyReadInterval:  3 * time.Second,
 		QueryInterval:         2 * time.Second,
@@ -71,6 +73,13 @@ func ConfigFromEnv() (Config, error) {
 		cfg.Enabled = enabled
 	}
 	cfg.MESTEKAddr = envOr("ELECTRICAL_MESTEK_ADDR", cfg.MESTEKAddr)
+	if raw := os.Getenv("ELECTRICAL_MESTEK_ENABLED"); raw != "" {
+		enabled, err := strconv.ParseBool(raw)
+		if err != nil {
+			return Config{}, fmt.Errorf("ELECTRICAL_MESTEK_ENABLED: %w", err)
+		}
+		cfg.MESTEKEnabled = enabled
+	}
 	if raw := os.Getenv("ELECTRICAL_MESTEK_ACTIVE_READ"); raw != "" {
 		active, err := strconv.ParseBool(raw)
 		if err != nil {

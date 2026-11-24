@@ -1,11 +1,9 @@
 package electrical
 
 import (
-	"bufio"
 	"context"
 	"errors"
 	"fmt"
-	"io"
 	"net"
 	"sort"
 	"strings"
@@ -110,7 +108,7 @@ func NewService(cfg Config, influx *InfluxClient) *Service {
 			}
 		}
 		status := "connecting"
-		if !cfg.Enabled {
+		if !cfg.Enabled || (source == SourceMESTEK && !cfg.MESTEKEnabled) {
 			status = "disabled"
 		}
 		s.health[source] = SourceHealth{Source: source, Mode: mode, Status: status}
@@ -135,9 +133,12 @@ func (s *Service) Run(ctx context.Context) {
 			s.flushLoop(ctx)
 		}()
 		if s.cfg.Enabled {
-			s.wg.Add(2)
-			go func() { defer s.wg.Done(); s.runMESTEK(ctx) }()
+			s.wg.Add(1)
 			go func() { defer s.wg.Done(); s.runKeithley(ctx) }()
+			if s.cfg.MESTEKEnabled {
+				s.wg.Add(1)
+				go func() { defer s.wg.Done(); s.runMESTEK(ctx) }()
+			}
 			for _, device := range s.devices {
 				s.wg.Add(1)
 				go func() { defer s.wg.Done(); s.runSCPI(ctx, device) }()
@@ -274,9 +275,16 @@ func (s *Service) collectActiveKeithley(ctx context.Context, parser *KeithleyPar
 }
 
 const (
-	keithleyReadWindow  = 2 * time.Second
-	keithleyArmCommand  = ":ARM:COUNT 1"
-	keithleyReadCommand = ":READ?"
+	keithleyReadWindow = 2 * time.Second
+	// The 6485 terminates responses with CR (0x0D), not LF, and after previous
+	// failed polls its TCP buffer can hold several readings at once. Both windows
+	// are intentionally short: one drains stale backlog before a new request, the
+	// other collects the remaining readings of a burst once the first valid line
+	// arrives, so the newest reading wins without always waiting the full window.
+	keithleyDrainWindow  = 50 * time.Millisecond
+	keithleySettleWindow = 100 * time.Millisecond
+	keithleyArmCommand   = ":ARM:COUNT 1"
+	keithleyReadCommand  = ":READ?"
 )
 
 // queryKeithley arms one reading and triggers it. Only these two read-path
@@ -292,10 +300,10 @@ func (s *Service) queryKeithley(ctx context.Context) (string, error) {
 	if contextDeadline, ok := ctx.Deadline(); ok && contextDeadline.Before(deadline) {
 		deadline = contextDeadline
 	}
+	s.drainKeithley(conn, deadline)
 	if err := conn.SetDeadline(deadline); err != nil {
 		return "", err
 	}
-	reader := bufio.NewReader(io.LimitReader(conn, 16*1024))
 	for _, command := range []string{keithleyArmCommand, keithleyReadCommand} {
 		if !allowedKeithleyCommand(command) {
 			return "", fmt.Errorf("Keithley command is not in the read-only whitelist")
@@ -304,17 +312,81 @@ func (s *Service) queryKeithley(ctx context.Context) (string, error) {
 			return "", err
 		}
 	}
-	// Serial gateways may echo commands or answer the arm step; skip any line
-	// that is not a valid three-field 6485 reading.
+	return readKeithleyReading(conn, deadline)
+}
+
+// drainKeithley discards bytes left over from earlier failed polls. A stale
+// multi-reading backlog must never be attributed to the request being issued.
+func (s *Service) drainKeithley(conn net.Conn, overall time.Time) {
+	drainDeadline := time.Now().Add(keithleyDrainWindow)
+	if overall.Before(drainDeadline) {
+		drainDeadline = overall
+	}
+	if err := conn.SetReadDeadline(drainDeadline); err != nil {
+		return
+	}
+	buffer := make([]byte, 4096)
 	for {
-		line, readErr := reader.ReadString('\n')
-		trimmed := strings.TrimSpace(line)
-		if trimmed != "" && keithleyLinePattern.MatchString(trimmed) {
-			return trimmed, nil
+		if !time.Now().Before(drainDeadline) {
+			return
+		}
+		n, err := conn.Read(buffer)
+		if n == 0 || err != nil {
+			return
+		}
+	}
+}
+
+// readKeithleyReading splits on both CR and LF, validates every candidate with
+// the 6485 line pattern and returns the last valid reading of the burst. Echos,
+// partial lines and garbage are ignored.
+func readKeithleyReading(conn net.Conn, overall time.Time) (string, error) {
+	buffer := make([]byte, 4096)
+	var pending []byte
+	var lastValid string
+	for {
+		n, readErr := conn.Read(buffer)
+		if n > 0 {
+			pending = append(pending, buffer[:n]...)
+			start := 0
+			for index := 0; index < len(pending); index++ {
+				if pending[index] != '\r' && pending[index] != '\n' {
+					continue
+				}
+				line := strings.TrimSpace(string(pending[start:index]))
+				start = index + 1
+				if line != "" && keithleyLinePattern.MatchString(line) {
+					lastValid = line
+				}
+			}
+			if start > 0 {
+				pending = append([]byte(nil), pending[start:]...)
+			}
+			if lastValid != "" {
+				// More readings may already be queued on this socket; keep
+				// reading briefly so the newest one is the one returned.
+				idleDeadline := time.Now().Add(keithleySettleWindow)
+				if overall.Before(idleDeadline) {
+					idleDeadline = overall
+				}
+				_ = conn.SetReadDeadline(idleDeadline)
+			}
+		}
+		if !time.Now().Before(overall) {
+			if lastValid != "" {
+				return lastValid, nil
+			}
+			return "", fmt.Errorf("no valid Keithley 6485 reading within %s", keithleyReadWindow)
 		}
 		if readErr != nil {
-			if trimmed != "" {
-				return "", fmt.Errorf("no valid Keithley 6485 reading in %q: %w", trimmed, readErr)
+			if lastValid != "" {
+				return lastValid, nil
+			}
+			if len(pending) > 0 {
+				return "", fmt.Errorf("no valid Keithley 6485 reading in %q: %w", string(pending), readErr)
+			}
+			if netErr, ok := readErr.(net.Error); ok && netErr.Timeout() {
+				return "", fmt.Errorf("no valid Keithley 6485 reading within %s", keithleyReadWindow)
 			}
 			return "", readErr
 		}
@@ -499,7 +571,9 @@ func (s *Service) Latest() LatestResult {
 	}
 	for _, source := range sourceOrder {
 		health := s.health[source]
-		if health.StorageError != "" || health.LastError != "" {
+		if source == SourceMESTEK && !s.cfg.MESTEKEnabled {
+			health.Status = "disabled"
+		} else if health.StorageError != "" || health.LastError != "" {
 			health.Status = "degraded"
 		} else if health.LastSampleAt != nil || health.Connected {
 			health.Status = "ok"
@@ -632,7 +706,10 @@ func (s *Service) SingleShot(ctx context.Context, userID string) (SingleShotResu
 	defer cancel()
 	result := SingleShotResult{StartedAt: started, Errors: make(map[string]string)}
 	continuous := s.continuousRunning()
-	mestekCh := s.mestekShot(shotCtx, continuous)
+	var mestekCh <-chan acquisitionResult
+	if s.cfg.MESTEKEnabled {
+		mestekCh = s.mestekShot(shotCtx, continuous)
+	}
 	keithleyCh := s.keithleyShot(shotCtx)
 	type deviceResult struct {
 		source  string
@@ -660,10 +737,15 @@ func (s *Service) SingleShot(ctx context.Context, userID string) (SingleShotResu
 			break
 		}
 	}
-	passiveResults := []struct {
+	type sourceChannel struct {
 		source string
 		ch     <-chan acquisitionResult
-	}{{SourceMESTEK, mestekCh}, {Source6485, keithleyCh}}
+	}
+	passiveResults := make([]sourceChannel, 0, 2)
+	if s.cfg.MESTEKEnabled {
+		passiveResults = append(passiveResults, sourceChannel{SourceMESTEK, mestekCh})
+	}
+	passiveResults = append(passiveResults, sourceChannel{Source6485, keithleyCh})
 	for _, pending := range passiveResults {
 		select {
 		case item := <-pending.ch:

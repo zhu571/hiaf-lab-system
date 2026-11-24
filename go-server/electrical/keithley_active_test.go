@@ -28,7 +28,7 @@ func TestKeithleyActivePollUsesReadOnlyCommands(t *testing.T) {
 				command := strings.TrimSpace(line)
 				commands <- command
 				if command == ":READ?" {
-					_, _ = server.Write([]byte(":READ?\n+7.919254E-10A,+1.011508E+06,+2.000000E+00\n"))
+					_, _ = server.Write([]byte(":READ?\r+7.919254E-10A,+1.011508E+06,+2.000000E+00\r"))
 				}
 			}
 		}()
@@ -44,8 +44,11 @@ func TestKeithleyActivePollUsesReadOnlyCommands(t *testing.T) {
 	if samples[0].Source != Source6485 || samples[0].Channel != "CH1" || samples[0].Metric != "current_A" {
 		t.Fatalf("sample identity = (%s, %s, %s), want (%s, CH1, current_A)", samples[0].Source, samples[0].Channel, samples[0].Metric, Source6485)
 	}
-	if got := *samples[0].Value; got < 7.91e-10 || got > 7.92e-10 {
-		t.Fatalf("parsed value = %v, want ~7.919e-10", got)
+	if samples[0].Unit != "nA" {
+		t.Fatalf("6485 unit = %q, want nA", samples[0].Unit)
+	}
+	if got := *samples[0].Value; got < 0.791 || got > 0.792 {
+		t.Fatalf("parsed value = %v, want ~0.7919 nA", got)
 	}
 	if samples[0].Raw != "+7.919254E-10A,+1.011508E+06,+2.000000E+00" {
 		t.Fatalf("raw = %q, want the matched reading line", samples[0].Raw)
@@ -95,5 +98,83 @@ func TestKeithleyCommandWhitelist(t *testing.T) {
 		if allowedKeithleyCommand(command) {
 			t.Fatalf("%q must be rejected", command)
 		}
+	}
+}
+
+func TestQueryKeithleyReturnsLatestReadingOfCRBurst(t *testing.T) {
+	cfg := DefaultConfig()
+	cfg.Devices = nil
+	svc := NewService(cfg, nil)
+	want := "+5.000000E-09A,+1.0E+06,+2.000000E+00"
+	svc.dial = func(ctx context.Context, network, address string) (net.Conn, error) {
+		client, server := net.Pipe()
+		go func() {
+			defer server.Close()
+			reader := bufio.NewReader(server)
+			for {
+				line, err := reader.ReadString('\n')
+				if err != nil {
+					return
+				}
+				if strings.TrimSpace(line) != ":READ?" {
+					continue
+				}
+				burst := strings.Join([]string{
+					"+1.000000E-09A,+1.0E+06,+2.000000E+00",
+					"+2.000000E-09A,+1.0E+06,+2.000000E+00",
+					"+3.000000E-09A,+1.0E+06,+2.000000E+00",
+					"+4.000000E-09A,+1.0E+06,+2.000000E+00",
+					want,
+				}, "\r") + "\r"
+				_, _ = server.Write([]byte(burst))
+			}
+		}()
+		return client, nil
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	line, err := svc.queryKeithley(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if line != want {
+		t.Fatalf("queryKeithley = %q, want the newest reading %q", line, want)
+	}
+}
+
+func TestQueryKeithleyDrainsStaleBacklogBeforeReading(t *testing.T) {
+	cfg := DefaultConfig()
+	cfg.Devices = nil
+	svc := NewService(cfg, nil)
+	want := "+2.500000E-09A,+1.0E+06,+2.000000E+00"
+	svc.dial = func(ctx context.Context, network, address string) (net.Conn, error) {
+		client, server := net.Pipe()
+		go func() {
+			defer server.Close()
+			stale := strings.Repeat("+9.999999E-09A,+1.0E+06,+2.000000E+00\r", 3)
+			if _, err := server.Write([]byte(stale)); err != nil {
+				return
+			}
+			reader := bufio.NewReader(server)
+			for {
+				line, err := reader.ReadString('\n')
+				if err != nil {
+					return
+				}
+				if strings.TrimSpace(line) == ":READ?" {
+					_, _ = server.Write([]byte(want + "\r"))
+				}
+			}
+		}()
+		return client, nil
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	line, err := svc.queryKeithley(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if line != want {
+		t.Fatalf("queryKeithley = %q, want stale backlog drained and %q returned", line, want)
 	}
 }

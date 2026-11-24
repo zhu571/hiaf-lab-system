@@ -68,8 +68,8 @@ func (s *Service) collectActiveMESTEK(ctx context.Context) ([]Sample, error) {
 		return nil, err
 	}
 	defer s.releaseMESTEK()
-	samples, stats, err := s.readMESTEKSnapshot(ctx)
-	s.updateActiveModbusHealth(stats)
+	samples, stats, units, err := s.readMESTEKSnapshot(ctx)
+	s.updateActiveModbusHealth(stats, units)
 	if err != nil {
 		// Keep the last known value for channels that dropped out of this round
 		// so the UI does not flicker; prune only values older than the retention
@@ -160,7 +160,7 @@ func (s *Service) runActiveMESTEK(ctx context.Context) {
 	}
 }
 
-func (s *Service) readMESTEKSnapshot(ctx context.Context) ([]Sample, ModbusStats, error) {
+func (s *Service) readMESTEKSnapshot(ctx context.Context) ([]Sample, ModbusStats, []MESTEKUnitHealth, error) {
 	snapshot := &mestekSnapshot{service: s}
 	defer snapshot.close()
 
@@ -185,10 +185,11 @@ func (s *Service) readMESTEKSnapshot(ctx context.Context) ([]Sample, ModbusStats
 		}
 	}
 	snapshot.stats.PartialBytes = snapshot.partialBytes()
+	units := round.unitHealth()
 	if len(round.mapped) != 13 {
-		return round.samples, snapshot.stats, round.snapshotError()
+		return round.samples, snapshot.stats, units, round.snapshotError()
 	}
-	return round.samples, snapshot.stats, nil
+	return round.samples, snapshot.stats, units, nil
 }
 
 type mestekPendingRead struct {
@@ -285,6 +286,33 @@ func (round *mestekRound) recover(ctx context.Context) {
 		}
 		round.readChannel(ctx, module, pending.start)
 	}
+}
+
+// unitHealth reports coverage per Modbus unit so a fault on one physical module
+// is not hidden by the overall 13-channel source status.
+func (round *mestekRound) unitHealth() []MESTEKUnitHealth {
+	units := make([]MESTEKUnitHealth, 0, len(mestekModules))
+	for _, module := range mestekModules {
+		mapped := 0
+		for local := 1; local <= module.channels; local++ {
+			channel, _ := mestekChannel(module.unit, uint16(local*100))
+			if round.mapped[channel] {
+				mapped++
+			}
+		}
+		status := "disconnected"
+		switch {
+		case mapped == module.channels:
+			status = "ok"
+		case mapped > 0:
+			status = "degraded"
+		}
+		units = append(units, MESTEKUnitHealth{
+			Unit: int(module.unit), Mapped: mapped, Total: module.channels,
+			Connected: mapped == module.channels, Status: status,
+		})
+	}
+	return units
 }
 
 func (round *mestekRound) snapshotError() *MESTEKSnapshotError {
@@ -533,7 +561,7 @@ func addActiveModbusStats(target *ModbusStats, addition ModbusStats) {
 	}
 }
 
-func (s *Service) updateActiveModbusHealth(stats ModbusStats) {
+func (s *Service) updateActiveModbusHealth(stats ModbusStats, units []MESTEKUnitHealth) {
 	s.mu.Lock()
 	health := s.health[SourceMESTEK]
 	health.CRCErrors += stats.CRCErrors
@@ -541,6 +569,7 @@ func (s *Service) updateActiveModbusHealth(stats ModbusStats) {
 	health.ResponseFrames += stats.ResponseFrames
 	health.MappedFrames += stats.MappedFrames
 	health.PartialBytes = stats.PartialBytes
+	health.Units = units
 	if stats.MappedFrames > 0 {
 		health.Mapping = MappingPaired
 	} else if stats.ResponseFrames > 0 {
