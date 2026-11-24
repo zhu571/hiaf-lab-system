@@ -27,6 +27,7 @@ type Config struct {
 	MESTEKActiveRead      bool
 	MESTEKReadInterval    time.Duration
 	KeithleyAddr          string
+	KeithleyReadInterval  time.Duration
 	Devices               []DeviceConfig
 	Influx                InfluxConfig
 	QueryInterval         time.Duration
@@ -49,7 +50,8 @@ func DefaultConfig() Config {
 			{Source: Source33210A, Addr: "10.51.12.220:5025"},
 		},
 		MESTEKActiveRead:      true,
-		MESTEKReadInterval:    10 * time.Second,
+		MESTEKReadInterval:    30 * time.Second,
+		KeithleyReadInterval:  3 * time.Second,
 		QueryInterval:         2 * time.Second,
 		ReconnectDelay:        2 * time.Second,
 		SingleShotTimeout:     30 * time.Second,
@@ -84,6 +86,13 @@ func ConfigFromEnv() (Config, error) {
 		cfg.MESTEKReadInterval = interval
 	}
 	cfg.KeithleyAddr = envOr("ELECTRICAL_6485_ADDR", cfg.KeithleyAddr)
+	if raw := os.Getenv("ELECTRICAL_6485_READ_INTERVAL"); raw != "" {
+		interval, err := time.ParseDuration(raw)
+		if err != nil || interval <= 0 {
+			return Config{}, fmt.Errorf("ELECTRICAL_6485_READ_INTERVAL must be a positive duration")
+		}
+		cfg.KeithleyReadInterval = interval
+	}
 	envNames := []string{"ELECTRICAL_RIGOL_ADDR", "ELECTRICAL_TEK_ADDR", "ELECTRICAL_33512B_ADDR", "ELECTRICAL_33210A_ADDR"}
 	for i := range cfg.Devices {
 		cfg.Devices[i].Addr = envOr(envNames[i], cfg.Devices[i].Addr)

@@ -33,14 +33,20 @@ func newFakeMESTEKServer(t *testing.T, handler func([]byte, int64) []byte) fakeM
 		go func() {
 			defer wg.Done()
 			defer server.Close()
-			request := make([]byte, 8)
-			if _, err := io.ReadFull(server, request); err != nil {
-				return
-			}
-			requestCopy := append([]byte(nil), request...)
-			requests <- requestCopy
-			if response := handler(requestCopy, connection); len(response) > 0 {
-				_, _ = server.Write(response)
+			// A real snapshot reuses one connection for the whole round, so the
+			// fake must keep serving requests until the client closes the socket.
+			for {
+				request := make([]byte, 8)
+				if _, err := io.ReadFull(server, request); err != nil {
+					return
+				}
+				requestCopy := append([]byte(nil), request...)
+				requests <- requestCopy
+				if response := handler(requestCopy, connection); len(response) > 0 {
+					if _, err := server.Write(response); err != nil {
+						return
+					}
+				}
 			}
 		}()
 		return client, nil
@@ -135,8 +141,8 @@ func TestMESTEKActiveSnapshotMapsAllThirteenChannels(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if server.connections.Load() != 15 {
-		t.Fatalf("connections = %d, want 15 one-request connections", server.connections.Load())
+	if server.connections.Load() != 1 {
+		t.Fatalf("connections = %d, want 1 reused snapshot connection", server.connections.Load())
 	}
 	requests := drainMESTEKRequests(t, server.requests, 15)
 	for index, request := range requests {
@@ -168,7 +174,7 @@ func TestMESTEKActiveSnapshotMapsAllThirteenChannels(t *testing.T) {
 	}
 }
 
-func TestMESTEKActiveSnapshotKeepsFailedChannelEmpty(t *testing.T) {
+func TestMESTEKActiveSnapshotRetainsRecentlyMissingChannel(t *testing.T) {
 	server := newFakeMESTEKServer(t, func(request []byte, _ int64) []byte {
 		unit := request[0]
 		start := binary.BigEndian.Uint16(request[2:4])
@@ -194,33 +200,70 @@ func TestMESTEKActiveSnapshotKeepsFailedChannelEmpty(t *testing.T) {
 	}
 	for _, sample := range samples {
 		if sample.Channel == "CH7" || sample.Channel == "UNMAPPED" {
-			t.Fatalf("failed channel was backfilled: %+v", sample)
+			t.Fatalf("failed channel was fabricated in this round: %+v", sample)
 		}
 	}
-	if _, ok := svc.latest[sampleKey(Sample{Source: SourceMESTEK, Channel: "CH7", Metric: "I_A", Mapping: MappingPaired})]; ok {
-		t.Fatal("failed channel was fabricated in latest state")
+	if _, ok := svc.latest[sampleKey(Sample{Source: SourceMESTEK, Channel: "CH7", Metric: "I_A", Mapping: MappingPaired})]; !ok {
+		t.Fatal("recently missing channel was dropped, causing UI jitter")
 	}
-	if server.connections.Load() != 17 { // 15 transactions + two retries for CH7
-		t.Fatalf("connections = %d, want 17", server.connections.Load())
+	if server.connections.Load() != 1 {
+		t.Fatalf("connections = %d, want 1 reused snapshot connection", server.connections.Load())
 	}
 }
 
-func TestMESTEKActiveRejectsLateResponse(t *testing.T) {
+func TestMESTEKActivePrunesOldMissingChannel(t *testing.T) {
 	server := newFakeMESTEKServer(t, func(request []byte, _ int64) []byte {
-		time.Sleep(mestekReadWindow + 30*time.Millisecond)
+		unit := request[0]
+		start := binary.BigEndian.Uint16(request[2:4])
+		if unit == 0x15 && start == 400 { // global CH7
+			return testResponse(0x14, make([]uint16, 16))
+		}
 		return fakeMESTEKResponse(t, request)
+	})
+	cfg := DefaultConfig()
+	cfg.Devices = nil
+	svc := NewService(cfg, nil)
+	svc.dial = server.dial
+	old := time.Now().Add(-2 * svc.mestekStaleAfter())
+	svc.record([]Sample{{
+		Time: old, Source: SourceMESTEK, Channel: "CH7", Metric: "I_A",
+		Mapping: MappingPaired, Value: float64Ptr(0.123), Quality: "good",
+	}})
+	_, err := svc.collectActiveMESTEK(context.Background())
+	server.wait()
+	if err == nil {
+		t.Fatal("expected a partial snapshot error")
+	}
+	if _, ok := svc.latest[sampleKey(Sample{Source: SourceMESTEK, Channel: "CH7", Metric: "I_A", Mapping: MappingPaired})]; ok {
+		t.Fatal("stale missing channel survived past the retention window")
+	}
+}
+
+func TestMESTEKActiveTimeoutRetriesOnSameConnection(t *testing.T) {
+	server := newFakeMESTEKServer(t, func(_ []byte, _ int64) []byte {
+		return nil // never answer: every attempt must time out
 	})
 	cfg := DefaultConfig()
 	svc := NewService(cfg, nil)
 	svc.dial = server.dial
-	_, stats, err := svc.readMESTEKHolding(context.Background(), 0x14, 100, 16)
+	snapshot := &mestekSnapshot{service: svc}
+	_, err := snapshot.readHolding(context.Background(), 0x14, 100, 16)
+	snapshot.close()
 	server.wait()
-	if err == nil || stats.MappedFrames != 0 || stats.RequestFrames != 3 {
-		t.Fatalf("late response accepted: stats=%+v err=%v", stats, err)
+	if err == nil || !strings.Contains(err.Error(), "failed after 3 attempts") {
+		t.Fatalf("timeout error = %v", err)
 	}
-	if server.connections.Load() != 3 {
-		t.Fatalf("connections = %d, want 3 independent attempts", server.connections.Load())
+	requests := drainMESTEKRequests(t, server.requests, 3)
+	if len(requests) != 3 {
+		t.Fatalf("requests = %d, want 3 same-connection retries", len(requests))
 	}
+	if server.connections.Load() != 1 {
+		t.Fatalf("connections = %d, want 1 connection with same-socket retries", server.connections.Load())
+	}
+}
+
+func float64Ptr(value float64) *float64 {
+	return &value
 }
 
 func TestMESTEKGateWaitsForContextAndSerializesCallers(t *testing.T) {
@@ -243,6 +286,7 @@ func TestMESTEKGateWaitsForContextAndSerializesCallers(t *testing.T) {
 func TestMESTEKActiveConfigFromEnv(t *testing.T) {
 	t.Setenv("ELECTRICAL_MESTEK_ACTIVE_READ", "false")
 	t.Setenv("ELECTRICAL_MESTEK_READ_INTERVAL", "12s")
+	t.Setenv("ELECTRICAL_6485_READ_INTERVAL", "4s")
 	t.Setenv("INFLUXDB_TOKEN", "test-token")
 	t.Setenv("INFLUXDB_ADDR", "http://influx.invalid")
 	t.Setenv("INFLUXDB_ORG", "lab")
@@ -254,8 +298,26 @@ func TestMESTEKActiveConfigFromEnv(t *testing.T) {
 	if cfg.MESTEKActiveRead || cfg.MESTEKReadInterval != 12*time.Second || cfg.SingleShotTimeout != 30*time.Second {
 		t.Fatalf("unexpected MESTEK config: %+v", cfg)
 	}
+	if cfg.KeithleyReadInterval != 4*time.Second {
+		t.Fatalf("unexpected 6485 interval: %v", cfg.KeithleyReadInterval)
+	}
 	t.Setenv("ELECTRICAL_MESTEK_READ_INTERVAL", "0s")
 	if _, err := ConfigFromEnv(); err == nil {
 		t.Fatal("non-positive MESTEK interval was accepted")
+	}
+	t.Setenv("ELECTRICAL_MESTEK_READ_INTERVAL", "12s")
+	t.Setenv("ELECTRICAL_6485_READ_INTERVAL", "0s")
+	if _, err := ConfigFromEnv(); err == nil {
+		t.Fatal("non-positive 6485 interval was accepted")
+	}
+}
+
+func TestElectricalDefaultIntervals(t *testing.T) {
+	cfg := DefaultConfig()
+	if cfg.MESTEKReadInterval != 30*time.Second {
+		t.Fatalf("MESTEK default interval = %v, want 30s", cfg.MESTEKReadInterval)
+	}
+	if cfg.KeithleyReadInterval != 3*time.Second {
+		t.Fatalf("6485 default interval = %v, want 3s", cfg.KeithleyReadInterval)
 	}
 }

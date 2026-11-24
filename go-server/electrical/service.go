@@ -1,9 +1,11 @@
 package electrical
 
 import (
+	"bufio"
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"net"
 	"sort"
 	"strings"
@@ -28,21 +30,24 @@ func (e *RateLimitError) Error() string {
 type dialContextFunc func(ctx context.Context, network, address string) (net.Conn, error)
 
 type Service struct {
-	cfg        Config
-	influx     *InfluxClient
-	devices    map[string]*SCPIDevice
-	dial       dialContextFunc
-	now        func() time.Time
-	mestekGate chan struct{}
+	cfg          Config
+	influx       *InfluxClient
+	devices      map[string]*SCPIDevice
+	dial         dialContextFunc
+	now          func() time.Time
+	mestekGate   chan struct{}
+	keithleyGate chan struct{}
 
-	mu        sync.RWMutex
-	latest    map[string]Sample
-	health    map[string]SourceHealth
-	waiters   map[string][]chan []Sample
-	updatedAt time.Time
-	seq       uint64
-	running   bool
-	runCtx    context.Context
+	mu            sync.RWMutex
+	latest        map[string]Sample
+	health        map[string]SourceHealth
+	waiters       map[string][]chan []Sample
+	updatedAt     time.Time
+	seq           uint64
+	running       bool
+	runCtx        context.Context
+	mestekMisses  int
+	mestekBackoff bool
 
 	backlogMu sync.Mutex
 	backlog   []Sample
@@ -70,7 +75,10 @@ func NewService(cfg Config, influx *InfluxClient) *Service {
 		cfg.ReconnectDelay = 2 * time.Second
 	}
 	if cfg.MESTEKReadInterval <= 0 {
-		cfg.MESTEKReadInterval = 10 * time.Second
+		cfg.MESTEKReadInterval = 30 * time.Second
+	}
+	if cfg.KeithleyReadInterval <= 0 {
+		cfg.KeithleyReadInterval = 3 * time.Second
 	}
 	if cfg.SingleShotTimeout <= 0 {
 		cfg.SingleShotTimeout = 30 * time.Second
@@ -87,16 +95,15 @@ func NewService(cfg Config, influx *InfluxClient) *Service {
 	s := &Service{
 		cfg: cfg, influx: influx, devices: make(map[string]*SCPIDevice),
 		dial: (&net.Dialer{Timeout: 3 * time.Second}).DialContext, now: time.Now,
-		mestekGate: make(chan struct{}, 1),
-		latest:     make(map[string]Sample), health: make(map[string]SourceHealth),
+		mestekGate:   make(chan struct{}, 1),
+		keithleyGate: make(chan struct{}, 1),
+		latest:       make(map[string]Sample), health: make(map[string]SourceHealth),
 		waiters: make(map[string][]chan []Sample), lastSingle: make(map[string]time.Time),
 		backlog: make([]Sample, 0, cfg.BacklogCapacity),
 	}
 	for _, source := range sourceOrder {
 		mode := "scpi"
-		if source == Source6485 {
-			mode = "passive"
-		} else if source == SourceMESTEK {
+		if source == SourceMESTEK {
 			mode = "modbus_active"
 			if !cfg.MESTEKActiveRead {
 				mode = "passive"
@@ -217,42 +224,105 @@ func (s *Service) runMESTEK(ctx context.Context) {
 	}
 }
 
+// runKeithley actively polls the 6485 instead of waiting for an unsolicited
+// stream. The device only answers :READ?, so a passive socket never produced
+// samples; LabVIEW does not share this endpoint, so polling has no contention.
 func (s *Service) runKeithley(ctx context.Context) {
 	parser := &KeithleyParser{}
 	for ctx.Err() == nil {
-		conn, err := s.dial(ctx, "tcp", s.cfg.KeithleyAddr)
-		if err != nil {
+		if _, err := s.collectActiveKeithley(ctx, parser); err != nil {
 			s.noteSourceError(Source6485, err, true)
-			if !sleepContext(ctx, s.cfg.ReconnectDelay) {
-				return
-			}
-			continue
+		} else {
+			s.noteSourceSuccess(Source6485)
 		}
-		s.noteConnected(Source6485)
-		for ctx.Err() == nil {
-			_ = conn.SetReadDeadline(time.Now().Add(500 * time.Millisecond))
-			buffer := make([]byte, 4096)
-			n, readErr := conn.Read(buffer) // passive boundary: never conn.Write
-			if n > 0 {
-				samples := parser.Feed(buffer[:n], s.now())
-				s.record(samples)
-				s.updateKeithleyHealth(parser)
-			}
-			if readErr != nil {
-				if netErr, ok := readErr.(net.Error); ok && netErr.Timeout() && ctx.Err() == nil {
-					continue
-				}
-				s.noteSourceError(Source6485, readErr, true)
-				break
-			}
-		}
-		_ = conn.Close()
-		parser.buffer = nil
-		parser.PartialBytes = 0
-		if !sleepContext(ctx, s.cfg.ReconnectDelay) {
+		if !sleepContext(ctx, s.cfg.KeithleyReadInterval) {
 			return
 		}
 	}
+}
+
+func (s *Service) acquireKeithley(ctx context.Context) error {
+	select {
+	case s.keithleyGate <- struct{}{}:
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+}
+
+func (s *Service) releaseKeithley() {
+	<-s.keithleyGate
+}
+
+// collectActiveKeithley performs one :READ? poll while holding a gate so the
+// continuous worker and single-shot never issue concurrent requests.
+func (s *Service) collectActiveKeithley(ctx context.Context, parser *KeithleyParser) ([]Sample, error) {
+	if err := s.acquireKeithley(ctx); err != nil {
+		return nil, err
+	}
+	defer s.releaseKeithley()
+	line, err := s.queryKeithley(ctx)
+	if err != nil {
+		return nil, err
+	}
+	samples := parser.Feed([]byte(line+"\n"), s.now())
+	s.updateKeithleyHealth(parser)
+	if len(samples) == 0 {
+		return nil, fmt.Errorf("unrecognized Keithley 6485 response %q", line)
+	}
+	return s.record(samples), nil
+}
+
+const (
+	keithleyReadWindow  = 2 * time.Second
+	keithleyArmCommand  = ":ARM:COUNT 1"
+	keithleyReadCommand = ":READ?"
+)
+
+// queryKeithley arms one reading and triggers it. Only these two read-path
+// commands may ever be written; output, ranging and other device state stay
+// untouched.
+func (s *Service) queryKeithley(ctx context.Context) (string, error) {
+	conn, err := s.dial(ctx, "tcp", s.cfg.KeithleyAddr)
+	if err != nil {
+		return "", err
+	}
+	defer conn.Close()
+	deadline := time.Now().Add(keithleyReadWindow)
+	if contextDeadline, ok := ctx.Deadline(); ok && contextDeadline.Before(deadline) {
+		deadline = contextDeadline
+	}
+	if err := conn.SetDeadline(deadline); err != nil {
+		return "", err
+	}
+	reader := bufio.NewReader(io.LimitReader(conn, 16*1024))
+	for _, command := range []string{keithleyArmCommand, keithleyReadCommand} {
+		if !allowedKeithleyCommand(command) {
+			return "", fmt.Errorf("Keithley command is not in the read-only whitelist")
+		}
+		if _, err := conn.Write([]byte(command + "\n")); err != nil {
+			return "", err
+		}
+	}
+	// Serial gateways may echo commands or answer the arm step; skip any line
+	// that is not a valid three-field 6485 reading.
+	for {
+		line, readErr := reader.ReadString('\n')
+		trimmed := strings.TrimSpace(line)
+		if trimmed != "" && keithleyLinePattern.MatchString(trimmed) {
+			return trimmed, nil
+		}
+		if readErr != nil {
+			if trimmed != "" {
+				return "", fmt.Errorf("no valid Keithley 6485 reading in %q: %w", trimmed, readErr)
+			}
+			return "", readErr
+		}
+	}
+}
+
+func allowedKeithleyCommand(command string) bool {
+	return command == keithleyArmCommand || command == keithleyReadCommand
 }
 
 func sleepContext(ctx context.Context, duration time.Duration) bool {
@@ -563,7 +633,7 @@ func (s *Service) SingleShot(ctx context.Context, userID string) (SingleShotResu
 	result := SingleShotResult{StartedAt: started, Errors: make(map[string]string)}
 	continuous := s.continuousRunning()
 	mestekCh := s.mestekShot(shotCtx, continuous)
-	keithleyCh := s.passiveShot(shotCtx, Source6485, continuous)
+	keithleyCh := s.keithleyShot(shotCtx)
 	type deviceResult struct {
 		source  string
 		samples []Sample
@@ -601,7 +671,7 @@ func (s *Service) SingleShot(ctx context.Context, userID string) (SingleShotResu
 			if item.err != nil {
 				result.Errors[pending.source] = item.err.Error()
 			} else if len(item.samples) == 0 {
-				result.Errors[pending.source] = "no passive frame received"
+				result.Errors[pending.source] = "no sample received"
 			}
 		case <-shotCtx.Done():
 			result.Errors[pending.source] = shotCtx.Err().Error()
@@ -633,6 +703,15 @@ func (s *Service) mestekShot(ctx context.Context, continuous bool) <-chan acquis
 	return ch
 }
 
+func (s *Service) keithleyShot(ctx context.Context) <-chan acquisitionResult {
+	ch := make(chan acquisitionResult, 1)
+	go func() {
+		samples, err := s.collectActiveKeithley(ctx, &KeithleyParser{})
+		ch <- acquisitionResult{samples: samples, err: err}
+	}()
+	return ch
+}
+
 func (s *Service) passiveShot(ctx context.Context, source string, continuous bool) <-chan acquisitionResult {
 	ch := make(chan acquisitionResult, 1)
 	if continuous {
@@ -648,13 +727,7 @@ func (s *Service) passiveShot(ctx context.Context, source string, continuous boo
 		return ch
 	}
 	go func() {
-		var samples []Sample
-		var err error
-		if source == SourceMESTEK {
-			samples, err = s.captureMESTEK(ctx)
-		} else {
-			samples, err = s.captureKeithley(ctx)
-		}
+		samples, err := s.captureMESTEK(ctx)
 		if err != nil {
 			s.noteSourceError(source, err, true)
 		}
@@ -713,33 +786,6 @@ func (s *Service) captureMESTEK(ctx context.Context) ([]Sample, error) {
 				}
 			}
 			s.updateModbusHealth(parser)
-		}
-		if readErr != nil {
-			return nil, readErr
-		}
-	}
-	return nil, ctx.Err()
-}
-
-func (s *Service) captureKeithley(ctx context.Context) ([]Sample, error) {
-	conn, err := s.dial(ctx, "tcp", s.cfg.KeithleyAddr)
-	if err != nil {
-		return nil, err
-	}
-	defer conn.Close()
-	parser := &KeithleyParser{}
-	for ctx.Err() == nil {
-		if deadline, ok := ctx.Deadline(); ok {
-			_ = conn.SetReadDeadline(deadline)
-		}
-		buffer := make([]byte, 4096)
-		n, readErr := conn.Read(buffer) // passive boundary: never conn.Write
-		if n > 0 {
-			samples := parser.Feed(buffer[:n], s.now())
-			s.updateKeithleyHealth(parser)
-			if len(samples) > 0 {
-				return samples[:1], nil
-			}
 		}
 		if readErr != nil {
 			return nil, readErr

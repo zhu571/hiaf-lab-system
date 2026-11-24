@@ -52,7 +52,7 @@ func TestLiveSingleShotSmoke(t *testing.T) {
 	defer influx.Close()
 
 	cfg := DefaultConfig()
-	cfg.MESTEKActiveRead = false // this smoke test enforces a zero-write passive socket
+	cfg.MESTEKActiveRead = false // this smoke test keeps the MESTEK socket zero-write
 	cfg.Enabled = false
 	cfg.SingleShotTimeout = 30 * time.Second
 	client := NewInfluxClient(InfluxConfig{Addr: influx.URL, Token: "live-smoke-token", Org: "lab", Bucket: "electrical-smoke"})
@@ -63,7 +63,12 @@ func TestLiveSingleShotSmoke(t *testing.T) {
 		if err != nil {
 			return nil, err
 		}
-		return &rejectWriteConn{Conn: conn}, nil
+		if address == cfg.MESTEKAddr {
+			return &rejectWriteConn{Conn: conn}, nil
+		}
+		// The 6485 endpoint is deliberately written: :ARM:COUNT/:READ? are its
+		// only supported read-path commands.
+		return conn, nil
 	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), 45*time.Second)

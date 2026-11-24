@@ -5,6 +5,7 @@ import (
 	"encoding/binary"
 	"fmt"
 	"io"
+	"net"
 	"strings"
 	"time"
 )
@@ -13,6 +14,12 @@ const (
 	mestekReadWindow  = 300 * time.Millisecond
 	mestekRetryDelay  = 120 * time.Millisecond
 	mestekReadRetries = 3
+
+	// LabVIEW is the primary MESTEK client. Losing more than three channels in a
+	// round is treated as a severe miss; three severe misses in a row skip one
+	// interval so the slave client yields the shared serial line.
+	mestekBackoffMinMapped   = 10
+	mestekBackoffAfterRounds = 3
 )
 
 type mestekModule struct {
@@ -27,7 +34,8 @@ var mestekModules = []mestekModule{
 }
 
 // MESTEKSnapshotError reports incomplete coverage without replacing missing
-// channels with delayed, passive or previous-snapshot frames.
+// channels with delayed, passive or previous-snapshot frames. Partial rounds
+// are still recorded; only wholly absent channels remain missing.
 type MESTEKSnapshotError struct {
 	Mapped  int
 	Missing []string
@@ -56,8 +64,12 @@ func (s *Service) collectActiveMESTEK(ctx context.Context) ([]Sample, error) {
 	samples, stats, err := s.readMESTEKSnapshot(ctx)
 	s.updateActiveModbusHealth(stats)
 	if err != nil {
-		s.invalidateMissingMESTEKChannels(samples)
+		// Keep the last known value for channels that dropped out of this round
+		// so the UI does not flicker; prune only values older than the retention
+		// window. The incomplete round itself is still reported via source health.
+		s.pruneStaleMESTEKChannels(samples)
 	}
+	s.noteMESTEKSnapshot(int(stats.MappedFrames))
 	recorded := s.record(samples)
 	if err != nil {
 		s.noteSourceError(SourceMESTEK, err, stats.ResponseFrames == 0)
@@ -65,20 +77,51 @@ func (s *Service) collectActiveMESTEK(ctx context.Context) ([]Sample, error) {
 	return recorded, err
 }
 
-func (s *Service) invalidateMissingMESTEKChannels(samples []Sample) {
+// pruneStaleMESTEKChannels drops channels that were missing from this round and
+// whose last value is older than the retention window. Channels missing only for
+// a round or two keep their previous reading to avoid UI jitter.
+func (s *Service) pruneStaleMESTEKChannels(samples []Sample) {
 	present := make(map[string]bool)
 	for _, sample := range samples {
 		if sample.Source == SourceMESTEK && sample.Channel != "UNMAPPED" {
 			present[sample.Channel] = true
 		}
 	}
+	cutoff := s.now().Add(-s.mestekStaleAfter())
 	s.mu.Lock()
 	for key, sample := range s.latest {
-		if sample.Source == SourceMESTEK && sample.Channel != "UNMAPPED" && !present[sample.Channel] {
+		if sample.Source != SourceMESTEK || sample.Channel == "UNMAPPED" {
+			continue
+		}
+		if !present[sample.Channel] && sample.Time.Before(cutoff) {
 			delete(s.latest, key)
 		}
 	}
 	s.mu.Unlock()
+}
+
+func (s *Service) mestekStaleAfter() time.Duration {
+	retention := 3 * s.cfg.MESTEKReadInterval
+	if retention < time.Minute {
+		retention = time.Minute
+	}
+	return retention
+}
+
+// noteMESTEKSnapshot tracks consecutive severe misses and arms a single-skipped
+// round once the threshold is reached. Healthy or mildly partial rounds reset it.
+func (s *Service) noteMESTEKSnapshot(mapped int) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if mapped > mestekBackoffMinMapped {
+		s.mestekMisses = 0
+		return
+	}
+	s.mestekMisses++
+	if s.mestekMisses >= mestekBackoffAfterRounds {
+		s.mestekMisses = 0
+		s.mestekBackoff = true
+	}
 }
 
 func (s *Service) acquireMESTEK(ctx context.Context) error {
@@ -97,21 +140,34 @@ func (s *Service) releaseMESTEK() {
 func (s *Service) runActiveMESTEK(ctx context.Context) {
 	for ctx.Err() == nil {
 		_, _ = s.collectActiveMESTEK(ctx)
-		if !sleepContext(ctx, s.cfg.MESTEKReadInterval) {
+		interval := s.cfg.MESTEKReadInterval
+		s.mu.Lock()
+		if s.mestekBackoff {
+			s.mestekBackoff = false
+			interval *= 2
+		}
+		s.mu.Unlock()
+		if !sleepContext(ctx, interval) {
 			return
 		}
 	}
 }
 
 func (s *Service) readMESTEKSnapshot(ctx context.Context) ([]Sample, ModbusStats, error) {
+	snapshot := &mestekSnapshot{service: s}
+	defer snapshot.close()
+
 	var samples []Sample
-	var stats ModbusStats
 	var missing []string
 	var causes []string
 	mapped := 0
+	incomplete := func() ([]Sample, ModbusStats, error) {
+		snapshot.stats.PartialBytes = snapshot.partialBytes()
+		return samples, snapshot.stats, &MESTEKSnapshotError{Mapped: mapped, Missing: missing, Causes: causes}
+	}
+
 	for _, module := range mestekModules {
-		head, headStats, err := s.readMESTEKHolding(ctx, module.unit, 0, 5)
-		addActiveModbusStats(&stats, headStats)
+		head, err := snapshot.readHolding(ctx, module.unit, 0, 5)
 		if err != nil {
 			causes = append(causes, fmt.Sprintf("unit 0x%02x header: %v", module.unit, err))
 			for local := 1; local <= module.channels; local++ {
@@ -119,7 +175,7 @@ func (s *Service) readMESTEKSnapshot(ctx context.Context) ([]Sample, ModbusStats
 				missing = append(missing, channel)
 			}
 			if ctx.Err() != nil {
-				return samples, stats, &MESTEKSnapshotError{Mapped: mapped, Missing: missing, Causes: causes}
+				return incomplete()
 			}
 			continue
 		}
@@ -133,8 +189,7 @@ func (s *Service) readMESTEKSnapshot(ctx context.Context) ([]Sample, ModbusStats
 		}
 		for local := 1; local <= module.channels; local++ {
 			start := uint16(local * 100)
-			frame, frameStats, readErr := s.readMESTEKHolding(ctx, module.unit, start, 16)
-			addActiveModbusStats(&stats, frameStats)
+			frame, readErr := snapshot.readHolding(ctx, module.unit, start, 16)
 			channel, _ := mestekChannel(module.unit, start)
 			if readErr != nil {
 				missing = append(missing, channel)
@@ -142,7 +197,7 @@ func (s *Service) readMESTEKSnapshot(ctx context.Context) ([]Sample, ModbusStats
 					causes = append(causes, fmt.Sprintf("%s: %v", channel, readErr))
 				}
 				if ctx.Err() != nil {
-					return samples, stats, &MESTEKSnapshotError{Mapped: mapped, Missing: missing, Causes: causes}
+					return incomplete()
 				}
 				continue
 			}
@@ -151,9 +206,202 @@ func (s *Service) readMESTEKSnapshot(ctx context.Context) ([]Sample, ModbusStats
 		}
 	}
 	if mapped != 13 {
-		return samples, stats, &MESTEKSnapshotError{Mapped: mapped, Missing: missing, Causes: causes}
+		return incomplete()
 	}
-	return samples, stats, nil
+	snapshot.stats.PartialBytes = snapshot.partialBytes()
+	return samples, snapshot.stats, nil
+}
+
+// mestekSnapshot owns one TCP connection for an entire 13-channel round. Keeping
+// the gateway connection open (instead of reconnecting per channel) is what makes
+// the slave client stop starving the LabVIEW primary reader.
+type mestekSnapshot struct {
+	service *Service
+	session *mestekSession
+	stats   ModbusStats
+}
+
+func (snapshot *mestekSnapshot) close() {
+	if snapshot.session != nil {
+		snapshot.session.close()
+		snapshot.session = nil
+	}
+}
+
+func (snapshot *mestekSnapshot) partialBytes() int {
+	if snapshot.session == nil {
+		return 0
+	}
+	return len(snapshot.session.buffer)
+}
+
+func (snapshot *mestekSnapshot) readHolding(ctx context.Context, unit byte, start, count uint16) (ModbusFrame, error) {
+	request, err := mestekReadRequest(unit, start, count)
+	if err != nil {
+		return ModbusFrame{}, err
+	}
+	var lastErr error
+	for attempt := 0; attempt < mestekReadRetries; attempt++ {
+		if attempt > 0 && !sleepContext(ctx, mestekRetryDelay) {
+			return ModbusFrame{}, ctx.Err()
+		}
+		if ctx.Err() != nil {
+			return ModbusFrame{}, ctx.Err()
+		}
+		if err := snapshot.ensureSession(ctx); err != nil {
+			lastErr = err
+			continue
+		}
+		frame, stats, readErr := snapshot.session.transact(ctx, request, unit, start, count, snapshot.service.now)
+		addActiveModbusStats(&snapshot.stats, stats)
+		if readErr == nil {
+			return frame, nil
+		}
+		lastErr = readErr
+		if ctx.Err() != nil {
+			return ModbusFrame{}, ctx.Err()
+		}
+		if !isMESTEKTimeout(readErr) {
+			// A timed-out request is retried on the same socket; only a broken
+			// socket forces a reconnect on the next attempt.
+			snapshot.session.close()
+			snapshot.session = nil
+		}
+	}
+	return ModbusFrame{}, fmt.Errorf("FC03 unit=0x%02x start=%d count=%d failed after %d attempts: %w", unit, start, count, mestekReadRetries, lastErr)
+}
+
+func (snapshot *mestekSnapshot) ensureSession(ctx context.Context) error {
+	if snapshot.session != nil {
+		return nil
+	}
+	session, err := snapshot.service.dialMESTEKSession(ctx)
+	if err != nil {
+		return err
+	}
+	snapshot.session = session
+	return nil
+}
+
+func (s *Service) dialMESTEKSession(ctx context.Context) (*mestekSession, error) {
+	conn, err := s.dial(ctx, "tcp", s.cfg.MESTEKAddr)
+	if err != nil {
+		return nil, err
+	}
+	return &mestekSession{conn: conn}, nil
+}
+
+func isMESTEKTimeout(err error) bool {
+	netErr, ok := err.(net.Error)
+	return ok && netErr.Timeout()
+}
+
+type mestekSession struct {
+	conn   net.Conn
+	buffer []byte
+}
+
+func (session *mestekSession) close() {
+	if session != nil && session.conn != nil {
+		_ = session.conn.Close()
+	}
+}
+
+// transact issues one FC03 read on the shared connection. Any bytes buffered
+// from an earlier timed-out attempt are discarded first so a duplicate late
+// reply cannot be attributed to the next channel.
+func (session *mestekSession) transact(ctx context.Context, request []byte, unit byte, start, count uint16, now func() time.Time) (ModbusFrame, ModbusStats, error) {
+	var stats ModbusStats
+	if len(session.buffer) > 0 {
+		stats.DiscardedBytes += uint64(len(session.buffer))
+		session.buffer = session.buffer[:0]
+	}
+	n, err := session.conn.Write(request)
+	if err != nil {
+		return ModbusFrame{}, stats, err
+	}
+	if n != len(request) {
+		return ModbusFrame{}, stats, io.ErrShortWrite
+	}
+	stats.RequestFrames++
+	deadline := time.Now().Add(mestekReadWindow)
+	if contextDeadline, ok := ctx.Deadline(); ok && contextDeadline.Before(deadline) {
+		deadline = contextDeadline
+	}
+	if err := session.conn.SetReadDeadline(deadline); err != nil {
+		return ModbusFrame{}, stats, err
+	}
+	frame, err := session.readFrame(ctx, unit, start, count, now, &stats)
+	return frame, stats, err
+}
+
+// readFrame only accepts a same-unit, same-byte-count, valid-CRC response
+// arriving within the read window. Channel identity comes from the request.
+func (session *mestekSession) readFrame(ctx context.Context, unit byte, start, count uint16, now func() time.Time, stats *ModbusStats) (ModbusFrame, error) {
+	chunk := make([]byte, 4096)
+	var readErr error
+	for {
+		for len(session.buffer) >= 3 {
+			if session.buffer[1] != 0x03 || (session.buffer[0] != 0x14 && session.buffer[0] != 0x15) {
+				session.buffer = session.buffer[1:]
+				stats.DiscardedBytes++
+				continue
+			}
+			byteCount := session.buffer[2]
+			if byteCount < 2 || byteCount > 250 || byteCount%2 != 0 {
+				session.buffer = session.buffer[1:]
+				stats.DiscardedBytes++
+				continue
+			}
+			frameLength := 5 + int(byteCount)
+			if len(session.buffer) < frameLength {
+				break
+			}
+			candidate := session.buffer[:frameLength]
+			if !ValidCRC(candidate) {
+				stats.CRCErrors++
+				session.buffer = session.buffer[1:]
+				stats.DiscardedBytes++
+				continue
+			}
+			raw := append([]byte(nil), candidate...)
+			session.buffer = session.buffer[frameLength:]
+			stats.ResponseFrames++
+			if raw[0] != unit || raw[2] != byte(2*count) {
+				continue
+			}
+			frame := ModbusFrame{
+				Time: now(), Kind: "response", Unit: unit, Function: 0x03,
+				Start: start, Count: count, ByteCount: raw[2], Raw: raw,
+				Registers: make([]uint16, count), Mapping: MappingPaired,
+			}
+			frame.Channel, _ = mestekChannel(unit, start)
+			for index := range frame.Registers {
+				frame.Registers[index] = binary.BigEndian.Uint16(raw[3+2*index : 5+2*index])
+			}
+			frame.Signature = responseSignature(frame.Unit, frame.Function, frame.Registers)
+			if frame.Channel != "" { // table headers are validated but are not channels
+				stats.MappedFrames++
+			}
+			return frame, nil
+		}
+		if readErr != nil {
+			return ModbusFrame{}, readErr
+		}
+		if ctx.Err() != nil {
+			return ModbusFrame{}, ctx.Err()
+		}
+		if len(session.buffer) > maxModbusBuffer {
+			drop := len(session.buffer) - 256
+			stats.DiscardedBytes += uint64(drop)
+			session.buffer = append([]byte(nil), session.buffer[drop:]...)
+		}
+		var n int
+		n, readErr = session.conn.Read(chunk)
+		if n > 0 {
+			session.buffer = append(session.buffer, chunk[:n]...)
+		}
+	}
 }
 
 func addActiveModbusStats(target *ModbusStats, addition ModbusStats) {
@@ -175,7 +423,7 @@ func (s *Service) updateActiveModbusHealth(stats ModbusStats) {
 	health.RequestFrames += stats.RequestFrames
 	health.ResponseFrames += stats.ResponseFrames
 	health.MappedFrames += stats.MappedFrames
-	health.PartialBytes = 0 // every transaction closes its connection and buffer
+	health.PartialBytes = stats.PartialBytes
 	if stats.MappedFrames > 0 {
 		health.Mapping = MappingPaired
 	} else if stats.ResponseFrames > 0 {
@@ -206,121 +454,4 @@ func mestekReadRequest(unit byte, start, count uint16) ([]byte, error) {
 	binary.BigEndian.PutUint16(request[4:6], count)
 	binary.LittleEndian.PutUint16(request[6:8], CRC16(request[:6]))
 	return request, nil
-}
-
-func (s *Service) readMESTEKHolding(ctx context.Context, unit byte, start, count uint16) (ModbusFrame, ModbusStats, error) {
-	request, err := mestekReadRequest(unit, start, count)
-	var stats ModbusStats
-	if err != nil {
-		return ModbusFrame{}, stats, err
-	}
-	var lastErr error
-	for attempt := 0; attempt < mestekReadRetries; attempt++ {
-		if attempt > 0 && !sleepContext(ctx, mestekRetryDelay) {
-			return ModbusFrame{}, stats, ctx.Err()
-		}
-		if ctx.Err() != nil {
-			return ModbusFrame{}, stats, ctx.Err()
-		}
-		frame, attemptStats, readErr := s.readMESTEKAttempt(ctx, request, unit, start, count)
-		addActiveModbusStats(&stats, attemptStats)
-		if readErr == nil {
-			return frame, stats, nil
-		}
-		lastErr = readErr
-	}
-	return ModbusFrame{}, stats, fmt.Errorf("FC03 unit=0x%02x start=%d count=%d failed after %d attempts: %w", unit, start, count, mestekReadRetries, lastErr)
-}
-
-// readMESTEKAttempt deliberately creates and closes one TCP connection for one
-// request. Only a same-unit, same-byte-count, valid-CRC response arriving within
-// 300 ms can inherit the requested channel identity.
-func (s *Service) readMESTEKAttempt(ctx context.Context, request []byte, unit byte, start, count uint16) (ModbusFrame, ModbusStats, error) {
-	var stats ModbusStats
-	conn, err := s.dial(ctx, "tcp", s.cfg.MESTEKAddr)
-	if err != nil {
-		return ModbusFrame{}, stats, err
-	}
-	defer conn.Close()
-	n, err := conn.Write(request)
-	if err != nil {
-		return ModbusFrame{}, stats, err
-	}
-	if n != len(request) {
-		return ModbusFrame{}, stats, io.ErrShortWrite
-	}
-	stats.RequestFrames++
-	deadline := time.Now().Add(mestekReadWindow)
-	if contextDeadline, ok := ctx.Deadline(); ok && contextDeadline.Before(deadline) {
-		deadline = contextDeadline
-	}
-	if err := conn.SetReadDeadline(deadline); err != nil {
-		return ModbusFrame{}, stats, err
-	}
-
-	buffer := make([]byte, 0, 1024)
-	chunk := make([]byte, 4096)
-	var readErr error
-	for {
-		for len(buffer) >= 3 {
-			if buffer[1] != 0x03 || (buffer[0] != 0x14 && buffer[0] != 0x15) {
-				buffer = buffer[1:]
-				stats.DiscardedBytes++
-				continue
-			}
-			byteCount := buffer[2]
-			if byteCount < 2 || byteCount > 250 || byteCount%2 != 0 {
-				buffer = buffer[1:]
-				stats.DiscardedBytes++
-				continue
-			}
-			frameLength := 5 + int(byteCount)
-			if len(buffer) < frameLength {
-				break
-			}
-			candidate := buffer[:frameLength]
-			if !ValidCRC(candidate) {
-				stats.CRCErrors++
-				buffer = buffer[1:]
-				stats.DiscardedBytes++
-				continue
-			}
-			raw := append([]byte(nil), candidate...)
-			buffer = buffer[frameLength:]
-			stats.ResponseFrames++
-			if raw[0] != unit || raw[2] != byte(2*count) {
-				continue
-			}
-			frame := ModbusFrame{
-				Time: s.now(), Kind: "response", Unit: unit, Function: 0x03,
-				Start: start, Count: count, ByteCount: raw[2], Raw: raw,
-				Registers: make([]uint16, count), Mapping: MappingPaired,
-			}
-			frame.Channel, _ = mestekChannel(unit, start)
-			for index := range frame.Registers {
-				frame.Registers[index] = binary.BigEndian.Uint16(raw[3+2*index : 5+2*index])
-			}
-			frame.Signature = responseSignature(frame.Unit, frame.Function, frame.Registers)
-			if frame.Channel != "" { // table headers are validated but are not channels
-				stats.MappedFrames++
-			}
-			return frame, stats, nil
-		}
-		if readErr != nil {
-			return ModbusFrame{}, stats, readErr
-		}
-		if ctx.Err() != nil {
-			return ModbusFrame{}, stats, ctx.Err()
-		}
-		if len(buffer) > maxModbusBuffer {
-			drop := len(buffer) - 256
-			stats.DiscardedBytes += uint64(drop)
-			buffer = append([]byte(nil), buffer[drop:]...)
-		}
-		var n int
-		n, readErr = conn.Read(chunk)
-		if n > 0 {
-			buffer = append(buffer, chunk[:n]...)
-		}
-	}
 }
