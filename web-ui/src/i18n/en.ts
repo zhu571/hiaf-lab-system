@@ -527,6 +527,8 @@ export default {
     passiveReadOnly: 'Passive read-only',
     activeReadOnly: 'Active FC03 read-only',
     scpiReadOnly: 'Fixed queries',
+    unit0x14: 'Unit 0x14 (CH1–CH3)',
+    unit0x15: 'Unit 0x15 (CH4–CH13)',
     lastSample: 'Last sample {time}',
     noSample: 'No samples yet',
     sampleCount: 'Samples {count}',
