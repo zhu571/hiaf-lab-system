@@ -66,6 +66,9 @@ func lineProtocol(sample Sample) string {
 		{"source", sample.Source}, {"channel", sample.Channel}, {"metric", sample.Metric},
 		{"unit", sample.Unit}, {"mapping", sample.Mapping}, {"signature", sample.Signature},
 	} {
+		if tag[1] == "" {
+			continue
+		}
 		line.WriteByte(',')
 		line.WriteString(escapeLineTag(tag[0]))
 		line.WriteByte('=')

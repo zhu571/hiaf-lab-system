@@ -118,6 +118,13 @@ describe('ElectricalMonitorView 四卡片与重点读数', () => {
   it('显示 MESTEK 13×5、三路信号源、六个示波器读数，且只有皮安计有趋势', async () => {
     const wrapper = await mountView()
     expect(wrapper.findAll('.source-card')).toHaveLength(4)
+    expect(wrapper.findAll('.connection-dot')).toHaveLength(6)
+    for (const source of ['mestek', 'keithley6485', 'rigol_dho814', 'tek_mdo3034', 'agilent_33512b', 'agilent_33210a']) {
+      const dot = wrapper.find(`.connection-dot[data-connection-source="${source}"]`)
+      expect(dot.exists()).toBe(true)
+      expect(dot.classes()).toContain('online')
+      expect(dot.attributes('aria-label')).toBe('在线')
+    }
     expect(wrapper.findAll('.mestek-card .mestek-row')).toHaveLength(13)
     expect(wrapper.findAll('.mestek-card .mestek-row td')).toHaveLength(65)
     expect(wrapper.find('.mestek-card [data-channel="CH1"] [data-metric="setI_A"]').text()).toBe('3')
@@ -137,6 +144,20 @@ describe('ElectricalMonitorView 四卡片与重点读数', () => {
     expect(getElectricalHistory).toHaveBeenCalledWith({
       source: 'keithley6485', channel: 'CH1', metric: 'current_A', from: '-30m', limit: 1000
     })
+    wrapper.unmount()
+  })
+
+  it('设备断开时指示灯显示红色离线状态', async () => {
+    const latest = makeLatest()
+    latest.sources = latest.sources.map((item) =>
+      item.source === 'agilent_33512b' ? { ...item, connected: false, status: 'degraded' } : item
+    )
+    vi.mocked(getElectricalLatest).mockResolvedValue(latest)
+    const wrapper = await mountView()
+    const offline = wrapper.find('.connection-dot[data-connection-source="agilent_33512b"]')
+    expect(offline.classes()).not.toContain('online')
+    expect(offline.attributes('aria-label')).toBe('离线')
+    expect(wrapper.find('.connection-dot[data-connection-source="agilent_33210a"]').classes()).toContain('online')
     wrapper.unmount()
   })
 
