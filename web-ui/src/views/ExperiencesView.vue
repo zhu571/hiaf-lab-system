@@ -31,8 +31,8 @@
       layout="total, sizes, prev, pager, next"
       :page-sizes="[20, 50, 100]"
       :total="total"
-      @current-change="load"
-      @size-change="onFilter"
+      @current-change="onCurrentChange"
+      @size-change="onSizeChange"
     />
     <el-drawer v-model="drawer" size="460" :title="t('experiences.detail')">
       <div v-if="selected" class="grid">
@@ -53,7 +53,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, onMounted, reactive, ref, watch } from 'vue'
+import { computed, reactive, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { ElMessage } from 'element-plus'
 import { showApiError } from '../composables/useNotify'
@@ -62,19 +62,16 @@ import KanbanBoard from '@/components/base/KanbanBoard.vue'
 import FormDialog from '@/components/base/FormDialog.vue'
 import MarkdownView from '@/components/business/MarkdownView.vue'
 import { archiveExperience, createExperience, listExperiences, publishExperience, type Experience } from '../api/experiences'
+import { useListPage } from '@/composables/useListPage'
 import { useProjectStore } from '../stores/project'
 
 const { t } = useI18n()
 const projects = useProjectStore()
-const items = ref<Experience[]>([])
 const selected = ref<Experience | null>(null)
 const drawer = ref(false)
 const dialog = ref(false)
 const keyword = ref('')
 const tagText = ref('')
-const page = ref(1)
-const perPage = ref(20)
-const total = ref(0)
 const draft = reactive({ title: '', content: '', tags: '' })
 const columns = [
   { status: 'candidate', labelKey: 'experiences.columnCandidate', tone: '--warn' },
@@ -89,6 +86,44 @@ const selectedProjectId = computed({
     if (id) projects.select(id)
   }
 })
+
+const {
+  items,
+  error,
+  page,
+  perPage,
+  total,
+  refresh,
+  onCurrentChange,
+  onSizeChange,
+} = useListPage<Experience>(
+  async ({ page: currentPage, perPage: currentPerPage }) => {
+    await projects.load()
+    const results = await Promise.all(
+      columns.map((col) =>
+        listExperiences({
+          status: col.status,
+          keyword: keyword.value,
+          tags: tagText.value,
+          project_id: projectId.value,
+          page: currentPage,
+          per_page: currentPerPage,
+        })
+      )
+    )
+    return {
+      items: results.flatMap((result) => result.items ?? []),
+      // 三个状态列各自独立分页，总数为三列之和
+      total: results.reduce((sum, result) => sum + (result.total ?? 0), 0),
+    }
+  },
+  { perPage: 20 }
+)
+
+watch(error, (err) => {
+  if (err) showApiError(err, t('experiences.loadFailed'))
+})
+
 const grouped = computed(
   () => Object.fromEntries(columns.map((col) => [col.status, items.value.filter((item) => item.status === col.status)])) as Record<string, Experience[]>
 )
@@ -98,31 +133,14 @@ const boardColumns = computed(() =>
   columns.map((col) => ({ key: col.status, label: t(col.labelKey), tone: col.tone, items: grouped.value[col.status] }))
 )
 
-onMounted(load)
 watch(projectId, () => {
   page.value = 1
-  load()
+  void refresh()
 })
 
 function onFilter() {
   page.value = 1
-  load()
-}
-
-async function load() {
-  try {
-    await projects.load()
-    const results = await Promise.all(
-      columns.map((col) =>
-        listExperiences({ status: col.status, keyword: keyword.value, tags: tagText.value, project_id: projectId.value, page: page.value, per_page: perPage.value })
-      )
-    )
-    items.value = results.flatMap((result) => result.items ?? [])
-    // 三个状态列各自独立分页，总数为三列之和
-    total.value = results.reduce((sum, result) => sum + (result.total ?? 0), 0)
-  } catch (err) {
-    showApiError(err, t('experiences.loadFailed'))
-  }
+  void refresh()
 }
 
 function appendTag(tag: string) {
@@ -141,7 +159,7 @@ async function publish(id: string) {
   try {
     selected.value = await publishExperience(id)
     ElMessage.success(t('experiences.published'))
-    await load()
+    await refresh()
   } catch (err) {
     showApiError(err, t('experiences.publishFailed'))
   }
@@ -151,7 +169,7 @@ async function archive(id: string) {
   try {
     selected.value = await archiveExperience(id)
     ElMessage.success(t('experiences.archived'))
-    await load()
+    await refresh()
   } catch (err) {
     showApiError(err, t('experiences.archiveFailed'))
   }
@@ -162,7 +180,7 @@ async function create() {
     await createExperience({ project_id: projectId.value || undefined, title: draft.title, content: draft.content, tags: draft.tags.split(',').map((item) => item.trim()).filter(Boolean) })
     dialog.value = false
     ElMessage.success(t('experiences.saved'))
-    await load()
+    await refresh()
   } catch (err) {
     showApiError(err, t('experiences.saveFailed'))
   }
