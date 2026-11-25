@@ -1,26 +1,12 @@
 import scan from './en/scan'
+import common from './en/common'
 
 // English messages. Context notes are kept as comments next to each group
 // (equivalent to the `_comment` keys planned for a JSON format — using .ts
 // modules, native comments avoid polluting the runtime message map).
 export default {
   translation: { original: 'Original', chinese: 'Chinese version', english: 'English version', pending: 'Translating', missing: 'Translation unavailable; showing original', failed: 'Translation failed; showing original', stale: 'Original updated; refreshing translation', retry: 'Retry translation', regenerate: 'Regenerate', save: 'Save translation', manual: 'Manually edited', overwriteConfirm: 'Regeneration will overwrite the current translation. Continue?', technicalHint: 'Check numbers, units, and device names' },
-  common: {
-    cancel: 'Cancel',
-    // Device connection state badges on the dashboard.
-    online: 'Online',
-    offline: 'Offline',
-    // Generic confirm/retry/empty labels used by base components (FormDialog / StateBlock).
-    confirm: 'Confirm',
-    retry: 'Retry',
-    empty: 'No data',
-    // Locale-aware list separator for joining summary strings (DashboardView brief cards).
-    listSeparator: '; ',
-    // Desktop topbar controls (AppLayout, R1 shell restructure).
-    collapseSidebar: 'Collapse sidebar',
-    expandSidebar: 'Expand sidebar',
-    userMenu: 'User menu'
-  },
+  common,
   login: {
     // Tagline under the "HIAF Lab System" brand on the login page.
     subtitle: 'Lab Log Management Platform',
