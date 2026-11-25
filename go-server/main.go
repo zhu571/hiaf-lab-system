@@ -523,56 +523,12 @@ func main() {
 		r.Use(mw.AuthRequired)
 		r.Get("/gascell", instrumentsHandler.GasCellStream)
 	})
-	r.Route("/api/v1/sensors", func(r chi.Router) {
-		r.Use(mw.AuthRequired)
-		r.Use(mw.AgentContext(db))
-		r.Use(mw.Audit(db))
-		r.Get("/latest", sensorsHandler.Latest)
-		r.Get("/history", sensorsHandler.History)
-	})
-	r.Route("/api/v1/electrical", func(r chi.Router) {
-		r.Use(mw.AuthRequired)
-		r.Use(mw.AgentContext(db))
-		r.Use(mw.Audit(db))
-		r.Use(mw.RequireIdempotencyKey(db))
-		r.Get("/latest", electricalHandler.Latest)
-		r.Get("/history", electricalHandler.History)
-		r.Post("/single-shot", electricalHandler.SingleShot)
-	})
+	registerMonitoringRoutes(r, db, sensorsHandler, electricalHandler)
 	registerTodoRoutes(r, db, todosHandler)
 
-	r.Route("/api/v1/ask", func(r chi.Router) {
-		r.Group(func(r chi.Router) {
-			r.Use(mw.AuthRequired)
-			r.Use(mw.Audit(db))
-			r.Use(mw.RequireIdempotencyKey(db))
-			r.Use(mw.Timeout(90 * time.Second))
-			r.Post("/chat", askHandler.Chat)
-			r.Get("/history", askHandler.History)
-			r.Get("/history/{id}", askHandler.HistoryByID)
-		})
-		r.Group(func(r chi.Router) {
-			r.Use(mw.AuthRequired)
-			r.Use(mw.Audit(db))
-			r.Post("/execute", askHandler.Execute)
-		})
-	})
+	registerAskRoutes(r, db, askHandler)
 
-	// 告警中心（方案 2026-08-09_alert-center，§4 鉴权矩阵）：
-	//   report/resolve 双通道 —— 内部 SERVICE_TOKEN（白名单见 service_token.go，
-	//   CSRF/幂等 IsServiceCall 豁免）→ AuthRequired 放行；resolve 用户通道
-	//   JWT + RequireRoleOrService(admin, maintainer) + CSRF + Idempotency-Key。
-	//   report/resolve 均要求 Idempotency-Key。
-	//   list/detail 全员 JWT 可读。不挂 AgentContext（report/resolve 拒收 agent 代理头）。
-	r.Route("/api/v1/alerts", func(r chi.Router) {
-		r.Use(mw.AuthRequired)
-		r.Use(mw.Audit(db))
-		r.With(mw.RequireIdempotencyKey(db)).Post("/report", alertHandler.Report)
-		r.With(mw.RequireRoleOrService(auth.RoleAdmin, auth.RoleMaintainer),
-			mw.RequireIdempotencyKey(db)).Post("/resolve", alertHandler.Resolve)
-		r.Get("/", alertHandler.List)
-		r.Get("/{id}", alertHandler.Get)
-	})
+	registerAlertRoutes(r, db, alertHandler)
 
 	// Serve embedded frontend with SPA fallback
 	staticFS, fsErr := fs.Sub(frontendFiles, "static")
