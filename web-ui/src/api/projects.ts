@@ -1,30 +1,11 @@
 import { request, requestWithMeta } from './client'
+import type { Project as ProjectBase, ProjectMember as ProjectMemberBase, ProjectWithStats } from './types.projects.gen'
 
-export type Project = {
-  id: string
-  code: string
-  name: string
-  short_name: string
-  description: string
-  status: string
-  visibility: string
-  member_count?: number
-  open_issue_count?: number
-  log_count?: number
-	current_user_role?: string
-  tags?: string[]
-}
-
-export type ProjectMember = {
-  project_id: string
-  user_id: string
-  username?: string
-  role: string
-  status: string
-  muted: boolean
-  joined_at: string
-  added_by: string
-}
+// tygo 不展开 Go 嵌入字段：核心字段保持必填，其余生成字段（含 ProjectWithStats）可选，
+// 兼容旧 Project 形状与测试里的最小 fixture。
+type ProjectCore = Pick<ProjectBase, 'id' | 'code' | 'name' | 'short_name' | 'description' | 'status' | 'visibility'>
+export type Project = ProjectCore & Partial<Omit<ProjectBase, keyof ProjectCore>> & Partial<ProjectWithStats>
+export type ProjectMember = ProjectMemberBase & { username?: string }
 
 export function listProjects(status = '') {
   return request<Project[]>({ url: '/projects', params: { status } })
