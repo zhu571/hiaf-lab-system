@@ -395,29 +395,7 @@ func main() {
 		r.Get("/events", auditHandler.ListEvents)
 		r.Get("/{request_id}", auditHandler.GetByRequestID)
 	})
-	r.Route("/api/v1/agent/tasks", func(r chi.Router) {
-		r.Use(mw.AuthRequired)
-		r.Use(mw.RequireRole(auth.RoleAgent))
-		r.With(mw.Audit(db)).Post("/claim", agentHandler.Claim)
-		r.Route("/{id}", func(r chi.Router) {
-			r.Use(mw.QueueTaskContext(db))
-			r.Use(mw.Audit(db))
-			r.Post("/complete", agentHandler.Complete)
-			r.Post("/fail", agentHandler.Fail)
-			// R8：租约续约——worker 在前置 HTTP 链 / LLM 长耗时阶段周期调用，
-			// 与 complete/fail 同套 claim_token 所有权校验（service 层）。
-			r.Post("/renew", agentHandler.Renew)
-		})
-	})
-	r.Route("/api/v1/agent/candidates", func(r chi.Router) {
-		r.Use(mw.AuthRequired)
-		r.Use(mw.RequireRole(auth.RoleAdmin, auth.RoleMaintainer))
-		r.Use(mw.Audit(db))
-		r.Get("/", agentHandler.ListCandidates)
-		r.Get("/{id}/trace", agentHandler.TraceCandidate)
-		r.Post("/{id}/approve", agentHandler.ApproveCandidate)
-		r.Post("/{id}/reject", agentHandler.RejectCandidate)
-	})
+	registerAgentRoutes(r, db, agentHandler)
 	r.Route("/api/v1/daily-reports", func(r chi.Router) {
 		r.Use(mw.AuthRequired)
 		r.Use(mw.AgentContext(db))
@@ -466,10 +444,7 @@ func main() {
 			r.Post("/test-data-curves", testDataCurveHandler.Create)
 			r.Get("/rf-matching", rfMatchingHandler.List)
 			r.Post("/rf-matching", rfMatchingHandler.Create)
-			r.Get("/scans", scansHandler.List)
-			r.Get("/scans/tags", scansHandler.Tags)
-			r.Post("/scans", scansHandler.Upload)
-
+			registerProjectScanRoutes(r, scansHandler)
 			r.Group(func(r chi.Router) {
 				r.Use(mw.RequireProjectPermission(db, mw.PermManageProject))
 				r.Patch("/", projectsHandler.Update)
@@ -494,20 +469,7 @@ func main() {
 			})
 		})
 	})
-	r.Route("/api/v1/scans", func(r chi.Router) {
-		r.Use(mw.AuthRequired)
-		r.Use(mw.AgentContext(db))
-		r.Use(mw.Audit(db))
-		r.Get("/{id}", scansHandler.GetByID)
-		r.Post("/ingest", scansHandler.Ingest)
-		r.Get("/{id}/file/{kind}", scansHandler.File)
-		r.Get("/{id}/thumb", scansHandler.Thumb)
-		r.Group(func(r chi.Router) {
-			r.Use(mw.RequireIdempotencyKey(db))
-			r.Patch("/{id}", scansHandler.Update)
-			r.Post("/{id}/void", scansHandler.Void)
-		})
-	})
+	registerScanRoutes(r, db, scansHandler)
 	r.Route("/api/v1/experiment-runs", func(r chi.Router) {
 		r.Use(mw.AuthRequired)
 		r.Use(mw.AgentContext(db))
