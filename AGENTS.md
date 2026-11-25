@@ -210,6 +210,7 @@ weekly 自身不 SELECT 任何业务表；新查询方法（`logs.WeeklyReports`
 
 - 使用 Composition API 和 `<script setup>`。
 - API 调用集中放在 `src/api/`。
+- API 类型：`src/api/types*.gen.ts` 由 `tygo` 从 Go struct 生成，禁止手改；改 Go model 后在 `go-server/` 执行 `go run github.com/gzuidhof/tygo@v0.2.7 generate`，CI 会校验生成无 diff。
 - 权限按钮隐藏只是 UX，后端仍必须强校验。
 - 列表页必须处理加载中、空、错误三种状态。
 - 表单提交要显示后端返回的 `request_id`，便于追审计日志。
