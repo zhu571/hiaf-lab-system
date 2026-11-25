@@ -139,7 +139,7 @@ jobs:
         run: |
           cd go-server
           go run github.com/gzuidhof/tygo@v0.2.7 generate
-          git diff --exit-code -- ../web-ui/src/api/types.gen.ts
+          git diff --exit-code -- ../web-ui/src/api/types.gen.ts ../web-ui/src/api/types.agent.gen.ts
       - name: Apply migrations
         env:
           PGID: ${{ job.services.postgres.id }}
