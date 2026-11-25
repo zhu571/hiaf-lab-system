@@ -52,6 +52,7 @@ const tabs = computed(() => [
   { label: t('project.tabs.runs'), name: 'experiment-runs', path: 'experiment-runs' },
   { label: t('project.tabs.testData'), name: 'test-data', path: 'test-data' },
   { label: t('project.tabs.rfMatching'), name: 'rf-matching', path: 'rf-matching' },
+  { label: t('project.tabs.scans'), name: 'scans', path: 'scans' },
   { label: t('project.tabs.assembly'), name: 'assembly', path: 'assembly' }
 ])
 
