@@ -1,12 +1,12 @@
 <template>
   <ListPage
     :title="t('logList.title')"
-    :loading="loading && !items"
+    :loading="loading && !items.length"
     :error="error"
-    :empty="!items?.length"
+    :empty="!items.length"
     :error-text="t('logList.loadFailed')"
     :empty-text="t('logList.empty')"
-    @retry="run"
+    @retry="refresh"
   >
     <template #filters>
       <div class="filters">
@@ -26,7 +26,7 @@
         </el-select>
       </div>
     </template>
-    <ResponsiveTable :rows="items ?? []" :loading="loading" class="log-table" @row-click="openLog">
+    <ResponsiveTable :rows="items" :loading="loading" class="log-table" @row-click="openLog">
       <el-table-column :label="t('logList.time')" width="170">
         <template #default="{ row }">{{ formatDateTime(row.occurred_at) }}</template>
       </el-table-column>
@@ -70,8 +70,8 @@
         layout="total, sizes, prev, pager, next"
         :page-sizes="[20, 50, 100]"
         :total="total"
-        @current-change="run"
-        @size-change="(n: number) => { onSizeChange(n); run() }"
+        @current-change="onCurrentChange"
+        @size-change="onSizeChange"
       />
     </template>
   </ListPage>
@@ -88,8 +88,7 @@ import { useI18n } from 'vue-i18n'
 import ListPage from '@/components/base/ListPage.vue'
 import ResponsiveTable from '@/components/base/ResponsiveTable.vue'
 import StatusBadge from '@/components/base/StatusBadge.vue'
-import { useAsyncData } from '@/composables/useAsyncData'
-import { usePagination } from '@/composables/usePagination'
+import { useListPage } from '@/composables/useListPage'
 import { formatDateTime } from '@/utils/datetime'
 import { statusMetaFor } from '@/utils/statusMeta'
 import { LOG_CATEGORIES, LOG_STATUSES, logCategoryKey, logSourceKey } from '@/utils/logMeta'
@@ -107,22 +106,26 @@ const category = ref('')
 const status = ref('confirmed')
 const dateRange = ref<[string, string] | null>(null)
 
-const { page, perPage, total, onSizeChange } = usePagination({ perPage: 20 })
-
-const { data: items, loading, error, run } = useAsyncData<LogItem[]>(async () => {
-  if (!projectId.value) return []
-  const params: Record<string, string | number> = { page: page.value, per_page: perPage.value, status: status.value }
-  if (category.value) params.category = category.value
-  if (dateRange.value?.[0]) params.date_from = new Date(`${dateRange.value[0]}T00:00:00`).toISOString()
-  if (dateRange.value?.[1]) params.date_to = new Date(`${dateRange.value[1]}T23:59:59.999`).toISOString()
-  const res = await listProjectLogs(projectId.value, params)
-  total.value = res.total ?? 0
-  return res.items ?? []
-})
+const { items, loading, error, page, perPage, total, refresh, onCurrentChange, onSizeChange } = useListPage<LogItem>(
+  async ({ page: currentPage, perPage: currentPerPage }) => {
+    if (!projectId.value) return { items: [], total: 0 }
+    const params: Record<string, string | number> = {
+      page: currentPage,
+      per_page: currentPerPage,
+      status: status.value,
+    }
+    if (category.value) params.category = category.value
+    if (dateRange.value?.[0]) params.date_from = new Date(`${dateRange.value[0]}T00:00:00`).toISOString()
+    if (dateRange.value?.[1]) params.date_to = new Date(`${dateRange.value[1]}T23:59:59.999`).toISOString()
+    const res = await listProjectLogs(projectId.value, params)
+    return { items: res.items ?? [], total: res.total ?? 0 }
+  },
+  { perPage: 20 }
+)
 
 function onFilter() {
   page.value = 1
-  run()
+  void refresh()
 }
 
 function categoryLabel(c: string) {
