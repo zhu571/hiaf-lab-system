@@ -3,6 +3,8 @@ import common from './en/common'
 import logs from './en/logs'
 import issues from './en/issues'
 import project from './en/project'
+import agentCandidates from './en/agentCandidates'
+import dashboard from './en/dashboard'
 
 // English messages. Context notes are kept as comments next to each group
 // (equivalent to the `_comment` keys planned for a JSON format — using .ts
@@ -204,67 +206,7 @@ export default {
     stateNeedsReconnect: 'Needs Reconnect',
     stateError: 'Error'
   },
-  dashboard: {
-    title: 'Lab Dashboard',
-    subtitle: 'Device status and team activity at a glance',
-    todayTodos: "Today's Todos",
-    todosCount: '{n} items',
-    todosMore: 'View all',
-    noTodos: 'No todos for today',
-    defer: 'Defer',
-    todoAddPlaceholder: 'Add a todo…',
-    todoAdd: 'Add',
-    todoLLMPlaceholder: 'Describe a task in one sentence for AI to parse…',
-    todoLLM: 'AI parse',
-    todosLoadFailed: 'Failed to load todos',
-    todoDone: 'Marked as done',
-    todoDoneFailed: 'Operation failed',
-    todoDeferred: 'Deferred to tomorrow',
-    todoDeferFailed: 'Failed to defer',
-    todoAdded: 'Added',
-    todoAddFailed: 'Failed to add',
-    todoLLMRejected: 'Cannot create todo: {reason}',
-    todoDraftTitle: 'AI parse result',
-    todoDraftConfirm: 'Save the following as a todo?',
-    todoDraftSave: 'Save',
-    todoLLMFailed: 'AI parse failed',
-    deviceStatus: 'Device Status',
-    // Panel badge: "{online}/{total} online" (instruments + gas control).
-    onlineCount: '{online}/{total} online',
-    noDevices: 'No devices',
-    gasControl: 'Gas Control',
-    runningState: 'Running State',
-    a1Pressure: 'A1 Pressure',
-    running: 'Running',
-    stopped: 'Stopped',
-    // Middle column: merged summary of the team's daily reports.
-    brief: 'Daily Brief',
-    last7Days: 'Last 7 days',
-    // Brief card badge: number of people who filed a report that day.
-    peopleCount: '{n} people',
-    noReport: 'No report',
-    teamReports: 'Team Daily Reports',
-		myReports: 'My Daily Reports',
-    reportsCount: '{n} reports',
-    noReportToday: 'No reports for this day',
-    noSummary: 'No summary',
-    today: 'Today',
-    yesterday: 'Yesterday',
-    loadDevicesFailed: 'Failed to load devices',
-    loadGasFailed: 'Failed to load gas cell status',
-    loadReportsFailed: 'Failed to load daily reports',
-    greeting: {
-      morning: 'Good morning, {name}',
-      afternoon: 'Good afternoon, {name}',
-      evening: 'Good evening, {name}'
-    },
-    quickActions: {
-      dailyReport: 'Write Report',
-      todo: 'New Todo',
-      ask: 'AI Chat',
-      run: 'New Batch'
-    }
-  },
+    ...dashboard,
   ...project,
   assembly: {
     // Assembly steps page (AssemblyView).
@@ -966,80 +908,7 @@ export default {
       add: 'Add step'
     }
   },
-  agentCandidates: {
-    // AI agent candidate review page (AgentCandidatesView).
-    pageTitle: 'AI Candidate Review',
-    statusFilter: 'Status',
-    date: 'Date',
-    type: 'Type',
-    title: 'Title',
-    confidence: 'Confidence',
-    source: 'Source',
-    sourceReport: 'From Daily Report',
-    actions: 'Actions',
-    viewDetail: 'Details',
-    approve: 'Approve',
-    reject: 'Reject',
-    empty: 'No candidate actions',
-    candidateDetail: 'Candidate Details',
-    noTitle: '(No title)',
-    severity: 'Severity: ',
-    targetIssue: 'Target Issue: ',
-    possibleDuplicate: 'Possible duplicate: ',
-    noIssueSpecified: '(No issue specified)',
-    llmConfidence: 'LLM Confidence',
-    promptVersion: 'Prompt Version',
-    status: 'Status',
-    reviewer: 'Reviewer',
-    reviewedAt: 'Reviewed At',
-    rejectReason: 'Reject Reason',
-    executionError: 'Execution Error',
-    rawPayload: 'Raw Payload',
-    rejectCandidateTitle: 'Reject Candidate',
-    rejectReasonRequired: 'Reject reason (required)',
-    confirmReject: 'Confirm Reject',
-    loadFailed: 'Failed to load candidate list',
-    statusPending: 'Pending Review',
-    statusApproved: 'Approved',
-    statusRejected: 'Rejected',
-    statusExecuted: 'Executed',
-    statusExecutionFailed: 'Execution Failed',
-    actionCreateIssue: 'Create Issue',
-    actionAddComment: 'Add Comment',
-    actionCreateExperience: 'Create Experience',
-    confirmApproveMsg: 'Are you sure you want to approve this candidate ({action})? A business record will be created.',
-    confirmApproveTitle: 'Approve Confirmation',
-    approved: 'Approved',
-    approveFailed: 'Failed to approve',
-    rejected: 'Rejected',
-    rejectFailed: 'Failed to reject',
-    // Diff view in the detail drawer (C13): source text vs candidate payload.
-    diffTitle: 'Source Comparison',
-    diffModeLine: 'Line',
-    diffModeWord: 'Word',
-    diffSource: 'Report Source',
-    diffCandidate: 'Candidate Content',
-    diffLoading: 'Loading comparison…',
-    diffFromSnapshot: 'The left pane shows the raw text snapshot captured when the AI parsed the report.',
-    diffFromCurrent: 'No snapshot for this task; the left pane shows the report’s current raw text (may differ from what the AI saw).',
-    diffTruncated: ' (first 2000 chars only)',
-    diffNoSource: 'No source text available for comparison',
-    diffLoadFailed: 'Failed to load trace info',
-    // Action-flow timeline in the detail drawer (C16, data from the C8 trace endpoint).
-    stageSubmit: 'Report Submitted',
-    stageAiParse: 'AI Parsing',
-    stageCandidate: 'Candidate Generated',
-    stageReview: 'Human Review',
-    stageResult: 'Execution Result',
-    model: 'Model: ',
-    snapshotExpand: 'Raw text snapshot',
-    noSnapshot: 'Pre-migration task; no snapshot',
-    traceUnavailable: 'Trace info unavailable',
-    reviewPending: 'Pending review',
-    resultPending: 'Not executed',
-    resultRejected: 'Rejected; no execution result',
-    viewResult: 'View result'
-  },
+    ...agentCandidates,
   rfMatching: {
     // RF matching page (RFMatchingView).
     title: 'RF Matching',
