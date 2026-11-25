@@ -103,7 +103,7 @@ class AskEngine:
         agent.loaded_tools = {}
         return agent
 
-    def ask(self, question, schema, history=None, context="", user_id=""):
+    def ask(self, question, schema, history=None, context="", user_id="", project_tables=None):
         """规划→执行→整合。同步方法（serve 层 asyncio.to_thread + wait_for 总 60s 预算）。
 
         context 为 Go 注入的实验室最近上下文（AI-3，trusted）：非空时置于规划/整合
@@ -120,8 +120,9 @@ class AskEngine:
         for item in history:
             ensure_safe(str(item.get("content", "")))
         context = str(context or "")
-        plan = self._plan(question, schema, history, context=context)
-        result = self._execute_with_retry(plan, question, schema, history, context=context, user_id=user_id)
+        plan = self._plan(question, schema, history, context=context, project_tables=project_tables)
+        result = self._execute_with_retry(plan, question, schema, history, context=context,
+                                          user_id=user_id, project_tables=project_tables)
         answer = self._integrate(question, result["sql"], result["table_name"],
                                  result["columns"], result["rows"], history, context=context)
         return {
@@ -142,7 +143,7 @@ class AskEngine:
             return ""
         return "以下为实验室最近上下文：\n" + context
 
-    def _plan(self, question, schema, history, error=None, context=""):
+    def _plan(self, question, schema, history, error=None, context="", project_tables=None):
         """规划：系统说明（instructions）+ 注入 schema + 用户问题 → JSON {"sql", "reason"}。
 
         schema/context 属 trusted_context（Go 注入）；question/history 属 untrusted_inputs（不可信）。
@@ -153,7 +154,8 @@ class AskEngine:
         if context_block:
             trusted["context"] = context_block
         trusted["schema"] = schema
-        trusted["project_tables_with_project_id"] = sorted(self.PROJECT_TABLES)
+        # Go 下发的 project_tables 是单一事实源；旧 Go 未带该字段时回退内置清单（保留一个版本）。
+        trusted["project_tables_with_project_id"] = sorted(project_tables or self.PROJECT_TABLES)
         payload = {
             "trusted_context": trusted,
             "untrusted_inputs": {"question": question, "history": history},
@@ -167,7 +169,7 @@ class AskEngine:
             raise ParseError("plan output is missing sql")
         return {"sql": sql, "reason": str(item.get("reason", "")).strip()}
 
-    def _execute_with_retry(self, plan, question, schema, history, context="", user_id=""):
+    def _execute_with_retry(self, plan, question, schema, history, context="", user_id="", project_tables=None):
         """执行 + SQL 被拒（4xx）重试一次：失败信息回填 prompt 让 LLM 改 SQL，再执行一次，仍失败 → ParseError。
 
         Go 不可达 / 5xx / 401 / 403 → APIError（502 provider_unavailable，不重试）。
@@ -180,7 +182,8 @@ class AskEngine:
                 error = str(exc)
                 if attempt == 1:
                     break  # 已重试一次，不再触发第三次规划
-                plan = self._plan(question, schema, history, error=error, context=context)
+                plan = self._plan(question, schema, history, error=error, context=context,
+                                  project_tables=project_tables)
         raise ParseError(f"SQL 执行被拒绝（重试后仍失败）: {error}")
 
     def _integrate(self, question, sql, table, columns, rows, history, context=""):
