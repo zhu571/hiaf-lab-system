@@ -145,6 +145,20 @@ docker load -i lab-images.tar
 3. 校验：`docker images` 与上述清单 diff 为空；`docker compose ps` 全部 healthy。
 4. 离线镜像包随升级一并更新至备份存储（见 docs/maintenance-strategy.md 备份/恢复章节）。
 
+## init_db_roles.sh（AR-05 最小权限 lab_app）
+
+默认部署仍用 `lab`。要切到只有 DML、无 DDL 的 `lab_app`：
+
+```bash
+docker compose -f deploy/docker-compose.yml up -d postgres
+bash deploy/scripts/init_db_roles.sh          # 生成 deploy/secrets/db_app_password.txt
+docker compose -f deploy/docker-compose.yml -f deploy/docker-compose.lab-app.yml up -d server
+```
+
+冒烟登录、日志、审批、ask、附件、scans 后保留；回滚直接
+`docker compose -f deploy/docker-compose.yml up -d server`。override 只给 server 挂
+`db_app_password`，postgres/migrate 继续用 `lab` 密码。
+
 ## influx_retention.sh
 
 把**已有** InfluxDB bucket 的保留期改为 90 天（AR-15）。新部署由 compose 的

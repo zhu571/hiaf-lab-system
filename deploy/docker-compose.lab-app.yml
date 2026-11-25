@@ -1,0 +1,30 @@
+# AR-05 最小权限应用账号切换（opt-in，不改变默认部署）。
+#
+# 前置：
+#   docker compose -f deploy/docker-compose.yml up -d postgres
+#   bash deploy/scripts/init_db_roles.sh      # 生成 deploy/secrets/db_app_password.txt
+#
+# 启动：
+#   docker compose -f deploy/docker-compose.yml -f deploy/docker-compose.lab-app.yml up -d server
+#
+# 回滚：
+#   docker compose -f deploy/docker-compose.yml up -d server
+#
+# server 仍依赖 migrate 完成；db_app_password 只挂给 server，postgres/migrate 继续用 lab 密码。
+services:
+  server:
+    environment:
+      DB_USER: lab_app
+      DB_PASSWORD_FILE: /run/secrets/db_app_password
+    secrets:
+      - db_password
+      - jwt_key
+      - influxdb_token
+      - agent_password
+      - service_token
+      - ntfy_publish_token
+      - db_app_password
+
+secrets:
+  db_app_password:
+    file: ./secrets/db_app_password.txt
