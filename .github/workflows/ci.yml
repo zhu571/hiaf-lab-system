@@ -299,6 +299,9 @@ jobs:
       - name: Run unit tests
         run: |
           python -m unittest discover -s py-agent/tests -v
+      - name: Run scan-ingest tests
+        run: |
+          python -m unittest discover -s deploy/scan-ingest/tests -v
       - name: Coverage report (non-blocking)
         run: |
           # coverage.py 在 requirements-dev.txt（生产依赖分离）；纯报告不阻塞 job
