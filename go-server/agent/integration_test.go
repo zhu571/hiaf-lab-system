@@ -1,6 +1,7 @@
 package agent
 
 import (
+	"context"
 	"crypto/sha256"
 	"database/sql"
 	"encoding/hex"
@@ -9,6 +10,7 @@ import (
 	"fmt"
 	"os"
 	"testing"
+	"time"
 
 	_ "github.com/lib/pq"
 )
@@ -125,6 +127,19 @@ func TestQueueAndCandidateLifecyclePostgres(t *testing.T) {
 	}
 	if _, err := svc.ApproveCandidate(candidate.ID, userID); err != nil || executor.calls != 1 {
 		t.Fatalf("repeat approve calls=%d, err=%v", executor.calls, err)
+	}
+	// AR-17：模拟 approved 后进程崩溃（超 10 分钟未执行），reconciler 应重新执行并落 executed。
+	if _, err := db.Exec(
+		`UPDATE agent_candidate_actions
+		 SET status = 'approved', executed_at = NULL, reviewed_at = now() - interval '20 minutes',
+		     execution_attempts = 0, last_attempt_at = NULL
+		 WHERE id = $1`, candidate.ID,
+	); err != nil {
+		t.Fatal(err)
+	}
+	retried, reconcileFailed, err := svc.ReconcileStaleCandidates(context.Background(), 10*time.Minute, 3, 10)
+	if err != nil || retried != 1 || reconcileFailed != 0 || executor.calls != 2 {
+		t.Fatalf("reconcile retried=%d failed=%d calls=%d err=%v", retried, reconcileFailed, executor.calls, err)
 	}
 	rejected, err := svc.RejectCandidate(rejectedCandidate.ID, userID, "not useful")
 	if err != nil || rejected.Status != CandidateRejected {

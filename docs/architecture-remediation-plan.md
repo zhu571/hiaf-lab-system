@@ -772,7 +772,8 @@ def _client(self):
 | AR-18 文档漂移 | 更新 AGENTS 的 25/38 为 30/44；加 CI 统计 | 随手 |
 
 > 实施状态（2026-11-25）：AR-13/14/15 已落地（Caddy 100MB + 安全头、Influx 90d retention/脚本）；
-> AR-18 的 AGENTS 数字已更新为 30 视图/50 迁移，但“CI 自动统计”未加；AR-16/17 未做。
+> AR-17 已落地（迁移 051 + `ReconcileStaleCandidates` + 5 分钟 reconciler + 告警）；
+> AR-18 的 AGENTS 数字已更新为 30 视图/51 迁移，但“CI 自动统计”未加；AR-16 未做。
 
 ---
 

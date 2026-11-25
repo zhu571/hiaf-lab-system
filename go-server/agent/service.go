@@ -46,6 +46,7 @@ type Service struct {
 	reportReader   ReportReader
 	auditReader    AuditReader
 	resultResolver CandidateResultResolver
+	alertReporter  func(title, detail string) error
 }
 
 func NewService(repo *Repository) *Service { return &Service{repo: repo} }
@@ -57,6 +58,43 @@ func (s *Service) SetReportReader(reader ReportReader) { s.reportReader = reader
 func (s *Service) SetAuditReader(reader AuditReader) { s.auditReader = reader }
 
 func (s *Service) SetResultResolver(resolver CandidateResultResolver) { s.resultResolver = resolver }
+
+// SetAlertReporter 由 main.go 注入（alertSvc.Report），reconciler 重试失败时告警。
+func (s *Service) SetAlertReporter(fn func(title, detail string) error) { s.alertReporter = fn }
+
+// ReconcileStaleCandidates 重新执行 approved 超时未完成的候选（AR-17）。
+// 返回本次成功重试数、失败数；单个候选失败不阻断其余候选。
+func (s *Service) ReconcileStaleCandidates(ctx context.Context, olderThan time.Duration, maxAttempts, limit int) (int, int, error) {
+	if s.executor == nil {
+		return 0, 0, nil
+	}
+	items, err := s.repo.ClaimStaleCandidates(olderThan, maxAttempts, limit)
+	if err != nil {
+		return 0, 0, err
+	}
+	retried, failed := 0, 0
+	for _, item := range items {
+		if err := s.executor.Execute(item.Candidate, item.ActingUserID); err != nil {
+			failed++
+			detail := sanitizeError(err.Error())
+			_, _ = s.repo.MarkCandidateFailed(item.Candidate.ID, detail)
+			if s.alertReporter != nil {
+				_ = s.alertReporter("候选执行对账失败",
+					"candidate="+item.Candidate.ID+" action="+item.Candidate.ActionType+" error="+detail)
+			}
+			continue
+		}
+		if _, err := s.repo.MarkCandidateExecuted(item.Candidate.ID); err != nil {
+			failed++
+			if s.alertReporter != nil {
+				_ = s.alertReporter("候选执行对账落库失败", "candidate="+item.Candidate.ID+" error="+sanitizeError(err.Error()))
+			}
+			continue
+		}
+		retried++
+	}
+	return retried, failed, nil
+}
 
 func (s *Service) ValidateAgentTask(taskID, actingUserID string) (bool, error) {
 	return s.repo.ValidateTask(taskID, actingUserID)
