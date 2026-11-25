@@ -1,5 +1,6 @@
 export default {
-  cancel: '取消',
+  common: {
+cancel: '取消',
   online: '在线',
   offline: '离线',
   confirm: '确定',
@@ -9,4 +10,5 @@ export default {
   collapseSidebar: '收起侧边栏',
   expandSidebar: '展开侧边栏',
   userMenu: '用户菜单'
+  }
 }

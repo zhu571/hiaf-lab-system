@@ -1,5 +1,6 @@
 export default {
-  cancel: 'Cancel',
+  common: {
+cancel: 'Cancel',
   online: 'Online',
   offline: 'Offline',
   confirm: 'Confirm',
@@ -9,4 +10,5 @@ export default {
   collapseSidebar: 'Collapse sidebar',
   expandSidebar: 'Expand sidebar',
   userMenu: 'User menu'
+  }
 }
