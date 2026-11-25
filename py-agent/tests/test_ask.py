@@ -83,6 +83,13 @@ class AskEngineTests(unittest.TestCase):
         engine.service_token = "secret"
         return engine
 
+    def test_plan_uses_payload_project_tables(self):
+        # AR-09：Go 下发的 project_tables 是单一事实源；Python 不再硬编码。
+        engine = self.make_engine(plan_results=[plan_json()], integrate_results=["### 回答"])
+        engine.ask(VALID_QUESTION, VALID_SCHEMA, user_id="u-42", project_tables=["logs", "issues"])
+        payload = json.loads(engine.plan_agent.queries[0])
+        self.assertEqual(payload["trusted_context"]["project_tables_with_project_id"], ["issues", "logs"])
+
     def test_execute_body_includes_user_id(self):
         # R2：execute 回调必须回传 user_id，Go 侧据此做行级隔离。
         captured = {}
@@ -240,7 +247,7 @@ class ValidateAskTests(unittest.TestCase):
         return body
 
     def test_valid(self):
-        question, schema, history, context, user_id = validate_ask(self.base())
+        question, schema, history, context, user_id, project_tables = validate_ask(self.base())
         self.assertEqual(question, VALID_QUESTION)
         self.assertEqual(schema, VALID_SCHEMA)
         self.assertEqual(history, [])
@@ -276,7 +283,7 @@ class ValidateAskTests(unittest.TestCase):
     def test_context_optional_passthrough(self):
         # AI-3：context 可选，合法字符串原样透传（strip）
         context = "最近 7 天日报摘要：\n- 2026-08-11: 完成预冷"
-        _, _, _, got, _ = validate_ask(self.base(context=context))
+        _, _, _, got, _, _ = validate_ask(self.base(context=context))
         self.assertEqual(got, context)
 
     def test_context_invalid_rejected(self):
@@ -311,10 +318,10 @@ class FakeAskEngine:
     def __init__(self):
         self.calls = []
 
-    def ask(self, question, schema, history=None, context="", user_id=""):
+    def ask(self, question, schema, history=None, context="", user_id="", project_tables=None):
         if self.error:
             raise self.error
-        self.calls.append({"question": question, "user_id": user_id})
+        self.calls.append({"question": question, "user_id": user_id, "project_tables": project_tables})
         return self.result
 
 

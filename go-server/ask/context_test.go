@@ -17,6 +17,15 @@ func TestChatPayload(t *testing.T) {
 	if payload["user_id"] != "u1" {
 		t.Fatalf("user_id must be sent to py-agent, got: %v", payload["user_id"])
 	}
+	tables, ok := payload["project_tables"].([]string)
+	if !ok || len(tables) != 7 {
+		t.Fatalf("project_tables must be a 7-item list, got: %#v", payload["project_tables"])
+	}
+	for _, table := range tables {
+		if table == "projects" || table == "run_steps" {
+			t.Fatalf("non project_id table leaked into project_tables: %v", tables)
+		}
+	}
 
 	const ctxText = "最近 7 天日报摘要：\n- 2026-08-11: 完成预冷"
 	payload = chatPayload("问题", "schema", ctxText, "u2")

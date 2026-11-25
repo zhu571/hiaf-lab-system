@@ -178,7 +178,13 @@ def validate_ask(data):
               and isinstance(item.get("content"), str) and len(item["content"]) <= 1000, "history item is invalid")
     check(isinstance(context, str) and len(context) <= 8000, "context is invalid")
     check(isinstance(user_id, str) and user_id.strip() and len(user_id.strip()) <= 128, "user_id is invalid")
-    return question.strip(), schema, history, context.strip(), user_id.strip()
+    project_tables = data.get("project_tables")
+    if project_tables is not None:
+        check(isinstance(project_tables, list) and len(project_tables) <= 20, "project_tables is invalid")
+        for table in project_tables:
+            check(isinstance(table, str) and re.fullmatch(r"[a-z_][a-z0-9_]*", table) is not None,
+                  "project_tables item is invalid")
+    return question.strip(), schema, history, context.strip(), user_id.strip(), project_tables
 
 
 def validate_weekly_request(data):
@@ -337,11 +343,11 @@ def create_app(interpreter, planner, parser, todo_planner, token, ask_engine=Non
     async def do_ask(validated, _data):
         if ask_engine is None:
             raise RuntimeError("ask engine is not configured")
-        question, schema, history, context, user_id = validated
+        question, schema, history, context, user_id, project_tables = validated
         # 总超时 60s 预算（规划 25s + 执行 5s + 整合 25s + 余量；重试共享同一预算）：
         # 两步 LLM 规划 + 一次执行 + 一次整合整体 wait_for，超时 → 502 provider_unavailable。
         return await asyncio.wait_for(
-            asyncio.to_thread(ask_engine.ask, question, schema, history, context, user_id),
+            asyncio.to_thread(ask_engine.ask, question, schema, history, context, user_id, project_tables),
             timeout=AskEngine.TOTAL_TIMEOUT,
         )
 

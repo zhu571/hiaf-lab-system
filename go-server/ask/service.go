@@ -13,6 +13,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -56,6 +57,19 @@ var projectFilterColumns = map[string]string{
 	"assembly_steps":      "project_id",
 	"experiment_runs":     "project_id",
 	"projects":            "id",
+}
+
+// ProjectTables 返回需要规划层强制 project_id 列的项目业务表（排序后）。
+// 与 projectFilterColumns 单一事实源：projects 表按 id 隔离，不在此清单。
+func ProjectTables() []string {
+	tables := make([]string, 0, len(projectFilterColumns))
+	for table, column := range projectFilterColumns {
+		if column == "project_id" {
+			tables = append(tables, table)
+		}
+	}
+	sort.Strings(tables)
+	return tables
 }
 
 const (
@@ -309,7 +323,12 @@ func (s *Service) buildContext(ctx context.Context, userID string) (string, erro
 // user_id（R2）随载荷下发，py-agent 在 /ask/execute 回调时回传，Go 侧按该用户
 // 可访问项目集合做行级隔离。
 func chatPayload(question, schema, contextText, userID string) map[string]any {
-	payload := map[string]any{"question": question, "schema": schema, "user_id": userID}
+	payload := map[string]any{
+		"question":       question,
+		"schema":         schema,
+		"user_id":        userID,
+		"project_tables": ProjectTables(),
+	}
 	if contextText != "" {
 		payload["context"] = contextText
 	}
