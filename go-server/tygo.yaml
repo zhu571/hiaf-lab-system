@@ -1,0 +1,6 @@
+packages:
+  - path: "github.com/zhu571/hiaf-lab-system/go-server/ask"
+    output_path: "../web-ui/src/api/types.gen.ts"
+    type_mappings:
+      time.Time: "string"
+      json.RawMessage: "unknown"
