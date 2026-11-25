@@ -718,8 +718,8 @@ def _client(self):
 - 回滚：生成文件可回退，手写类型保留。
 
 > 实施状态（2026-11-25）：project_tables 已由 Go 下发、Python 回退一版；ask_reader GRANT 集成测试已加。
-> tygo 已接入 `ask` + `agent` 模块生成 `web-ui/src/api/types{,.agent}.gen.ts`，CI 用
-> `go run tygo generate && git diff` 校验；其余模块（logs/issues/projects）的类型替换待后续逐个迁移。
+> tygo 已接入 `ask` + `agent` + `logs` 模块生成 `web-ui/src/api/types{,.agent,.logs}.gen.ts`，CI 用
+> `go run tygo generate && git diff` 校验；其余模块（issues/projects）的类型替换待后续逐个迁移。
 
 ---
 
