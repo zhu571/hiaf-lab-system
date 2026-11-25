@@ -9,3 +9,8 @@ packages:
     type_mappings:
       time.Time: "string"
       json.RawMessage: "unknown"
+  - path: "github.com/zhu571/hiaf-lab-system/go-server/logs"
+    output_path: "../web-ui/src/api/types.logs.gen.ts"
+    type_mappings:
+      time.Time: "string"
+      json.RawMessage: "unknown"
