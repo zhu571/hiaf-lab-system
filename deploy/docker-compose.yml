@@ -76,6 +76,8 @@ services:
       DOCKER_INFLUXDB_INIT_PASSWORD: ${INFLUX_PASSWORD}
       DOCKER_INFLUXDB_INIT_ORG: ${INFLUXDB_ORG:-lab-org}
       DOCKER_INFLUXDB_INIT_BUCKET: ${INFLUXDB_BUCKET:-lab-bucket}
+      # AR-15：新 bucket 默认 90 天保留；已有 bucket 用 deploy/scripts/influx_retention.sh 更新。
+      DOCKER_INFLUXDB_INIT_RETENTION: ${INFLUXDB_RETENTION:-90d}
       DOCKER_INFLUXDB_INIT_ADMIN_TOKEN: ${INFLUX_TOKEN}
     healthcheck:
       test: ["CMD-SHELL", "influx ping || exit 1"]
