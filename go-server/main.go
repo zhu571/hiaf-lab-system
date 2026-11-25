@@ -362,14 +362,7 @@ func main() {
 		r.Post("/", authHandler.AdminCreateInvitationCode)
 		r.Post("/{id}/revoke", authHandler.AdminRevokeInvitationCode)
 	})
-	// 自动化规则（C9 规则引擎一期）— admin only，写操作需审计+幂等
-	r.Route("/api/v1/admin/automation", func(r chi.Router) {
-		r.Use(mw.AuthRequired)
-		r.Use(mw.RequireRole(auth.RoleAdmin))
-		r.Use(mw.Audit(db))
-		r.Use(mw.RequireIdempotencyKey(db))
-		r.Mount("/", automationHandler.Routes())
-	})
+	registerAutomationRoutes(r, db, automationHandler)
 	// 系统更新 — admin only
 	r.Route("/api/v1/admin/system", func(r chi.Router) {
 		r.Use(mw.AuthRequired)
@@ -388,13 +381,7 @@ func main() {
 		// SSE 日志流 — 流式，无审计/幂等
 		r.Get("/update/stream/{sessionId}", systemHandler.UpdateStream)
 	})
-	r.Route("/api/v1/audit", func(r chi.Router) {
-		r.Use(mw.AuthRequired)
-		// /verify 与 /events 必须先于 /{request_id} 注册（chi 按注册序匹配，静态段否则会被吞）。
-		r.Get("/verify", auditHandler.VerifyChain)
-		r.Get("/events", auditHandler.ListEvents)
-		r.Get("/{request_id}", auditHandler.GetByRequestID)
-	})
+	registerAuditRoutes(r, auditHandler)
 	registerAgentRoutes(r, db, agentHandler)
 	r.Route("/api/v1/daily-reports", func(r chi.Router) {
 		r.Use(mw.AuthRequired)
@@ -602,15 +589,7 @@ func main() {
 			r.Post("/archive", experiencesHandler.Archive)
 		})
 	})
-	// 周报（AI-1）：手动触发生成，maintainer+ 权限；写接口：审计 + Idempotency-Key。
-	// 定时调度独立于 HTTP（weeklyScheduler goroutine，每周日 20:00）。
-	r.Route("/api/v1/weekly", func(r chi.Router) {
-		r.Use(mw.AuthRequired)
-		r.Use(mw.Audit(db))
-		r.With(mw.RequireRole(auth.RoleAdmin, auth.RoleMaintainer),
-			mw.Timeout(360*time.Second),
-			mw.RequireIdempotencyKey(db)).Post("/summary", weeklyHandler.Summary)
-	})
+	registerWeeklyRoutes(r, db, weeklyHandler)
 	r.Route("/api/v1/attachments", func(r chi.Router) {
 		r.Use(mw.AuthRequired)
 		r.Use(mw.AgentContext(db))
