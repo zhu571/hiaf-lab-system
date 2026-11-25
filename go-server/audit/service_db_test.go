@@ -72,6 +72,30 @@ func insertChained(t *testing.T, db *sql.DB, requestID, action, actorType, detai
 	return id
 }
 
+func TestEnsurePartitionsPostgres(t *testing.T) {
+	db := openTestDB(t)
+	var relkind string
+	if err := db.QueryRow(`SELECT relkind FROM pg_class WHERE relname = 'audit_log'`).Scan(&relkind); err != nil {
+		t.Fatal(err)
+	}
+	if relkind != "p" {
+		t.Skip("046 审计分区迁移未应用")
+	}
+
+	svc := NewService(db)
+	if err := svc.EnsurePartitions(context.Background(), 3); err != nil {
+		t.Fatalf("EnsurePartitions: %v", err)
+	}
+	name := "audit_log_" + time.Now().UTC().Format("200601")
+	var exists bool
+	if err := db.QueryRow(`SELECT EXISTS(SELECT 1 FROM pg_class WHERE relname = $1)`, name).Scan(&exists); err != nil {
+		t.Fatal(err)
+	}
+	if !exists {
+		t.Fatalf("partition %s not created", name)
+	}
+}
+
 func TestVerifyChainPostgres(t *testing.T) {
 	db := openTestDB(t)
 	requireChainSchema(t, db)

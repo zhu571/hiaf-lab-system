@@ -1,5 +1,6 @@
 import logging
 import os
+import threading
 
 from dotenv import load_dotenv
 
@@ -27,16 +28,25 @@ def main():
             f"租约预算不足：renew_interval ({renew_interval}s) + 单次续约最坏耗时 "
             f"({worst_renew_call}s) 必须小于 AGENT_LEASE_SECONDS ({lease_seconds}s)"
         )
-    api = GoAPI.from_env()
-    api.login()
-    parser = Parser(os.environ["DEEPSEEK_API_KEY"])
-    Worker(
-        api, parser,
-        poll_interval=float(os.getenv("POLL_INTERVAL_SECONDS", "5")),
-        lease_seconds=lease_seconds,
-        llm_timeout=LLM_TIMEOUT_SECONDS,
-        renew_interval=renew_interval,
-    ).run_forever()
+    concurrency = max(1, int(os.getenv("WORKER_CONCURRENCY", "2")))
+    workers = []
+    for index in range(concurrency):
+        # 每个线程独立 GoAPI（token/刷新/CSRF 互不干扰）与 Parser（LightAgent 非线程安全）。
+        api = GoAPI.from_env()
+        api.login()
+        parser = Parser(os.environ["DEEPSEEK_API_KEY"])
+        worker = Worker(
+            api, parser,
+            poll_interval=float(os.getenv("POLL_INTERVAL_SECONDS", "5")),
+            lease_seconds=lease_seconds,
+            llm_timeout=LLM_TIMEOUT_SECONDS,
+            renew_interval=renew_interval,
+        )
+        thread = threading.Thread(target=worker.run_forever, name=f"agent-worker-{index}", daemon=False)
+        thread.start()
+        workers.append(thread)
+    for thread in workers:
+        thread.join()
 
 
 if __name__ == "__main__":

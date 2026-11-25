@@ -3,6 +3,7 @@ package weekly
 import (
 	"context"
 	"errors"
+	"fmt"
 	"log/slog"
 	"sync"
 	"time"
@@ -19,6 +20,7 @@ type Scheduler struct {
 	interval  time.Duration
 	tracker   *FailureTracker
 	sendAlert func(title, msg string) error
+	claim     func(ctx context.Context, job, runKey string) (bool, error)
 	wg        sync.WaitGroup
 }
 
@@ -32,6 +34,11 @@ func NewScheduler(svc *Service, authorID string, loc *time.Location, now func() 
 // SetAlertReporter 注入连续失败告警上报器（main.go 接 alertSvc.Report）。
 func (s *Scheduler) SetAlertReporter(fn func(title, msg string) error) {
 	s.sendAlert = fn
+}
+
+// SetRunClaimer 注入跨副本认领（AR-01）；未注入时保持单实例行为。
+func (s *Scheduler) SetRunClaimer(fn func(ctx context.Context, job, runKey string) (bool, error)) {
+	s.claim = fn
 }
 
 // Run 启动调度循环：ctx 取消后在途批完成（上限 30s）。
@@ -68,6 +75,17 @@ func (s *Scheduler) check(ctx context.Context, t time.Time) {
 func (s *Scheduler) runGenerate(ctx context.Context) {
 	s.wg.Add(1)
 	defer s.wg.Done()
+	if s.claim != nil {
+		year, week := s.now().In(s.loc).ISOWeek()
+		runKey := fmt.Sprintf("%d-W%02d", year, week)
+		ok, err := s.claim(ctx, "weekly", runKey)
+		if err != nil {
+			slog.Warn("weekly scheduler claim failed, running anyway", "error", err)
+		} else if !ok {
+			slog.Info("weekly scheduler job already claimed", "run_key", runKey)
+			return
+		}
+	}
 	_, err := s.svc.Generate(ctx, s.authorID, "", true)
 	if err != nil {
 		if errors.Is(err, ErrNoReports) {

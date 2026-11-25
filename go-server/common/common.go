@@ -3,6 +3,7 @@ package common
 import (
 	"context"
 	"fmt"
+	"net/http"
 	"os"
 	"strings"
 )
@@ -20,6 +21,14 @@ func SetRequestID(ctx context.Context, id string) context.Context {
 func GetRequestID(ctx context.Context) string {
 	id, _ := ctx.Value(requestIDKey).(string)
 	return id
+}
+
+// SetRequestIDHeader 把 ctx 中的 request_id 透传到下游服务（如 py-agent），
+// 使一次问答可在 Go / Python / 模型日志中用同一个 ID 关联（AR-07）。
+func SetRequestIDHeader(ctx context.Context, req *http.Request) {
+	if id := GetRequestID(ctx); id != "" {
+		req.Header.Set("X-Request-Id", id)
+	}
 }
 
 // ReadSecret reads a secret from a Docker secret file and falls back to an environment variable.

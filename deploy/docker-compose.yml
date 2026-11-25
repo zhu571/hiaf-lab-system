@@ -212,6 +212,9 @@ services:
       ELECTRICAL_33512B_ADDR: ${ELECTRICAL_33512B_ADDR:-10.51.12.219:5025}
       ELECTRICAL_33210A_ADDR: ${ELECTRICAL_33210A_ADDR:-10.51.12.220:5025}
       PY_AGENT_INTERPRET_URL: http://py-agent-interpret:8001
+      # GC 扫描存档（scan-archive）：文件存 lab-uploads 卷内单副本。
+      SCAN_STORAGE_DIR: ${SCAN_STORAGE_DIR:-/app/uploads/scans}
+      SCAN_MACHINE: ${SCAN_MACHINE:-gascell}
       PY_AGENT_INTERNAL_TOKEN_FILE: /run/secrets/agent_password
       KEYSIGHT_33210A_ADDR: ${KEYSIGHT_33210A_ADDR:-}
       # R6：仓库宿主路径单一来源（gascell 实际在 /home/gascell/hiaf-lab-system，
@@ -242,6 +245,12 @@ services:
       SERVICE_TOKEN_FILE: /run/secrets/service_token
       NTFY_PUBLISH_TOKEN_FILE: /run/secrets/ntfy_publish_token
       TODOS_SCHEDULER_ENABLED: ${TODOS_SCHEDULER_ENABLED:-true}
+      # 幂等 / panic 恢复 / HTTP 超时（AR-03/AR-07/AR-12）：默认开启，排障可关。
+      IDEMPOTENCY_V2: ${IDEMPOTENCY_V2:-true}
+      RECOVERER_ENABLED: ${RECOVERER_ENABLED:-true}
+      HTTP_TIMEOUTS_ENABLED: ${HTTP_TIMEOUTS_ENABLED:-true}
+      HTTP_READ_HEADER_TIMEOUT: ${HTTP_READ_HEADER_TIMEOUT:-5s}
+      HTTP_IDLE_TIMEOUT: ${HTTP_IDLE_TIMEOUT:-120s}
       # 周报（AI-1）：每周日 20:00 定时生成的作者用户 ID（WEEKLY_SUMMARY_AUTHOR_ID 为空则跳过）
       WEEKLY_SCHEDULER_ENABLED: ${WEEKLY_SCHEDULER_ENABLED:-true}
       WEEKLY_SUMMARY_AUTHOR_ID: ${WEEKLY_SUMMARY_AUTHOR_ID:-}
@@ -304,6 +313,8 @@ services:
       DEEPSEEK_BASE_URL: ${DEEPSEEK_BASE_URL:-https://api.deepseek.com}
       DEEPSEEK_FALLBACK_MODEL: ${DEEPSEEK_FALLBACK_MODEL:-}
       LLM_TIMEOUT_SECONDS: ${LLM_TIMEOUT_SECONDS:-180}
+      # 后台 worker 并发线程数（AR-04）；每个线程独立登录/解析器。
+      WORKER_CONCURRENCY: ${WORKER_CONCURRENCY:-2}
       # worker 死信告警发 ntfy 的 Bearer token（与 Go 侧 notify 同源凭据，C6 修复）
       NTFY_PUBLISH_TOKEN_FILE: /run/secrets/ntfy_publish_token
       # ask/execute 的 service_token（与 Go server 的 SERVICE_TOKEN 同源）；
@@ -345,6 +356,9 @@ services:
       PY_AGENT_INTERNAL_TOKEN_FILE: /run/secrets/agent_password
       # /v1/ask 的 AskEngine 出站调 Go ask/execute 的 service_token（与 server 同源）
       SERVICE_TOKEN_FILE: /run/secrets/service_token
+      # interpret 并发（AR-04）：worker 进程数 × 每进程 LLM 信号量。
+      UVICORN_WORKERS: ${UVICORN_WORKERS:-2}
+      PY_AGENT_MAX_CONCURRENCY: ${PY_AGENT_MAX_CONCURRENCY:-8}
     secrets:
       - agent_password
       - service_token

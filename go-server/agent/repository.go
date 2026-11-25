@@ -63,7 +63,7 @@ func (r *Repository) Claim(leaseSeconds int) (*PendingAgentTask, error) {
 		        OR (status = 'failed' AND COALESCE(next_attempt_at, created_at) <= now())
 		        OR (status = 'processing' AND lease_expires_at <= now())
 		     )
-		     ORDER BY created_at
+		     ORDER BY (queue_class = 'interactive') DESC, created_at
 		     FOR UPDATE SKIP LOCKED
 		     LIMIT 1
 		 )

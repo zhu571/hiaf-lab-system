@@ -256,3 +256,21 @@ func TestSchedulerWeekendFailureNotTracked(t *testing.T) {
 		t.Fatal("weekend push must not run")
 	}
 }
+
+func TestRunBatchSkipsWhenAlreadyClaimed(t *testing.T) {
+	ran := false
+	s := &Scheduler{
+		loc: time.UTC,
+		now: time.Now,
+		claim: func(context.Context, string, string) (bool, error) {
+			return false, nil
+		},
+	}
+	ok := s.runBatch(context.Background(), "generate", func(context.Context) error {
+		ran = true
+		return nil
+	})
+	if !ok || ran {
+		t.Fatalf("claimed job: ok=%v ran=%v, want true/false", ok, ran)
+	}
+}

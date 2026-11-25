@@ -18,6 +18,10 @@ var (
 	httpRequestsTotal = expvar.NewMap("lab_http_requests_total")
 	requestsInflight  int64
 
+	// AR-07：panic 与审计写失败必须可告警，不能只落日志。
+	panicsTotal           = expvar.NewInt("lab_panics_total")
+	auditWriteFailedTotal = expvar.NewInt("lab_audit_write_failed_total")
+
 	// agentQueueProvider 由 main.go 经 SetAgentQueueProvider 注入（agent 模块
 	// Service.QueueDepth），杜绝 middleware 跨模块直读表。
 	agentQueueProvider atomic.Value // func() float64
@@ -95,6 +99,10 @@ func MetricsHandler(w http.ResponseWriter, r *http.Request) {
 	fmt.Fprintf(w, "lab_http_requests_inflight %d\n", atomic.LoadInt64(&requestsInflight))
 	fmt.Fprintln(w, "# TYPE lab_agent_queue_depth gauge")
 	fmt.Fprintf(w, "lab_agent_queue_depth %s\n", strconv.FormatFloat(agentQueueDepth(), 'f', -1, 64))
+	fmt.Fprintln(w, "# TYPE lab_panics_total counter")
+	fmt.Fprintf(w, "lab_panics_total %d\n", panicsTotal.Value())
+	fmt.Fprintln(w, "# TYPE lab_audit_write_failed_total counter")
+	fmt.Fprintf(w, "lab_audit_write_failed_total %d\n", auditWriteFailedTotal.Value())
 }
 
 func agentQueueDepth() float64 {

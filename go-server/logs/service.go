@@ -16,6 +16,7 @@ import (
 	"time"
 	"unicode/utf8"
 
+	"github.com/zhu571/hiaf-lab-system/go-server/common"
 	"github.com/zhu571/hiaf-lab-system/go-server/middleware"
 	"github.com/zhu571/hiaf-lab-system/go-server/projects"
 	"github.com/zhu571/hiaf-lab-system/go-server/translations"
@@ -87,6 +88,7 @@ type Service struct {
 	client      *http.Client
 	parserURL   string
 	parserToken string
+	limiter     *common.RateLimitStore
 	rlMu        sync.Mutex
 	rlCalls     map[string][]time.Time
 	translation *translations.Service
@@ -103,6 +105,8 @@ func NewService(repo logRepository, timezone string, access ProjectAccessChecker
 }
 
 func (s *Service) SetTranslations(t *translations.Service) { s.translation = t }
+
+func (s *Service) SetRateLimiter(limiter *common.RateLimitStore) { s.limiter = limiter }
 
 func (s *Service) Translation(ctx context.Context, kind, id, userID, role string, req translations.Request) (any, error) {
 	if s.translation == nil {
@@ -790,7 +794,7 @@ func (s *Service) AiParse(ctx context.Context, id, userID, userRole string) (*Ai
 	if err != nil {
 		return nil, err
 	}
-	if !s.allowOne(userID) {
+	if !s.allowOne(ctx, userID) {
 		return nil, ErrRateLimited
 	}
 	if s.parserURL == "" || s.parserToken == "" {
@@ -812,6 +816,7 @@ func (s *Service) AiParse(ctx context.Context, id, userID, userRole string) (*Ai
 	}
 	httpReq.Header.Set("Content-Type", "application/json")
 	httpReq.Header.Set("Authorization", "Bearer "+s.parserToken)
+	common.SetRequestIDHeader(ctx, httpReq)
 
 	resp, err := s.client.Do(httpReq)
 	if err != nil {
@@ -900,7 +905,10 @@ func validateAiParseLogs(items []AiParseLogEntry, allowed []middleware.ProjectSu
 // allowOne 复制自 steptemplates.Service.allowOne（每用户 10 次/分钟，内存计数）。
 // 有意不提取公共包：logs 与 steptemplates 是平行业务模块，互相 import 私有运行时
 // 实现会造成耦合；若第三个模块出现同需求，再提取到 common。
-func (s *Service) allowOne(userID string) bool {
+func (s *Service) allowOne(ctx context.Context, userID string) bool {
+	if s.limiter != nil {
+		return s.limiter.Allow(ctx, userID)
+	}
 	now, cutoff := time.Now(), time.Now().Add(-time.Minute)
 	s.rlMu.Lock()
 	defer s.rlMu.Unlock()
