@@ -32,9 +32,9 @@ HIAF 低温气体靶实验室的多人协作日志管理平台。系统已完成
 
 - `docs/`：API、权限审计、仪器安全、项目设计、Agent 策略、维护策略等设计文档。
 - `go-server/`：Go 后端，20+ 个模块包（含 automation、steptemplates、todos、testdata 等）。
-- `web-ui/`：Vue 3 + Element Plus 前端，25 个业务视图 + 4 个布局壳 + base/business 分层组件，目录结构与约定见 §5/§6。
+- `web-ui/`：Vue 3 + Element Plus 前端，30 个业务视图 + 4 个布局壳 + base/business 分层组件，目录结构与约定见 §5/§6。
 - `py-agent/`：Python LightAgent 服务 + EPICS 虚拟 IOC。
-- `migrations/`：PostgreSQL 迁移脚本（38 个版本）。
+- `migrations/`：PostgreSQL 迁移脚本（50 个版本）。
 - `deploy/`：Docker Compose（10 个服务）、Dockerfile、secrets。
 - `.github/workflows/ci.yml`：Go、前端、Python Agent 三个 CI job。
 
@@ -69,6 +69,10 @@ HIAF 低温气体靶实验室的多人协作日志管理平台。系统已完成
 | `docs/collab-guide.md` | 了解多人协作、分支、审核流程 |
 | `docs/maintenance-strategy.md` | 写部署、迁移、备份、回滚前必读 |
 | `docs/codex-plan.md` | 了解 Codex 对架构和实施顺序的补充建议 |
+| `docs/multi-user-agent-upgrade.md` | 规划多人 Agent、会话/工具/配额升级前必读（含 GitHub 同类项目调研） |
+| `docs/architecture-review.md` | 做架构演进、性能/安全加固、跨模块改造前必读（缺陷编号 AR-xx 可引用） |
+| `docs/architecture-remediation-plan.md` | 修 AR-01～AR-12 前必读：每项的方案、迁移、测试、回滚与批次 |
+| `docs/scan-archive-design-v0.4.md` | GC 扫描数据自动存档设计（项目级 scans、watcher、单副本存储、前端）；计划位置见 remediation-plan §16 |
 
 如果文档名和实际文件不一致，先用 `rg --files` 查找，不要凭记忆创建重复文档。
 
@@ -88,6 +92,7 @@ hiaf-lab-system/
 │   ├── assembly/           # 装配/组装模块
 │   ├── runs/               # 实验运行模块
 │   ├── rfmatch/            # RF 匹配模块
+│   ├── scans/              # GC 扫描存档模块（PR1 读/说明/作废 + PR2 上传/存储/文件；watcher/前端待）
 │   ├── steptemplates/      # 步骤模板模块
 │   ├── todos/              # 待办事项模块
 │   ├── testdata/           # 测试数据模块
@@ -111,7 +116,7 @@ hiaf-lab-system/
 │   ├── ioc/                # EPICS 虚拟 IOC (pyEpics 模拟硬件 PV)
 │   └── tests/              # 测试
 ├── web-ui/                 # Vue 3 前端
-│   ├── src/api/            # API 层：client.ts 统一封装（幂等键/CSRF/401 单飞刷新/错误分类）+ 19 个业务模块
+│   ├── src/api/            # API 层：client.ts 统一封装（幂等键/CSRF/401 单飞刷新/错误分类）+ 20 个业务模块
 │   ├── src/components/
 │   │   ├── base/           # 通用基础件（无业务语义、props/slots 驱动）：StatusBadge/StateBlock/FormDialog/ResponsiveTable/AppBreadcrumb/ListPage/CardGrid/KanbanBoard/DashboardPanel
 │   │   └── business/       # 业务复合件（可直读 store/API）：SensorTrendChart/AskDialog/ProjectDashboard/CommandPalette/NotificationCenter/MobileNavDrawer 等
@@ -123,10 +128,10 @@ hiaf-lab-system/
 │   ├── src/stores/         # 仅 auth/project 两个全局 store（业务数据保持页面本地态）
 │   ├── src/styles/         # tokens/base/utilities/element-overrides/themes/dark.css
 │   ├── src/utils/          # datetime.ts/statusMeta.ts/chartTheme.ts/testDataPaste.ts
-│   ├── src/views/          # 25 个业务视图
+│   ├── src/views/          # 30 个业务视图
 │   └── e2e/                # Playwright 冒烟（13 spec 16 用例；R2 新增 command-palette / notifications 两 spec）
 ├── migrations/             # PostgreSQL 迁移脚本
-├── deploy/                 # Docker Compose、frp、Nginx 配置
+├── deploy/                 # Docker Compose、frp、Nginx、scan-ingest watcher
 ├── images/                 # 运行时图片附件目录
 └── AGENTS.md               # 本文件
 ```
@@ -307,8 +312,9 @@ python worker.py
 |------|------|
 | `scripts/test-all.sh` | 本地一键全量测试（迁移 up/down → Go race+覆盖率 → py unittest → 前端 vitest → 构建产物与 static 一致性），任一步失败即退出 |
 | `scripts/test-e2e.sh` | 本地一键 Playwright E2E 冒烟（起 postgres → 迁移 → Go server → vite dev → playwright，trap 自动清理） |
-| `deploy/scripts/backup.sh` | 数据库定时备份（容器内 pg_dump `-Fc` → `/opt/lab-backups/`，flock 防重入，失败上报告警中心；gascell systemd timer 每日 03:00 + 保留 14 天） |
-| `deploy/scripts/restore-check.sh` | 恢复演练：`pg_restore -Fc` 到临时库校验表数与关键行后 drop，验证备份可用 |
+| `deploy/scripts/backup.sh` | 全量备份：PostgreSQL `pg_dump -Fc` + InfluxDB + 附件 volume + `images/` + sha256 清单，本地保留 + 可选 rclone 异地（AR-06） |
+| `deploy/scripts/restore-check.sh` | 恢复演练：DB 恢复到临时库校验表数/迁移版本/关键行，并校验附件 tar 与 Influx manifest |
+| `deploy/scripts/init_db_roles.sh` | 创建 `lab_app` 最小权限角色（DML、无 DDL、审计禁改删）；切换 `DB_USER` 前手动执行一次（AR-05） |
 | `deploy/scripts/watchdog.sh` | 宿主机 watchdog：每 60s 探测全部容器健康态（HTTP + docker inspect），3 次失败告警只告警不自动重启 |
 | `cli/`（labctl） | AI Agent/运维命令行客户端 + MCP Server（见 `cli/README.md`；测试：`py-agent/.venv/bin/python -m unittest discover -s cli/tests`） |
 
