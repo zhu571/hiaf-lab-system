@@ -1,25 +1,15 @@
 import { request } from './client'
+import type { Comment as CommentBase, Issue as IssueBase } from './types.issues.gen'
 
-export type Issue = {
-  id: string
-  project_id: string
-  title: string
-  description: string
-  status: string
-  severity: string
-  ai_generated?: boolean
-  author_id: string
-  created_at?: string
-  comments?: Comment[]
-}
+type IssueCore = Pick<IssueBase, 'id' | 'project_id' | 'title' | 'description' | 'status' | 'severity' | 'author_id'>
+export type Issue = IssueCore &
+  Partial<Omit<IssueBase, keyof IssueCore>> & {
+    ai_generated?: boolean
+    created_at?: string
+    comments?: Comment[]
+  }
 
-export type Comment = {
-  id: string
-  issue_id: string
-  author_id: string
-  content: string
-  created_at: string
-}
+export type Comment = CommentBase
 
 export function listIssues(projectId: string, params: Record<string, string | number> = {}) {
   return request<{ items: Issue[]; total: number; page: number }>({ url: `/projects/${projectId}/issues`, params })
