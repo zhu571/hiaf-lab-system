@@ -1,0 +1,63 @@
+export default {
+  dashboard: {
+    title: 'Lab Dashboard',
+    subtitle: 'Device status and team activity at a glance',
+    todayTodos: "Today's Todos",
+    todosCount: '{n} items',
+    todosMore: 'View all',
+    noTodos: 'No todos for today',
+    defer: 'Defer',
+    todoAddPlaceholder: 'Add a todo…',
+    todoAdd: 'Add',
+    todoLLMPlaceholder: 'Describe a task in one sentence for AI to parse…',
+    todoLLM: 'AI parse',
+    todosLoadFailed: 'Failed to load todos',
+    todoDone: 'Marked as done',
+    todoDoneFailed: 'Operation failed',
+    todoDeferred: 'Deferred to tomorrow',
+    todoDeferFailed: 'Failed to defer',
+    todoAdded: 'Added',
+    todoAddFailed: 'Failed to add',
+    todoLLMRejected: 'Cannot create todo: {reason}',
+    todoDraftTitle: 'AI parse result',
+    todoDraftConfirm: 'Save the following as a todo?',
+    todoDraftSave: 'Save',
+    todoLLMFailed: 'AI parse failed',
+    deviceStatus: 'Device Status',
+    // Panel badge: "{online}/{total} online" (instruments + gas control).
+    onlineCount: '{online}/{total} online',
+    noDevices: 'No devices',
+    gasControl: 'Gas Control',
+    runningState: 'Running State',
+    a1Pressure: 'A1 Pressure',
+    running: 'Running',
+    stopped: 'Stopped',
+    // Middle column: merged summary of the team's daily reports.
+    brief: 'Daily Brief',
+    last7Days: 'Last 7 days',
+    // Brief card badge: number of people who filed a report that day.
+    peopleCount: '{n} people',
+    noReport: 'No report',
+    teamReports: 'Team Daily Reports',
+		myReports: 'My Daily Reports',
+    reportsCount: '{n} reports',
+    noReportToday: 'No reports for this day',
+    noSummary: 'No summary',
+    today: 'Today',
+    yesterday: 'Yesterday',
+    loadDevicesFailed: 'Failed to load devices',
+    loadGasFailed: 'Failed to load gas cell status',
+    loadReportsFailed: 'Failed to load daily reports',
+    greeting: {
+      morning: 'Good morning, {name}',
+      afternoon: 'Good afternoon, {name}',
+      evening: 'Good evening, {name}'
+    },
+    quickActions: {
+      dailyReport: 'Write Report',
+      todo: 'New Todo',
+      ask: 'AI Chat',
+      run: 'New Batch'
+    }
+  },
+}
