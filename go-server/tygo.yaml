@@ -14,3 +14,13 @@ packages:
     type_mappings:
       time.Time: "string"
       json.RawMessage: "unknown"
+  - path: "github.com/zhu571/hiaf-lab-system/go-server/issues"
+    output_path: "../web-ui/src/api/types.issues.gen.ts"
+    type_mappings:
+      time.Time: "string"
+      json.RawMessage: "unknown"
+  - path: "github.com/zhu571/hiaf-lab-system/go-server/projects"
+    output_path: "../web-ui/src/api/types.projects.gen.ts"
+    type_mappings:
+      time.Time: "string"
+      json.RawMessage: "unknown"
