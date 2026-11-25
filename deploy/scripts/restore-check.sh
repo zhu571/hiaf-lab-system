@@ -145,6 +145,28 @@ else
   echo "InfluxDB 备份：未找到 influx-* 目录（旧备份或未启用），跳过"
 fi
 
+# 校验 6：scans 行数与附件包内文件（scan-archive PR4；迁移 050 未应用时跳过）
+SCANS_TABLE="$(psql_exec "$TEMP_DB" "SELECT COALESCE(to_regclass('public.scans')::text,'')")"
+if [ -n "$SCANS_TABLE" ]; then
+  PROD_SCANS="$(psql_exec lab "SELECT count(*) FROM scans")"
+  REST_SCANS="$(psql_exec "$TEMP_DB" "SELECT count(*) FROM scans")"
+  echo "scans：临时库 $REST_SCANS 行 / 生产 $PROD_SCANS 行"
+  [ "$REST_SCANS" = "$PROD_SCANS" ] || {
+    echo "失败：scans 行数不一致（生产 $PROD_SCANS ≠ 恢复 $REST_SCANS）"
+    exit 1
+  }
+  if [ -n "$UPLOADS_FILE" ] && [ -f "$UPLOADS_FILE" ] && [ "${REST_SCANS:-0}" -gt 0 ]; then
+    SCAN_FILES="$(tar tzf "$UPLOADS_FILE" 2>/dev/null | grep -c 'scans/' || true)"
+    echo "scans 附件：$UPLOADS_FILE 内 $SCAN_FILES 个 scans/ 条目"
+    [ "${SCAN_FILES:-0}" -gt 0 ] || {
+      echo "失败：scans 表有 $REST_SCANS 行，但附件包内没有 scans/ 文件"
+      exit 1
+    }
+  fi
+else
+  echo "scans：表不存在（迁移 050 未应用或旧备份），跳过"
+fi
+
 echo ""
 echo "===== 恢复演练通过 ====="
 echo "备份 $RESTORE_FILE 可完整恢复（表数一致 / 迁移 001-$EXPECTED_MIGRATIONS 完整 / 日报数据可读）"

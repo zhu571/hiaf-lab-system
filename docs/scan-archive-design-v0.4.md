@@ -3,7 +3,7 @@
 > 状态：**评审修订稿，先评审不做**
 > 取代：`scan-archive-design-v0.3.md`（2026-11-25 第二轮修订）
 > 计划位置：`docs/architecture-remediation-plan.md` §16「并行特性轨道：GC 扫描存档」
-> 迁移编号：**050（PR1–PR3 已落地）**——049 已被 AR-04 `queue_class` 占用
+> 迁移编号：**050（PR1–PR4 已落地）**——049 已被 AR-04 `queue_class` 占用
 > 决策记录（2026-11-25）：① 项目级；② 多值标签；③ 内容相同但文件名不同各存一条；④ **单副本**：gascell 存一份；NAS 原始目录只读不动，不归档、不复制、不删除
 > 关联：`docs/test-data-curves-design.md`、`docs/api-contract.md`、`docs/permission-audit.md`、`docs/maintenance-strategy.md`、`docs/architecture-remediation-plan.md`
 

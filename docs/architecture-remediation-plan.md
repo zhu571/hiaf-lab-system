@@ -878,7 +878,7 @@ def _client(self):
 | PR1 后端骨架 | ✅ | 迁移 050 `scans`；`go-server/scans/`（parser、repository、service、handler）；列表/详情/tags/说明/作废路由；parser + service 单测；050 up/down 已验证 | — |
 | PR2 上传/文件 | ✅ | `POST /projects/{id}/scans` multipart；txt/png 大小与 magic 校验；sha/去重/迟到 png 补挂；`lab-uploads/scans` 单副本存储 + 320px 缩略图；`file/txt|png`、`thumb` 下载（ETag/Range/内联/下载审计） | 孤儿目录清理任务（设计 §5.1 的可选清理） |
 | PR3 ingest/watcher | ✅ | `POST /api/v1/scans/ingest`（仅 SERVICE_TOKEN，白名单精确路径）；`Service.Ingest` 无用户 ACL；`deploy/scan-ingest/` watcher（轮询/稳定判定/png grace/state/心跳/退避/告警）、systemd unit、dry-run/backfill | — |
-| PR4 监控/运维 | 🟡 | watcher 心跳文件 + 失败告警；复用 AR-06 备份覆盖 `lab-uploads/scans` | `watchdog.sh` 接入心跳、磁盘告警、`restore-check.sh` scans 抽查 |
+| PR4 监控/运维 | ✅ | watcher 心跳 + 坏文件告警；`watchdog.sh` 接入 scan-ingest 心跳/磁盘 80% 告警；`restore-check.sh` 校验 scans 行数与附件包 `scans/` 条目 | 实际生产部署后按 369 对导入再跑一次恢复演练 |
 | PR5 前端 | ⏳ | — | 项目 tab、列表/详情、曲线、i18n/statusMeta |
 | PR6 存量导入 | 🟡 | `--backfill --dry-run` + 正式 backfill 已实现（限速 5 req/s） | 实际导入 369 对、对账、缺 png/legacy3 清单 |
 

@@ -315,7 +315,7 @@ python worker.py
 | `deploy/scripts/backup.sh` | 全量备份：PostgreSQL `pg_dump -Fc` + InfluxDB + 附件 volume + `images/` + sha256 清单，本地保留 + 可选 rclone 异地（AR-06） |
 | `deploy/scripts/restore-check.sh` | 恢复演练：DB 恢复到临时库校验表数/迁移版本/关键行，并校验附件 tar 与 Influx manifest |
 | `deploy/scripts/init_db_roles.sh` | 创建 `lab_app` 最小权限角色（DML、无 DDL、审计禁改删）；切换 `DB_USER` 前手动执行一次（AR-05） |
-| `deploy/scripts/watchdog.sh` | 宿主机 watchdog：每 60s 探测全部容器健康态（HTTP + docker inspect），3 次失败告警只告警不自动重启 |
+| `deploy/scripts/watchdog.sh` | 宿主机 watchdog：每 60s 探测全部容器健康态（HTTP + docker inspect）+ scan-ingest 心跳/磁盘阈值，3 次失败告警只告警不自动重启 |
 | `cli/`（labctl） | AI Agent/运维命令行客户端 + MCP Server（见 `cli/README.md`；测试：`py-agent/.venv/bin/python -m unittest discover -s cli/tests`） |
 
 ## 8. PR 前检查清单
