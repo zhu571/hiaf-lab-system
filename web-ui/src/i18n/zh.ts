@@ -1,20 +1,9 @@
 import scan from './zh/scan'
+import common from './zh/common'
 
 export default {
   translation: { original: '原文', chinese: '中文版', english: '英文版', pending: '翻译中', missing: '暂无该语言译文，当前显示原文', failed: '翻译失败，当前显示原文', stale: '原文已更新，译文正在刷新', retry: '重试翻译', regenerate: '重新生成', save: '保存译文', manual: '人工修订', overwriteConfirm: '重新生成会覆盖当前译文，是否继续？', technicalHint: '请核对数字、单位和设备名称' },
-  common: {
-    cancel: '取消',
-    online: '在线',
-    offline: '离线',
-    confirm: '确定',
-    retry: '重试',
-    empty: '暂无数据',
-    listSeparator: '；',
-    // 桌面顶栏控件（结构改版 R1，AppLayout）
-    collapseSidebar: '收起侧边栏',
-    expandSidebar: '展开侧边栏',
-    userMenu: '用户菜单'
-  },
+  common,
   login: {
     subtitle: '实验室日志管理平台',
     username: '用户名',
