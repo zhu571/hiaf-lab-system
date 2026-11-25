@@ -1,5 +1,6 @@
 export default {
-  title: '扫描存档',
+  scan: {
+title: '扫描存档',
   subtitle: 'LabVIEW 扫描 txt/png 自动收档；可补说明、打标签、看曲线与原始数据。',
   upload: '上传扫描',
   uploadTitle: '上传扫描文件',
@@ -47,4 +48,5 @@ export default {
   curveHint: '前 5 个数值列，抽样最多 2000 点',
   curveLoadFailed: '曲线加载失败',
   tagPlaceholder: '输入标签，回车确认'
+  }
 }

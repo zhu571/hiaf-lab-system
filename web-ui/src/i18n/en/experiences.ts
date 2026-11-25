@@ -1,0 +1,28 @@
+export default {
+  experiences: {
+    pageTitle: 'Experiences',
+    selectProject: 'Select project',
+    create: 'New Experience',
+    keyword: 'Keyword',
+    tagPlaceholder: 'Tags, comma separated',
+    empty: 'No experiences',
+    detail: 'Experience Detail',
+    columnCandidate: 'Pending Review',
+    columnPublished: 'Published',
+    columnArchived: 'Archived',
+    labelTitle: 'Title',
+    labelTags: 'Tags',
+    labelContent: 'Content',
+    publish: 'Publish',
+    archive: 'Archive',
+    cancel: 'Cancel',
+    save: 'Save',
+    loadFailed: 'Failed to load experiences',
+    published: 'Experience published',
+    publishFailed: 'Failed to publish',
+    archived: 'Experience archived',
+    archiveFailed: 'Failed to archive',
+    saved: 'Experience saved',
+    saveFailed: 'Failed to save'
+  },
+}

@@ -1,5 +1,6 @@
 export default {
-  title: 'Scan Archive',
+  scan: {
+title: 'Scan Archive',
   subtitle: 'Automatically archive LabVIEW scan txt/png files; annotate, tag, view curves and raw data.',
   upload: 'Upload scan',
   uploadTitle: 'Upload scan files',
@@ -47,4 +48,5 @@ export default {
   curveHint: 'First 5 numeric columns, sampled to at most 2000 points',
   curveLoadFailed: 'Failed to load curve',
   tagPlaceholder: 'Type a tag and press Enter'
+  }
 }
