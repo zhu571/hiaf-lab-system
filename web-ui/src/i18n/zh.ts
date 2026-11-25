@@ -2,6 +2,7 @@ import scan from './zh/scan'
 import common from './zh/common'
 import logs from './zh/logs'
 import issues from './zh/issues'
+import project from './zh/project'
 
 export default {
   translation: { original: '原文', chinese: '中文版', english: '英文版', pending: '翻译中', missing: '暂无该语言译文，当前显示原文', failed: '翻译失败，当前显示原文', stale: '原文已更新，译文正在刷新', retry: '重试翻译', regenerate: '重新生成', save: '保存译文', manual: '人工修订', overwriteConfirm: '重新生成会覆盖当前译文，是否继续？', technicalHint: '请核对数字、单位和设备名称' },
@@ -252,42 +253,7 @@ export default {
       run: '新建批次'
     }
   },
-  project: {
-    backToList: '项目列表',
-    switchProject: '切换项目',
-    searchPlaceholder: '搜索项目',
-    goToProjects: '前往项目列表',
-    fallbackNoAccess: '项目不存在或无权访问，请重新选择',
-    fallbackNoProjects: '暂无项目，请先创建或选择一个项目',
-    tabs: {
-      overview: '概览',
-      logs: '日志',
-      issues: '问题',
-      runs: '批次',
-      testData: '数据',
-      rfMatching: 'RF匹配',
-      scans: '扫描存档',
-      assembly: '装配'
-    },
-    stages: {
-      draft: '筹备',
-      active: '进行中',
-      completed: '已完成',
-      archived: '归档',
-      unknown: '未知'
-    }
-  },
-  projects: {
-    title: '项目',
-    create: '新建项目',
-    code: '编号',
-    name: '名称',
-    shortName: '简称',
-    description: '说明',
-    save: '保存',
-    created: '项目已创建',
-    createFailed: '项目创建失败'
-  },
+  ...project,
   assembly: {
     title: '装配步骤',
     allStatus: '全部状态',
