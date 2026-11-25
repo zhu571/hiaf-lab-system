@@ -32,7 +32,7 @@ HIAF 低温气体靶实验室的多人协作日志管理平台。系统已完成
 
 - `docs/`：API、权限审计、仪器安全、项目设计、Agent 策略、维护策略等设计文档。
 - `go-server/`：Go 后端，20+ 个模块包（含 automation、steptemplates、todos、testdata 等）。
-- `web-ui/`：Vue 3 + Element Plus 前端，30 个业务视图 + 4 个布局壳 + base/business 分层组件，目录结构与约定见 §5/§6。
+- `web-ui/`：Vue 3 + Element Plus 前端，31 个业务视图 + 4 个布局壳 + base/business 分层组件，目录结构与约定见 §5/§6。
 - `py-agent/`：Python LightAgent 服务 + EPICS 虚拟 IOC。
 - `migrations/`：PostgreSQL 迁移脚本（51 个版本）。
 - `deploy/`：Docker Compose（10 个服务）、Dockerfile、secrets。
@@ -128,7 +128,7 @@ hiaf-lab-system/
 │   ├── src/stores/         # 仅 auth/project 两个全局 store（业务数据保持页面本地态）
 │   ├── src/styles/         # tokens/base/utilities/element-overrides/themes/dark.css
 │   ├── src/utils/          # datetime.ts/statusMeta.ts/chartTheme.ts/testDataPaste.ts
-│   ├── src/views/          # 30 个业务视图
+│   ├── src/views/          # 31 个业务视图
 │   └── e2e/                # Playwright 冒烟（13 spec 16 用例；R2 新增 command-palette / notifications 两 spec）
 ├── migrations/             # PostgreSQL 迁移脚本
 ├── deploy/                 # Docker Compose、frp、Nginx、scan-ingest watcher
@@ -311,6 +311,7 @@ python worker.py
 | 脚本 | 用途 |
 |------|------|
 | `scripts/test-all.sh` | 本地一键全量测试（迁移 up/down → Go race+覆盖率 → py unittest → 前端 vitest → 构建产物与 static 一致性），任一步失败即退出 |
+| `scripts/check-doc-stats.sh` | 校验 AGENTS 的视图/迁移数字与实际目录一致（AR-18，Go CI job 调用） |
 | `scripts/test-e2e.sh` | 本地一键 Playwright E2E 冒烟（起 postgres → 迁移 → Go server → vite dev → playwright，trap 自动清理） |
 | `deploy/scripts/backup.sh` | 全量备份：PostgreSQL `pg_dump -Fc` + InfluxDB + 附件 volume + `images/` + sha256 清单，本地保留 + 可选 rclone 异地（AR-06） |
 | `deploy/scripts/restore-check.sh` | 恢复演练：DB 恢复到临时库校验表数/迁移版本/关键行，并校验附件 tar 与 Influx manifest |
