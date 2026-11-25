@@ -144,3 +144,16 @@ docker load -i lab-images.tar
 2. 仓库版本升级后 compose 指明确版本号（禁止 `latest`）→ `docker compose up -d`。
 3. 校验：`docker images` 与上述清单 diff 为空；`docker compose ps` 全部 healthy。
 4. 离线镜像包随升级一并更新至备份存储（见 docs/maintenance-strategy.md 备份/恢复章节）。
+
+## influx_retention.sh
+
+把**已有** InfluxDB bucket 的保留期改为 90 天（AR-15）。新部署由 compose 的
+`DOCKER_INFLUXDB_INIT_RETENTION` 生效；已有 bucket 不会自动改，需执行一次：
+
+```bash
+INFLUXDB_ORG=lab-org INFLUXDB_BUCKET=lab-bucket INFLUXDB_RETENTION=90d \
+  deploy/scripts/influx_retention.sh
+```
+
+token 优先取 `INFLUX_TOKEN`，否则读 `deploy/secrets/influxdb_token.txt`。脚本只改保留期，
+不会立即删除历史数据；Grafana 历史查询会按保留期逐步缩短。

@@ -16,7 +16,17 @@ https://lab.hiaf-gascell.site {
     encode gzip zstd
     @metrics path /metrics
     respond @metrics 404                          # D14：公网不暴露 /metrics
-    request_body max_size 32MB
+    # 安全响应头（AR-14）；CSP 允许 Element Plus 内联样式与 blob/data 预览，不放开外部脚本。
+    header {
+        Strict-Transport-Security "max-age=31536000; includeSubDomains"
+        X-Content-Type-Options "nosniff"
+        X-Frame-Options "DENY"
+        Referrer-Policy "strict-origin-when-cross-origin"
+        Permissions-Policy "geolocation=(), microphone=(), camera=()"
+        Content-Security-Policy "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self' data:; connect-src 'self'; media-src 'self' blob:; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'none'"
+    }
+    # 附件上限 100MiB（AR-13）：与 go-server/attachments/handler.go 的 100MiB 对齐。
+    request_body max_size 100MB
     reverse_proxy 10.144.144.12:8000 {
         header_up -X-Forwarded-For                            # ① 先删（防伪造首值存活）
         header_up X-Forwarded-For {http.request.remote.host}  # ② 覆写真实 peer（唯一值）

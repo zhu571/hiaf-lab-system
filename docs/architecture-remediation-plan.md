@@ -771,6 +771,9 @@ def _client(self):
 | AR-17 候选 reconciler | 定时扫 `approved` 超 10 分钟未执行 → 重试/告警 | Batch 2 |
 | AR-18 文档漂移 | 更新 AGENTS 的 25/38 为 30/44；加 CI 统计 | 随手 |
 
+> 实施状态（2026-11-25）：AR-13/14/15 已落地（Caddy 100MB + 安全头、Influx 90d retention/脚本）；
+> AR-18 的 AGENTS 数字已更新为 30 视图/50 迁移，但“CI 自动统计”未加；AR-16/17 未做。
+
 ---
 
 ## 14. 验收清单（整体）
