@@ -363,24 +363,7 @@ func main() {
 		r.Post("/{id}/revoke", authHandler.AdminRevokeInvitationCode)
 	})
 	registerAutomationRoutes(r, db, automationHandler)
-	// 系统更新 — admin only
-	r.Route("/api/v1/admin/system", func(r chi.Router) {
-		r.Use(mw.AuthRequired)
-		r.Use(mw.RequireRole(auth.RoleAdmin))
-
-		// 版本查询 — 只读，无审计/幂等
-		r.Get("/version", systemHandler.GetVersion)
-
-		// 触发更新 — 写操作，需审计+幂等
-		r.Group(func(r chi.Router) {
-			r.Use(mw.Audit(db))
-			r.Use(mw.RequireIdempotencyKey(db))
-			r.Post("/update", systemHandler.TriggerUpdate)
-		})
-
-		// SSE 日志流 — 流式，无审计/幂等
-		r.Get("/update/stream/{sessionId}", systemHandler.UpdateStream)
-	})
+	registerSystemAdminRoutes(r, db, systemHandler)
 	registerAuditRoutes(r, auditHandler)
 	registerAgentRoutes(r, db, agentHandler)
 	r.Route("/api/v1/daily-reports", func(r chi.Router) {
@@ -590,21 +573,7 @@ func main() {
 		})
 	})
 	registerWeeklyRoutes(r, db, weeklyHandler)
-	r.Route("/api/v1/attachments", func(r chi.Router) {
-		r.Use(mw.AuthRequired)
-		r.Use(mw.AgentContext(db))
-		r.Use(mw.Audit(db))
-		r.Use(mw.RequireIdempotencyKey(db))
-		r.Get("/", attachmentsHandler.List)
-		r.Post("/", attachmentsHandler.Upload)
-		r.Route("/{id}", func(r chi.Router) {
-			r.Get("/", attachmentsHandler.GetByID)
-			r.Get("/content", attachmentsHandler.Download)
-			r.Post("/links", attachmentsHandler.AddLink)
-			r.Delete("/links/{link_id}", attachmentsHandler.RemoveLink)
-			r.Delete("/", attachmentsHandler.SoftDelete)
-		})
-	})
+	registerAttachmentRoutes(r, db, attachmentsHandler)
 	r.Route("/api/v1/instruments", func(r chi.Router) {
 		// parse-result 是只读解析接口：与 ListInstruments 同级鉴权，但不需要 Idempotency-Key。
 		r.Group(func(r chi.Router) {
