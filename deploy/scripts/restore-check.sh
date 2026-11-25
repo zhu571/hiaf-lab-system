@@ -119,6 +119,32 @@ echo "daily_reports：共 $REPORT_COUNT 行，最新日期 ${LATEST_DATE:-<空>}
   exit 1
 }
 
+# 校验 4：附件备份可读（AR-06；没有附件备份时跳过并提示）
+UPLOADS_FILE="$(ls -t "$BACKUP_DIR"/uploads-*.tar.gz 2>/dev/null | head -1 || true)"
+if [ -n "$UPLOADS_FILE" ] && [ -f "$UPLOADS_FILE" ]; then
+  if ! tar tzf "$UPLOADS_FILE" >/dev/null 2>&1; then
+    echo "失败：附件备份不可读（$UPLOADS_FILE）"
+    exit 1
+  fi
+  UPLOAD_ENTRIES="$(tar tzf "$UPLOADS_FILE" 2>/dev/null | wc -l | tr -d ' ')"
+  echo "附件备份：$UPLOADS_FILE（$UPLOAD_ENTRIES 个条目）"
+else
+  echo "附件备份：未找到 uploads-*.tar.gz（旧备份或未启用附件备份），跳过"
+fi
+
+# 校验 5：InfluxDB 备份目录完整（AR-06；实际 restore 见 deploy/scripts/README 手动命令）
+INFLUX_DIR="$(ls -dt "$BACKUP_DIR"/influx-* 2>/dev/null | head -1 || true)"
+if [ -n "$INFLUX_DIR" ] && [ -d "$INFLUX_DIR" ]; then
+  if ! find "$INFLUX_DIR" -maxdepth 1 -name '*.manifest' | grep -q .; then
+    echo "失败：InfluxDB 备份目录缺少 manifest（$INFLUX_DIR）"
+    exit 1
+  fi
+  INFLUX_FILES="$(find "$INFLUX_DIR" -type f | wc -l | tr -d ' ')"
+  echo "InfluxDB 备份：$INFLUX_DIR（$INFLUX_FILES 个文件）"
+else
+  echo "InfluxDB 备份：未找到 influx-* 目录（旧备份或未启用），跳过"
+fi
+
 echo ""
 echo "===== 恢复演练通过 ====="
 echo "备份 $RESTORE_FILE 可完整恢复（表数一致 / 迁移 001-$EXPECTED_MIGRATIONS 完整 / 日报数据可读）"

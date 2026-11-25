@@ -16,6 +16,7 @@ type Scheduler struct {
 	interval  time.Duration
 	tracker   *FailureTracker
 	sendAlert func(title, msg string) error
+	claim     func(ctx context.Context, job, runKey string) (bool, error)
 	wg        sync.WaitGroup
 }
 
@@ -31,6 +32,11 @@ func NewScheduler(svc *Service, loc *time.Location, now func() time.Time) *Sched
 // SetAlertReporter 注入连续失败告警上报器（main.go 接 alertSvc.Report）。
 func (s *Scheduler) SetAlertReporter(fn func(title, msg string) error) {
 	s.sendAlert = fn
+}
+
+// SetRunClaimer 注入跨副本认领（AR-01）；未注入时保持单实例行为。
+func (s *Scheduler) SetRunClaimer(fn func(ctx context.Context, job, runKey string) (bool, error)) {
+	s.claim = fn
 }
 
 // Run 启动调度循环：启动时顺延补跑（错过 08:30 则补跑，幂等）；ctx 取消后
@@ -82,6 +88,16 @@ func (s *Scheduler) check(ctx context.Context, t time.Time) {
 func (s *Scheduler) runBatch(ctx context.Context, name string, fn func(context.Context) error) bool {
 	s.wg.Add(1)
 	defer s.wg.Done()
+	if s.claim != nil {
+		runKey := s.now().In(s.loc).Format("2006-01-02") + ":" + name
+		ok, err := s.claim(ctx, "todos", runKey)
+		if err != nil {
+			slog.Warn("todos scheduler claim failed, running anyway", "job", name, "error", err)
+		} else if !ok {
+			slog.Info("todos scheduler job already claimed", "job", name, "run_key", runKey)
+			return true
+		}
+	}
 	if err := fn(ctx); err != nil {
 		slog.Error("todos scheduler job failed", "job", name, "error", err)
 		return false

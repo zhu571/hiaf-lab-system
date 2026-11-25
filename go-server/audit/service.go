@@ -7,6 +7,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"log/slog"
 	"strings"
 	"time"
 )
@@ -27,6 +28,50 @@ type Service struct {
 }
 
 func NewService(db *sql.DB) *Service { return &Service{db: db} }
+
+// EnsurePartitions 创建从当前月到 ahead 个月之后的 audit_log 月分区（AR-02）。
+// 表名/日期均由 time 生成，不接受外部输入；CREATE TABLE IF NOT EXISTS 幂等。
+func (s *Service) EnsurePartitions(ctx context.Context, ahead int) error {
+	if ahead < 0 {
+		ahead = 0
+	}
+	now := time.Now().UTC()
+	base := time.Date(now.Year(), now.Month(), 1, 0, 0, 0, 0, time.UTC)
+	for i := 0; i <= ahead; i++ {
+		start := base.AddDate(0, i, 0)
+		end := start.AddDate(0, 1, 0)
+		name := "audit_log_" + start.Format("200601")
+		stmt := fmt.Sprintf(
+			`CREATE TABLE IF NOT EXISTS %s PARTITION OF audit_log FOR VALUES FROM ('%s') TO ('%s')`,
+			name, start.Format("2006-01-02"), end.Format("2006-01-02"),
+		)
+		if _, err := s.db.ExecContext(ctx, stmt); err != nil {
+			return fmt.Errorf("create audit partition %s: %w", name, err)
+		}
+	}
+	return nil
+}
+
+// StartPartitionMaintenance 启动时补齐当前+未来 3 个月分区，并每日检查一次；
+// 分区缺失会导致审计 INSERT 失败（no partition of relation found）。
+func (s *Service) StartPartitionMaintenance(ctx context.Context) {
+	ensure := func() {
+		if err := s.EnsurePartitions(ctx, 3); err != nil && ctx.Err() == nil {
+			slog.Warn("audit partition maintenance failed", "error", err)
+		}
+	}
+	ensure()
+	ticker := time.NewTicker(24 * time.Hour)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			ensure()
+		}
+	}
+}
 
 // ListByRequestID 返回某 request_id 的全部审计行（/api/v1/audit/{request_id}）。
 func (s *Service) ListByRequestID(ctx context.Context, requestID string) ([]Record, error) {

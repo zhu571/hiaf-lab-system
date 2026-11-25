@@ -122,6 +122,7 @@ type Service struct {
 	client     *http.Client
 	agentURL   string
 	agentToken string
+	limiter    *common.RateLimitStore
 	rlMu       sync.Mutex
 	rlCalls    map[string][]time.Time
 	schemaMu   sync.Mutex
@@ -138,6 +139,8 @@ func NewService(repo *Repository, db *sql.DB) *Service {
 		rlCalls: map[string][]time.Time{},
 	}
 }
+
+func (s *Service) SetRateLimiter(limiter *common.RateLimitStore) { s.limiter = limiter }
 
 // AutoConfigure 读取 py-agent 地址与内部 token（与 steptemplates 同机制）。
 func (s *Service) AutoConfigure() {
@@ -319,7 +322,7 @@ func (s *Service) Chat(ctx context.Context, userID, question string) (*ChatRespo
 	if question == "" || utf8.RuneCountInString(question) > 1000 {
 		return nil, fmt.Errorf("%w: 问题需 1-1000 字符", ErrInvalidInput)
 	}
-	if !s.allowOne(userID) {
+	if !s.allowOne(ctx, userID) {
 		return nil, ErrRateLimited
 	}
 	if s.agentURL == "" || s.agentToken == "" {
@@ -347,6 +350,7 @@ func (s *Service) Chat(ctx context.Context, userID, question string) (*ChatRespo
 	}
 	httpReq.Header.Set("Content-Type", "application/json")
 	httpReq.Header.Set("Authorization", "Bearer "+s.agentToken)
+	common.SetRequestIDHeader(ctx, httpReq)
 
 	resp, err := s.client.Do(httpReq)
 	if err != nil {
@@ -940,8 +944,12 @@ func snapshotSize(rows []map[string]any) int {
 	return len(data)
 }
 
-// allowOne 进程内限流：10 次/分钟/用户（复制自 steptemplates/service.go:319 先例）。
-func (s *Service) allowOne(userID string) bool {
+// allowOne 限流：优先用共享 RateLimitStore（多副本），未注入时回退进程内
+// 10 次/分钟/用户（测试与单机兼容）。
+func (s *Service) allowOne(ctx context.Context, userID string) bool {
+	if s.limiter != nil {
+		return s.limiter.Allow(ctx, userID)
+	}
 	now, cutoff := time.Now(), time.Now().Add(-time.Minute)
 	s.rlMu.Lock()
 	defer s.rlMu.Unlock()
@@ -1010,9 +1018,14 @@ func (s *Service) StartRetentionTask(ctx context.Context) {
 		loc = time.UTC
 	}
 	run := func() {
+		now := time.Now().In(loc)
+		if ok, err := common.ClaimScheduledRun(ctx, s.db, "ask_retention", now.Format("2006-01-02")); err != nil {
+			slog.Warn("ask retention claim failed, running anyway", "error", err)
+		} else if !ok {
+			return
+		}
 		s.retention.Lock()
 		defer s.retention.Unlock()
-		now := time.Now().In(loc)
 		cutoff := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, loc).AddDate(0, 0, -days)
 		if _, err := s.RunRetentionOnce(ctx, cutoff); err != nil && ctx.Err() == nil {
 			slog.Warn("ask retention run failed", "error", err)

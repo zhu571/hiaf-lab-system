@@ -7,6 +7,7 @@ import httpx
 
 from tools.api import APIError
 from tools.parse import MODEL, BASE_URL, ParseError, ensure_safe, _json_object
+from tools.request_context import REQUEST_ID
 
 
 class _ExecuteRejected(Exception):
@@ -75,10 +76,20 @@ class AskEngine:
         )
         self.go_api_base = (go_api_base or os.environ["GO_API_BASE"]).rstrip("/")
         self.service_token = service_token if service_token is not None else read_service_token()
-        # 共享 httpx.Client：serve 层 asyncio.to_thread 会并发调用 ask，
-        # _execute 用锁串行化出站请求，避免跨线程复用连接（httpx.Client 非线程安全）。
-        self._client_lock = threading.Lock()
-        self.client = httpx.Client(timeout=self.EXECUTE_TIMEOUT)
+        # 线程本地 httpx.Client（AR-04）：serve 层 asyncio.to_thread 并发调用 ask，
+        # httpx.Client 非线程安全，但也不该用全局锁把所有用户串行化。
+        # self.client 保留给测试注入 fake transport。
+        self.client = None
+        self._local = threading.local()
+
+    def _http_client(self):
+        if self.client is not None:
+            return self.client
+        client = getattr(self._local, "client", None)
+        if client is None:
+            client = httpx.Client(timeout=self.EXECUTE_TIMEOUT)
+            self._local.client = client
+        return client
 
     @staticmethod
     def _build_agent(api_key, name, prompt_path, HookDecision, LightAgent, ToolRegistry, NoToolHook):
@@ -211,13 +222,16 @@ class AskEngine:
     def _execute(self, sql, user_id=""):
         if not self.service_token:
             raise APIError("service token is not configured")
+        headers = {"Authorization": "Bearer " + self.service_token}
+        request_id = REQUEST_ID.get()
+        if request_id:
+            headers["X-Request-Id"] = request_id
         try:
-            with self._client_lock:
-                response = self.client.post(
-                    self.go_api_base + "/api/v1/ask/execute",
-                    json={"sql": sql, "user_id": str(user_id or "")},
-                    headers={"Authorization": "Bearer " + self.service_token},
-                )
+            response = self._http_client().post(
+                self.go_api_base + "/api/v1/ask/execute",
+                json={"sql": sql, "user_id": str(user_id or "")},
+                headers=headers,
+            )
         except (httpx.TimeoutException, httpx.TransportError) as exc:
             raise APIError("Go API unavailable") from exc
         if response.status_code >= 500:

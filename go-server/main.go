@@ -28,6 +28,7 @@ import (
 	"github.com/zhu571/hiaf-lab-system/go-server/electrical"
 	"github.com/zhu571/hiaf-lab-system/go-server/experiences"
 	"github.com/zhu571/hiaf-lab-system/go-server/instruments"
+	"github.com/zhu571/hiaf-lab-system/go-server/internal/config"
 	"github.com/zhu571/hiaf-lab-system/go-server/issues"
 	"github.com/zhu571/hiaf-lab-system/go-server/logs"
 	mw "github.com/zhu571/hiaf-lab-system/go-server/middleware"
@@ -50,26 +51,43 @@ var frontendFiles embed.FS
 func main() {
 	slog.SetDefault(slog.New(slog.NewJSONHandler(os.Stdout, nil)))
 
-	jwtSecret, err := common.ReadSecret("/run/secrets/jwt_key", "JWT_SECRET")
+	cfg, err := config.Load()
+	if err != nil {
+		slog.Error("failed to load config", "error", err)
+		os.Exit(1)
+	}
+	cfg.LogRedacted()
+
+	jwtSecret, err := common.ReadSecret(cfg.Auth.JWTSecretFile, cfg.Auth.JWTSecretEnv)
 	if err != nil {
 		slog.Error("failed to read jwt secret", "error", err)
 		os.Exit(1)
 	}
 	mw.SetJWTSecret([]byte(jwtSecret))
 
-	serviceToken, err := common.ReadSecret("/run/secrets/service_token", "SERVICE_TOKEN")
+	serviceToken, err := common.ReadSecret(cfg.Auth.ServiceTokenFile, cfg.Auth.ServiceTokenEnv)
 	if err != nil {
 		slog.Warn("service token 未配置（todos scheduler 将无法拉取日报）", "error", err)
 	}
 	mw.SetServiceToken(serviceToken)
+	mw.SetIdempotencyV2(cfg.Features.IdempotencyV2)
 
-	db, err := common.OpenDB()
+	db, err := common.OpenDBWithOptions(common.DBOptions{
+		Host:         cfg.DB.Host,
+		Port:         cfg.DB.Port,
+		User:         cfg.DB.User,
+		Name:         cfg.DB.Name,
+		PasswordFile: cfg.DB.PasswordFile,
+		PasswordEnv:  cfg.DB.PasswordEnv,
+		MaxOpen:      cfg.DB.MaxOpen,
+		MaxIdle:      cfg.DB.MaxIdle,
+	})
 	if err != nil {
 		slog.Error("failed to open database", "error", err)
 		os.Exit(1)
 	}
 	defer db.Close()
-	port := commonEnv("PORT", "8000")
+	port := cfg.HTTP.Port
 
 	// 告警中心模块（方案 2026-08-09_alert-center）：先于各接入点构造，
 	// 经窄接口注入 middleware/auth/instruments/todos（模块间不跨模块直连）。
@@ -112,6 +130,7 @@ func main() {
 	if err := logsSvc.AutoConfigure(); err != nil {
 		slog.Warn("logs ai-parse autoconfigure failed", "error", err)
 	}
+	logsSvc.SetRateLimiter(common.NewRateLimitStore(db, "logs_ai_parse", 10, time.Minute))
 	logsHandler := logs.NewHandler(logsSvc)
 	auditSvc := audit.NewService(db)
 	auditHandler := audit.NewHandler(auditSvc)
@@ -133,6 +152,7 @@ func main() {
 	askRepo := ask.NewRepository(db)
 	askSvc := ask.NewService(askRepo, db)
 	askSvc.AutoConfigure()
+	askSvc.SetRateLimiter(common.NewRateLimitStore(db, "ask", 10, time.Minute))
 	askSvc.StartupCheck(context.Background())
 	askHandler := ask.NewHandler(askSvc)
 	issuesSvc := issues.NewService(issuesRepo, issues.ProjectAccessAdapter{DB: db, Repo: projectsRepo}, agentSvc)
@@ -152,12 +172,13 @@ func main() {
 	templatesRepo := steptemplates.NewRepository(db)
 	templatesSvc := steptemplates.NewService(templatesRepo, db)
 	templatesSvc.AutoConfigure()
+	templatesSvc.SetRateLimiter(common.NewRateLimitStore(db, "steptemplates", 10, time.Minute))
 	templatesHandler := steptemplates.NewHandler(templatesSvc)
 	assemblySvc.ConfigureTemplates(templateReaderBridge{repo: templatesRepo})
 	runsSvc.ConfigureTemplates(runTemplateReaderBridge{repo: templatesRepo})
 	runsSvc.ConfigureReports(runReportReaderBridge{repo: logsRepo})
 	testDataRepo := testdata.NewRepository(db)
-	selfBase := commonEnv("SELF_BASE_URL", "http://127.0.0.1:"+port)
+	selfBase := cfg.App.SelfBaseURL
 	testDataSvc := testdata.NewService(testDataRepo, testdata.ProjectAccessAdapter{Repo: projectsRepo},
 		testdata.NewHTTPRunValidator(selfBase))
 	testDataHandler := testdata.NewHandler(testDataSvc)
@@ -179,7 +200,7 @@ func main() {
 			rfmatch:  rfMatchingSvc,
 			projects: projectsRepo,
 		},
-		commonEnv("ATTACHMENT_DIR", "./uploads/"))
+		cfg.App.AttachmentDir)
 	attachmentsHandler := attachments.NewHandler(attachmentsSvc)
 	agentSvc.SetExecutor(candidateExecutor{issues: issuesSvc, experiences: experiencesSvc})
 	// trace 端点（C8）的三个只读注入：日报当前值（logs）、审计行（audit）、
@@ -197,8 +218,8 @@ func main() {
 		slog.Error("failed to create instruments service", "error", err)
 		os.Exit(1)
 	}
-	e5063aAddr := commonEnv("E5063A_ADDR", "10.51.12.157:5025")
-	hiokiAddr := commonEnv("HIOKI_IM3536_ADDR", "10.51.12.101:3500")
+	e5063aAddr := cfg.Instruments.E5063AAddr
+	hiokiAddr := cfg.Instruments.HiokiIM3536Addr
 	e5063aWorker := instruments.NewInstrumentWorker(instruments.WorkerConfig{
 		InstrumentID: "e5063a",
 		Addr:         e5063aAddr,
@@ -215,7 +236,7 @@ func main() {
 		"e5063a":       e5063aWorker,
 		"hioki_im3536": hiokiWorker,
 	}
-	if addr := os.Getenv("KEYSIGHT_33210A_ADDR"); addr != "" {
+	if addr := cfg.Instruments.Keysight33210AAddr; addr != "" {
 		workers["keysight_33210a"] = instruments.NewInstrumentWorker(instruments.WorkerConfig{
 			InstrumentID: "keysight_33210a", Addr: addr, Terminator: "\n", Reporter: alertSvc,
 		})
@@ -253,7 +274,7 @@ func main() {
 	}
 	electricalHandler := electrical.NewHandler(electricalSvc)
 
-	repoRoot := commonEnv("REPO_ROOT", "/opt/hiaf-lab-system")
+	repoRoot := cfg.App.RepoRoot
 	systemSvc := system.NewService(repoRoot)
 	systemHandler := system.NewHandler(systemSvc)
 
@@ -294,6 +315,9 @@ func main() {
 	r.Use(mw.SourceGate())
 	r.Use(middleware.RealIP)
 	r.Use(mw.RequestID)
+	if cfg.Features.Recoverer {
+		r.Use(mw.Recoverer)
+	}
 	r.Use(mw.ServiceToken())
 	r.Use(mw.CORS)
 	r.Use(mw.CSRF)
@@ -396,7 +420,7 @@ func main() {
 			r.Get("/", logsHandler.GetReportByID)
 			r.Patch("/", logsHandler.UpdateReportRawText)
 			r.Post("/submit", logsHandler.SubmitReport)
-			r.Post("/ai-parse", logsHandler.AiParseReport)
+			r.With(mw.Timeout(90*time.Second)).Post("/ai-parse", logsHandler.AiParseReport)
 			r.Post("/translations", logsHandler.Translation)
 			r.Patch("/translations", logsHandler.Translation)
 			r.Post("/translations/", logsHandler.Translation)
@@ -503,7 +527,7 @@ func main() {
 		r.Use(mw.RequireIdempotencyKey(db))
 		r.Get("/", templatesHandler.List)
 		r.Post("/", templatesHandler.Create)
-		r.Post("/generate", templatesHandler.Generate)
+		r.With(mw.Timeout(90*time.Second)).Post("/generate", templatesHandler.Generate)
 		r.Route("/{id}", func(r chi.Router) {
 			r.Get("/", templatesHandler.GetByID)
 			r.Patch("/", templatesHandler.Update)
@@ -580,7 +604,7 @@ func main() {
 		r.Post("/", experiencesHandler.Create)
 		r.Post("/candidates", experiencesHandler.Create)
 		// AI-2 经验候选提取：maintainer+ 手动触发（对齐 /api/v1/weekly/summary 角色门槛）。
-		r.With(mw.RequireRole(auth.RoleAdmin, auth.RoleMaintainer)).
+		r.With(mw.RequireRole(auth.RoleAdmin, auth.RoleMaintainer), mw.Timeout(360*time.Second)).
 			Post("/extract-candidates", experiencesHandler.ExtractCandidates)
 		r.Route("/{id}", func(r chi.Router) {
 			r.Get("/", experiencesHandler.GetByID)
@@ -595,6 +619,7 @@ func main() {
 		r.Use(mw.AuthRequired)
 		r.Use(mw.Audit(db))
 		r.With(mw.RequireRole(auth.RoleAdmin, auth.RoleMaintainer),
+			mw.Timeout(360*time.Second),
 			mw.RequireIdempotencyKey(db)).Post("/summary", weeklyHandler.Summary)
 	})
 	r.Route("/api/v1/attachments", func(r chi.Router) {
@@ -641,7 +666,7 @@ func main() {
 			})
 			r.Get("/{id}/status", instrumentsHandler.InstrumentStatus)
 			r.Get("/{id}/flows/{flow_id}", instrumentsHandler.GetFlow)
-			r.Post("/{id}/nl-commands", instrumentsHandler.InterpretCommand)
+			r.With(mw.Timeout(90*time.Second)).Post("/{id}/nl-commands", instrumentsHandler.InterpretCommand)
 			r.Post("/{id}/nl-execute", instrumentsHandler.NLExecute)
 			r.Post("/{id}/emergency-stop", instrumentsHandler.EmergencyStop)
 			r.With(mw.RequireRole(auth.RoleMaintainer, auth.RoleAdmin)).Post("/{id}/manual-check", instrumentsHandler.ConfirmManualCheck)
@@ -712,6 +737,7 @@ func main() {
 			r.Use(mw.AuthRequired)
 			r.Use(mw.Audit(db))
 			r.Use(mw.RequireIdempotencyKey(db))
+			r.Use(mw.Timeout(90 * time.Second))
 			r.Post("/chat", askHandler.Chat)
 			r.Get("/history", askHandler.History)
 			r.Get("/history/{id}", askHandler.HistoryByID)
@@ -766,8 +792,11 @@ func main() {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 	translationSvc.Start(ctx)
-	if os.Getenv("TODOS_SCHEDULER_ENABLED") != "false" {
+	if cfg.Scheduler.TodosEnabled {
 		sched := todos.NewScheduler(todosSvc, loc, time.Now)
+		sched.SetRunClaimer(func(ctx context.Context, job, runKey string) (bool, error) {
+			return common.ClaimScheduledRun(ctx, db, job, runKey)
+		})
 		// 连续失败告警收敛到告警中心（warning/todos），由 alert 模块聚合去重后推送。
 		sched.SetAlertReporter(func(title, msg string) error {
 			_, err := alertSvc.Report(context.Background(), "warning", "todos", title, msg)
@@ -777,8 +806,11 @@ func main() {
 		slog.Info("todos scheduler enabled")
 	}
 	// 周报定时调度（AI-1）：每周日 20:00；WEEKLY_SUMMARY_AUTHOR_ID 未配置时跳过。
-	if os.Getenv("WEEKLY_SCHEDULER_ENABLED") != "false" {
-		weeklySched := weekly.NewScheduler(weeklySvc, os.Getenv("WEEKLY_SUMMARY_AUTHOR_ID"), loc, time.Now)
+	if cfg.Scheduler.WeeklyEnabled {
+		weeklySched := weekly.NewScheduler(weeklySvc, cfg.Scheduler.WeeklyAuthorID, loc, time.Now)
+		weeklySched.SetRunClaimer(func(ctx context.Context, job, runKey string) (bool, error) {
+			return common.ClaimScheduledRun(ctx, db, job, runKey)
+		})
 		weeklySched.SetAlertReporter(func(title, msg string) error {
 			_, err := alertSvc.Report(context.Background(), "warning", "weekly", title, msg)
 			return err
@@ -790,10 +822,23 @@ func main() {
 	go electricalSvc.Run(ctx)
 	// ask_history 快照保留任务（P2-3）：立即执行一次 + 每 24h，90 天前快照置 NULL。
 	go askSvc.StartRetentionTask(ctx)
+	// 审计月分区维护（AR-02）：启动补齐 + 每日检查，防止跨月后审计 INSERT 无分区。
+	go auditSvc.StartPartitionMaintenance(ctx)
+	// 共享限流计数清理（AR-01）：启动立即 + 每日清过期窗口。
+	go common.StartRateLimitCleanup(ctx, db)
+	// 调度认领记录清理（AR-01）：保留 30 天。
+	go common.StartSchedulerClaimCleanup(ctx, db)
+	// 幂等 key 清理（AR-03）：启动立即 + 每小时清 expires_at 过期行。
+	go mw.StartIdempotencyCleanup(ctx, db)
 	// 告警中心维护任务：TTL 24h 兜底（启动立即 + 每小时）+ 90 天滚动清理（每日 04:00）。
 	go alertSvc.StartMaintenance(ctx)
 
 	srv := &http.Server{Addr: ":" + port, Handler: r}
+	if cfg.Features.RequestTimeouts {
+		srv.ReadHeaderTimeout = cfg.HTTP.ReadHeaderTimeout
+		srv.IdleTimeout = cfg.HTTP.IdleTimeout
+		srv.MaxHeaderBytes = 1 << 20
+	}
 	go func() {
 		<-ctx.Done()
 		shutdownCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
@@ -833,11 +878,4 @@ func spaHandler(staticFS fs.FS) http.HandlerFunc {
 		r.URL.Path = "/"
 		fileServer.ServeHTTP(w, r)
 	}
-}
-
-func commonEnv(key, def string) string {
-	if v := os.Getenv(key); v != "" {
-		return v
-	}
-	return def
 }

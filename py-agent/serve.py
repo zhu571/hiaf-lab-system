@@ -1,12 +1,15 @@
 import asyncio
 import json
+import logging
 import os
 import re
 import secrets
 from pathlib import Path
+from uuid import uuid4
 
 import uvicorn
 from starlette.applications import Starlette
+from starlette.datastructures import MutableHeaders
 from starlette.requests import Request
 from starlette.responses import JSONResponse
 from starlette.routing import Route
@@ -14,10 +17,25 @@ from starlette.routing import Route
 from tools.ask import AskEngine
 from tools.experience import ExperienceExtractor
 from tools.parse import InstrumentFlowDecider, InstrumentInterpreter, ParseError, Parser
+from tools.request_context import REQUEST_ID
 from tools.stepplan import StepPlanner
 from tools.todoplan import TodoPlanner
 from tools.weekly import WeeklySummarizer
 from tools.translation import FIELDS, LOCALES, SOURCE_LOCALES, Translator, validate_translation
+
+# 全局限流（AR-04）：所有 LLM 端点共享，防止单进程把线程池/上游打满。
+# Semaphore 绑定事件循环，测试会创建多个 loop，因此按 loop 懒创建。
+MAX_CONCURRENCY = max(1, int(os.getenv("PY_AGENT_MAX_CONCURRENCY", "8")))
+_SEMAPHORES: dict[int, asyncio.Semaphore] = {}
+
+
+def _llm_semaphore() -> asyncio.Semaphore:
+    loop = asyncio.get_running_loop()
+    sem = _SEMAPHORES.get(id(loop))
+    if sem is None:
+        sem = asyncio.Semaphore(MAX_CONCURRENCY)
+        _SEMAPHORES[id(loop)] = sem
+    return sem
 
 
 def read_token():
@@ -233,6 +251,29 @@ def validate_experience_extract(data):
     return issues
 
 
+class RequestIDMiddleware:
+    """纯 ASGI 中间件：读 Go 透传的 X-Request-Id，写入 contextvar 与响应头（AR-07）。"""
+    def __init__(self, app):
+        self.app = app
+
+    async def __call__(self, scope, receive, send):
+        if scope["type"] != "http":
+            await self.app(scope, receive, send)
+            return
+        headers = dict(scope.get("headers") or [])
+        request_id = headers.get(b"x-request-id", b"").decode("latin-1").strip()
+        if not request_id:
+            request_id = "py-" + uuid4().hex
+        REQUEST_ID.set(request_id)
+
+        async def send_with_id(message):
+            if message["type"] == "http.response.start":
+                MutableHeaders(scope=message)["X-Request-Id"] = request_id
+            await send(message)
+
+        await self.app(scope, receive, send_with_id)
+
+
 def create_app(interpreter, planner, parser, todo_planner, token, ask_engine=None, weekly=None, extractor=None, translator=None, flow_decider=None):
     def make_endpoint(validate, handler, parse_error_code):
         """端点工厂：统一 Bearer 鉴权、JSON 解析（64KB 上限）、三态异常映射（400/422/502）。
@@ -246,7 +287,8 @@ def create_app(interpreter, planner, parser, todo_planner, token, ask_engine=Non
                 return JSONResponse({"error": "unauthorized"}, status_code=401)
             try:
                 data = await request.json()
-                result = await handler(validate(data), data)
+                async with _llm_semaphore():
+                    result = await handler(validate(data), data)
                 return JSONResponse(result)
             except (ValueError, json.JSONDecodeError):
                 return JSONResponse({"error": "bad_request"}, status_code=400)
@@ -328,7 +370,7 @@ def create_app(interpreter, planner, parser, todo_planner, token, ask_engine=Non
             raise RuntimeError("translator is not configured")
         return await asyncio.to_thread(translator.translate, *validated)
 
-    return Starlette(routes=[
+    app = Starlette(routes=[
         Route("/health", health),
         Route("/v1/interpret", make_endpoint(validate_request, do_interpret, "interpretation_failed"), methods=["POST"]),
         Route("/v1/instrument-flow-next", make_endpoint(validate_flow_next, do_flow_next, "flow_decision_failed"), methods=["POST"]),
@@ -341,14 +383,36 @@ def create_app(interpreter, planner, parser, todo_planner, token, ask_engine=Non
         Route("/v1/experience-extract", make_endpoint(validate_experience_extract, do_experience_extract, "experience_extract_failed"), methods=["POST"]),
         Route("/v1/translate", make_endpoint(validate_translation_request, do_translation, "translation_failed"), methods=["POST"]),
     ])
+    app.add_middleware(RequestIDMiddleware)
+    return app
 
 
-if __name__ == "__main__":
+class _RequestIDLogFilter(logging.Filter):
+    """把 contextvar 里的 request_id 注入每条日志（AR-07）。"""
+
+    def filter(self, record):
+        record.request_id = REQUEST_ID.get() or "-"
+        return True
+
+
+def _configure_logging():
+    handler = logging.StreamHandler()
+    handler.addFilter(_RequestIDLogFilter())
+    logging.basicConfig(
+        level=logging.INFO,
+        handlers=[handler],
+        format="%(asctime)s %(levelname)s %(name)s [%(request_id)s] %(message)s",
+        force=True,
+    )
+
+
+def build_app():
+    """uvicorn factory：每个 worker 进程各自构造一份 app（AR-04）。"""
     api_key = os.getenv("DEEPSEEK_API_KEY")
     if not api_key:
         raise RuntimeError("DEEPSEEK_API_KEY environment variable is not set")
     daily_prompt = Path(__file__).parent / "prompts" / "daily_logs.txt"
-    app = create_app(
+    return create_app(
         InstrumentInterpreter(api_key), StepPlanner(api_key),
         Parser(api_key, prompt_path=daily_prompt), TodoPlanner(api_key), read_token(),
         ask_engine=AskEngine(api_key),
@@ -357,4 +421,10 @@ if __name__ == "__main__":
         translator=Translator(api_key),
         flow_decider=InstrumentFlowDecider(api_key),
     )
-    uvicorn.run(app, host="0.0.0.0", port=8001)
+
+
+if __name__ == "__main__":
+    _configure_logging()
+    # UVICORN_WORKERS > 1 时每进程独立 Parse/AskEngine；总并发 ≈ workers * PY_AGENT_MAX_CONCURRENCY。
+    workers = max(1, int(os.getenv("UVICORN_WORKERS", "1")))
+    uvicorn.run("serve:build_app", factory=True, workers=workers, host="0.0.0.0", port=8001)

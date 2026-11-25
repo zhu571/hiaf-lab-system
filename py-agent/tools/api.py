@@ -6,6 +6,7 @@ from pathlib import Path
 import httpx
 
 from tools.parse import MODEL
+from tools.request_context import REQUEST_ID
 
 
 class APIError(RuntimeError):
@@ -126,6 +127,9 @@ class GoAPI:
 
     def _request(self, method, path, authenticate=True, headers=None, **kwargs):
         headers = dict(headers or {})
+        request_id = REQUEST_ID.get()
+        if request_id:
+            headers.setdefault("X-Request-Id", request_id)
         if self.csrf_token and method.upper() not in ("GET", "HEAD", "OPTIONS"):
             headers["X-CSRF-Token"] = self.csrf_token
         refreshed = False

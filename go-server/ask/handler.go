@@ -81,6 +81,7 @@ func (h *Handler) History(w http.ResponseWriter, r *http.Request) {
 
 // HistoryByID GET /api/v1/ask/history/{id} —— 明细（含 rows 快照，仅本人可读）。
 func (h *Handler) HistoryByID(w http.ResponseWriter, r *http.Request) {
+	middleware.SetAuditAction(r.Context(), "ask.history.read")
 	claims := middleware.GetUserClaims(r.Context())
 	if claims == nil {
 		common.WriteError(w, r, http.StatusUnauthorized, "unauthorized", "未登录", nil)

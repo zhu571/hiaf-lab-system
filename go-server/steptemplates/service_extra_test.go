@@ -442,7 +442,7 @@ func TestSvcGenerate(t *testing.T) {
 	t.Run("rate limited", func(t *testing.T) {
 		svc, mock := newGenerateTestService(t, "u-rl")
 		for i := 0; i < 10; i++ {
-			if !svc.allowOne("u-rl") {
+			if !svc.allowOne(context.Background(), "u-rl") {
 				t.Fatalf("call %d allowed", i+1)
 			}
 		}
@@ -572,16 +572,16 @@ func TestAutoConfigure(t *testing.T) {
 func TestSvcAllowOne(t *testing.T) {
 	svc := &Service{rlCalls: map[string][]time.Time{}}
 	for i := 0; i < 10; i++ {
-		if !svc.allowOne("u-a") {
+		if !svc.allowOne(context.Background(), "u-a") {
 			t.Fatalf("call %d", i+1)
 		}
 	}
-	if svc.allowOne("u-a") {
+	if svc.allowOne(context.Background(), "u-a") {
 		t.Fatal("11th must be rejected")
 	}
 	// 过期裁剪
 	svc.rlCalls["u-b"] = []time.Time{time.Now().Add(-2 * time.Minute), time.Now().Add(-2 * time.Minute)}
-	if !svc.allowOne("u-b") {
+	if !svc.allowOne(context.Background(), "u-b") {
 		t.Fatal("expired calls must be allowed")
 	}
 	if len(svc.rlCalls["u-b"]) != 1 {

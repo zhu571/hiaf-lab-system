@@ -27,7 +27,8 @@ func SetServiceToken(token string) {
 // ServiceToken 校验白名单路径上的 SERVICE_TOKEN。白名单按方法分条件匹配：
 // GET /api/v1/daily-reports/by-date（拉全量用户日报是敏感操作，scope 收敛）、
 // POST /api/v1/ask/execute（AI 智能查询内部只读执行端点，见 ask 模块）与
-// POST /api/v1/alerts/report、/api/v1/alerts/resolve（告警中心写端点，见 alert 模块）。
+// POST /api/v1/alerts/report、/api/v1/alerts/resolve（告警中心写端点，见 alert 模块）与
+// POST /api/v1/scans/ingest（GC 扫描 watcher 自动入库，见 scans 模块）。
 // 命中且正确 → ctx 标记 serviceCallKey 并跳过 JWT；非白名单路径直接放行（不消费 token）；
 // 白名单上 token 错误 → 401 + 泄露告警。
 func ServiceToken() func(http.Handler) http.Handler {
@@ -36,7 +37,8 @@ func ServiceToken() func(http.Handler) http.Handler {
 			if !((r.Method == http.MethodGet && r.URL.Path == "/api/v1/daily-reports/by-date") ||
 				(r.Method == http.MethodPost && r.URL.Path == "/api/v1/ask/execute") ||
 				(r.Method == http.MethodPost && r.URL.Path == "/api/v1/alerts/report") ||
-				(r.Method == http.MethodPost && r.URL.Path == "/api/v1/alerts/resolve")) {
+				(r.Method == http.MethodPost && r.URL.Path == "/api/v1/alerts/resolve") ||
+				(r.Method == http.MethodPost && r.URL.Path == "/api/v1/scans/ingest")) {
 				next.ServeHTTP(w, r)
 				return
 			}

@@ -1,6 +1,7 @@
 package ask
 
 import (
+	"context"
 	"strings"
 	"testing"
 	"time"
@@ -121,22 +122,22 @@ func TestAllowOne(t *testing.T) {
 
 	// 10 次以内放行，第 11 次拒绝
 	for i := 0; i < 10; i++ {
-		if !svc.allowOne("u-rate") {
+		if !svc.allowOne(context.Background(), "u-rate") {
 			t.Fatalf("call %d should be allowed", i+1)
 		}
 	}
-	if svc.allowOne("u-rate") {
+	if svc.allowOne(context.Background(), "u-rate") {
 		t.Fatal("11th call must be rejected")
 	}
 
 	// 其他用户不受影响
-	if !svc.allowOne("u-other") {
+	if !svc.allowOne(context.Background(), "u-other") {
 		t.Fatal("other user must be allowed")
 	}
 
 	// 其他用户的过期 key（>1min 无调用）被顺手清理
 	svc.rlCalls["u-stale"] = []time.Time{time.Now().Add(-2 * time.Minute)}
-	if !svc.allowOne("u-fresh") {
+	if !svc.allowOne(context.Background(), "u-fresh") {
 		t.Fatal("fresh user must be allowed")
 	}
 	if _, ok := svc.rlCalls["u-stale"]; ok {
@@ -148,7 +149,7 @@ func TestAllowOne(t *testing.T) {
 	for i := range svc.rlCalls["u-own"] {
 		svc.rlCalls["u-own"][i] = time.Now().Add(-2 * time.Minute)
 	}
-	if !svc.allowOne("u-own") {
+	if !svc.allowOne(context.Background(), "u-own") {
 		t.Fatal("expired calls must be trimmed and allowed")
 	}
 	if len(svc.rlCalls["u-own"]) != 1 {

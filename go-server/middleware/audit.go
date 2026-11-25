@@ -9,10 +9,14 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"github.com/zhu571/hiaf-lab-system/go-server/common"
 )
+
+// lastAuditAlertUnix 限频审计失败告警（60s 一次），避免 DB 故障时告警风暴。
+var lastAuditAlertUnix atomic.Int64
 
 type auditActionKeyType string
 
@@ -115,7 +119,13 @@ func Audit(db *sql.DB) func(next http.Handler) http.Handler {
 				detail:         detail,
 				lastLogin:      lastLogin,
 			}); err != nil {
+				auditWriteFailedTotal.Add(1)
 				slog.Error("audit log insert failed", "error", err, "request_id", common.GetRequestID(r.Context()))
+				now := time.Now().Unix()
+				if prev := lastAuditAlertUnix.Load(); now-prev >= 60 && lastAuditAlertUnix.CompareAndSwap(prev, now) {
+					ReportAlert("critical", "security", "审计写入失败",
+						"审计行落库失败（request_id="+common.GetRequestID(r.Context())+"），hash 链可能出现事件缺口")
+				}
 			}
 		})
 	}

@@ -132,6 +132,8 @@ func (h *Handler) GetReportByDate(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handler) GetReportByID(w http.ResponseWriter, r *http.Request) {
+	middleware.SetAuditAction(r.Context(), "daily_report.read")
+	middleware.SetAuditDetail(r.Context(), map[string]any{"report_id": chi.URLParam(r, "id")})
 	claims := middleware.GetUserClaims(r.Context())
 	if claims == nil {
 		common.WriteError(w, r, http.StatusUnauthorized, "unauthorized", "未登录", nil)

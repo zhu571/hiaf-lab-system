@@ -17,6 +17,7 @@ import (
 	"time"
 
 	"github.com/zhu571/hiaf-lab-system/go-server/auth"
+	"github.com/zhu571/hiaf-lab-system/go-server/common"
 	"github.com/zhu571/hiaf-lab-system/go-server/projects"
 )
 
@@ -46,6 +47,7 @@ type Service struct {
 	client       *http.Client
 	plannerURL   string
 	plannerToken string
+	limiter      *common.RateLimitStore
 	rlMu         sync.Mutex
 	rlCalls      map[string][]time.Time
 }
@@ -59,6 +61,8 @@ func NewService(repo stepRepo, db *sql.DB) *Service {
 	}
 	return svc
 }
+
+func (s *Service) SetRateLimiter(limiter *common.RateLimitStore) { s.limiter = limiter }
 
 func (s *Service) ConfigurePlanner(url, token string) {
 	s.plannerURL = strings.TrimRight(url, "/")
@@ -90,7 +94,7 @@ func (s *Service) Generate(ctx context.Context, userID, userRole string, req Gen
 	if err := s.requireGenerateAccess(userID); err != nil {
 		return nil, err
 	}
-	if !s.allowOne(userID) {
+	if !s.allowOne(ctx, userID) {
 		return nil, fmt.Errorf("AI 生成请求过于频繁，请稍后再试")
 	}
 	if s.plannerURL == "" || s.plannerToken == "" {
@@ -124,6 +128,7 @@ func (s *Service) Generate(ctx context.Context, userID, userRole string, req Gen
 	}
 	httpReq.Header.Set("Content-Type", "application/json")
 	httpReq.Header.Set("Authorization", "Bearer "+s.plannerToken)
+	common.SetRequestIDHeader(ctx, httpReq)
 
 	resp, err := s.client.Do(httpReq)
 	if err != nil {
@@ -319,7 +324,10 @@ func (s *Service) requireGenerateAccess(userID string) error {
 	return nil
 }
 
-func (s *Service) allowOne(userID string) bool {
+func (s *Service) allowOne(ctx context.Context, userID string) bool {
+	if s.limiter != nil {
+		return s.limiter.Allow(ctx, userID)
+	}
 	now, cutoff := time.Now(), time.Now().Add(-time.Minute)
 	s.rlMu.Lock()
 	defer s.rlMu.Unlock()

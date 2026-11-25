@@ -11,6 +11,8 @@ import (
 	"path/filepath"
 	"strings"
 	"time"
+
+	"github.com/zhu571/hiaf-lab-system/go-server/common"
 )
 
 // httpExtractClient 生产 LLM 客户端：调 py-agent /v1/experience-extract（300s 超时——
@@ -53,6 +55,7 @@ func (c *httpExtractClient) Extract(ctx context.Context, req ExtractLLMRequest) 
 	}
 	httpReq.Header.Set("Content-Type", "application/json")
 	httpReq.Header.Set("Authorization", "Bearer "+c.token)
+	common.SetRequestIDHeader(ctx, httpReq)
 	resp, err := c.client.Do(httpReq)
 	if err != nil {
 		return nil, fmt.Errorf("%w: py-agent 请求失败: %w", ErrExtractUpstream, err)
