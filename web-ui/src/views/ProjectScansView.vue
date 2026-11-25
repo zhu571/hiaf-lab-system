@@ -94,6 +94,11 @@
           />
           <el-empty v-else :description="t('scan.noImage')" />
         </div>
+        <ScanCurveChart
+          v-if="selected.format === 'v7' || selected.format === 'v11' || selected.format === 'v12'"
+          :scan-id="selected.id"
+          :columns="selected.columns"
+        />
         <el-form label-width="90px">
           <el-form-item :label="t('scan.titleLabel')">
             <el-input v-model="editTitle" maxlength="200" show-word-limit :disabled="selected.is_void" />
@@ -148,6 +153,7 @@ import { onMounted, ref } from 'vue'
 import { useRoute } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import { ElMessage, ElMessageBox } from 'element-plus'
+import ScanCurveChart from '@/components/business/ScanCurveChart.vue'
 import {
   downloadScanFile, getScan, listScans, scanFileUrl,
   updateScan, uploadScan, voidScan, type ScanItem,

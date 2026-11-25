@@ -1684,6 +1684,9 @@ export default {
     uploadFailed: '上传失败',
     downloadFailed: '下载失败',
     noImage: '该扫描没有图片',
+    curve: '扫描曲线',
+    curveHint: '前 5 个数值列，抽样最多 2000 点',
+    curveLoadFailed: '曲线加载失败',
     tagPlaceholder: '输入标签，回车确认'
   }
 }

@@ -1733,6 +1733,9 @@ export default {
     uploadFailed: 'Upload failed',
     downloadFailed: 'Download failed',
     noImage: 'This scan has no image',
+    curve: 'Scan curve',
+    curveHint: 'First 5 numeric columns, sampled to at most 2000 points',
+    curveLoadFailed: 'Failed to load curve',
     tagPlaceholder: 'Type a tag and press Enter'
   }
 }
