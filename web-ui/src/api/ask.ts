@@ -1,38 +1,12 @@
 import { request } from './client'
+import type { AskHistory, ChatResponse } from './types.gen'
 
 // AI 智能查询（方案 §4）：ask_history 存 rows JSONB 快照（≤256KB），
 // 列表接口不含 rows 大字段，明细接口返回快照供前端还原表格（不重新查询）。
 
-export type AskChatResponse = {
-  id: string
-  question: string
-  answer: string
-  sql: string
-  table_name: string
-  columns: string[]
-  rows: Record<string, unknown>[]
-  row_count: number
-  truncated: boolean
-  duration_ms: number
-  created_at: string
-}
-
-export type AskHistoryItem = {
-  id: string
-  user_id: string
-  request_id: string
-  question: string
-  answer: string
-  sql_text: string
-  table_name: string
-  columns: string[]
-  row_count: number
-  duration_ms: number
-  model: string
-  created_at: string
-}
-
-export type AskHistoryDetail = AskHistoryItem & { rows: Record<string, unknown>[] }
+export type AskChatResponse = ChatResponse
+export type AskHistoryItem = AskHistory
+export type AskHistoryDetail = AskHistory & { rows: Record<string, unknown>[] }
 
 /** AI 查询结果展示数据（重构方案 §3.7 P11：由 AskResultPanel.vue:54-63 迁入，与 19 个 api 文件内联类型惯例统一） */
 export type AskResultData = {
