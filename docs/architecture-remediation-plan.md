@@ -717,6 +717,10 @@ def _client(self):
 - 风险：生成类型命名冲突；先小范围，逐步替换。
 - 回滚：生成文件可回退，手写类型保留。
 
+> 实施状态（2026-11-25）：project_tables 已由 Go 下发、Python 回退一版；ask_reader GRANT 集成测试已加。
+> tygo 已接入 `ask` 模块生成 `web-ui/src/api/types.gen.ts`，CI 用 `go run tygo generate && git diff` 校验；
+> 其余模块的类型替换待后续逐个迁移。
+
 ---
 
 ## 11. AR-10 CI 门禁（Batch 3）
