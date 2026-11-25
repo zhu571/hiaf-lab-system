@@ -440,33 +440,7 @@ func main() {
 		})
 	})
 	registerScanRoutes(r, db, scansHandler)
-	r.Route("/api/v1/experiment-runs", func(r chi.Router) {
-		r.Use(mw.AuthRequired)
-		r.Use(mw.AgentContext(db))
-		r.Use(mw.Audit(db))
-		r.Use(mw.RequireIdempotencyKey(db))
-		r.Route("/{id}", func(r chi.Router) {
-			r.Get("/", runsHandler.GetByID)
-			r.Patch("/", runsHandler.Update)
-			r.Delete("/", runsHandler.SoftDelete)
-			r.Post("/daily-reports/{report_id}", runsHandler.AddReportLink)
-			r.Delete("/daily-reports/{report_id}", runsHandler.RemoveReportLink)
-			r.Get("/steps", runsHandler.HandleListSteps)
-			r.Post("/steps", runsHandler.HandleCreateStep)
-			r.Post("/steps/apply-template", runsHandler.HandleApplyTemplate)
-		})
-	})
-	r.Route("/api/v1/run-steps", func(r chi.Router) {
-		r.Use(mw.AuthRequired)
-		r.Use(mw.AgentContext(db))
-		r.Use(mw.Audit(db))
-		r.Use(mw.RequireIdempotencyKey(db))
-		r.Post("/reorder", runsHandler.HandleReorderSteps)
-		r.Route("/{id}", func(r chi.Router) {
-			r.Patch("/", runsHandler.HandleUpdateStep)
-			r.Delete("/", runsHandler.HandleDeleteStep)
-		})
-	})
+	registerRunRoutes(r, db, runsHandler)
 	r.Route("/api/v1/assembly", func(r chi.Router) {
 		r.Use(mw.AuthRequired)
 		r.Use(mw.AgentContext(db))
@@ -649,25 +623,7 @@ func main() {
 		r.Get("/history", electricalHandler.History)
 		r.Post("/single-shot", electricalHandler.SingleShot)
 	})
-	r.Route("/api/v1/todos", func(r chi.Router) {
-		r.Use(mw.AuthRequired)
-		r.Use(mw.AgentContext(db))
-		r.Use(mw.Audit(db))
-		r.Use(mw.RequireIdempotencyKey(db))
-		r.Get("/", todosHandler.List)
-		r.Post("/", todosHandler.Create)
-		r.Post("/llm-parse", todosHandler.ParseLLM)
-		r.Post("/llm-add", todosHandler.LLMAdd)
-		r.Get("/notification-topic", todosHandler.NotificationTopic)
-		r.Post("/notification-topic/provision", todosHandler.Provision)
-		r.Post("/notification-topic/redeem", todosHandler.Redeem)
-		r.Route("/{id}", func(r chi.Router) {
-			r.Patch("/", todosHandler.Edit)
-			r.Patch("/done", todosHandler.Done)
-			r.Patch("/defer", todosHandler.Defer)
-			r.Delete("/", todosHandler.Delete)
-		})
-	})
+	registerTodoRoutes(r, db, todosHandler)
 
 	r.Route("/api/v1/ask", func(r chi.Router) {
 		r.Group(func(r chi.Router) {
