@@ -7,7 +7,7 @@
       <el-tab-pane :label="t('audit.tabEvents')" name="events">
         <!-- 列表骨架统一 base/ListPage（结构改版 R3）：tab 内嵌省略 title，用 filters/default/pagination 槽 -->
         <ListPage
-          :loading="eventsLoading && !eventsData"
+          :loading="eventsLoading && !events.length"
           :error="eventsError"
           :empty="events.length === 0"
           :error-text="t('audit.loadFailed')"
@@ -69,8 +69,8 @@
               layout="total, sizes, prev, pager, next"
               :page-sizes="[20, 50, 100]"
               :total="total"
-              @current-change="loadEvents"
-              @size-change="onPageSizeChange"
+              @current-change="onCurrentChange"
+              @size-change="onSizeChange"
             />
           </template>
         </ListPage>
@@ -125,9 +125,8 @@ import ResponsiveTable from '@/components/base/ResponsiveTable.vue'
 import ListPage from '@/components/base/ListPage.vue'
 import { getAudit, listAuditEvents, type AuditRecord } from '@/api/audit'
 import { showApiError } from '@/composables/useNotify'
-import { useAsyncData } from '@/composables/useAsyncData'
+import { useListPage } from '@/composables/useListPage'
 import { useMobile } from '@/composables/useMobile'
-import { usePagination } from '@/composables/usePagination'
 import { formatDateTime } from '@/utils/datetime'
 
 const { t } = useI18n()
@@ -141,28 +140,29 @@ const filterUserId = ref('')
 const filterActorType = ref('')
 const timeRange = ref<[string, string] | null>(null)
 
-// 分页状态（S4 收敛 usePagination）：perPage 保持原值 20；筛选变化只重置页码（对齐原 onFilter 行为）
-const { page, perPage, total, onSizeChange } = usePagination({ perPage: 20 })
-
-// 列表数据（S4 收敛 useAsyncData）：immediate 自动首载；列表级错误只写 error ref，交 StateBlock 呈现，不再 toast
 const {
-  data: eventsData,
+  items: events,
   loading: eventsLoading,
   error: eventsError,
-  run: loadEvents
-} = useAsyncData(async () => {
-  const params: Record<string, string | number> = { page: page.value, per_page: perPage.value }
-  if (filterAction.value.trim()) params.action = filterAction.value.trim()
-  if (filterUserId.value.trim()) params.user_id = filterUserId.value.trim()
-  if (filterActorType.value) params.actor_type = filterActorType.value
-  if (timeRange.value?.[0]) params.from = timeRange.value[0]
-  if (timeRange.value?.[1]) params.to = timeRange.value[1]
-  const res = await listAuditEvents(params)
-  total.value = res.total ?? 0
-  return res.items ?? []
-})
-
-const events = computed(() => eventsData.value ?? [])
+  page,
+  perPage,
+  total,
+  refresh: loadEvents,
+  onCurrentChange,
+  onSizeChange,
+} = useListPage<AuditRecord>(
+  async ({ page: currentPage, perPage: currentPerPage }) => {
+    const params: Record<string, string | number> = { page: currentPage, per_page: currentPerPage }
+    if (filterAction.value.trim()) params.action = filterAction.value.trim()
+    if (filterUserId.value.trim()) params.user_id = filterUserId.value.trim()
+    if (filterActorType.value) params.actor_type = filterActorType.value
+    if (timeRange.value?.[0]) params.from = timeRange.value[0]
+    if (timeRange.value?.[1]) params.to = timeRange.value[1]
+    const res = await listAuditEvents(params)
+    return { items: res.items ?? [], total: res.total ?? 0 }
+  },
+  { perPage: 20 }
+)
 
 const actorTypes = computed(() => [
   { value: 'user', label: t('audit.actorUser') },
@@ -175,13 +175,7 @@ function actorLabel(v?: string) {
 
 function onFilter() {
   page.value = 1
-  loadEvents()
-}
-
-// el-pagination @size-change：每页条数切换（onSizeChange 内已重置 page=1；提到 script 以显式标注参数类型）
-function onPageSizeChange(n: number) {
-  onSizeChange(n)
-  loadEvents()
+  void loadEvents()
 }
 
 // 从列表跳转到 request_id 详情查询
