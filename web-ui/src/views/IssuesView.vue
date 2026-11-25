@@ -5,7 +5,7 @@
       <el-button type="primary" @click="createDialog = true">{{ t('issues.create') }}</el-button>
     </div>
     <!-- empty 不接线：看板 4 列 + 列内 empty-hint 即空态呈现，保持桌面布局零回归 -->
-    <StateBlock :loading="loading && !data" :error="error" :error-text="t('issues.loadFailed')" @retry="run">
+    <StateBlock :loading="loading && !data.length" :error="error" :error-text="t('issues.loadFailed')" @retry="refresh">
       <KanbanBoard :columns="boardColumns">
         <template #card="{ item }">
           <button class="issue-card" @click="open(item.id)">
@@ -24,8 +24,8 @@
       layout="total, sizes, prev, pager, next"
       :page-sizes="[20, 50, 100]"
       :total="total"
-      @current-change="run"
-      @size-change="(n: number) => { onSizeChange(n); run() }"
+      @current-change="onCurrentChange"
+      @size-change="onSizeChange"
     />
     <el-drawer v-model="drawer" size="420" :title="t('issues.detail')">
       <div v-if="selected" class="grid">
@@ -60,8 +60,7 @@ import KanbanBoard from '@/components/base/KanbanBoard.vue'
 import FormDialog from '@/components/base/FormDialog.vue'
 import CommentSection from '@/components/business/CommentSection.vue'
 import MarkdownView from '@/components/business/MarkdownView.vue'
-import { useAsyncData } from '@/composables/useAsyncData'
-import { usePagination } from '@/composables/usePagination'
+import { useListPage } from '@/composables/useListPage'
 import { statusMetaFor } from '@/utils/statusMeta'
 import { addIssueComment, createIssue, getIssue, listIssues, transitionIssue, type Issue } from '../api/issues'
 import { useProjectStore } from '../stores/project'
@@ -80,16 +79,15 @@ const draft = reactive({ title: '', severity: 'medium', description: '' })
 
 const projectId = computed(() => String(route.params.id || projects.current?.id || ''))
 
-const { page, perPage, total, reset, onSizeChange } = usePagination({ perPage: 20 })
-
-// 列表数据走 useAsyncData（内建竞态 seq + unmount 丢弃）；error 只写 ref，由 StateBlock 呈现
-const { data, loading, error, run } = useAsyncData<Issue[]>(async () => {
-  await projects.load()
-  if (!projectId.value) return []
-  const res = await listIssues(projectId.value, { page: page.value, per_page: perPage.value })
-  total.value = res.total ?? 0
-  return res.items ?? []
-})
+const { items: data, loading, error, page, perPage, total, refresh, onCurrentChange, onSizeChange } = useListPage<Issue>(
+  async ({ page: currentPage, perPage: currentPerPage }) => {
+    await projects.load()
+    if (!projectId.value) return { items: [], total: 0 }
+    const res = await listIssues(projectId.value, { page: currentPage, per_page: currentPerPage })
+    return { items: res.items ?? [], total: res.total ?? 0 }
+  },
+  { perPage: 20 }
+)
 
 const grouped = computed(() => Object.fromEntries(statuses.map((s) => [s, (data.value ?? []).filter((item) => item.status === s)])) as Record<string, Issue[]>)
 
@@ -103,10 +101,10 @@ const boardColumns = computed(() =>
   }))
 )
 
-// 切换项目回第一页重拉；首屏加载由 useAsyncData immediate 承担，无需 onMounted
+// 切换项目回第一页重拉；首屏加载由 useListPage immediate 承担
 watch(projectId, () => {
-  reset()
-  run()
+  page.value = 1
+  void refresh()
 })
 
 // 状态/严重度文案走 statusMeta 注册表 labelKey 国际化，未命中回退原文
@@ -137,7 +135,7 @@ async function transition() {
     await transitionIssue(id, targetStatus.value, reason.value)
     reason.value = ''
     ElMessage.success(t('issues.statusUpdated'))
-    await run()
+    await refresh()
     await open(id)
   } catch (err) {
     showApiError(err, t('issues.statusUpdateFailed'))
@@ -158,7 +156,7 @@ async function create() {
   try {
     await createIssue(projectId.value, draft)
     createDialog.value = false
-    await run()
+    await refresh()
   } catch (err) {
     showApiError(err, t('issues.createFailed'))
   }
