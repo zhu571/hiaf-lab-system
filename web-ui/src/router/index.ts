@@ -30,6 +30,7 @@ const DailyReportShell = () => import('@/layouts/DailyReportShell.vue')
 const ProjectLayout = () => import('@/layouts/ProjectLayout.vue')
 const ProjectDashboard = () => import('@/components/business/ProjectDashboard.vue')
 const ProjectLogsView = () => import('../views/ProjectLogsView.vue')
+const ProjectScansView = () => import('../views/ProjectScansView.vue')
 const LogDetailView = () => import('../views/LogDetailView.vue')
 const MyLogsView = () => import('../views/MyLogsView.vue')
 const TeamDailyReportDetailView = () => import('../views/TeamDailyReportDetailView.vue')
@@ -63,6 +64,7 @@ const router = createRouter({
         { path: 'experiment-runs', component: RunListView, meta: { titleKey: 'nav.projects' } },
         { path: 'test-data', component: TestDataView, meta: { titleKey: 'nav.projects' } },
         { path: 'rf-matching', component: RFMatchingView, meta: { titleKey: 'nav.projects' } },
+    { path: 'scans', component: ProjectScansView, meta: { titleKey: 'nav.projects' } },
         { path: 'assembly', component: AssemblyView, meta: { titleKey: 'nav.projects' } }
       ]
     },
