@@ -214,6 +214,10 @@ func main() {
 	agentSvc.SetReportReader(reportReaderBridge{svc: logsSvc})
 	agentSvc.SetAuditReader(auditReaderBridge{svc: auditSvc})
 	agentSvc.SetResultResolver(resultResolverBridge{issues: issuesRepo, experiences: experiencesRepo})
+	agentSvc.SetAlertReporter(func(title, detail string) error {
+		_, err := alertSvc.Report(context.Background(), "warning", "agent", title, detail)
+		return err
+	})
 	sensorsSvc, err := sensors.NewService()
 	if err != nil {
 		slog.Error("failed to create sensors service", "error", err)
@@ -855,6 +859,8 @@ func main() {
 	go mw.StartIdempotencyCleanup(ctx, db)
 	// 告警中心维护任务：TTL 24h 兜底（启动立即 + 每小时）+ 90 天滚动清理（每日 04:00）。
 	go alertSvc.StartMaintenance(ctx)
+	// 候选执行对账（AR-17）：approved 超 10 分钟未执行 → 重新执行/告警。
+	go agent.StartCandidateReconciler(ctx, agentSvc, 5*time.Minute)
 
 	srv := &http.Server{Addr: ":" + port, Handler: r}
 	if cfg.Features.RequestTimeouts {

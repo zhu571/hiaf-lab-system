@@ -34,7 +34,7 @@ HIAF 低温气体靶实验室的多人协作日志管理平台。系统已完成
 - `go-server/`：Go 后端，20+ 个模块包（含 automation、steptemplates、todos、testdata 等）。
 - `web-ui/`：Vue 3 + Element Plus 前端，30 个业务视图 + 4 个布局壳 + base/business 分层组件，目录结构与约定见 §5/§6。
 - `py-agent/`：Python LightAgent 服务 + EPICS 虚拟 IOC。
-- `migrations/`：PostgreSQL 迁移脚本（50 个版本）。
+- `migrations/`：PostgreSQL 迁移脚本（51 个版本）。
 - `deploy/`：Docker Compose（10 个服务）、Dockerfile、secrets。
 - `.github/workflows/ci.yml`：Go、前端、Python Agent 三个 CI job。
 

@@ -331,6 +331,58 @@ func (r *Repository) RejectCandidate(id, reviewerID, reason string) (*AgentCandi
 	return nil, ErrCandidateNotPending
 }
 
+type StaleCandidate struct {
+	Candidate    AgentCandidateAction
+	ActingUserID string
+}
+
+// ClaimStaleCandidates 认领 approved 超时未执行的候选（AR-17）。
+// 用 execution_attempts + last_attempt_at 做租约，避免 reconciler 与正常审批并发重复执行。
+func (r *Repository) ClaimStaleCandidates(olderThan time.Duration, maxAttempts, limit int) ([]StaleCandidate, error) {
+	seconds := int(olderThan.Seconds())
+	if seconds < 60 {
+		seconds = 60
+	}
+	if limit <= 0 || limit > 100 {
+		limit = 20
+	}
+	rows, err := r.db.Query(
+		`WITH stale AS (
+		   SELECT c.id
+		   FROM agent_candidate_actions c
+		   WHERE c.status = 'approved'
+		     AND COALESCE(c.reviewed_at, c.created_at) < now() - $1::interval
+		     AND c.execution_attempts < $2
+		     AND (c.last_attempt_at IS NULL OR c.last_attempt_at < now() - interval '10 minutes')
+		   ORDER BY COALESCE(c.reviewed_at, c.created_at)
+		   LIMIT $3
+		   FOR UPDATE SKIP LOCKED
+		 )
+		 UPDATE agent_candidate_actions c
+		 SET last_attempt_at = now(), execution_attempts = c.execution_attempts + 1
+		 FROM stale s, pending_agent_tasks t
+		 WHERE c.id = s.id AND t.id = c.task_id
+		 RETURNING c.id, c.task_id, c.action_type, c.project_id, c.pool_action_key, c.payload,
+		           c.status, c.agent_confidence, c.reviewed_by, c.reviewed_at, c.review_reason,
+		           c.executed_at, c.execution_error, c.created_at, t.acting_user_id`,
+		fmt.Sprintf("%d seconds", seconds), maxAttempts, limit,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("claim stale candidates: %w", err)
+	}
+	defer rows.Close()
+
+	items := []StaleCandidate{}
+	for rows.Next() {
+		var item StaleCandidate
+		if err := scanCandidateWithActingUser(rows, &item.Candidate, &item.ActingUserID); err != nil {
+			return nil, fmt.Errorf("scan stale candidate: %w", err)
+		}
+		items = append(items, item)
+	}
+	return items, rows.Err()
+}
+
 func (r *Repository) MarkCandidateExecuted(id string) (*AgentCandidateAction, error) {
 	var item AgentCandidateAction
 	err := scanCandidate(r.db.QueryRow(
