@@ -1,22 +1,19 @@
 import { request, requestWithMeta } from './client'
 import type { FieldTranslations } from '@/utils/contentLanguage'
+import type { DailyReport as DailyReportBase, Log as LogBase } from './types.logs.gen'
 
 export type TranslationSidecar = Record<string, FieldTranslations>
 export type TranslationRequest = { field: string; target_locale: 'zh' | 'en'; force?: boolean; translated_text?: string }
 
-export type DailyReport = {
-  id: string
-  report_date: string
-  author_id: string
-  author_name?: string
-	log_count?: number
-  raw_text: string
-  summary: string
-  content_status: string
-  quality_status: string
-  logs?: LogItem[]
-  translations?: TranslationSidecar
-}
+// tygo 生成的核心字段保持必填，其余字段可选，兼容旧视图/测试 fixture。
+type DailyReportCore = Pick<DailyReportBase, 'id' | 'report_date' | 'author_id' | 'raw_text' | 'summary' | 'content_status' | 'quality_status'>
+export type DailyReport = DailyReportCore &
+  Partial<Omit<DailyReportBase, keyof DailyReportCore>> & {
+    author_name?: string
+    log_count?: number
+    logs?: LogItem[]
+    translations?: TranslationSidecar
+  }
 
 export type DailyReportRef = Pick<DailyReport, 'id' | 'report_date' | 'author_id' | 'author_name' | 'content_status' | 'quality_status'> & {
   can_read_detail: boolean
@@ -27,22 +24,12 @@ export type TeamDailyReportProjection = Pick<DailyReport, 'id' | 'report_date' |
   logs?: LogItem[]
 }
 
-export type LogItem = {
-  id: string
-  project_id: string
-	project_code?: string
-	project_name?: string
-  author_id: string
-	author_name?: string
-  occurred_at: string
-  category: string
-  content: string
-  raw_snippet?: string
-  source: string
-  content_status: string
-  created_at?: string
-  translations?: TranslationSidecar
-}
+type LogCore = Pick<LogBase, 'id' | 'project_id' | 'author_id' | 'occurred_at' | 'category' | 'content' | 'source' | 'content_status'>
+export type LogItem = LogCore &
+  Partial<Omit<LogBase, keyof LogCore>> & {
+    created_at?: string
+    translations?: TranslationSidecar
+  }
 
 export function todayReport() {
   return request<DailyReport>({ url: '/daily-reports/today', method: 'POST', data: {} })
