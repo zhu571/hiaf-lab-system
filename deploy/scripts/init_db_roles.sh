@@ -15,12 +15,12 @@ set -euo pipefail
 # 用法（在部署机仓库根目录）：
 #   bash deploy/scripts/init_db_roles.sh
 #
-# 切换 server 到 lab_app（需要一次重启窗口）：
-#   1) 确认 deploy/secrets/db_app_password.txt 已生成（本脚本会生成）；
-#   2) compose 的 server 增加 secret 挂载 db_app_password → /run/secrets/db_app_password；
-#   3) server 环境：DB_USER=lab_app、DB_PASSWORD_FILE=/run/secrets/db_app_password；
-#   4) docker compose up -d server，跑登录/日志/审批/ask/附件冒烟；
-#   5) 回滚：DB_USER=lab、DB_PASSWORD_FILE=/run/secrets/db_password。
+# 切换 server 到 lab_app（需要一次重启窗口；opt-in override）：
+#   1) docker compose -f deploy/docker-compose.yml up -d postgres
+#   2) bash deploy/scripts/init_db_roles.sh   # 本脚本生成 deploy/secrets/db_app_password.txt
+#   3) docker compose -f deploy/docker-compose.yml -f deploy/docker-compose.lab-app.yml up -d server
+#   4) 跑登录/日志/审批/ask/附件/scans 冒烟；
+#   5) 回滚：docker compose -f deploy/docker-compose.yml up -d server（DB_USER 回到 lab）。
 # ============================================================
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"

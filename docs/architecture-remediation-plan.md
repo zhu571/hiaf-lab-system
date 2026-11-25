@@ -66,7 +66,7 @@ AR-05 角色 ───> AR-02 归档（归档任务需独立角色）
 | AR-03 幂等 | 🟡 主体 | 迁移 045、V2 作用域/TTL/响应重放/失败释放、清理任务、单测 + DB 集成测试 | 流式/大响应的可重放策略、前端重试复用 key |
 | AR-02 审计 | 🟡 Phase 2 | 失败指标 + 60s 限频告警；迁移 046 月分区 + `EnsurePartitions` 每日维护；带存量数据 up/down、跨月路由、链连续已验证 | 分区 detach/归档（需链锚点）、敏感读审计 |
 | AR-06 备份 | 🟡 6a | `backup.sh` 补 InfluxDB/附件/图片/清单/保留/异地；`restore-check.sh` 校验附件与 Influx manifest | docker.sock 收窄/宿主更新代理；Influx 实际 restore 演练命令 |
-| AR-05 DB 角色 | 🟡 脚本 | `deploy/scripts/init_db_roles.sh`（lab_app + 最小权限 + 默认权限 + 审计禁改删） | 切换 compose `DB_USER=lab_app` + 停机冒烟；CI 以 lab_app 跑一遍 |
+| AR-05 DB 角色 | 🟡 override | `deploy/scripts/init_db_roles.sh` + `deploy/docker-compose.lab-app.yml`（opt-in，默认仍 lab） | 生产停机切默认 `lab_app` + 全量冒烟；CI 以 lab_app 跑一遍 |
 
 > 标注说明：🟡 = 代码已落地但未完成全部验收（尤其缺少 `TEST_DATABASE_URL` 下的迁移/集成测试与生产冒烟）。
 >
@@ -487,6 +487,9 @@ REVOKE UPDATE, DELETE, TRUNCATE ON audit_log FROM lab_app;
 
 - 漏 GRANT 会在运行时 500；用 `ALTER DEFAULT PRIVILEGES` + 启动自检（查询 `has_table_privilege`）降低风险。
 - 回滚：切回 `DB_USER=lab`（保留角色不删）。
+
+> 实施状态：已提供 `deploy/docker-compose.lab-app.yml` opt-in override（不破坏默认 `lab` 部署）；
+> 切换步骤见 `deploy/scripts/README.md`。默认切换与 CI 以 `lab_app` 跑全量测试仍待停机窗口完成。
 
 ### 工作量
 
