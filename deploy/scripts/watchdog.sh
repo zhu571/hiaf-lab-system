@@ -44,6 +44,12 @@ SERVICE_TOKEN_FILE="${WATCHDOG_SERVICE_TOKEN_FILE:-$SCRIPT_DIR/../secrets/servic
 WEB_URL="${WATCHDOG_WEB_URL:-http://10.144.144.12:8000}"
 FAIL_THRESHOLD="${WATCHDOG_FAIL_THRESHOLD:-3}"
 PROBE_TIMEOUT=5
+# scan-ingest watcher 心跳（scan-archive PR4）：文件存在才检查，未部署不告警。
+SCAN_HEARTBEAT_FILE="${WATCHDOG_SCAN_HEARTBEAT_FILE:-/var/lib/lab-scan-ingest/heartbeat}"
+SCAN_HEARTBEAT_MAX_AGE="${WATCHDOG_SCAN_HEARTBEAT_MAX_AGE:-300}"
+# 数据盘使用率（默认 docker 根盘；阈值 80%）。
+DISK_PATH="${WATCHDOG_DISK_PATH:-/var/lib/docker}"
+DISK_THRESHOLD="${WATCHDOG_DISK_THRESHOLD:-80}"
 
 DRY_RUN=0
 [ "${1:-}" = "--dry-run" ] && DRY_RUN=1
@@ -267,5 +273,64 @@ for entry in "${CONTAINERS[@]}"; do
   IFS='|' read -r name container <<< "$entry"
   check_container "$name" "$container"
 done
+
+check_scan_ingest() {
+  # scan-ingest watcher 心跳：文件不存在 = 未部署（跳过）；超时 → 告警一次，恢复 resolve。
+  local alert_file="$STATE_DIR/scan-ingest.alerted"
+  if [ ! -f "$SCAN_HEARTBEAT_FILE" ]; then
+    if [ -f "$alert_file" ]; then
+      resolve_alert watchdog "scan-ingest 心跳超时"
+      [ "$DRY_RUN" -eq 0 ] && rm -f "$alert_file"
+    fi
+    echo "scan-ingest: 未部署（无心跳文件 $SCAN_HEARTBEAT_FILE），跳过"
+    return 0
+  fi
+  local mtime age
+  mtime="$(stat -c %Y "$SCAN_HEARTBEAT_FILE" 2>/dev/null || echo 0)"
+  age=$(( $(date +%s) - mtime ))
+  if [ "$age" -le "$SCAN_HEARTBEAT_MAX_AGE" ]; then
+    if [ -f "$alert_file" ]; then
+      resolve_alert watchdog "scan-ingest 心跳超时"
+      [ "$DRY_RUN" -eq 0 ] && rm -f "$alert_file"
+    fi
+    echo "scan-ingest: 心跳正常（${age}s）"
+    return 0
+  fi
+  if [ ! -f "$alert_file" ]; then
+    report_alert watchdog "scan-ingest 心跳超时" \
+      "scan-ingest 心跳文件已 ${age}s 未更新（阈值 ${SCAN_HEARTBEAT_MAX_AGE}s）。检查 systemctl status lab-scan-ingest、NAS 挂载与 $SCAN_HEARTBEAT_FILE。" \
+      "warning"
+    [ "$DRY_RUN" -eq 0 ] && : > "$alert_file"
+  fi
+  echo "scan-ingest: 心跳超时（${age}s）"
+}
+
+check_disk() {
+  # 数据盘使用率：达到阈值告警一次，回落 resolve。
+  local alert_file="$STATE_DIR/disk.alerted" usage
+  usage="$(df -P "$DISK_PATH" 2>/dev/null | awk 'NR==2 {gsub(/%/,"",$5); print $5}')"
+  if [ -z "$usage" ]; then
+    echo "磁盘: 路径不可用（$DISK_PATH），跳过"
+    return 0
+  fi
+  if [ "$usage" -ge "$DISK_THRESHOLD" ]; then
+    if [ ! -f "$alert_file" ]; then
+      report_alert watchdog "磁盘使用率过高" \
+        "$DISK_PATH 使用率 ${usage}%（阈值 ${DISK_THRESHOLD}%）。lab-uploads 含 scans 单副本，请清理或扩容。" \
+        "warning"
+      [ "$DRY_RUN" -eq 0 ] && : > "$alert_file"
+    fi
+    echo "磁盘: 使用率 ${usage}%（告警）"
+  else
+    if [ -f "$alert_file" ]; then
+      resolve_alert watchdog "磁盘使用率过高"
+      [ "$DRY_RUN" -eq 0 ] && rm -f "$alert_file"
+    fi
+    echo "磁盘: 使用率 ${usage}%（正常）"
+  fi
+}
+
+check_scan_ingest
+check_disk
 
 exit 0
