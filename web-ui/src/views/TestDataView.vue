@@ -15,12 +15,12 @@
       <el-tab-pane :label="t('testData.list')" name="list">
         <!-- 列表骨架统一 base/ListPage（结构改版 R3）：tab 内嵌省略 title；三态经 ListPage 内 StateBlock -->
         <ListPage
-          :loading="loading && !items"
+          :loading="loading && !items.length"
           :error="error"
-          :empty="!items?.length"
+          :empty="!items.length"
           :error-text="t('testData.loadFailed')"
           :empty-text="t('testData.empty')"
-          @retry="run"
+          @retry="refresh"
         >
           <template #filters>
             <div class="filters">
@@ -34,7 +34,7 @@
               </el-select>
             </div>
           </template>
-          <ResponsiveTable :rows="items ?? []" :loading="loading">
+          <ResponsiveTable :rows="items" :loading="loading">
             <el-table-column :label="t('testData.measuredAt')" width="170">
               <template #default="{ row }">{{ formatDateTime(row.measured_at) }}</template>
             </el-table-column>
@@ -78,8 +78,8 @@
               v-model:page-size="perPage"
               layout="total, prev, pager, next"
               :total="total"
-              @current-change="run"
-              @size-change="(n: number) => { onSizeChange(n); run() }"
+              @current-change="onCurrentChange"
+              @size-change="onSizeChange"
             />
           </template>
         </ListPage>
@@ -132,8 +132,7 @@ import { deleteTestData, listTestData, type TestData } from '@/api/testdata'
 import { listRuns, type ExperimentRun } from '@/api/runs'
 import { useAuthStore } from '@/stores/auth'
 import { showApiError } from '@/composables/useNotify'
-import { useAsyncData } from '@/composables/useAsyncData'
-import { usePagination } from '@/composables/usePagination'
+import { useListPage } from '@/composables/useListPage'
 import { useTheme } from '@/composables/useTheme'
 import ResponsiveTable from '@/components/base/ResponsiveTable.vue'
 import ListPage from '@/components/base/ListPage.vue'
@@ -149,8 +148,6 @@ const auth = useAuthStore()
 const runs = ref<ExperimentRun[]>([])
 const dataType = ref('')
 const quality = ref('')
-// 分页状态收敛到 usePagination（保持原 perPage=20 与 el-pagination layout 不变）
-const { page, perPage, total, onSizeChange } = usePagination({ perPage: 20 })
 
 const dataTypes = ['cryo', 'pressure', 'voltage', 'rf_voltage', 'efficiency']
 const qualities = ['normal', 'outlier', 'suspect', 'invalid']
@@ -176,7 +173,7 @@ const { state: themeState } = useTheme()
 const chartGroups = computed<ChartGroup[]>(() => {
   void themeState.value
   return buildChartGroups(
-    (items.value ?? []).map((item) => {
+    items.value.map((item) => {
       const time = new Date(item.measured_at || item.created_at).getTime()
       return { key: item.measurement, time: Number.isNaN(time) ? 0 : time, value: item.value }
     }),
@@ -212,29 +209,31 @@ function polyline(group: ChartGroup) {
     .join(' ')
 }
 
-// 列表数据收敛到 useAsyncData（竞态 seq + 卸载丢弃内建；对齐原 onMounted(load) / watch(projectId, load)）：
-// immediate 首屏自动加载；error 只写 ref 走 StateBlock 三态，不再 toast（操作级错误仍走 showApiError）
+// 列表数据统一走 useListPage；loader 结束时仍刷新 runs（批量录入下拉数据源）。
 const {
-  data: items,
+  items,
   loading,
   error,
-  run
-} = useAsyncData<TestData[]>(
-  async () => {
-    if (!projectId.value) return []
+  page,
+  perPage,
+  total,
+  refresh,
+  onCurrentChange,
+  onSizeChange,
+} = useListPage<TestData>(
+  async ({ page: currentPage, perPage: currentPerPage }) => {
+    if (!projectId.value) return { items: [], total: 0 }
     try {
-      const params: Record<string, string | number> = { page: page.value, per_page: perPage.value }
+      const params: Record<string, string | number> = { page: currentPage, per_page: currentPerPage }
       if (dataType.value) params.data_type = dataType.value
       if (quality.value) params.quality = quality.value
       const res = await listTestData(projectId.value, params)
-      total.value = res.total ?? 0
-      return res.items ?? []
+      return { items: res.items ?? [], total: res.total ?? 0 }
     } finally {
-      // 保持原 load() 数据流：无论列表请求成败，结束后都刷新运行下拉（批量录入编辑器的 runs 数据源）
       await loadRuns()
     }
   },
-  { watch: [projectId] }
+  { perPage: 20, watch: [projectId] }
 )
 
 async function loadRuns() {
@@ -252,12 +251,12 @@ async function loadRuns() {
 
 function onFilter() {
   page.value = 1
-  run()
+  void refresh()
 }
 
 // 批量录入成功 → 刷新列表（批量编辑器内部已清空表格）
 async function onBatchSubmitted() {
-  await run()
+  await refresh()
 }
 
 async function invalidate(row: TestData) {
@@ -273,7 +272,7 @@ async function invalidate(row: TestData) {
   try {
     await deleteTestData(row.id)
     ElMessage.success(t('testData.invalidated'))
-    await run()
+    await refresh()
   } catch (err) {
     showApiError(err, t('testData.invalidateFailed'))
   }
