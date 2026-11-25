@@ -1,0 +1,26 @@
+export default {
+  audit: {
+    title: '审计查询',
+    query: '查询',
+    recordCount: '记录数',
+    user: '用户',
+    client: '客户端',
+    inputRequestId: '输入 request_id 查询',
+    time: '时间',
+    method: '方法',
+    path: '路径',
+    status: '状态',
+    action: '动作',
+    noRecords: '暂无审计记录',
+    loadFailed: '审计记录加载失败',
+    tabEvents: '事件列表',
+    tabByRequestId: '按 request_id 查询',
+    actorType: '来源类型',
+    actorUser: '用户',
+    actorAgent: 'Agent',
+    filterUserId: '用户 ID',
+    rangeStart: '开始时间',
+    rangeEnd: '结束时间',
+    requestIdCol: '请求 ID'
+  },
+}
