@@ -1,3 +1,7 @@
+# 锁定版本（pip freeze）。LightAgent 0.9.4 的 METADATA 直接要求：
+#   boto3 / langfuse / mem0ai / mcp / openai / httpx / PyYAML / loguru / pydantic-settings
+# qdrant-client 是 mem0ai 的依赖，posthog 是 langfuse 的依赖；删除会破坏 import。
+# 升级 LightAgent 后再重新 freeze；不要手工裁剪本文件（AR-16 审计结论）。
 LightAgent==0.9.4
 PyJWT==2.13.0
 PyYAML==6.0.3

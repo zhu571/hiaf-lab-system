@@ -767,13 +767,14 @@ def _client(self):
 | AR-13 Caddy 32MB vs 100MiB | Caddy 改 100MB，或对 `/api/v1/attachments` 单独放宽；实测 >32MB 上传 | Batch 1 |
 | AR-14 安全头 | Caddy 加 CSP/HSTS/X-Frame-Options/Referrer-Policy | Batch 1 |
 | AR-15 Influx retention | `influx bucket list` 确认；设 180 天 + 降采样 | Batch 1 |
-| AR-16 依赖面 | 评估 mem0ai/qdrant/boto3 是否实际使用；拆 requirements | Batch 3 |
+| AR-16 依赖面 | **审计完成，不裁剪**：LightAgent 0.9.4 METADATA 直接要求 `boto3`/`langfuse`/`mem0ai`；`qdrant-client` 来自 mem0ai，`posthog` 来自 langfuse。保留 `pip freeze` 锁文件并在 requirements 头部登记，升级 LightAgent 后重新 freeze | Batch 3 |
 | AR-17 候选 reconciler | 定时扫 `approved` 超 10 分钟未执行 → 重试/告警 | Batch 2 |
 | AR-18 文档漂移 | 更新 AGENTS 的 25/38 为 30/44；加 CI 统计 | 随手 |
 
 > 实施状态（2026-11-25）：AR-13/14/15 已落地（Caddy 100MB + 安全头、Influx 90d retention/脚本）；
 > AR-17 已落地（迁移 051 + `ReconcileStaleCandidates` + 5 分钟 reconciler + 告警）；
-> AR-18 已落地（AGENTS 31 视图/51 迁移 + `scripts/check-doc-stats.sh` CI 校验）；AR-16 未做。
+> AR-18 已落地（AGENTS 31 视图/51 迁移 + `scripts/check-doc-stats.sh` CI 校验）；
+> AR-16 审计完成：依赖为 LightAgent 强制/传递依赖，**不裁剪**，见 `py-agent/requirements.txt` 头部说明。
 
 ---
 
