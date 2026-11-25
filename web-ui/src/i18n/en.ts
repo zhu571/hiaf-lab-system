@@ -1,3 +1,5 @@
+import scan from './en/scan'
+
 // English messages. Context notes are kept as comments next to each group
 // (equivalent to the `_comment` keys planned for a JSON format — using .ts
 // modules, native comments avoid polluting the runtime message map).
@@ -1688,54 +1690,5 @@ export default {
     server: 'Server error, please try again later',
     unknown: 'Request failed, please try again later'
   },
-  scan: {
-    title: 'Scan Archive',
-    subtitle: 'Automatically archive LabVIEW scan txt/png files; annotate, tag, view curves and raw data.',
-    upload: 'Upload scan',
-    uploadTitle: 'Upload scan files',
-    file: 'File',
-    txtFile: 'txt file',
-    pngFile: 'png image',
-    tags: 'Tags',
-    titleLabel: 'Title',
-    description: 'Description',
-    save: 'Save',
-    cancel: 'Cancel',
-    confirm: 'Confirm',
-    detail: 'Details',
-    downloadTxt: 'Download txt',
-    downloadPng: 'Download png',
-    void: 'Void',
-    voided: 'Voided',
-    voidReason: 'Please enter the void reason',
-    voidReasonRequired: 'Void reason is required',
-    format: 'Format',
-    rows: 'Rows',
-    badRows: 'Bad rows',
-    machine: 'Machine',
-    scanTime: 'Scan time',
-    filterQ: 'Search filename/title/description',
-    filterTags: 'Tags (comma separated)',
-    filterAnnotated: 'Annotation',
-    annotatedAll: 'All',
-    annotatedYes: 'Annotated',
-    annotatedNo: 'Pending',
-    dateFrom: 'Start date',
-    dateTo: 'End date',
-    search: 'Search',
-    actions: 'Actions',
-    empty: 'No scans yet',
-    loadFailed: 'Failed to load scans',
-    saved: 'Annotation saved',
-    saveFailed: 'Save failed',
-    uploaded: 'Uploaded',
-    duplicate: 'File already exists; returned existing record',
-    uploadFailed: 'Upload failed',
-    downloadFailed: 'Download failed',
-    noImage: 'This scan has no image',
-    curve: 'Scan curve',
-    curveHint: 'First 5 numeric columns, sampled to at most 2000 points',
-    curveLoadFailed: 'Failed to load curve',
-    tagPlaceholder: 'Type a tag and press Enter'
-  }
+  scan
 }
