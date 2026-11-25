@@ -1,6 +1,7 @@
 import scan from './zh/scan'
 import common from './zh/common'
 import logs from './zh/logs'
+import issues from './zh/issues'
 
 export default {
   translation: { original: '原文', chinese: '中文版', english: '英文版', pending: '翻译中', missing: '暂无该语言译文，当前显示原文', failed: '翻译失败，当前显示原文', stale: '原文已更新，译文正在刷新', retry: '重试翻译', regenerate: '重新生成', save: '保存译文', manual: '人工修订', overwriteConfirm: '重新生成会覆盖当前译文，是否继续？', technicalHint: '请核对数字、单位和设备名称' },
@@ -761,35 +762,7 @@ export default {
       test: '测试'
     }
   },
-  issues: {
-    title: '问题看板',
-    create: '新建问题',
-    empty: '暂无问题',
-    detail: '问题详情',
-    reasonPlaceholder: '状态变更理由',
-    updateStatus: '更新状态',
-    fieldTitle: '标题',
-    severity: '严重程度',
-    description: '描述',
-    save: '保存',
-    statusUpdated: '状态已更新',
-    statusUpdateFailed: '状态更新失败',
-    loadFailed: '加载失败',
-    createFailed: '创建失败',
-    commentFailed: '评论失败',
-    status: {
-      open: '未解决',
-      in_progress: '进行中',
-      resolved: '已解决',
-      closed: '已关闭'
-    },
-    comments: {
-      title: '评论',
-      empty: '暂无评论',
-      placeholder: '添加评论',
-      send: '发送'
-    }
-  },
+  ...issues,
   experiences: {
     pageTitle: '经验库',
     selectProject: '选择项目',
