@@ -51,9 +51,9 @@ DECLARE
     end_month   DATE;
     cur         DATE;
 BEGIN
-    SELECT date_trunc('month', COALESCE(min(created_at), now()))::date
+    SELECT date_trunc('month', COALESCE(min(created_at), now() - interval '5 years'))::date
       INTO start_month FROM audit_log_legacy;
-    end_month := (date_trunc('month', now()) + interval '1 month')::date;
+    end_month := (date_trunc('month', now()) + interval '1 year')::date;
     cur := start_month;
     WHILE cur < end_month LOOP
         EXECUTE format(
