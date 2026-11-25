@@ -761,6 +761,9 @@ def _client(self):
 - 5–8 天（增量）。
 - 风险：大 diff；按视图逐个 PR。
 
+> 实施状态（2026-11-25）：`useListPage` 已落地，`ProjectLogsView`、`IssuesView`、`AuditView`（事件 tab）、
+> `ExperiencesView`、`TestDataView`（列表 tab）5 个视图已迁移；类型生成依赖 AR-09，i18n 拆分与业务组件测试未做。
+
 ---
 
 ## 13. P3 处理策略（不展开）
