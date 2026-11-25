@@ -1,0 +1,23 @@
+[Unit]
+Description=GC scan archive watcher (scan-archive)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=labscan
+Group=labscan
+EnvironmentFile=/etc/lab-scan-ingest/config.env
+ExecStart=/usr/bin/python3 /opt/lab-scan-ingest/scan_ingest.py
+Restart=always
+RestartSec=10
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+ReadWritePaths=/var/lib/lab-scan-ingest
+# NAS 只读挂载点需在 unit 外配置；这里不授予写权限。
+ReadOnlyPaths=/mnt/mtof
+
+[Install]
+WantedBy=multi-user.target

@@ -36,6 +36,7 @@ import (
 	"github.com/zhu571/hiaf-lab-system/go-server/projects"
 	"github.com/zhu571/hiaf-lab-system/go-server/rfmatch"
 	"github.com/zhu571/hiaf-lab-system/go-server/runs"
+	"github.com/zhu571/hiaf-lab-system/go-server/scans"
 	"github.com/zhu571/hiaf-lab-system/go-server/sensors"
 	"github.com/zhu571/hiaf-lab-system/go-server/steptemplates"
 	"github.com/zhu571/hiaf-lab-system/go-server/system"
@@ -186,6 +187,11 @@ func main() {
 	rfMatchingRepo := rfmatch.NewRepository(db)
 	rfMatchingSvc := rfmatch.NewService(rfMatchingRepo, rfmatch.ProjectAccessAdapter{Repo: projectsRepo})
 	rfMatchingHandler := rfmatch.NewHandler(rfMatchingSvc)
+	scansRepo := scans.NewRepository(db)
+	scansSvc := scans.NewService(scansRepo, scans.ProjectAccessAdapter{Repo: projectsRepo})
+	scansSvc.SetStorage(scans.NewStorage(cfg.App.ScanStorageDir))
+	scansSvc.SetDefaultMachine(cfg.App.ScanMachine)
+	scansHandler := scans.NewHandler(scansSvc)
 	attachmentsRepo := attachments.NewRepository(db)
 	// R3：实体权限检查改 main 构造期注入桥接（各模块既有读路径 + 项目 ACL），
 	// 不再走无认证的回环 HTTP permission-check（无模块实现且 fail-open）。
@@ -456,6 +462,9 @@ func main() {
 			r.Post("/test-data-curves", testDataCurveHandler.Create)
 			r.Get("/rf-matching", rfMatchingHandler.List)
 			r.Post("/rf-matching", rfMatchingHandler.Create)
+			r.Get("/scans", scansHandler.List)
+			r.Get("/scans/tags", scansHandler.Tags)
+			r.Post("/scans", scansHandler.Upload)
 
 			r.Group(func(r chi.Router) {
 				r.Use(mw.RequireProjectPermission(db, mw.PermManageProject))
@@ -479,6 +488,20 @@ func main() {
 				r.Use(mw.RequireProjectPermission(db, mw.PermCreateIssue))
 				r.Post("/issues", issuesHandler.Create)
 			})
+		})
+	})
+	r.Route("/api/v1/scans", func(r chi.Router) {
+		r.Use(mw.AuthRequired)
+		r.Use(mw.AgentContext(db))
+		r.Use(mw.Audit(db))
+		r.Get("/{id}", scansHandler.GetByID)
+		r.Post("/ingest", scansHandler.Ingest)
+		r.Get("/{id}/file/{kind}", scansHandler.File)
+		r.Get("/{id}/thumb", scansHandler.Thumb)
+		r.Group(func(r chi.Router) {
+			r.Use(mw.RequireIdempotencyKey(db))
+			r.Patch("/{id}", scansHandler.Update)
+			r.Post("/{id}/void", scansHandler.Void)
 		})
 	})
 	r.Route("/api/v1/experiment-runs", func(r chi.Router) {
