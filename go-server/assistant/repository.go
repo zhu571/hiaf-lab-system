@@ -258,6 +258,36 @@ func (r *Repository) AddAssistantMessage(ctx context.Context, sessionID, runID, 
 	return &m, nil
 }
 
+func (r *Repository) AddUserMessageToSession(ctx context.Context, sessionID, content string) (*Message, error) {
+	tx, err := r.db.BeginTx(ctx, nil)
+	if err != nil {
+		return nil, err
+	}
+	defer tx.Rollback()
+
+	var m Message
+	err = tx.QueryRowContext(ctx,
+		`INSERT INTO assistant_messages (session_id, role, content)
+		 VALUES ($1::uuid, 'user', $2)
+		 RETURNING id, session_id, run_id, role, content, created_at`,
+		sessionID, content,
+	).Scan(&m.ID, &m.SessionID, &m.RunID, &m.Role, &m.Content, &m.CreatedAt)
+	if err != nil {
+		return nil, err
+	}
+	if _, err := tx.ExecContext(ctx,
+		`UPDATE assistant_sessions
+		 SET last_message_at = now(), updated_at = now(),
+		     title = CASE WHEN title = '' THEN $2 ELSE title END
+		 WHERE id = $1::uuid`, sessionID, truncateTitle(content)); err != nil {
+		return nil, err
+	}
+	if err := tx.Commit(); err != nil {
+		return nil, fmt.Errorf("commit message: %w", err)
+	}
+	return &m, nil
+}
+
 func projectID(p *string) string {
 	if p == nil {
 		return ""
