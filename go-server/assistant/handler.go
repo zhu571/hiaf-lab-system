@@ -20,7 +20,7 @@ func NewHandler(svc *Service) *Handler { return &Handler{svc: svc} }
 func (h *Handler) List(w http.ResponseWriter, r *http.Request) {
 	userID := middleware.GetUserClaims(r.Context()).UserID
 	limit, _ := strconv.Atoi(r.URL.Query().Get("limit"))
-	items, err := h.svc.List(r.Context(), userID, r.URL.Query().Get("status"), limit)
+	items, err := h.svc.List(r.Context(), userID, r.URL.Query().Get("status"), r.URL.Query().Get("q"), limit)
 	if err != nil {
 		writeError(w, r, err)
 		return

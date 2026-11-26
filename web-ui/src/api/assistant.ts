@@ -41,7 +41,7 @@ export type AssistantRunResult = {
   messages: AssistantMessage[]
 }
 
-export function listAssistantSessions(params: { status?: string; limit?: number } = {}) {
+export function listAssistantSessions(params: { status?: string; limit?: number; q?: string } = {}) {
   return request<{ items: AssistantSession[] }>({ url: '/assistant/sessions', params })
 }
 

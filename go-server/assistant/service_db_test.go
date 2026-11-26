@@ -101,7 +101,7 @@ func TestDBServiceSessionLifecycle(t *testing.T) {
 	if err := svc.Archive(ctx, dbTestUserID, sess.ID); err != nil {
 		t.Fatalf("Archive: %v", err)
 	}
-	list, err := svc.List(ctx, dbTestUserID, statusArchived, 10)
+	list, err := svc.List(ctx, dbTestUserID, statusArchived, "", 10)
 	if err != nil || len(list) == 0 {
 		t.Fatalf("archived list = %v, %v", list, err)
 	}
