@@ -18,6 +18,15 @@
           </el-button>
         </div>
       </div>
+      <el-input
+        v-model="search"
+        size="small"
+        clearable
+        class="assistant-search"
+        :placeholder="t('assistant.search')"
+        @keyup.enter="loadSessions"
+        @clear="loadSessions"
+      />
       <div v-if="loadingSessions" v-loading="true" class="assistant-loading" />
       <el-empty v-else-if="!sessions.length" :description="t('assistant.emptySessions')" />
       <ul v-else class="assistant-sessions">
@@ -99,6 +108,7 @@ const messages = ref<AssistantMessage[]>([])
 const projects = ref<Project[]>([])
 const activeId = ref('')
 const newProject = ref('')
+const search = ref('')
 const draft = ref('')
 const loadingSessions = ref(false)
 const loadingMessages = ref(false)
@@ -126,7 +136,7 @@ function messageText(m: AssistantMessage) {
 async function loadSessions() {
   loadingSessions.value = true
   try {
-    const res = await listAssistantSessions({ status: 'active' })
+    const res = await listAssistantSessions({ status: 'active', q: search.value.trim() })
     sessions.value = res.items
     if (!activeId.value && sessions.value.length) activeId.value = sessions.value[0].id
     if (activeId.value) await loadMessages()
@@ -249,6 +259,9 @@ onMounted(() => {
 }
 .assistant-project-select {
   width: 110px;
+}
+.assistant-search {
+  margin-top: var(--space-2);
 }
 .assistant-shared {
   margin-left: var(--space-1);

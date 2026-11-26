@@ -2,6 +2,7 @@ export default {
   assistant: {
     title: 'AI Assistant',
     new: 'New session',
+    search: 'Search sessions',
     emptySessions: 'No sessions yet',
     selectSession: 'Select or create a session',
     emptyMessages: 'No messages yet. Tell the assistant what you need.',

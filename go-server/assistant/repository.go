@@ -148,13 +148,15 @@ func (r *Repository) AddUserMessage(ctx context.Context, userID, sessionID, cont
 	return &m, nil
 }
 
-func (r *Repository) ListVisibleSessions(ctx context.Context, userID, status string, limit int) ([]Session, error) {
+func (r *Repository) ListVisibleSessions(ctx context.Context, userID, status, query string, limit int) ([]Session, error) {
 	rows, err := r.db.QueryContext(ctx,
 		`SELECT id, user_id, project_id, title, status, summary, last_message_at, created_at, updated_at
 		 FROM assistant_sessions
-		 WHERE (user_id = $1::uuid OR project_id IS NOT NULL) AND ($2 = '' OR status = $2)
+		 WHERE (user_id = $1::uuid OR project_id IS NOT NULL)
+		   AND ($2 = '' OR status = $2)
+		   AND ($3 = '' OR title ILIKE '%' || $3 || '%' OR summary ILIKE '%' || $3 || '%')
 		 ORDER BY COALESCE(last_message_at, created_at) DESC
-		 LIMIT $3`, userID, status, limit)
+		 LIMIT $4`, userID, status, query, limit)
 	if err != nil {
 		return nil, err
 	}

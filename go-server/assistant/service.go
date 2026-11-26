@@ -69,14 +69,14 @@ func (s *Service) Create(ctx context.Context, userID string, req CreateSessionRe
 	return sess, nil
 }
 
-func (s *Service) List(ctx context.Context, userID, status string, limit int) ([]Session, error) {
+func (s *Service) List(ctx context.Context, userID, status, query string, limit int) ([]Session, error) {
 	if status != "" && status != statusActive && status != statusArchived {
 		return nil, ErrInvalid
 	}
 	if limit <= 0 || limit > 100 {
 		limit = 50
 	}
-	items, err := s.repo.ListVisibleSessions(ctx, userID, status, limit)
+	items, err := s.repo.ListVisibleSessions(ctx, userID, status, strings.TrimSpace(query), limit)
 	if err != nil {
 		return nil, err
 	}

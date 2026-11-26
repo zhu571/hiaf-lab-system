@@ -2,6 +2,7 @@ export default {
   assistant: {
     title: 'AI 助手',
     new: '新建会话',
+    search: '搜索会话',
     emptySessions: '暂无会话',
     selectSession: '选择或新建一个会话',
     emptyMessages: '还没有消息，先说一下你想做什么',
