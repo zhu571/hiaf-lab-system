@@ -680,6 +680,12 @@ def _client(self):
 - 风险：机械搬运易漏；golden 测试 + 全量 `go test`。
 - 回滚：纯文件移动，git revert 即可。
 
+> 实施状态（2026-11-26）：路由注册已按域拆到 21 个 `routes_*.go`；`background.go`（调度/清理/对账）、
+> `server.go`（HTTP 启停）、`frontend.go`（embed 挂载）、`bootstrap.go`（JWT/ServiceToken/DB 初始化）、
+> `routes_core.go`（health/metrics/auth/admin）已迁出。`main.go` 约 900 → 371 行，只剩模块构造与调用。
+> 剩余：`buildDeps()`/`wiring.go` 尚未落地（构造区跨模块依赖较密，需单独设计）；`router_test.go` 路由
+> golden 比对未加。
+
 ---
 
 ## 10. AR-09 单一事实源（Batch 3）

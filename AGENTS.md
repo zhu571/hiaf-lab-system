@@ -81,7 +81,12 @@ HIAF 低温气体靶实验室的多人协作日志管理平台。系统已完成
 ```text
 hiaf-lab-system/
 ├── go-server/              # Go 后端
-│   ├── main.go             # 入口，注册所有模块路由
+│   ├── main.go             # 入口，构造模块依赖并调用路由/启动
+│   ├── routes_*.go         # 按域拆分的路由注册（core/scans/agent/projects/...）
+│   ├── background.go       # 后台调度/清理/对账任务启动
+│   ├── bootstrap.go        # JWT/ServiceToken/DB 初始化
+│   ├── server.go           # HTTP server 启停
+│   ├── frontend.go         # go:embed 前端挂载 + SPA fallback
 │   ├── auth/               # 认证鉴权模块
 │   ├── logs/               # 日志管理模块
 │   ├── issues/             # 问题管理模块
@@ -122,7 +127,7 @@ hiaf-lab-system/
 │   │   └── business/       # 业务复合件（可直读 store/API）：SensorTrendChart/AskDialog/ProjectDashboard/CommandPalette/NotificationCenter/MobileNavDrawer 等
 │   ├── src/composables/    # 组合式函数：useAsyncData/usePolling/usePagination/useTheme 等
 │   ├── src/config/         # navigation.ts 导航单一数据源（NAV_ITEMS + filterNavByRole）
-│   ├── src/i18n/           # 中英双语（zh.ts 完整基准/en.ts 对齐同一 key 结构，keys.test.ts 双向比对防线）
+│   ├── src/i18n/           # 中英双语：zh.ts/en.ts 聚合 + zh/<domain>.ts / en/<domain>.ts 分域消息；keys.test.ts 双向比对防线
 │   ├── src/layouts/        # 布局壳：AppLayout/ProjectLayout/MobileTopBar/DailyReportShell
 │   ├── src/router/         # 路由表（全懒加载 + 兼容重定向 + catch-all）+ guard.ts 守卫纯函数
 │   ├── src/stores/         # 仅 auth/project 两个全局 store（业务数据保持页面本地态）
