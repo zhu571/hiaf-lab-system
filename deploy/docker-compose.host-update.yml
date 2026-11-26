@@ -1,0 +1,25 @@
+# AR-06b host 更新模式 override（可选，不默认启用）。
+#
+# 用法：
+#   docker compose -f deploy/docker-compose.yml -f deploy/docker-compose.host-update.yml up -d
+#
+# 要求 Docker Compose >= 2.24.4（!override / !reset）。启用前先安装 deploy/systemd/ 下的
+# 单元并确保 .hermes/update-requests 对 server 运行 UID 可写、对 lab-update 可读。
+services:
+  server:
+    environment:
+      UPDATE_ENGINE: host
+      UPDATE_REQUEST_DIR: ${REPO_ROOT:-/opt/hiaf-lab-system}/.hermes/update-requests
+      UPDATE_LOG_DIR: ${REPO_ROOT:-/opt/hiaf-lab-system}/.hermes/updates
+      UPDATE_REQUEST_KEY_FILE: /etc/lab-update/request.key
+    # 不再需要 docker 组；socket 也从 volumes 中移除。
+    group_add: !reset []
+    volumes: !override
+      - ${REPO_ROOT:-/opt/hiaf-lab-system}:${REPO_ROOT:-/opt/hiaf-lab-system}:ro
+      - ${REPO_ROOT:-/opt/hiaf-lab-system}/.hermes/update-requests:${REPO_ROOT:-/opt/hiaf-lab-system}/.hermes/update-requests
+      - ${REPO_ROOT:-/opt/hiaf-lab-system}/.hermes/updates:${REPO_ROOT:-/opt/hiaf-lab-system}/.hermes/updates
+      - ${REPO_ROOT:-/opt/hiaf-lab-system}/.hermes/backups:${REPO_ROOT:-/opt/hiaf-lab-system}/.hermes/backups
+      - ntfy-etc:/etc/ntfy
+      - ./ntfy/server.yml:/etc/ntfy/server.yml:ro
+      - lab-uploads:/app/uploads
+      - /etc/lab-update/request.key:/etc/lab-update/request.key:ro
