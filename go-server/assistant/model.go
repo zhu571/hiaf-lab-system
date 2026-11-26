@@ -20,6 +20,7 @@ type Message struct {
 	ID          string         `json:"id"`
 	SessionID   string         `json:"session_id"`
 	RunID       *string        `json:"run_id,omitempty"`
+	UserID      *string        `json:"user_id,omitempty"`
 	Role        string         `json:"role"`
 	Content     string         `json:"content"`
 	ContentJSON map[string]any `json:"content_json,omitempty"`

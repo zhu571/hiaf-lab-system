@@ -63,7 +63,7 @@
         <el-empty v-else-if="!messages.length" :description="t('assistant.emptyMessages')" />
         <div v-else class="assistant-messages">
           <div v-for="m in messages" :key="m.id" :class="['assistant-message', m.role]">
-            <div class="assistant-message-role">{{ roleLabel(m.role) }}</div>
+            <div class="assistant-message-role">{{ messageAuthor(m) }}</div>
             <div class="assistant-message-content">{{ messageText(m) }}</div>
           </div>
         </div>
@@ -101,8 +101,10 @@ import {
 } from '@/api/assistant'
 import { listProjects, type Project } from '@/api/projects'
 import { showApiError } from '@/composables/useNotify'
+import { useAuthStore } from '@/stores/auth'
 
 const { t } = useI18n()
+const auth = useAuthStore()
 const sessions = ref<AssistantSession[]>([])
 const messages = ref<AssistantMessage[]>([])
 const projects = ref<Project[]>([])
@@ -127,6 +129,11 @@ function roleLabel(role: string) {
   if (role === 'assistant') return t('assistant.role.assistant')
   if (role === 'tool') return t('assistant.role.tool')
   return t('assistant.role.user')
+}
+
+function messageAuthor(m: AssistantMessage) {
+  if (m.role === 'user' && m.user_id && m.user_id !== auth.user?.id) return t('assistant.role.member')
+  return roleLabel(m.role)
 }
 
 function messageText(m: AssistantMessage) {

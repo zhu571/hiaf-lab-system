@@ -171,7 +171,7 @@ func (s *Service) AddMessage(ctx context.Context, userID, id, content string) (*
 	if _, err := s.Get(ctx, userID, id); err != nil {
 		return nil, err
 	}
-	m, err := s.repo.AddUserMessageToSession(ctx, id, content)
+	m, err := s.repo.AddUserMessageToSession(ctx, id, userID, content)
 	if err != nil {
 		return nil, err
 	}
@@ -199,7 +199,7 @@ func (s *Service) StartRun(ctx context.Context, userID, sessionID, content strin
 	reply := "AI 运行时尚未接入，你的问题已记录；接入后会在这里回答。"
 	var meta []byte
 	if s.replier != nil {
-		history, err := s.repo.ListMessages(ctx, userID, sessionID)
+		history, err := s.repo.ListMessagesBySession(ctx, sessionID)
 		if err != nil {
 			_ = s.repo.FinishRun(ctx, run.ID, "failed", err.Error())
 			return nil, err

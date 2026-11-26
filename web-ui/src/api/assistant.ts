@@ -16,6 +16,7 @@ export type AssistantMessage = {
   id: string
   session_id: string
   run_id?: string
+  user_id?: string
   role: 'user' | 'assistant' | 'tool' | string
   content: string
   content_json?: Record<string, unknown>

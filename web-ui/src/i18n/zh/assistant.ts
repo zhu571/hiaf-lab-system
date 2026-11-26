@@ -21,6 +21,7 @@ export default {
     runtimeReply: 'AI 运行时尚未接入，你的问题已记录；接入后会在这里回答。',
     role: {
       user: '我',
+      member: '其他成员',
       assistant: '助手',
       tool: '工具'
     }
