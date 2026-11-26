@@ -13,7 +13,10 @@ var (
 	ErrInvalid            = errors.New("invalid assistant request")
 	ErrProjectUnsupported = errors.New("project sessions are not enabled yet")
 	ErrUpstream           = errors.New("assistant upstream unavailable")
+	ErrQuota              = errors.New("assistant daily quota exceeded")
 )
+
+const defaultDailyRuns = 100
 
 // ProjectAccessChecker 由 main 注入，assistant 不直接读项目表。
 type ProjectAccessChecker interface {
@@ -163,6 +166,15 @@ func (s *Service) Messages(ctx context.Context, userID, id string) ([]Message, e
 	return s.repo.ListMessagesBySession(ctx, id)
 }
 
+func (s *Service) Usage(ctx context.Context, userID string) (Usage, error) {
+	usage, err := s.repo.TodayUsage(ctx, userID)
+	if err != nil {
+		return Usage{}, err
+	}
+	usage.RunLimit = defaultDailyRuns
+	return usage, nil
+}
+
 func (s *Service) AddMessage(ctx context.Context, userID, id, content string) (*Message, error) {
 	content = strings.TrimSpace(content)
 	if content == "" || len([]rune(content)) > maxContentLen {
@@ -188,12 +200,18 @@ func (s *Service) StartRun(ctx context.Context, userID, sessionID, content strin
 	if sess.Status != statusActive {
 		return nil, ErrInvalid
 	}
+	if usage, err := s.repo.TodayUsage(ctx, userID); err == nil && usage.Runs >= defaultDailyRuns {
+		return nil, ErrQuota
+	}
 	userMsg, err := s.AddMessage(ctx, userID, sessionID, content)
 	if err != nil {
 		return nil, err
 	}
 	run := &Run{SessionID: sessionID, UserID: userID, Model: "placeholder", PromptVersion: "assistant-placeholder-v1"}
 	if err := s.repo.CreateRun(ctx, run); err != nil {
+		return nil, err
+	}
+	if err := s.repo.IncrementRunUsage(ctx, userID); err != nil {
 		return nil, err
 	}
 	reply := "AI 运行时尚未接入，你的问题已记录；接入后会在这里回答。"

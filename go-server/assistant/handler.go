@@ -117,6 +117,16 @@ func (h *Handler) StartRun(w http.ResponseWriter, r *http.Request) {
 	common.WriteSuccess(w, r, result)
 }
 
+func (h *Handler) Usage(w http.ResponseWriter, r *http.Request) {
+	userID := middleware.GetUserClaims(r.Context()).UserID
+	usage, err := h.svc.Usage(r.Context(), userID)
+	if err != nil {
+		writeError(w, r, err)
+		return
+	}
+	common.WriteSuccess(w, r, usage)
+}
+
 func writeError(w http.ResponseWriter, r *http.Request, err error) {
 	switch {
 	case errors.Is(err, ErrNotFound):
@@ -129,6 +139,8 @@ func writeError(w http.ResponseWriter, r *http.Request, err error) {
 		common.WriteError(w, r, http.StatusBadRequest, "invalid_request", "参数不合法", nil)
 	case errors.Is(err, ErrUpstream):
 		common.WriteError(w, r, http.StatusBadGateway, "upstream_error", "AI 服务暂时不可用", nil)
+	case errors.Is(err, ErrQuota):
+		common.WriteError(w, r, http.StatusTooManyRequests, "quota_exceeded", "今日 AI 助手次数已用完", nil)
 	default:
 		common.WriteError(w, r, http.StatusInternalServerError, "internal_error", "服务器内部错误", nil)
 	}
