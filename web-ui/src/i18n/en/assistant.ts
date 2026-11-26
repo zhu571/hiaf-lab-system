@@ -9,6 +9,8 @@ export default {
     send: 'Send',
     archive: 'Archive',
     untitled: 'Untitled session',
+    privateSession: 'Private',
+    shared: 'Project shared',
     runtimePending: 'AI reply runtime is not connected yet; your messages are saved.',
     runtimeReply: 'AI runtime is not connected yet. Your question is saved and will be answered here once it is.',
     role: {

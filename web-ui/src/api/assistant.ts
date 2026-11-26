@@ -45,8 +45,12 @@ export function listAssistantSessions(params: { status?: string; limit?: number 
   return request<{ items: AssistantSession[] }>({ url: '/assistant/sessions', params })
 }
 
-export function createAssistantSession(title = '') {
-  return request<AssistantSession>({ url: '/assistant/sessions', method: 'POST', data: { title } })
+export function createAssistantSession(title = '', projectId = '') {
+  return request<AssistantSession>({
+    url: '/assistant/sessions',
+    method: 'POST',
+    data: { title, project_id: projectId }
+  })
 }
 
 export function updateAssistantSession(id: string, data: { title?: string; status?: string }) {
