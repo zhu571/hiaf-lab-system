@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"net/http"
 	"strconv"
+	"time"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/zhu571/hiaf-lab-system/go-server/common"
@@ -154,6 +155,83 @@ func (h *Handler) Export(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "text/markdown; charset=utf-8")
 	w.Header().Set("Content-Disposition", fmt.Sprintf("attachment; filename=%q", "assistant-"+id+".md"))
 	_, _ = w.Write([]byte(md))
+}
+
+func (h *Handler) StartRunStream(w http.ResponseWriter, r *http.Request) {
+	flusher, ok := w.(http.Flusher)
+	if !ok {
+		common.WriteError(w, r, http.StatusInternalServerError, "stream_unsupported", "SSE 不可用", nil)
+		return
+	}
+	userID := middleware.GetUserClaims(r.Context()).UserID
+	var req CreateRunRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		common.WriteError(w, r, http.StatusBadRequest, "invalid_request", "请求体格式错误", nil)
+		return
+	}
+	w.Header().Set("Content-Type", "text/event-stream")
+	w.Header().Set("Cache-Control", "no-cache")
+	w.Header().Set("Connection", "keep-alive")
+	w.Header().Set("X-Accel-Buffering", "no")
+	fmt.Fprint(w, "event: start\ndata: {\"status\":\"running\"}\n\n")
+	flusher.Flush()
+
+	type outcome struct {
+		result *RunResult
+		err    error
+	}
+	done := make(chan outcome, 1)
+	go func() {
+		// 客户端断开不应取消已开始的 run；LLM 客户端自带 120s 超时。
+		ctx := context.WithoutCancel(r.Context())
+		result, err := h.svc.StartRun(ctx, userID, chi.URLParam(r, "id"), req.Content)
+		done <- outcome{result: result, err: err}
+	}()
+
+	ticker := time.NewTicker(10 * time.Second)
+	defer ticker.Stop()
+	enc := json.NewEncoder(w)
+	for {
+		select {
+		case <-r.Context().Done():
+			return
+		case <-ticker.C:
+			fmt.Fprint(w, ": heartbeat\n\n")
+			flusher.Flush()
+		case out := <-done:
+			if out.err != nil {
+				code, message := streamError(out.err)
+				fmt.Fprint(w, "event: error\ndata: ")
+				_ = enc.Encode(map[string]string{"code": code, "message": message})
+				fmt.Fprint(w, "\n")
+				flusher.Flush()
+				return
+			}
+			fmt.Fprint(w, "event: result\ndata: ")
+			_ = enc.Encode(out.result)
+			fmt.Fprint(w, "\n")
+			fmt.Fprint(w, "event: done\ndata: {}\n\n")
+			flusher.Flush()
+			return
+		}
+	}
+}
+
+func streamError(err error) (string, string) {
+	switch {
+	case errors.Is(err, ErrQuota):
+		return "quota_exceeded", "今日 AI 助手次数已用完"
+	case errors.Is(err, ErrUpstream):
+		return "upstream_error", "AI 服务暂时不可用"
+	case errors.Is(err, ErrNotFound):
+		return "not_found", "会话不存在"
+	case errors.Is(err, ErrForbidden):
+		return "permission_denied", "无权操作该会话"
+	case errors.Is(err, ErrInvalid):
+		return "invalid_request", "参数不合法"
+	default:
+		return "internal_error", "服务器内部错误"
+	}
 }
 
 func writeError(w http.ResponseWriter, r *http.Request, err error) {
