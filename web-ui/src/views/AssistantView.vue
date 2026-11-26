@@ -62,17 +62,22 @@
             <span v-if="activeSession.project_id" class="assistant-shared">{{ t('assistant.shared') }}</span>
             <span v-if="activeSession.status === 'archived'" class="assistant-shared">{{ t('assistant.archived') }}</span>
           </strong>
-          <el-button
-            v-if="activeSession.status === 'archived'"
-            size="small"
-            :loading="restoring"
-            @click="restoreActive"
-          >
-            {{ t('assistant.restore') }}
-          </el-button>
-          <el-button v-else size="small" :loading="archiving" @click="archiveActive">
-            {{ t('assistant.archive') }}
-          </el-button>
+          <div class="assistant-main-actions">
+            <el-button size="small" :loading="renaming" @click="renameActive">
+              {{ t('assistant.rename') }}
+            </el-button>
+            <el-button
+              v-if="activeSession.status === 'archived'"
+              size="small"
+              :loading="restoring"
+              @click="restoreActive"
+            >
+              {{ t('assistant.restore') }}
+            </el-button>
+            <el-button v-else size="small" :loading="archiving" @click="archiveActive">
+              {{ t('assistant.archive') }}
+            </el-button>
+          </div>
         </header>
         <div v-if="loadingMessages" v-loading="true" class="assistant-messages-loading" />
         <el-empty v-else-if="!messages.length" :description="t('assistant.emptyMessages')" />
@@ -111,6 +116,7 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
+import { ElMessageBox } from 'element-plus'
 import {
   archiveAssistantSession,
   createAssistantSession,
@@ -144,6 +150,7 @@ const creating = ref(false)
 const sending = ref(false)
 const archiving = ref(false)
 const restoring = ref(false)
+const renaming = ref(false)
 
 const activeSession = computed(() => sessions.value.find((s) => s.id === activeId.value))
 
@@ -265,8 +272,33 @@ async function archiveActive() {
   }
 }
 
-async function restoreActive() {
-  if (!activeId.value) return
+async function renameActive() {
+  if (!activeSession.value) return
+  let result: { value: string } | null = null
+  try {
+    result = await ElMessageBox.prompt(t('assistant.renamePrompt'), t('assistant.rename'), {
+      inputValue: activeSession.value.title,
+      confirmButtonText: t('common.confirm'),
+      cancelButtonText: t('common.cancel')
+    })
+  } catch {
+    return
+  }
+  const title = result?.value.trim() ?? ''
+  if (!title) return
+  renaming.value = true
+  try {
+    const updated = await updateAssistantSession(activeSession.value.id, { title })
+    const idx = sessions.value.findIndex((s) => s.id === updated.id)
+    if (idx >= 0) sessions.value[idx] = updated
+  } catch (err) {
+    showApiError(err, t('assistant.renameFailed'))
+  } finally {
+    renaming.value = false
+  }
+}
+
+async function restoreActive() {  if (!activeId.value) return
   restoring.value = true
   try {
     await updateAssistantSession(activeId.value, { status: 'active' })
@@ -341,6 +373,11 @@ onMounted(() => {
   border-radius: var(--radius-sm);
   font-size: var(--fs-body-sm);
   color: var(--text-3);
+}
+.assistant-main-actions {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
 }
 .assistant-loading,
 .assistant-messages-loading {
