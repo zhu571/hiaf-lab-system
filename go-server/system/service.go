@@ -112,6 +112,10 @@ func NewService(repoRoot string) *Service {
 		// UPDATE_ENGINE=shell 显式回退 update.sh 兜底。
 		s.engine = "go"
 	}
+	// host 模式由宿主 runner 写 log/done，默认与请求文件同目录，避免落到容器 /tmp。
+	if s.engine == "host" && os.Getenv("UPDATE_LOG_DIR") == "" {
+		s.logDir = filepath.Join(repoRoot, ".hermes", "updates")
+	}
 	s.runner = newRunner(s, s.engine)
 	// 启动恢复：重建进程重启前中断的 session（运行中的挂到 s.active，防双更新并发）
 	s.recoverInterruptedSessions()

@@ -42,15 +42,48 @@ func TestHostRunnerSpawnWritesSignedRequest(t *testing.T) {
 	if err != nil {
 		t.Fatalf("read request: %v", err)
 	}
-	var req hostRequest
+	var req HostRequest
 	if err := json.Unmarshal(data, &req); err != nil {
 		t.Fatalf("unmarshal: %v", err)
 	}
 	if req.SessionID != "sess_1" || req.Branch != "main" || len(req.Flags) != 1 {
 		t.Fatalf("unexpected request: %+v", req)
 	}
-	if req.Signature == "" || req.Signature != signHostRequest([]byte("secret"), req) {
+	if req.Signature == "" || req.Signature != SignHostRequest([]byte("secret"), req) {
 		t.Fatalf("signature mismatch: %q", req.Signature)
+	}
+}
+
+func TestHostRunnerLoadAndApplyRequest(t *testing.T) {
+	root := t.TempDir()
+	keyFile := filepath.Join(root, "key")
+	if err := os.WriteFile(keyFile, []byte("secret"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("UPDATE_REQUEST_KEY_FILE", keyFile)
+	req := HostRequest{
+		SessionID: "sess_3", RepoRoot: root, ComposeFile: "deploy/docker-compose.yml",
+		ProjectName: "deploy", Branch: "main", Flags: []string{"--force"},
+		RequestedAt: time.Now().Format(time.RFC3339), Nonce: "n1",
+	}
+	req.Signature = SignHostRequest([]byte("secret"), req)
+	data, err := json.Marshal(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(root, "sess_3.json")
+	if err := os.WriteFile(path, data, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	cfg := &UpdateConfig{}
+	if err := ApplyHostRequest(cfg, path); err != nil {
+		t.Fatalf("ApplyHostRequest: %v", err)
+	}
+	if cfg.SessionID != "sess_3" || !cfg.Force || cfg.Branch != "main" {
+		t.Fatalf("unexpected cfg: %+v", cfg)
+	}
+	if cfg.DoneFile != filepath.Join(root, ".hermes", "updates", "lab-update-sess_3.done") {
+		t.Fatalf("done file = %q", cfg.DoneFile)
 	}
 }
 

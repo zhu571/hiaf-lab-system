@@ -6,6 +6,7 @@ package main
 import (
 	"context"
 	"flag"
+	"fmt"
 	"os"
 	"os/signal"
 	"syscall"
@@ -14,6 +15,8 @@ import (
 	"github.com/zhu571/hiaf-lab-system/go-server/system"
 )
 
+var hostRequestPath string
+
 func main() {
 	os.Exit(run())
 }
@@ -21,6 +24,12 @@ func main() {
 // run 返回进程退出码；用 return 代替直接 os.Exit，保证 defer（关闭日志文件等）执行。
 func run() int {
 	cfg := parseFlags(os.Args[1:])
+	if hostRequestPath != "" {
+		if err := system.ApplyHostRequest(cfg, hostRequestPath); err != nil {
+			fmt.Fprintf(os.Stderr, "load host request: %v\n", err)
+			return 2
+		}
+	}
 
 	log, err := system.NewLogger(cfg.LogFile, os.Stdout)
 	if err != nil {
@@ -70,10 +79,12 @@ func parseFlags(args []string) *system.UpdateConfig {
 		force      = fs.Bool("force", false, "跳过变更检测，全量重建")
 		dryRun     = fs.Bool("dry-run", false, "仅检测变更，不执行实际操作")
 		noRollback = fs.Bool("no-rollback", false, "失败时不回滚")
+		request    = fs.String("request", "", "宿主侧更新请求文件（AR-06b，UPDATE_ENGINE=host）")
 	)
 	if err := fs.Parse(args); err != nil {
 		os.Exit(2)
 	}
+	hostRequestPath = *request
 
 	return &system.UpdateConfig{
 		RepoRoot:        *repo,
