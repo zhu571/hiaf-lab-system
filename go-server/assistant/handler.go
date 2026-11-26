@@ -102,6 +102,21 @@ func (h *Handler) AddMessage(w http.ResponseWriter, r *http.Request) {
 	common.WriteSuccess(w, r, m)
 }
 
+func (h *Handler) StartRun(w http.ResponseWriter, r *http.Request) {
+	userID := middleware.GetUserClaims(r.Context()).UserID
+	var req CreateRunRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		common.WriteError(w, r, http.StatusBadRequest, "invalid_request", "请求体格式错误", nil)
+		return
+	}
+	result, err := h.svc.StartRun(r.Context(), userID, chi.URLParam(r, "id"), req.Content)
+	if err != nil {
+		writeError(w, r, err)
+		return
+	}
+	common.WriteSuccess(w, r, result)
+}
+
 func writeError(w http.ResponseWriter, r *http.Request, err error) {
 	switch {
 	case errors.Is(err, ErrNotFound):

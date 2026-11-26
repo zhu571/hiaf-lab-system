@@ -39,3 +39,27 @@ type UpdateSessionRequest struct {
 type CreateMessageRequest struct {
 	Content string `json:"content"`
 }
+
+// Run 是 assistant_runs 的对外模型（第一阶段只落占位回复，不调用 LLM）。
+type Run struct {
+	ID            string     `json:"id"`
+	SessionID     string     `json:"session_id"`
+	UserID        string     `json:"user_id"`
+	Status        string     `json:"status"`
+	Model         string     `json:"model"`
+	PromptVersion string     `json:"prompt_version"`
+	InputTokens   int        `json:"input_tokens"`
+	OutputTokens  int        `json:"output_tokens"`
+	Error         *string    `json:"error,omitempty"`
+	StartedAt     time.Time  `json:"started_at"`
+	FinishedAt    *time.Time `json:"finished_at,omitempty"`
+}
+
+type CreateRunRequest struct {
+	Content string `json:"content"`
+}
+
+type RunResult struct {
+	Run      Run       `json:"run"`
+	Messages []Message `json:"messages"`
+}

@@ -81,6 +81,18 @@ func TestDBServiceSessionLifecycle(t *testing.T) {
 	if _, err := svc.Update(ctx, dbTestUserID, sess.ID, UpdateSessionRequest{Title: &title}); err != nil {
 		t.Fatalf("Update: %v", err)
 	}
+	// run 骨架：用户消息 + 占位 assistant 消息，run 完成。
+	runResult, err := svc.StartRun(ctx, dbTestUserID, sess.ID, "再问一次")
+	if err != nil {
+		t.Fatalf("StartRun: %v", err)
+	}
+	if runResult.Run.Status != "done" || len(runResult.Messages) != 2 {
+		t.Fatalf("unexpected run result: %+v", runResult)
+	}
+	if runResult.Messages[1].Role != "assistant" || runResult.Messages[1].ContentJSON["placeholder"] != true {
+		t.Fatalf("unexpected assistant placeholder: %+v", runResult.Messages[1])
+	}
+
 	if err := svc.Archive(ctx, dbTestUserID, sess.ID); err != nil {
 		t.Fatalf("Archive: %v", err)
 	}

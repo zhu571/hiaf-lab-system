@@ -2,6 +2,7 @@ package assistant
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"strings"
 )
@@ -116,4 +117,38 @@ func (s *Service) AddMessage(ctx context.Context, userID, id, content string) (*
 		return nil, ErrNotFound
 	}
 	return m, nil
+}
+
+// StartRun 记录一次用户提问并返回一条明确的占位 assistant 回复。
+// 真实 LLM/tool 循环接入后替换本方法内部实现，API 形状保持不变。
+func (s *Service) StartRun(ctx context.Context, userID, sessionID, content string) (*RunResult, error) {
+	sess, err := s.Get(ctx, userID, sessionID)
+	if err != nil {
+		return nil, err
+	}
+	if sess.Status != statusActive {
+		return nil, ErrInvalid
+	}
+	userMsg, err := s.AddMessage(ctx, userID, sessionID, content)
+	if err != nil {
+		return nil, err
+	}
+	run := &Run{SessionID: sessionID, UserID: userID, Model: "placeholder", PromptVersion: "assistant-placeholder-v1"}
+	if err := s.repo.CreateRun(ctx, run); err != nil {
+		return nil, err
+	}
+	reply := "AI 运行时尚未接入，你的问题已记录；接入后会在这里回答。"
+	meta, _ := json.Marshal(map[string]any{"placeholder": true})
+	assistantMsg, err := s.repo.AddAssistantMessage(ctx, sessionID, run.ID, reply, meta)
+	if err != nil {
+		_ = s.repo.FinishRun(ctx, run.ID, "failed", err.Error())
+		return nil, err
+	}
+	if err := s.repo.FinishRun(ctx, run.ID, "done", ""); err != nil {
+		return nil, err
+	}
+	finished := assistantMsg.CreatedAt
+	run.Status = "done"
+	run.FinishedAt = &finished
+	return &RunResult{Run: *run, Messages: []Message{*userMsg, *assistantMsg}}, nil
 }

@@ -148,6 +148,54 @@ func (r *Repository) AddUserMessage(ctx context.Context, userID, sessionID, cont
 	return &m, nil
 }
 
+func (r *Repository) CreateRun(ctx context.Context, run *Run) error {
+	return r.db.QueryRowContext(ctx,
+		`INSERT INTO assistant_runs (session_id, user_id, status, model, prompt_version)
+		 VALUES ($1::uuid, $2::uuid, 'running', $3, $4)
+		 RETURNING id, session_id, user_id, status, model, prompt_version,
+		           input_tokens, output_tokens, error, started_at, finished_at`,
+		run.SessionID, run.UserID, run.Model, run.PromptVersion,
+	).Scan(&run.ID, &run.SessionID, &run.UserID, &run.Status, &run.Model, &run.PromptVersion,
+		&run.InputTokens, &run.OutputTokens, &run.Error, &run.StartedAt, &run.FinishedAt)
+}
+
+func (r *Repository) FinishRun(ctx context.Context, runID, status, errMsg string) error {
+	_, err := r.db.ExecContext(ctx,
+		`UPDATE assistant_runs
+		 SET status = $2, error = NULLIF($3, ''), finished_at = now()
+		 WHERE id = $1::uuid`, runID, status, errMsg)
+	return err
+}
+
+func (r *Repository) AddAssistantMessage(ctx context.Context, sessionID, runID, content string, contentJSON []byte) (*Message, error) {
+	tx, err := r.db.BeginTx(ctx, nil)
+	if err != nil {
+		return nil, err
+	}
+	defer tx.Rollback()
+
+	var m Message
+	err = tx.QueryRowContext(ctx,
+		`INSERT INTO assistant_messages (session_id, run_id, role, content, content_json)
+		 VALUES ($1::uuid, $2::uuid, 'assistant', $3, $4)
+		 RETURNING id, session_id, run_id, role, content, created_at`,
+		sessionID, runID, content, contentJSON,
+	).Scan(&m.ID, &m.SessionID, &m.RunID, &m.Role, &m.Content, &m.CreatedAt)
+	if err != nil {
+		return nil, err
+	}
+	if _, err := tx.ExecContext(ctx,
+		`UPDATE assistant_sessions SET last_message_at = now(), updated_at = now() WHERE id = $1::uuid`,
+		sessionID); err != nil {
+		return nil, err
+	}
+	if err := tx.Commit(); err != nil {
+		return nil, fmt.Errorf("commit assistant message: %w", err)
+	}
+	_ = json.Unmarshal(contentJSON, &m.ContentJSON)
+	return &m, nil
+}
+
 func projectID(p *string) string {
 	if p == nil {
 		return ""

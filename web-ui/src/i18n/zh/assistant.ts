@@ -10,6 +10,7 @@ export default {
     archive: '归档',
     untitled: '未命名会话',
     runtimePending: 'AI 回复运行时尚未接入；当前只保存你的消息。',
+    runtimeReply: 'AI 运行时尚未接入，你的问题已记录；接入后会在这里回答。',
     role: {
       user: '我',
       assistant: '助手',
