@@ -27,6 +27,9 @@
         @keyup.enter="loadSessions"
         @clear="loadSessions"
       />
+      <el-checkbox v-model="showArchived" class="assistant-archived-toggle" @change="loadSessions">
+        {{ t('assistant.showArchived') }}
+      </el-checkbox>
       <div v-if="loadingSessions" v-loading="true" class="assistant-loading" />
       <el-empty v-else-if="!sessions.length" :description="t('assistant.emptySessions')" />
       <ul v-else class="assistant-sessions">
@@ -54,8 +57,17 @@
           <strong>
             {{ activeSession.title || t('assistant.untitled') }}
             <span v-if="activeSession.project_id" class="assistant-shared">{{ t('assistant.shared') }}</span>
+            <span v-if="activeSession.status === 'archived'" class="assistant-shared">{{ t('assistant.archived') }}</span>
           </strong>
-          <el-button size="small" :loading="archiving" @click="archiveActive">
+          <el-button
+            v-if="activeSession.status === 'archived'"
+            size="small"
+            :loading="restoring"
+            @click="restoreActive"
+          >
+            {{ t('assistant.restore') }}
+          </el-button>
+          <el-button v-else size="small" :loading="archiving" @click="archiveActive">
             {{ t('assistant.archive') }}
           </el-button>
         </header>
@@ -72,12 +84,18 @@
             v-model="draft"
             type="textarea"
             :rows="3"
+            :disabled="activeSession.status === 'archived'"
             :placeholder="t('assistant.placeholder')"
             @keydown.ctrl.enter.prevent="sendMessage"
           />
           <div class="assistant-compose-actions">
             <span class="assistant-hint">{{ t('assistant.runtimePending') }}</span>
-            <el-button type="primary" :loading="sending" :disabled="!draft.trim()" @click="sendMessage">
+            <el-button
+              type="primary"
+              :loading="sending"
+              :disabled="activeSession.status === 'archived' || !draft.trim()"
+              @click="sendMessage"
+            >
               {{ t('assistant.send') }}
             </el-button>
           </div>
@@ -96,6 +114,7 @@ import {
   listAssistantMessages,
   listAssistantSessions,
   startAssistantRun,
+  updateAssistantSession,
   type AssistantMessage,
   type AssistantSession
 } from '@/api/assistant'
@@ -111,12 +130,14 @@ const projects = ref<Project[]>([])
 const activeId = ref('')
 const newProject = ref('')
 const search = ref('')
+const showArchived = ref(false)
 const draft = ref('')
 const loadingSessions = ref(false)
 const loadingMessages = ref(false)
 const creating = ref(false)
 const sending = ref(false)
 const archiving = ref(false)
+const restoring = ref(false)
 
 const activeSession = computed(() => sessions.value.find((s) => s.id === activeId.value))
 
@@ -143,7 +164,10 @@ function messageText(m: AssistantMessage) {
 async function loadSessions() {
   loadingSessions.value = true
   try {
-    const res = await listAssistantSessions({ status: 'active', q: search.value.trim() })
+    const res = await listAssistantSessions({
+      status: showArchived.value ? 'archived' : 'active',
+      q: search.value.trim()
+    })
     sessions.value = res.items
     if (!activeId.value && sessions.value.length) activeId.value = sessions.value[0].id
     if (activeId.value) await loadMessages()
@@ -226,6 +250,22 @@ async function archiveActive() {
   }
 }
 
+async function restoreActive() {
+  if (!activeId.value) return
+  restoring.value = true
+  try {
+    await updateAssistantSession(activeId.value, { status: 'active' })
+    sessions.value = sessions.value.filter((s) => s.id !== activeId.value)
+    activeId.value = sessions.value[0]?.id ?? ''
+    messages.value = []
+    if (activeId.value) await loadMessages()
+  } catch (err) {
+    showApiError(err, t('assistant.restoreFailed'))
+  } finally {
+    restoring.value = false
+  }
+}
+
 onMounted(() => {
   void loadProjects()
   void loadSessions()
@@ -269,6 +309,9 @@ onMounted(() => {
 }
 .assistant-search {
   margin-top: var(--space-2);
+}
+.assistant-archived-toggle {
+  margin-top: var(--space-1);
 }
 .assistant-shared {
   margin-left: var(--space-1);
