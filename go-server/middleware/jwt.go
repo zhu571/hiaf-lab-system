@@ -86,6 +86,11 @@ func GetUserClaims(ctx context.Context) *UserClaims {
 	return claims
 }
 
+// WithUserClaims 注入 claims，供测试/内部调用构造已认证上下文。
+func WithUserClaims(ctx context.Context, claims *UserClaims) context.Context {
+	return context.WithValue(ctx, userClaimsKey, claims)
+}
+
 // GenerateToken creates a short-lived access token valid for 15 minutes.
 func GenerateToken(userID, username, role string, tokenVersion int, secret []byte) (string, error) {
 	claims := &UserClaims{
