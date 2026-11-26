@@ -2,6 +2,7 @@ import adminUsers from './en/adminUsers'
 import agentCandidates from './en/agentCandidates'
 import alert from './en/alert'
 import ask from './en/ask'
+import assistant from './en/assistant'
 import assembly from './en/assembly'
 import attachment from './en/attachment'
 import audit from './en/audit'
@@ -40,6 +41,7 @@ export default {
   ...agentCandidates,
   ...alert,
   ...ask,
+  ...assistant,
   ...assembly,
   ...attachment,
   ...audit,

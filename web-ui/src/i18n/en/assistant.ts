@@ -1,0 +1,19 @@
+export default {
+  assistant: {
+    title: 'AI Assistant',
+    new: 'New session',
+    emptySessions: 'No sessions yet',
+    selectSession: 'Select or create a session',
+    emptyMessages: 'No messages yet. Tell the assistant what you need.',
+    placeholder: 'Ask a question, Ctrl+Enter to send',
+    send: 'Send',
+    archive: 'Archive',
+    untitled: 'Untitled session',
+    runtimePending: 'AI reply runtime is not connected yet; your messages are saved.',
+    role: {
+      user: 'Me',
+      assistant: 'Assistant',
+      tool: 'Tool'
+    }
+  }
+}

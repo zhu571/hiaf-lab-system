@@ -10,6 +10,7 @@ export default {
     attachments: 'Attachments',
     aiReview: 'AI Review',
     aiAsk: 'AI Ask',
+    assistant: 'AI Assistant',
     pendingReview: 'Pending review candidates',
     // Section headers inside the system menu group (nav-menu-redesign: system
     // group is clustered by section in the sidebar and mobile drawer).
