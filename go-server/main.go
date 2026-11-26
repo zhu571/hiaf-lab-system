@@ -336,32 +336,7 @@ func main() {
 	r.Use(mw.Metrics)
 	r.Use(middleware.RequestLogger(mw.SlogLogFormatter{}))
 
-	r.Get("/health", func(w http.ResponseWriter, r *http.Request) {
-		common.WriteSuccess(w, r, map[string]string{"status": "ok"})
-	})
-	// /metrics 不经过 AuthRequired（运维探针可达；ServiceToken 白名单只拦
-	// /api/v1/daily-reports/by-date 与 /api/v1/ask/execute，/metrics 不受影响）。
-	r.Get("/metrics", mw.MetricsHandler)
-
-	r.Mount("/api/v1/auth", authHandler.Routes(mw.Audit(db)))
-	r.Route("/api/v1/admin/users", func(r chi.Router) {
-		r.Use(mw.AuthRequired)
-		r.Use(mw.RequireRole(auth.RoleAdmin))
-		r.Use(mw.Audit(db))
-		r.Get("/", authHandler.AdminListUsers)
-		r.Post("/", authHandler.AdminCreateUser)
-		r.Patch("/{id}", authHandler.AdminUpdateUser)
-		r.Post("/{id}/reset-password", authHandler.AdminResetPassword)
-	})
-	r.Route("/api/v1/admin/invitation-codes", func(r chi.Router) {
-		r.Use(mw.AuthRequired)
-		r.Use(mw.RequireRole(auth.RoleAdmin))
-		r.Use(mw.Audit(db))
-		r.Use(mw.RequireIdempotencyKey(db))
-		r.Get("/", authHandler.AdminListInvitationCodes)
-		r.Post("/", authHandler.AdminCreateInvitationCode)
-		r.Post("/{id}/revoke", authHandler.AdminRevokeInvitationCode)
-	})
+	registerCoreRoutes(r, db, authHandler)
 	registerAutomationRoutes(r, db, automationHandler)
 	registerSystemAdminRoutes(r, db, systemHandler)
 	registerAuditRoutes(r, auditHandler)
@@ -390,27 +365,7 @@ func main() {
 	registerAlertRoutes(r, db, alertHandler)
 
 	// Serve embedded frontend with SPA fallback
-	staticFS, fsErr := fs.Sub(frontendFiles, "static")
-	if fsErr != nil {
-		slog.Error("failed to mount embedded frontend", "error", fsErr)
-		os.Exit(1)
-	}
-	indexHTML, err := staticFS.Open("index.html")
-	if err != nil {
-		slog.Error("embedded frontend missing index.html", "error", err)
-		os.Exit(1)
-	}
-	indexHTML.Close()
-
-	spa := spaHandler(staticFS)
-	r.NotFound(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		// Don't serve frontend for API routes
-		if len(r.URL.Path) >= 5 && r.URL.Path[:5] == "/api/" {
-			http.NotFound(w, r)
-			return
-		}
-		spa.ServeHTTP(w, r)
-	}))
+	mountFrontend(r)
 
 	// 优雅关闭：SIGINT/SIGTERM → scheduler 不再起新批、在途批完成（≤30s），HTTP 10s 内排空。
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
@@ -430,22 +385,7 @@ func main() {
 		agent:       agentSvc,
 	})
 
-	srv := &http.Server{Addr: ":" + port, Handler: r}
-	if cfg.Features.RequestTimeouts {
-		srv.ReadHeaderTimeout = cfg.HTTP.ReadHeaderTimeout
-		srv.IdleTimeout = cfg.HTTP.IdleTimeout
-		srv.MaxHeaderBytes = 1 << 20
-	}
-	go func() {
-		<-ctx.Done()
-		shutdownCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-		defer cancel()
-		if err := srv.Shutdown(shutdownCtx); err != nil {
-			slog.Warn("http server shutdown", "error", err)
-		}
-	}()
-	slog.Info("server starting", "port", port)
-	if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+	if err := runHTTPServer(ctx, r, cfg, port); err != nil {
 		slog.Error("server exited", "error", err)
 		os.Exit(1)
 	}
