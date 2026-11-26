@@ -21,6 +21,7 @@ export default {
     runtimeReply: 'AI runtime is not connected yet. Your question is saved and will be answered here once it is.',
     role: {
       user: 'Me',
+      member: 'Member',
       assistant: 'Assistant',
       tool: 'Tool'
     }
