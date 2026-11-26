@@ -13,6 +13,7 @@ func registerAssistantRoutes(r chi.Router, db *sql.DB, assistantHandler *assista
 	r.Route("/api/v1/assistant", func(r chi.Router) {
 		r.Use(middleware.AuthRequired)
 		r.Use(middleware.Audit(db))
+		r.Get("/usage", assistantHandler.Usage)
 		r.Route("/sessions", func(r chi.Router) {
 			r.Get("/", assistantHandler.List)
 			r.Group(func(r chi.Router) {

@@ -64,3 +64,13 @@ type RunResult struct {
 	Run      Run       `json:"run"`
 	Messages []Message `json:"messages"`
 }
+
+// Usage 是 assistant_usage 的当日用量。
+type Usage struct {
+	Date         string `json:"date"`
+	Runs         int    `json:"runs"`
+	InputTokens  int64  `json:"input_tokens"`
+	OutputTokens int64  `json:"output_tokens"`
+	ToolCalls    int    `json:"tool_calls"`
+	RunLimit     int    `json:"run_limit"`
+}

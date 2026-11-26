@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
+	"time"
 )
 
 // Repository 只访问 assistant_* 表，不 join 其他模块业务表。
@@ -222,6 +223,30 @@ func (r *Repository) AddUserMessageToSession(ctx context.Context, sessionID, use
 		return nil, fmt.Errorf("commit message: %w", err)
 	}
 	return &m, nil
+}
+
+func (r *Repository) TodayUsage(ctx context.Context, userID string) (Usage, error) {
+	var u Usage
+	err := r.db.QueryRowContext(ctx,
+		`SELECT usage_date::text, runs, input_tokens, output_tokens, tool_calls
+		 FROM assistant_usage WHERE user_id = $1::uuid AND usage_date = CURRENT_DATE`, userID,
+	).Scan(&u.Date, &u.Runs, &u.InputTokens, &u.OutputTokens, &u.ToolCalls)
+	if err == sql.ErrNoRows {
+		return Usage{Date: time.Now().Format("2006-01-02")}, nil
+	}
+	if err != nil {
+		return Usage{}, err
+	}
+	return u, nil
+}
+
+func (r *Repository) IncrementRunUsage(ctx context.Context, userID string) error {
+	_, err := r.db.ExecContext(ctx,
+		`INSERT INTO assistant_usage (user_id, usage_date, runs)
+		 VALUES ($1::uuid, CURRENT_DATE, 1)
+		 ON CONFLICT (user_id, usage_date)
+		 DO UPDATE SET runs = assistant_usage.runs + 1`, userID)
+	return err
 }
 
 func projectID(p *string) string {

@@ -97,6 +97,9 @@ func TestDBServiceSessionLifecycle(t *testing.T) {
 	if runResult.Messages[1].Role != "assistant" || runResult.Messages[1].Content != "fake answer" {
 		t.Fatalf("unexpected assistant message: %+v", runResult.Messages[1])
 	}
+	if usage, err := svc.Usage(ctx, dbTestUserID); err != nil || usage.Runs < 1 {
+		t.Fatalf("usage = %+v, err = %v", usage, err)
+	}
 
 	if err := svc.Archive(ctx, dbTestUserID, sess.ID); err != nil {
 		t.Fatalf("Archive: %v", err)
