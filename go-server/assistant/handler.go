@@ -1,6 +1,7 @@
 package assistant
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"net/http"
@@ -11,11 +12,24 @@ import (
 	"github.com/zhu571/hiaf-lab-system/go-server/middleware"
 )
 
-type Handler struct {
-	svc *Service
+// serviceAPI 是 Handler 依赖的窄接口，便于 HTTP 层注入 fake。
+type serviceAPI interface {
+	Create(ctx context.Context, userID string, req CreateSessionRequest) (*Session, error)
+	List(ctx context.Context, userID, status, query string, limit int) ([]Session, error)
+	Get(ctx context.Context, userID, id string) (*Session, error)
+	Update(ctx context.Context, userID, id string, req UpdateSessionRequest) (*Session, error)
+	Archive(ctx context.Context, userID, id string) error
+	Messages(ctx context.Context, userID, id string) ([]Message, error)
+	AddMessage(ctx context.Context, userID, id, content string) (*Message, error)
+	StartRun(ctx context.Context, userID, sessionID, content string) (*RunResult, error)
+	Usage(ctx context.Context, userID string) (Usage, error)
 }
 
-func NewHandler(svc *Service) *Handler { return &Handler{svc: svc} }
+type Handler struct {
+	svc serviceAPI
+}
+
+func NewHandler(svc serviceAPI) *Handler { return &Handler{svc: svc} }
 
 func (h *Handler) List(w http.ResponseWriter, r *http.Request) {
 	userID := middleware.GetUserClaims(r.Context()).UserID
