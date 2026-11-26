@@ -20,6 +20,7 @@ import (
 	"github.com/zhu571/hiaf-lab-system/go-server/alert"
 	"github.com/zhu571/hiaf-lab-system/go-server/ask"
 	"github.com/zhu571/hiaf-lab-system/go-server/assembly"
+	"github.com/zhu571/hiaf-lab-system/go-server/assistant"
 	"github.com/zhu571/hiaf-lab-system/go-server/attachments"
 	"github.com/zhu571/hiaf-lab-system/go-server/audit"
 	"github.com/zhu571/hiaf-lab-system/go-server/auth"
@@ -119,6 +120,9 @@ func main() {
 		return float64(n)
 	})
 	agentHandler := agent.NewHandler(agentSvc)
+	assistantRepo := assistant.NewRepository(db)
+	assistantSvc := assistant.NewService(assistantRepo)
+	assistantHandler := assistant.NewHandler(assistantSvc)
 	automationRepo := automation.NewRepository(db)
 	automationSvc := automation.NewService(automationRepo)
 	automationHandler := automation.NewHandler(automationSvc)
@@ -313,6 +317,7 @@ func main() {
 	registerSystemAdminRoutes(r, db, systemHandler)
 	registerAuditRoutes(r, auditHandler)
 	registerAgentRoutes(r, db, agentHandler)
+	registerAssistantRoutes(r, db, assistantHandler)
 	registerDailyReportRoutes(r, db, logsHandler)
 	registerProjectRoutes(r, db, projectsHandler, issuesHandler, logsHandler, runsHandler,
 		assemblyHandler, testDataHandler, testDataCurveHandler, rfMatchingHandler, scansHandler)
