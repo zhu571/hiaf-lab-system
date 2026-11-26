@@ -63,6 +63,10 @@ func (f *fakeService) Usage(_ context.Context, userID string) (Usage, error) {
 	return Usage{Date: "2026-11-26", Runs: 1, RunLimit: 100}, nil
 }
 
+func (f *fakeService) Export(_ context.Context, _, id string) (string, error) {
+	return "# exported " + id, nil
+}
+
 func authedRequest(method, target string, body string) *http.Request {
 	req := httptest.NewRequest(method, target, strings.NewReader(body))
 	claims := &middleware.UserClaims{UserID: "u1", Username: "tester"}

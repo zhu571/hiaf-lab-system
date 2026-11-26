@@ -10,6 +10,8 @@ export default {
     send: 'Send',
     archive: 'Archive',
     rename: 'Rename',
+    export: 'Export',
+    exportFailed: 'Failed to export',
     renamePrompt: 'Enter a new session title',
     renameFailed: 'Failed to rename',
     archived: 'Archived',

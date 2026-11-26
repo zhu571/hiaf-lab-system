@@ -23,6 +23,7 @@ func registerAssistantRoutes(r chi.Router, db *sql.DB, assistantHandler *assista
 			r.Route("/{id}", func(r chi.Router) {
 				r.Get("/", assistantHandler.Get)
 				r.Get("/messages", assistantHandler.Messages)
+				r.Get("/export", assistantHandler.Export)
 				r.Group(func(r chi.Router) {
 					r.Use(middleware.RequireIdempotencyKey(db))
 					r.Patch("/", assistantHandler.Update)

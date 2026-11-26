@@ -66,6 +66,9 @@
             <el-button size="small" :loading="renaming" @click="renameActive">
               {{ t('assistant.rename') }}
             </el-button>
+            <el-button size="small" :loading="exporting" @click="exportActive">
+              {{ t('assistant.export') }}
+            </el-button>
             <el-button
               v-if="activeSession.status === 'archived'"
               size="small"
@@ -120,6 +123,7 @@ import { ElMessageBox } from 'element-plus'
 import {
   archiveAssistantSession,
   createAssistantSession,
+  exportAssistantSession,
   listAssistantMessages,
   listAssistantSessions,
   getAssistantUsage,
@@ -151,6 +155,7 @@ const sending = ref(false)
 const archiving = ref(false)
 const restoring = ref(false)
 const renaming = ref(false)
+const exporting = ref(false)
 
 const activeSession = computed(() => sessions.value.find((s) => s.id === activeId.value))
 
@@ -272,8 +277,26 @@ async function archiveActive() {
   }
 }
 
-async function renameActive() {
+async function exportActive() {
   if (!activeSession.value) return
+  exporting.value = true
+  try {
+    const markdown = await exportAssistantSession(activeSession.value.id)
+    const blob = new Blob([markdown], { type: 'text/markdown;charset=utf-8' })
+    const url = URL.createObjectURL(blob)
+    const link = document.createElement('a')
+    link.href = url
+    link.download = `assistant-${activeSession.value.id}.md`
+    link.click()
+    URL.revokeObjectURL(url)
+  } catch (err) {
+    showApiError(err, t('assistant.exportFailed'))
+  } finally {
+    exporting.value = false
+  }
+}
+
+async function renameActive() {  if (!activeSession.value) return
   let result: { value: string } | null = null
   try {
     result = await ElMessageBox.prompt(t('assistant.renamePrompt'), t('assistant.rename'), {

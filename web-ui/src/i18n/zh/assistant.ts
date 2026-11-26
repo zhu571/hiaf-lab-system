@@ -10,6 +10,8 @@ export default {
     send: '发送',
     archive: '归档',
     rename: '重命名',
+    export: '导出',
+    exportFailed: '导出失败',
     renamePrompt: '输入新的会话标题',
     renameFailed: '重命名失败',
     archived: '已归档',
