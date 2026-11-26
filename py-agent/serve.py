@@ -15,6 +15,7 @@ from starlette.responses import JSONResponse
 from starlette.routing import Route
 
 from tools.ask import AskEngine
+from tools.assistant import AssistantReplier, validate_assistant_reply
 from tools.experience import ExperienceExtractor
 from tools.parse import InstrumentFlowDecider, InstrumentInterpreter, ParseError, Parser
 from tools.request_context import REQUEST_ID
@@ -280,7 +281,7 @@ class RequestIDMiddleware:
         await self.app(scope, receive, send_with_id)
 
 
-def create_app(interpreter, planner, parser, todo_planner, token, ask_engine=None, weekly=None, extractor=None, translator=None, flow_decider=None):
+def create_app(interpreter, planner, parser, todo_planner, token, ask_engine=None, weekly=None, extractor=None, translator=None, flow_decider=None, assistant=None):
     def make_endpoint(validate, handler, parse_error_code):
         """端点工厂：统一 Bearer 鉴权、JSON 解析（64KB 上限）、三态异常映射（400/422/502）。
 
@@ -376,6 +377,14 @@ def create_app(interpreter, planner, parser, todo_planner, token, ask_engine=Non
             raise RuntimeError("translator is not configured")
         return await asyncio.to_thread(translator.translate, *validated)
 
+    async def do_assistant_reply(validated, _data):
+        if assistant is None:
+            raise RuntimeError("assistant replier is not configured")
+        return await asyncio.wait_for(
+            asyncio.to_thread(assistant.reply, validated),
+            timeout=AssistantReplier.TOTAL_TIMEOUT,
+        )
+
     app = Starlette(routes=[
         Route("/health", health),
         Route("/v1/interpret", make_endpoint(validate_request, do_interpret, "interpretation_failed"), methods=["POST"]),
@@ -388,6 +397,7 @@ def create_app(interpreter, planner, parser, todo_planner, token, ask_engine=Non
         Route("/v1/weekly-summary", make_endpoint(validate_weekly_request, do_weekly, "weekly_summary_failed"), methods=["POST"]),
         Route("/v1/experience-extract", make_endpoint(validate_experience_extract, do_experience_extract, "experience_extract_failed"), methods=["POST"]),
         Route("/v1/translate", make_endpoint(validate_translation_request, do_translation, "translation_failed"), methods=["POST"]),
+        Route("/v1/assistant-reply", make_endpoint(validate_assistant_reply, do_assistant_reply, "assistant_reply_failed"), methods=["POST"]),
     ])
     app.add_middleware(RequestIDMiddleware)
     return app
@@ -426,6 +436,7 @@ def build_app():
         extractor=ExperienceExtractor(api_key),
         translator=Translator(api_key),
         flow_decider=InstrumentFlowDecider(api_key),
+        assistant=AssistantReplier(api_key),
     )
 
 

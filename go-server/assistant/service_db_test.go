@@ -45,6 +45,10 @@ func openAssistantTestDB(t *testing.T) *sql.DB {
 	return db
 }
 
+type fakeReplier struct{}
+
+func (fakeReplier) Reply(context.Context, []Message) (string, error) { return "fake answer", nil }
+
 func TestDBServiceSessionLifecycle(t *testing.T) {
 	db := openAssistantTestDB(t)
 	svc := NewService(NewRepository(db))
@@ -81,7 +85,8 @@ func TestDBServiceSessionLifecycle(t *testing.T) {
 	if _, err := svc.Update(ctx, dbTestUserID, sess.ID, UpdateSessionRequest{Title: &title}); err != nil {
 		t.Fatalf("Update: %v", err)
 	}
-	// run 骨架：用户消息 + 占位 assistant 消息，run 完成。
+	// run 骨架：用户消息 + assistant 消息，run 完成。
+	svc.SetReplier(fakeReplier{})
 	runResult, err := svc.StartRun(ctx, dbTestUserID, sess.ID, "再问一次")
 	if err != nil {
 		t.Fatalf("StartRun: %v", err)
@@ -89,8 +94,8 @@ func TestDBServiceSessionLifecycle(t *testing.T) {
 	if runResult.Run.Status != "done" || len(runResult.Messages) != 2 {
 		t.Fatalf("unexpected run result: %+v", runResult)
 	}
-	if runResult.Messages[1].Role != "assistant" || runResult.Messages[1].ContentJSON["placeholder"] != true {
-		t.Fatalf("unexpected assistant placeholder: %+v", runResult.Messages[1])
+	if runResult.Messages[1].Role != "assistant" || runResult.Messages[1].Content != "fake answer" {
+		t.Fatalf("unexpected assistant message: %+v", runResult.Messages[1])
 	}
 
 	if err := svc.Archive(ctx, dbTestUserID, sess.ID); err != nil {

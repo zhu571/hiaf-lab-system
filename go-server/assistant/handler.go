@@ -125,6 +125,8 @@ func writeError(w http.ResponseWriter, r *http.Request, err error) {
 		common.WriteError(w, r, http.StatusBadRequest, "not_supported", "项目共享会话暂未开放", nil)
 	case errors.Is(err, ErrInvalid):
 		common.WriteError(w, r, http.StatusBadRequest, "invalid_request", "参数不合法", nil)
+	case errors.Is(err, ErrUpstream):
+		common.WriteError(w, r, http.StatusBadGateway, "upstream_error", "AI 服务暂时不可用", nil)
 	default:
 		common.WriteError(w, r, http.StatusInternalServerError, "internal_error", "服务器内部错误", nil)
 	}

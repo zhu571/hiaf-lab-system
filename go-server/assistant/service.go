@@ -11,6 +11,7 @@ var (
 	ErrNotFound           = errors.New("assistant session not found")
 	ErrInvalid            = errors.New("invalid assistant request")
 	ErrProjectUnsupported = errors.New("project sessions are not enabled yet")
+	ErrUpstream           = errors.New("assistant upstream unavailable")
 )
 
 const (
@@ -20,10 +21,14 @@ const (
 )
 
 type Service struct {
-	repo *Repository
+	repo    *Repository
+	replier Replier
 }
 
 func NewService(repo *Repository) *Service { return &Service{repo: repo} }
+
+// SetReplier 注入真实 LLM 客户端；未注入时 StartRun 返回明确的占位回复。
+func (s *Service) SetReplier(r Replier) { s.replier = r }
 
 func (s *Service) Create(ctx context.Context, userID string, req CreateSessionRequest) (*Session, error) {
 	if strings.TrimSpace(req.ProjectID) != "" {
@@ -138,7 +143,28 @@ func (s *Service) StartRun(ctx context.Context, userID, sessionID, content strin
 		return nil, err
 	}
 	reply := "AI 运行时尚未接入，你的问题已记录；接入后会在这里回答。"
-	meta, _ := json.Marshal(map[string]any{"placeholder": true})
+	var meta []byte
+	if s.replier != nil {
+		history, err := s.repo.ListMessages(ctx, userID, sessionID)
+		if err != nil {
+			_ = s.repo.FinishRun(ctx, run.ID, "failed", err.Error())
+			return nil, err
+		}
+		if len(history) > 20 {
+			history = history[len(history)-20:]
+		}
+		answer, err := s.replier.Reply(ctx, history)
+		if err != nil {
+			_ = s.repo.FinishRun(ctx, run.ID, "failed", err.Error())
+			return nil, ErrUpstream
+		}
+		reply = answer
+		run.Model = "py-agent"
+		run.PromptVersion = "assistant-chat-v1"
+	}
+	if s.replier == nil {
+		meta, _ = json.Marshal(map[string]any{"placeholder": true})
+	}
 	assistantMsg, err := s.repo.AddAssistantMessage(ctx, sessionID, run.ID, reply, meta)
 	if err != nil {
 		_ = s.repo.FinishRun(ctx, run.ID, "failed", err.Error())
