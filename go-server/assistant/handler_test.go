@@ -113,6 +113,22 @@ func TestHandlerStartRunMapsUpstream(t *testing.T) {
 	}
 }
 
+func TestHandlerStartRunStreamEmitsResult(t *testing.T) {
+	h := NewHandler(&fakeService{})
+	req := withParam(authedRequest(http.MethodPost, "/assistant/sessions/s1/runs/stream", `{"content":"hi"}`), "id", "s1")
+	w := httptest.NewRecorder()
+	h.StartRunStream(w, req)
+	body := w.Body.String()
+	for _, want := range []string{"event: start", "event: result", "event: done"} {
+		if !strings.Contains(body, want) {
+			t.Fatalf("stream missing %q:\n%s", want, body)
+		}
+	}
+	if ct := w.Header().Get("Content-Type"); !strings.Contains(ct, "text/event-stream") {
+		t.Fatalf("content-type = %q", ct)
+	}
+}
+
 func TestHandlerUsageReturnsLimit(t *testing.T) {
 	h := NewHandler(&fakeService{})
 	req := authedRequest(http.MethodGet, "/assistant/usage", "")

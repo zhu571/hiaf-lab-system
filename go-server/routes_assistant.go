@@ -30,6 +30,7 @@ func registerAssistantRoutes(r chi.Router, db *sql.DB, assistantHandler *assista
 					r.Delete("/", assistantHandler.Archive)
 					r.Post("/messages", assistantHandler.AddMessage)
 					r.Post("/runs", assistantHandler.StartRun)
+					r.Post("/runs/stream", assistantHandler.StartRunStream)
 				})
 			})
 		})

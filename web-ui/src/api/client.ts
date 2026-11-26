@@ -58,6 +58,12 @@ export function setCSRFToken(token: string) {
   csrfToken = token
 }
 
+// getCSRFToken 供 fetch/SSE 等绕过 axios 拦截器的请求复用 CSRF 头。
+export function getCSRFToken() {
+  if (!csrfToken) csrfToken = decodeURIComponent(csrfFromCookie() || '')
+  return csrfToken
+}
+
 function csrfFromCookie() {
   return document.cookie
     .split('; ')

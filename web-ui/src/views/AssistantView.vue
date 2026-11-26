@@ -127,7 +127,7 @@ import {
   listAssistantMessages,
   listAssistantSessions,
   getAssistantUsage,
-  startAssistantRun,
+  startAssistantRunStream,
   updateAssistantSession,
   type AssistantMessage,
   type AssistantSession,
@@ -250,10 +250,14 @@ async function sendMessage() {
   if (!content || !activeId.value) return
   sending.value = true
   try {
-    const result = await startAssistantRun(activeId.value, content)
-    messages.value.push(...result.messages)
-    draft.value = ''
-    void loadUsage()
+    await startAssistantRunStream(activeId.value, content, {
+      onResult: (result) => {
+        messages.value.push(...result.messages)
+        draft.value = ''
+        void loadUsage()
+      },
+      onError: (message) => showApiError(new Error(message), t('assistant.sendFailed'))
+    })
   } catch (err) {
     showApiError(err, t('assistant.sendFailed'))
   } finally {

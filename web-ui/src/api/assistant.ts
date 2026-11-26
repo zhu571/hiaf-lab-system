@@ -1,4 +1,4 @@
-import { api, request } from './client'
+import { api, getCSRFToken, request } from './client'
 
 export type AssistantSession = {
   id: string
@@ -90,4 +90,70 @@ export function getAssistantUsage() {
 export async function exportAssistantSession(id: string) {
   const response = await api.get(`/assistant/sessions/${id}/export`, { responseType: 'text' })
   return String(response.data)
+}
+
+export type AssistantStreamHandlers = {
+  onStart?: () => void
+  onResult: (result: AssistantRunResult) => void
+  onError?: (message: string) => void
+}
+
+// startAssistantRunStream 通过 fetch 读取 SSE（POST，带 CSRF/HttpOnly Cookie）。
+export async function startAssistantRunStream(
+  id: string,
+  content: string,
+  handlers: AssistantStreamHandlers
+) {
+  const response = await fetch(`/api/v1/assistant/sessions/${id}/runs/stream`, {
+    method: 'POST',
+    credentials: 'include',
+    headers: {
+      'Content-Type': 'application/json',
+      'X-CSRF-Token': getCSRFToken()
+    },
+    body: JSON.stringify({ content })
+  })
+  if (!response.ok || !response.body) {
+    let message = `HTTP ${response.status}`
+    try {
+      const body = await response.json()
+      message = body?.error?.message || message
+    } catch {
+      // ignore
+    }
+    throw new Error(message)
+  }
+  const reader = response.body.getReader()
+  const decoder = new TextDecoder()
+  let buffer = ''
+  for (;;) {
+    const { value, done } = await reader.read()
+    if (done) break
+    buffer += decoder.decode(value, { stream: true })
+    let idx = buffer.indexOf('\n\n')
+    while (idx >= 0) {
+      const block = buffer.slice(0, idx)
+      buffer = buffer.slice(idx + 2)
+      const eventLine = block.split('\n').find((line) => line.startsWith('event: '))
+      const dataLine = block
+        .split('\n')
+        .filter((line) => line.startsWith('data: '))
+        .map((line) => line.slice(6))
+        .join('\n')
+      const event = eventLine?.slice(7) || 'message'
+      if (event === 'start') handlers.onStart?.()
+      if (event === 'result' && dataLine) handlers.onResult(JSON.parse(dataLine) as AssistantRunResult)
+      if (event === 'error') {
+        let message = 'AI 服务暂时不可用'
+        try {
+          message = JSON.parse(dataLine)?.message || message
+        } catch {
+          // ignore
+        }
+        handlers.onError?.(message)
+        return
+      }
+      idx = buffer.indexOf('\n\n')
+    }
+  }
 }
