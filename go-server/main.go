@@ -59,36 +59,8 @@ func main() {
 	}
 	cfg.LogRedacted()
 
-	jwtSecret, err := common.ReadSecret(cfg.Auth.JWTSecretFile, cfg.Auth.JWTSecretEnv)
-	if err != nil {
-		slog.Error("failed to read jwt secret", "error", err)
-		os.Exit(1)
-	}
-	mw.SetJWTSecret([]byte(jwtSecret))
-
-	serviceToken, err := common.ReadSecret(cfg.Auth.ServiceTokenFile, cfg.Auth.ServiceTokenEnv)
-	if err != nil {
-		slog.Warn("service token 未配置（todos scheduler 将无法拉取日报）", "error", err)
-	}
-	mw.SetServiceToken(serviceToken)
-	mw.SetIdempotencyV2(cfg.Features.IdempotencyV2)
-
-	db, err := common.OpenDBWithOptions(common.DBOptions{
-		Host:         cfg.DB.Host,
-		Port:         cfg.DB.Port,
-		User:         cfg.DB.User,
-		Name:         cfg.DB.Name,
-		PasswordFile: cfg.DB.PasswordFile,
-		PasswordEnv:  cfg.DB.PasswordEnv,
-		MaxOpen:      cfg.DB.MaxOpen,
-		MaxIdle:      cfg.DB.MaxIdle,
-	})
-	if err != nil {
-		slog.Error("failed to open database", "error", err)
-		os.Exit(1)
-	}
+	db, jwtSecret, port := bootstrap(cfg)
 	defer db.Close()
-	port := cfg.HTTP.Port
 
 	// 告警中心模块（方案 2026-08-09_alert-center）：先于各接入点构造，
 	// 经窄接口注入 middleware/auth/instruments/todos（模块间不跨模块直连）。
