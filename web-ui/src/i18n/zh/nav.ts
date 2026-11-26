@@ -9,6 +9,7 @@ export default {
     attachments: '附件',
     aiReview: 'AI审核',
     aiAsk: 'AI 问答',
+    assistant: 'AI 助手',
     pendingReview: '待审核候选',
     // 侧栏/抽屉内系统组小标题（nav-menu-redesign：system 组按 section 聚类）
     sections: {

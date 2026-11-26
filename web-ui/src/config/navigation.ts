@@ -1,6 +1,7 @@
 import type { Component } from 'vue'
 import {
   Bell,
+  ChatDotRound,
   Connection,
   DataBoard,
   Document,
@@ -61,6 +62,7 @@ export const NAV_ITEMS: NavEntry[] = [
   { path: '/daily-report', icon: Document, titleKey: 'nav.dailyReport', shortTitleKey: 'nav.short.dailyReport', group: 'main', mobile: true },
   { path: '/experiences', icon: Memo, titleKey: 'nav.experiences', group: 'main' },
   { path: '/attachments', icon: Paperclip, titleKey: 'nav.attachments', group: 'main' },
+  { path: '/assistant', icon: ChatDotRound, titleKey: 'nav.assistant', group: 'main' },
   { path: '/agent-candidates', icon: MagicStick, titleKey: 'nav.aiReview', group: 'main', minRole: 'maintainer', badge: 'agentPending' },
   { path: '/gas-control', icon: Monitor, titleKey: 'nav.gasControl', group: 'system', section: 'device' },
   { path: '/instrument-measure', icon: Odometer, titleKey: 'nav.instruments', group: 'system', section: 'device' },

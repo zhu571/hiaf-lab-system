@@ -8,6 +8,7 @@ const ProjectsView = () => import('../views/ProjectsView.vue')
 const DailyReportView = () => import('../views/DailyReportView.vue')
 const IssuesView = () => import('../views/IssuesView.vue')
 const ExperiencesView = () => import('../views/ExperiencesView.vue')
+const AssistantView = () => import('../views/AssistantView.vue')
 const AuditView = () => import('../views/AuditView.vue')
 const SettingsView = () => import('../views/SettingsView.vue')
 const DailyHistoryView = () => import('../views/DailyHistoryView.vue')
@@ -77,6 +78,7 @@ const router = createRouter({
     { path: '/electrical', component: ElectricalMonitorView, meta: { titleKey: 'nav.electrical' } },
     { path: '/todos', component: TodoView, meta: { titleKey: 'nav.todos' } },
     { path: '/experiences', component: ExperiencesView, meta: { titleKey: 'nav.experiences' } },
+    { path: '/assistant', component: AssistantView, meta: { titleKey: 'nav.assistant' } },
     { path: '/audit', component: AuditView, meta: { titleKey: 'nav.audit' } },
     { path: '/alerts', component: AlertCenterView, meta: { titleKey: 'nav.alert' } },
     { path: '/settings', component: SettingsView, meta: { titleKey: 'nav.settings' } },

@@ -44,8 +44,8 @@ describe('filterNavByRole：角色矩阵', () => {
 })
 
 describe('NAV_ITEMS 实际配置（对齐 AppLayout 三组派生）', () => {
-  it('配置完整性：17 项、path 唯一、titleKey 非空', () => {
-    expect(NAV_ITEMS).toHaveLength(17)
+  it('配置完整性：18 项、path 唯一、titleKey 非空', () => {
+    expect(NAV_ITEMS).toHaveLength(18)
     const paths = NAV_ITEMS.map((i) => i.path)
     expect(new Set(paths).size).toBe(paths.length)
     for (const i of NAV_ITEMS) {
@@ -54,15 +54,15 @@ describe('NAV_ITEMS 实际配置（对齐 AppLayout 三组派生）', () => {
     }
   })
 
-  it('桌面主组（viewer）：7 项，aiReview 经 minRole 过滤隐藏', () => {
+  it('桌面主组（viewer）：8 项，aiReview 经 minRole 过滤隐藏', () => {
     const main = filterNavByRole(NAV_ITEMS.filter((i) => i.group === 'main'), 'viewer')
-    expect(main.map((i) => i.path)).toEqual(['/', '/projects', '/my-logs', '/todos', '/daily-report', '/experiences', '/attachments'])
+    expect(main.map((i) => i.path)).toEqual(['/', '/projects', '/my-logs', '/todos', '/daily-report', '/experiences', '/attachments', '/assistant'])
     expect(main.find((i) => i.path === '/agent-candidates')).toBeUndefined()
   })
 
-  it('桌面主组（maintainer）：8 项，agent-candidates 带 agentPending 徽章', () => {
+  it('桌面主组（maintainer）：9 项，agent-candidates 带 agentPending 徽章', () => {
     const main = filterNavByRole(NAV_ITEMS.filter((i) => i.group === 'main'), 'maintainer')
-    expect(main).toHaveLength(8)
+    expect(main).toHaveLength(9)
     const aiReview = main.find((i) => i.path === '/agent-candidates')
     expect(aiReview?.badge).toBe('agentPending')
     expect(aiReview?.minRole).toBe('maintainer')

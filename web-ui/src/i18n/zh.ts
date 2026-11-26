@@ -2,6 +2,7 @@ import adminUsers from './zh/adminUsers'
 import agentCandidates from './zh/agentCandidates'
 import alert from './zh/alert'
 import ask from './zh/ask'
+import assistant from './zh/assistant'
 import assembly from './zh/assembly'
 import attachment from './zh/attachment'
 import audit from './zh/audit'
@@ -41,6 +42,7 @@ export default {
   ...agentCandidates,
   ...alert,
   ...ask,
+  ...assistant,
   ...assembly,
   ...attachment,
   ...audit,
