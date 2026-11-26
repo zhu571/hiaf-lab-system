@@ -68,6 +68,10 @@ type Service struct {
 	force      bool
 	dryRun     bool
 	noRollback bool
+
+	// AR-06b：宿主侧更新请求目录与可选 HMAC key（UPDATE_ENGINE=host）。
+	requestDir     string
+	requestKeyFile string
 }
 
 func NewService(repoRoot string) *Service {
@@ -97,6 +101,9 @@ func NewService(repoRoot string) *Service {
 		runUID:      envOrInt("UPDATE_RUN_UID", 0),
 		runGID:      envOrInt("UPDATE_RUN_GID", 0),
 		dockerGID:   envOrInt("UPDATE_DOCKER_GID", 0),
+
+		requestDir:     envOrStr("UPDATE_REQUEST_DIR", filepath.Join(repoRoot, ".hermes", "update-requests")),
+		requestKeyFile: envOrStr("UPDATE_REQUEST_KEY_FILE", ""),
 	}
 	s.applyUpdateFlags(envOrStr("UPDATE_FLAGS", ""))
 	s.engine = envOrStr("UPDATE_ENGINE", "")
