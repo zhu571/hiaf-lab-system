@@ -11,7 +11,7 @@
 </template>
 
 <script setup lang="ts">
-import { onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { Chart } from 'chart.js'
 import { api } from '@/api/client'
@@ -102,10 +102,12 @@ async function load() {
   error.value = false
   try {
     const response = await api.get(`/scans/${props.scanId}/file/txt`, { responseType: 'text' })
+    // canvas 由 v-else 渲染：先关 loading 并等 DOM patch，否则 draw 时 ref 还是空。
+    loading.value = false
+    await nextTick()
     draw(String(response.data))
   } catch {
     error.value = true
-  } finally {
     loading.value = false
   }
 }
