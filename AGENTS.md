@@ -68,6 +68,7 @@ HIAF 低温气体靶实验室的多人协作日志管理平台。系统已完成
 | `docs/agent-auto-review.md` | 写 Agent 自动解析、自动入库、审核队列前必读 |
 | `docs/collab-guide.md` | 了解多人协作、分支、审核流程 |
 | `docs/maintenance-strategy.md` | 写部署、迁移、备份、回滚前必读 |
+| `docs/update-runner-hardening.md` | AR-06b 更新执行器去 docker.sock 的宿主侧方案（设计稿） |
 | `docs/codex-plan.md` | 了解 Codex 对架构和实施顺序的补充建议 |
 | `docs/multi-user-agent-upgrade.md` | 规划多人 Agent、会话/工具/配额升级前必读（含 GitHub 同类项目调研） |
 | `docs/architecture-review.md` | 做架构演进、性能/安全加固、跨模块改造前必读（缺陷编号 AR-xx 可引用） |
