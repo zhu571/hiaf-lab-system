@@ -11,6 +11,11 @@ export default {
     untitled: '未命名会话',
     privateSession: '私有会话',
     shared: '项目共享',
+    loadFailed: '会话加载失败',
+    messagesFailed: '消息加载失败',
+    createFailed: '新建会话失败',
+    sendFailed: '发送失败',
+    archiveFailed: '归档失败',
     runtimePending: 'AI 回复运行时尚未接入；当前只保存你的消息。',
     runtimeReply: 'AI 运行时尚未接入，你的问题已记录；接入后会在这里回答。',
     role: {
