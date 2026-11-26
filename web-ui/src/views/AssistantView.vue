@@ -38,7 +38,7 @@
         <div v-else class="assistant-messages">
           <div v-for="m in messages" :key="m.id" :class="['assistant-message', m.role]">
             <div class="assistant-message-role">{{ roleLabel(m.role) }}</div>
-            <div class="assistant-message-content">{{ m.content }}</div>
+            <div class="assistant-message-content">{{ messageText(m) }}</div>
           </div>
         </div>
         <div class="assistant-compose">
@@ -65,11 +65,11 @@
 import { computed, onMounted, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import {
-  addAssistantMessage,
   archiveAssistantSession,
   createAssistantSession,
   listAssistantMessages,
   listAssistantSessions,
+  startAssistantRun,
   type AssistantMessage,
   type AssistantSession
 } from '@/api/assistant'
@@ -96,6 +96,10 @@ function roleLabel(role: string) {
   if (role === 'assistant') return t('assistant.role.assistant')
   if (role === 'tool') return t('assistant.role.tool')
   return t('assistant.role.user')
+}
+
+function messageText(m: AssistantMessage) {
+  return m.content_json?.placeholder ? t('assistant.runtimeReply') : m.content
 }
 
 async function loadSessions() {
@@ -144,8 +148,8 @@ async function sendMessage() {
   if (!content || !activeId.value) return
   sending.value = true
   try {
-    const msg = await addAssistantMessage(activeId.value, content)
-    messages.value.push(msg)
+    const result = await startAssistantRun(activeId.value, content)
+    messages.value.push(...result.messages)
     draft.value = ''
   } finally {
     sending.value = false
