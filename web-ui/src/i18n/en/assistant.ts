@@ -13,6 +13,7 @@ export default {
     restore: 'Restore',
     restoreFailed: 'Failed to restore',
     showArchived: 'Show archived',
+    usage: 'Today {used}/{limit}',
     untitled: 'Untitled session',
     privateSession: 'Private',
     shared: 'Project shared',
