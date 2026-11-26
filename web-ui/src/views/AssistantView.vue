@@ -30,6 +30,9 @@
       <el-checkbox v-model="showArchived" class="assistant-archived-toggle" @change="loadSessions">
         {{ t('assistant.showArchived') }}
       </el-checkbox>
+      <div v-if="usage" class="assistant-usage">
+        {{ t('assistant.usage', { used: usage.runs, limit: usage.run_limit }) }}
+      </div>
       <div v-if="loadingSessions" v-loading="true" class="assistant-loading" />
       <el-empty v-else-if="!sessions.length" :description="t('assistant.emptySessions')" />
       <ul v-else class="assistant-sessions">
@@ -113,10 +116,12 @@ import {
   createAssistantSession,
   listAssistantMessages,
   listAssistantSessions,
+  getAssistantUsage,
   startAssistantRun,
   updateAssistantSession,
   type AssistantMessage,
-  type AssistantSession
+  type AssistantSession,
+  type AssistantUsage
 } from '@/api/assistant'
 import { listProjects, type Project } from '@/api/projects'
 import { showApiError } from '@/composables/useNotify'
@@ -127,6 +132,7 @@ const auth = useAuthStore()
 const sessions = ref<AssistantSession[]>([])
 const messages = ref<AssistantMessage[]>([])
 const projects = ref<Project[]>([])
+const usage = ref<AssistantUsage | null>(null)
 const activeId = ref('')
 const newProject = ref('')
 const search = ref('')
@@ -199,6 +205,14 @@ async function loadProjects() {
   }
 }
 
+async function loadUsage() {
+  try {
+    usage.value = await getAssistantUsage()
+  } catch {
+    usage.value = null
+  }
+}
+
 function selectSession(id: string) {
   activeId.value = id
   messages.value = []
@@ -227,6 +241,7 @@ async function sendMessage() {
     const result = await startAssistantRun(activeId.value, content)
     messages.value.push(...result.messages)
     draft.value = ''
+    void loadUsage()
   } catch (err) {
     showApiError(err, t('assistant.sendFailed'))
   } finally {
@@ -269,6 +284,7 @@ async function restoreActive() {
 onMounted(() => {
   void loadProjects()
   void loadSessions()
+  void loadUsage()
 })
 </script>
 
@@ -312,6 +328,11 @@ onMounted(() => {
 }
 .assistant-archived-toggle {
   margin-top: var(--space-1);
+}
+.assistant-usage {
+  margin-top: var(--space-1);
+  font-size: var(--fs-body-sm);
+  color: var(--text-3);
 }
 .assistant-shared {
   margin-left: var(--space-1);

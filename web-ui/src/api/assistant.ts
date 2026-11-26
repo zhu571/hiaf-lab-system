@@ -42,6 +42,15 @@ export type AssistantRunResult = {
   messages: AssistantMessage[]
 }
 
+export type AssistantUsage = {
+  date: string
+  runs: number
+  input_tokens: number
+  output_tokens: number
+  tool_calls: number
+  run_limit: number
+}
+
 export function listAssistantSessions(params: { status?: string; limit?: number; q?: string } = {}) {
   return request<{ items: AssistantSession[] }>({ url: '/assistant/sessions', params })
 }
@@ -72,4 +81,8 @@ export function addAssistantMessage(id: string, content: string) {
 
 export function startAssistantRun(id: string, content: string) {
   return request<AssistantRunResult>({ url: `/assistant/sessions/${id}/runs`, method: 'POST', data: { content } })
+}
+
+export function getAssistantUsage() {
+  return request<AssistantUsage>({ url: '/assistant/usage' })
 }

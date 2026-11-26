@@ -13,6 +13,7 @@ export default {
     restore: '恢复',
     restoreFailed: '恢复失败',
     showArchived: '显示已归档',
+    usage: '今日用量 {used}/{limit}',
     untitled: '未命名会话',
     privateSession: '私有会话',
     shared: '项目共享',
