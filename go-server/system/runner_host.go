@@ -4,9 +4,6 @@ package system
 
 import (
 	"context"
-	"crypto/hmac"
-	"crypto/sha256"
-	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"log/slog"
@@ -15,19 +12,6 @@ import (
 	"strings"
 	"time"
 )
-
-// hostRequest 是 server 写给宿主侧 systemd 更新单元的请求文件（AR-06b）。
-type hostRequest struct {
-	SessionID   string   `json:"session_id"`
-	RepoRoot    string   `json:"repo_root"`
-	ComposeFile string   `json:"compose_file"`
-	ProjectName string   `json:"project_name"`
-	Branch      string   `json:"branch"`
-	Flags       []string `json:"flags"`
-	RequestedAt string   `json:"requested_at"`
-	Nonce       string   `json:"nonce"`
-	Signature   string   `json:"signature,omitempty"`
-}
 
 // hostRunner 不调用 Docker API：只把请求落盘，由宿主侧 systemd path 单元执行。
 // 因此 server 容器无需挂载 docker.sock。
@@ -42,7 +26,7 @@ func (r *hostRunner) Spawn(ctx context.Context, sess *UpdateSession) (RunnerID, 
 	if err := os.MkdirAll(r.requestDir, 0o700); err != nil {
 		return "", fmt.Errorf("create request dir: %w", err)
 	}
-	req := hostRequest{
+	req := HostRequest{
 		SessionID:   sess.ID,
 		RepoRoot:    r.cfg.RepoRoot,
 		ComposeFile: r.cfg.ComposeFile,
@@ -55,7 +39,7 @@ func (r *hostRunner) Spawn(ctx context.Context, sess *UpdateSession) (RunnerID, 
 	if key, err := r.readKey(); err != nil {
 		return "", err
 	} else if len(key) > 0 {
-		req.Signature = signHostRequest(key, req)
+		req.Signature = SignHostRequest(key, req)
 	}
 	data, err := json.MarshalIndent(req, "", "  ")
 	if err != nil {
@@ -144,15 +128,4 @@ func hostSessionID(id RunnerID) (string, error) {
 		return "", fmt.Errorf("invalid host runner id %q", s)
 	}
 	return strings.TrimPrefix(s, "host:"), nil
-}
-
-// signHostRequest 对稳定字段做 HMAC，宿主侧 runner 用同一 key 验签后再执行。
-func signHostRequest(key []byte, req hostRequest) string {
-	canonical := strings.Join([]string{
-		req.SessionID, req.RepoRoot, req.ComposeFile, req.ProjectName,
-		req.Branch, strings.Join(req.Flags, ","), req.RequestedAt, req.Nonce,
-	}, "\n")
-	mac := hmac.New(sha256.New, key)
-	_, _ = mac.Write([]byte(canonical))
-	return hex.EncodeToString(mac.Sum(nil))
 }
