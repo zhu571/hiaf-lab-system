@@ -168,12 +168,12 @@ func (s *Service) AddMessage(ctx context.Context, userID, id, content string) (*
 	if content == "" || len([]rune(content)) > maxContentLen {
 		return nil, ErrInvalid
 	}
-	m, err := s.repo.AddUserMessage(ctx, userID, id, content)
-	if err != nil {
+	if _, err := s.Get(ctx, userID, id); err != nil {
 		return nil, err
 	}
-	if m == nil {
-		return nil, ErrNotFound
+	m, err := s.repo.AddUserMessageToSession(ctx, id, content)
+	if err != nil {
+		return nil, err
 	}
 	return m, nil
 }
@@ -187,10 +187,6 @@ func (s *Service) StartRun(ctx context.Context, userID, sessionID, content strin
 	}
 	if sess.Status != statusActive {
 		return nil, ErrInvalid
-	}
-	// 项目会话对其他成员只读；继续对话仍由创建者发起。
-	if sess.UserID != userID {
-		return nil, ErrForbidden
 	}
 	userMsg, err := s.AddMessage(ctx, userID, sessionID, content)
 	if err != nil {
