@@ -385,60 +385,8 @@ func main() {
 			r.Patch("/translations/", logsHandler.Translation)
 		})
 	})
-	r.Route("/api/v1/projects", func(r chi.Router) {
-		r.Use(mw.AuthRequired)
-		r.Use(mw.AgentContext(db))
-		r.Use(mw.Audit(db))
-		r.Use(mw.RequireIdempotencyKey(db))
-		r.Get("/", projectsHandler.List)
-		// D11：项目创建限 maintainer+admin（viewer 不可），service 内同语义校验纵深。
-		r.With(mw.RequireRole(auth.RoleAdmin, auth.RoleMaintainer)).Post("/", projectsHandler.Create)
-
-		r.Route("/{id}", func(r chi.Router) {
-			r.Use(mw.RequireProjectPermission(db, mw.PermRead))
-			r.Get("/", projectsHandler.GetByID)
-			r.Get("/members", projectsHandler.ListMembers)
-			r.Get("/issues", issuesHandler.List)
-			r.Get("/logs", logsHandler.ListLogs)
-			r.With(mw.RequireProjectPermission(db, mw.PermReadTeamReports)).Get("/daily-reports", logsHandler.ListTeamReports)
-			r.With(mw.RequireProjectPermission(db, mw.PermReadTeamReports)).Get("/daily-reports/{report_id}", logsHandler.GetTeamReport)
-			r.Get("/experiment-runs", runsHandler.List)
-			r.Post("/experiment-runs", runsHandler.Create)
-			r.Get("/assembly", assemblyHandler.List)
-			r.Post("/assembly", assemblyHandler.Create)
-			r.Post("/assembly/apply-template", assemblyHandler.ApplyTemplate)
-			r.Get("/test-data", testDataHandler.List)
-			r.Post("/test-data", testDataHandler.Create)
-			r.Post("/test-data/batch", testDataHandler.CreateBatch)
-			r.Get("/test-data-curves", testDataCurveHandler.List)
-			r.Post("/test-data-curves", testDataCurveHandler.Create)
-			r.Get("/rf-matching", rfMatchingHandler.List)
-			r.Post("/rf-matching", rfMatchingHandler.Create)
-			registerProjectScanRoutes(r, scansHandler)
-			r.Group(func(r chi.Router) {
-				r.Use(mw.RequireProjectPermission(db, mw.PermManageProject))
-				r.Patch("/", projectsHandler.Update)
-				r.Post("/transition", projectsHandler.TransitionStatus)
-			})
-
-			r.Group(func(r chi.Router) {
-				r.Use(mw.RequireProjectPermission(db, mw.PermManageMembers))
-				r.Post("/members", projectsHandler.AddMember)
-				r.Patch("/members/{userID}", projectsHandler.UpdateMemberRole)
-				r.Delete("/members/{userID}", projectsHandler.RemoveMember)
-			})
-
-			r.Group(func(r chi.Router) {
-				r.Use(mw.RequireProjectPermission(db, mw.PermCreateLog))
-				r.Post("/logs", logsHandler.CreateLog)
-			})
-
-			r.Group(func(r chi.Router) {
-				r.Use(mw.RequireProjectPermission(db, mw.PermCreateIssue))
-				r.Post("/issues", issuesHandler.Create)
-			})
-		})
-	})
+	registerProjectRoutes(r, db, projectsHandler, issuesHandler, logsHandler, runsHandler,
+		assemblyHandler, testDataHandler, testDataCurveHandler, rfMatchingHandler, scansHandler)
 	registerScanRoutes(r, db, scansHandler)
 	registerRunRoutes(r, db, runsHandler)
 	registerAssemblyRoutes(r, db, assemblyHandler)
