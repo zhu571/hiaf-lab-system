@@ -122,6 +122,7 @@ func main() {
 	agentHandler := agent.NewHandler(agentSvc)
 	assistantRepo := assistant.NewRepository(db)
 	assistantSvc := assistant.NewService(assistantRepo)
+	assistantSvc.SetReplier(assistant.NewHTTPReplier())
 	assistantHandler := assistant.NewHandler(assistantSvc)
 	automationRepo := automation.NewRepository(db)
 	automationSvc := automation.NewService(automationRepo)
