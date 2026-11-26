@@ -17,7 +17,15 @@ import (
 // server 重建不影响它）；区别只在 entrypoint —— go 跑 lab-update 流水线，shell 跑
 // update.sh。shell 引擎不再在 server 容器内直接 bash（server 容器非 root 且仓库只读，
 // 无法写 .git，无法满足 I1），统一走 runner 容器 + 仓库 rw 挂载。
-func newRunner(s *Service, _ string) SessionRunner {
+func newRunner(s *Service, engine string) SessionRunner {
+	if engine == "host" {
+		return &hostRunner{
+			cfg:        s.spawnConfig(),
+			requestDir: s.requestDir,
+			logDir:     s.logDir,
+			keyFile:    s.requestKeyFile,
+		}
+	}
 	return &dockerRunner{cmds: NewExecRunner("", nil), cfg: s.spawnConfig()}
 }
 
