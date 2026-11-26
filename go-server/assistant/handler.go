@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"strconv"
 
@@ -23,6 +24,7 @@ type serviceAPI interface {
 	AddMessage(ctx context.Context, userID, id, content string) (*Message, error)
 	StartRun(ctx context.Context, userID, sessionID, content string) (*RunResult, error)
 	Usage(ctx context.Context, userID string) (Usage, error)
+	Export(ctx context.Context, userID, id string) (string, error)
 }
 
 type Handler struct {
@@ -139,6 +141,19 @@ func (h *Handler) Usage(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	common.WriteSuccess(w, r, usage)
+}
+
+func (h *Handler) Export(w http.ResponseWriter, r *http.Request) {
+	userID := middleware.GetUserClaims(r.Context()).UserID
+	id := chi.URLParam(r, "id")
+	md, err := h.svc.Export(r.Context(), userID, id)
+	if err != nil {
+		writeError(w, r, err)
+		return
+	}
+	w.Header().Set("Content-Type", "text/markdown; charset=utf-8")
+	w.Header().Set("Content-Disposition", fmt.Sprintf("attachment; filename=%q", "assistant-"+id+".md"))
+	_, _ = w.Write([]byte(md))
 }
 
 func writeError(w http.ResponseWriter, r *http.Request, err error) {

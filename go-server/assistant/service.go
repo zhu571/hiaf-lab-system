@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"strings"
 )
 
@@ -173,6 +174,24 @@ func (s *Service) Usage(ctx context.Context, userID string) (Usage, error) {
 	}
 	usage.RunLimit = defaultDailyRuns
 	return usage, nil
+}
+
+// Export 生成 Markdown 会话记录（只读）。
+func (s *Service) Export(ctx context.Context, userID, id string) (string, error) {
+	sess, err := s.Get(ctx, userID, id)
+	if err != nil {
+		return "", err
+	}
+	msgs, err := s.repo.ListMessagesBySession(ctx, id)
+	if err != nil {
+		return "", err
+	}
+	var b strings.Builder
+	fmt.Fprintf(&b, "# %s\n\n", sess.Title)
+	for _, m := range msgs {
+		fmt.Fprintf(&b, "## %s\n\n%s\n\n", m.Role, m.Content)
+	}
+	return b.String(), nil
 }
 
 func (s *Service) AddMessage(ctx context.Context, userID, id, content string) (*Message, error) {

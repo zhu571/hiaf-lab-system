@@ -1,4 +1,4 @@
-import { request } from './client'
+import { api, request } from './client'
 
 export type AssistantSession = {
   id: string
@@ -85,4 +85,9 @@ export function startAssistantRun(id: string, content: string) {
 
 export function getAssistantUsage() {
   return request<AssistantUsage>({ url: '/assistant/usage' })
+}
+
+export async function exportAssistantSession(id: string) {
+  const response = await api.get(`/assistant/sessions/${id}/export`, { responseType: 'text' })
+  return String(response.data)
 }
