@@ -148,6 +148,68 @@ func (r *Repository) AddUserMessage(ctx context.Context, userID, sessionID, cont
 	return &m, nil
 }
 
+func (r *Repository) ListVisibleSessions(ctx context.Context, userID, status string, limit int) ([]Session, error) {
+	rows, err := r.db.QueryContext(ctx,
+		`SELECT id, user_id, project_id, title, status, summary, last_message_at, created_at, updated_at
+		 FROM assistant_sessions
+		 WHERE (user_id = $1::uuid OR project_id IS NOT NULL) AND ($2 = '' OR status = $2)
+		 ORDER BY COALESCE(last_message_at, created_at) DESC
+		 LIMIT $3`, userID, status, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []Session
+	for rows.Next() {
+		var s Session
+		if err := rows.Scan(&s.ID, &s.UserID, &s.ProjectID, &s.Title, &s.Status, &s.Summary,
+			&s.LastMessageAt, &s.CreatedAt, &s.UpdatedAt); err != nil {
+			return nil, err
+		}
+		out = append(out, s)
+	}
+	return out, rows.Err()
+}
+
+func (r *Repository) GetSessionAny(ctx context.Context, id string) (*Session, error) {
+	var s Session
+	err := r.db.QueryRowContext(ctx,
+		`SELECT id, user_id, project_id, title, status, summary, last_message_at, created_at, updated_at
+		 FROM assistant_sessions WHERE id = $1::uuid`, id,
+	).Scan(&s.ID, &s.UserID, &s.ProjectID, &s.Title, &s.Status, &s.Summary,
+		&s.LastMessageAt, &s.CreatedAt, &s.UpdatedAt)
+	if err == sql.ErrNoRows {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	return &s, nil
+}
+
+func (r *Repository) ListMessagesBySession(ctx context.Context, sessionID string) ([]Message, error) {
+	rows, err := r.db.QueryContext(ctx,
+		`SELECT id, session_id, run_id, role, content, content_json, created_at
+		 FROM assistant_messages WHERE session_id = $1::uuid ORDER BY created_at`, sessionID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []Message
+	for rows.Next() {
+		var m Message
+		var raw []byte
+		if err := rows.Scan(&m.ID, &m.SessionID, &m.RunID, &m.Role, &m.Content, &raw, &m.CreatedAt); err != nil {
+			return nil, err
+		}
+		if len(raw) > 0 {
+			_ = json.Unmarshal(raw, &m.ContentJSON)
+		}
+		out = append(out, m)
+	}
+	return out, rows.Err()
+}
+
 func (r *Repository) CreateRun(ctx context.Context, run *Run) error {
 	return r.db.QueryRowContext(ctx,
 		`INSERT INTO assistant_runs (session_id, user_id, status, model, prompt_version)

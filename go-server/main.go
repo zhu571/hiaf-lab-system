@@ -123,6 +123,7 @@ func main() {
 	assistantRepo := assistant.NewRepository(db)
 	assistantSvc := assistant.NewService(assistantRepo)
 	assistantSvc.SetReplier(assistant.NewHTTPReplier())
+	assistantSvc.SetProjectAccessChecker(assistantProjectAccess{db: db})
 	assistantHandler := assistant.NewHandler(assistantSvc)
 	automationRepo := automation.NewRepository(db)
 	automationSvc := automation.NewService(automationRepo)
