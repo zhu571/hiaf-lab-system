@@ -91,6 +91,7 @@ import {
   type AssistantSession
 } from '@/api/assistant'
 import { listProjects, type Project } from '@/api/projects'
+import { showApiError } from '@/composables/useNotify'
 
 const { t } = useI18n()
 const sessions = ref<AssistantSession[]>([])
@@ -129,6 +130,8 @@ async function loadSessions() {
     sessions.value = res.items
     if (!activeId.value && sessions.value.length) activeId.value = sessions.value[0].id
     if (activeId.value) await loadMessages()
+  } catch (err) {
+    showApiError(err, t('assistant.loadFailed'))
   } finally {
     loadingSessions.value = false
   }
@@ -140,6 +143,8 @@ async function loadMessages() {
   try {
     const res = await listAssistantMessages(activeId.value)
     messages.value = res.items
+  } catch (err) {
+    showApiError(err, t('assistant.messagesFailed'))
   } finally {
     loadingMessages.value = false
   }
@@ -166,6 +171,8 @@ async function createSession() {
     sessions.value = [session, ...sessions.value]
     activeId.value = session.id
     messages.value = []
+  } catch (err) {
+    showApiError(err, t('assistant.createFailed'))
   } finally {
     creating.value = false
   }
@@ -179,6 +186,8 @@ async function sendMessage() {
     const result = await startAssistantRun(activeId.value, content)
     messages.value.push(...result.messages)
     draft.value = ''
+  } catch (err) {
+    showApiError(err, t('assistant.sendFailed'))
   } finally {
     sending.value = false
   }
@@ -193,6 +202,8 @@ async function archiveActive() {
     activeId.value = sessions.value[0]?.id ?? ''
     messages.value = []
     if (activeId.value) await loadMessages()
+  } catch (err) {
+    showApiError(err, t('assistant.archiveFailed'))
   } finally {
     archiving.value = false
   }
