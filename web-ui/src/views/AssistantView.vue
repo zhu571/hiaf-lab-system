@@ -3,9 +3,20 @@
     <aside class="assistant-side">
       <div class="assistant-side-head">
         <h2>{{ t('assistant.title') }}</h2>
-        <el-button size="small" type="primary" :loading="creating" @click="createSession">
-          {{ t('assistant.new') }}
-        </el-button>
+        <div class="assistant-side-actions">
+          <el-select v-model="newProject" size="small" class="assistant-project-select">
+            <el-option :label="t('assistant.privateSession')" value="" />
+            <el-option
+              v-for="p in projects"
+              :key="p.id"
+              :label="p.short_name || p.name"
+              :value="p.id"
+            />
+          </el-select>
+          <el-button size="small" type="primary" :loading="creating" @click="createSession">
+            {{ t('assistant.new') }}
+          </el-button>
+        </div>
       </div>
       <div v-if="loadingSessions" v-loading="true" class="assistant-loading" />
       <el-empty v-else-if="!sessions.length" :description="t('assistant.emptySessions')" />
@@ -16,7 +27,10 @@
           :class="['assistant-session', { active: s.id === activeId }]"
           @click="selectSession(s.id)"
         >
-          <span class="assistant-session-title">{{ s.title || t('assistant.untitled') }}</span>
+          <span class="assistant-session-title">
+            {{ s.title || t('assistant.untitled') }}
+            <span v-if="s.project_id" class="assistant-shared">{{ t('assistant.shared') }}</span>
+          </span>
           <span class="assistant-session-time">{{ s.last_message_at ? formatDate(s.last_message_at) : '' }}</span>
         </li>
       </ul>
@@ -28,7 +42,10 @@
       </div>
       <template v-else>
         <header class="assistant-main-head">
-          <strong>{{ activeSession.title || t('assistant.untitled') }}</strong>
+          <strong>
+            {{ activeSession.title || t('assistant.untitled') }}
+            <span v-if="activeSession.project_id" class="assistant-shared">{{ t('assistant.shared') }}</span>
+          </strong>
           <el-button size="small" :loading="archiving" @click="archiveActive">
             {{ t('assistant.archive') }}
           </el-button>
@@ -73,11 +90,14 @@ import {
   type AssistantMessage,
   type AssistantSession
 } from '@/api/assistant'
+import { listProjects, type Project } from '@/api/projects'
 
 const { t } = useI18n()
 const sessions = ref<AssistantSession[]>([])
 const messages = ref<AssistantMessage[]>([])
+const projects = ref<Project[]>([])
 const activeId = ref('')
+const newProject = ref('')
 const draft = ref('')
 const loadingSessions = ref(false)
 const loadingMessages = ref(false)
@@ -125,6 +145,14 @@ async function loadMessages() {
   }
 }
 
+async function loadProjects() {
+  try {
+    projects.value = await listProjects('active')
+  } catch {
+    projects.value = []
+  }
+}
+
 function selectSession(id: string) {
   activeId.value = id
   messages.value = []
@@ -134,7 +162,7 @@ function selectSession(id: string) {
 async function createSession() {
   creating.value = true
   try {
-    const session = await createAssistantSession()
+    const session = await createAssistantSession('', newProject.value)
     sessions.value = [session, ...sessions.value]
     activeId.value = session.id
     messages.value = []
@@ -170,7 +198,10 @@ async function archiveActive() {
   }
 }
 
-onMounted(loadSessions)
+onMounted(() => {
+  void loadProjects()
+  void loadSessions()
+})
 </script>
 
 <style scoped>
@@ -199,6 +230,22 @@ onMounted(loadSessions)
 .assistant-side-head h2 {
   margin: 0;
   font-size: var(--fs-body);
+}
+.assistant-side-actions {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+.assistant-project-select {
+  width: 110px;
+}
+.assistant-shared {
+  margin-left: var(--space-1);
+  padding: 0 var(--space-1);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  font-size: var(--fs-body-sm);
+  color: var(--text-3);
 }
 .assistant-loading,
 .assistant-messages-loading {
