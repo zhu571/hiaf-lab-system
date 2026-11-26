@@ -1,0 +1,11 @@
+[Unit]
+Description=HIAF lab update request watcher
+Documentation=file:/opt/hiaf-lab-system/docs/update-runner-hardening.md
+After=network-online.target docker.service
+
+[Path]
+PathExistsGlob=/opt/hiaf-lab-system/.hermes/update-requests/*.json
+Unit=lab-update-dispatch.service
+
+[Install]
+WantedBy=paths.target

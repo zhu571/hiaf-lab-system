@@ -1,0 +1,19 @@
+[Unit]
+Description=HIAF lab update dispatcher
+Documentation=file:/opt/hiaf-lab-system/docs/update-runner-hardening.md
+After=network-online.target docker.service
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=lab-update
+Group=docker
+Environment=UPDATE_REQUEST_DIR=/opt/hiaf-lab-system/.hermes/update-requests
+Environment=UPDATE_LOG_DIR=/opt/hiaf-lab-system/.hermes/updates
+Environment=UPDATE_REQUEST_KEY_FILE=/etc/lab-update/request.key
+ExecStart=/usr/local/bin/lab-update-dispatch
+TimeoutStartSec=1800
+Nice=5
+
+[Install]
+WantedBy=multi-user.target
