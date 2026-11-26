@@ -9,10 +9,16 @@ import (
 
 var (
 	ErrNotFound           = errors.New("assistant session not found")
+	ErrForbidden          = errors.New("assistant session forbidden")
 	ErrInvalid            = errors.New("invalid assistant request")
 	ErrProjectUnsupported = errors.New("project sessions are not enabled yet")
 	ErrUpstream           = errors.New("assistant upstream unavailable")
 )
+
+// ProjectAccessChecker 由 main 注入，assistant 不直接读项目表。
+type ProjectAccessChecker interface {
+	CanReadProject(ctx context.Context, userID, projectID string) (bool, error)
+}
 
 const (
 	statusActive   = "active"
@@ -21,8 +27,9 @@ const (
 )
 
 type Service struct {
-	repo    *Repository
-	replier Replier
+	repo     *Repository
+	replier  Replier
+	projects ProjectAccessChecker
 }
 
 func NewService(repo *Repository) *Service { return &Service{repo: repo} }
@@ -30,9 +37,23 @@ func NewService(repo *Repository) *Service { return &Service{repo: repo} }
 // SetReplier 注入真实 LLM 客户端；未注入时 StartRun 返回明确的占位回复。
 func (s *Service) SetReplier(r Replier) { s.replier = r }
 
+// SetProjectAccessChecker 注入项目成员校验；未注入时项目会话不可用。
+func (s *Service) SetProjectAccessChecker(c ProjectAccessChecker) { s.projects = c }
+
 func (s *Service) Create(ctx context.Context, userID string, req CreateSessionRequest) (*Session, error) {
-	if strings.TrimSpace(req.ProjectID) != "" {
-		return nil, ErrProjectUnsupported
+	var projectID *string
+	if id := strings.TrimSpace(req.ProjectID); id != "" {
+		if s.projects == nil {
+			return nil, ErrProjectUnsupported
+		}
+		ok, err := s.projects.CanReadProject(ctx, userID, id)
+		if err != nil {
+			return nil, err
+		}
+		if !ok {
+			return nil, ErrForbidden
+		}
+		projectID = &id
 	}
 	title := strings.TrimSpace(req.Title)
 	if len([]rune(title)) > 200 {
@@ -41,7 +62,7 @@ func (s *Service) Create(ctx context.Context, userID string, req CreateSessionRe
 	if title == "" {
 		title = "新会话"
 	}
-	sess := &Session{UserID: userID, Title: title}
+	sess := &Session{UserID: userID, Title: title, ProjectID: projectID}
 	if err := s.repo.CreateSession(ctx, sess); err != nil {
 		return nil, err
 	}
@@ -55,18 +76,51 @@ func (s *Service) List(ctx context.Context, userID, status string, limit int) ([
 	if limit <= 0 || limit > 100 {
 		limit = 50
 	}
-	return s.repo.ListSessions(ctx, userID, status, limit)
+	items, err := s.repo.ListVisibleSessions(ctx, userID, status, limit)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]Session, 0, len(items))
+	for _, sess := range items {
+		if sess.UserID == userID {
+			out = append(out, sess)
+			continue
+		}
+		if sess.ProjectID == nil || s.projects == nil {
+			continue
+		}
+		ok, err := s.projects.CanReadProject(ctx, userID, *sess.ProjectID)
+		if err != nil {
+			return nil, err
+		}
+		if ok {
+			out = append(out, sess)
+		}
+	}
+	return out, nil
 }
 
 func (s *Service) Get(ctx context.Context, userID, id string) (*Session, error) {
-	sess, err := s.repo.GetSession(ctx, userID, id)
+	sess, err := s.repo.GetSessionAny(ctx, id)
 	if err != nil {
 		return nil, err
 	}
 	if sess == nil {
 		return nil, ErrNotFound
 	}
-	return sess, nil
+	if sess.UserID == userID {
+		return sess, nil
+	}
+	if sess.ProjectID != nil && s.projects != nil {
+		ok, err := s.projects.CanReadProject(ctx, userID, *sess.ProjectID)
+		if err != nil {
+			return nil, err
+		}
+		if ok {
+			return sess, nil
+		}
+	}
+	return nil, ErrNotFound
 }
 
 func (s *Service) Update(ctx context.Context, userID, id string, req UpdateSessionRequest) (*Session, error) {
@@ -106,7 +160,7 @@ func (s *Service) Messages(ctx context.Context, userID, id string) ([]Message, e
 	if _, err := s.Get(ctx, userID, id); err != nil {
 		return nil, err
 	}
-	return s.repo.ListMessages(ctx, userID, id)
+	return s.repo.ListMessagesBySession(ctx, id)
 }
 
 func (s *Service) AddMessage(ctx context.Context, userID, id, content string) (*Message, error) {
@@ -133,6 +187,10 @@ func (s *Service) StartRun(ctx context.Context, userID, sessionID, content strin
 	}
 	if sess.Status != statusActive {
 		return nil, ErrInvalid
+	}
+	// 项目会话对其他成员只读；继续对话仍由创建者发起。
+	if sess.UserID != userID {
+		return nil, ErrForbidden
 	}
 	userMsg, err := s.AddMessage(ctx, userID, sessionID, content)
 	if err != nil {

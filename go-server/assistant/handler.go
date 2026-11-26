@@ -121,6 +121,8 @@ func writeError(w http.ResponseWriter, r *http.Request, err error) {
 	switch {
 	case errors.Is(err, ErrNotFound):
 		common.WriteError(w, r, http.StatusNotFound, "not_found", "会话不存在", nil)
+	case errors.Is(err, ErrForbidden):
+		common.WriteError(w, r, http.StatusForbidden, "permission_denied", "无权操作该会话", nil)
 	case errors.Is(err, ErrProjectUnsupported):
 		common.WriteError(w, r, http.StatusBadRequest, "not_supported", "项目共享会话暂未开放", nil)
 	case errors.Is(err, ErrInvalid):
