@@ -71,6 +71,7 @@ HIAF 低温气体靶实验室的多人协作日志管理平台。系统已完成
 | `docs/update-runner-hardening.md` | AR-06b 更新执行器去 docker.sock 的宿主侧方案（设计稿） |
 | `docs/codex-plan.md` | 了解 Codex 对架构和实施顺序的补充建议 |
 | `docs/multi-user-agent-upgrade.md` | 规划多人 Agent、会话/工具/配额升级前必读（含 GitHub 同类项目调研） |
+| `docs/assistant-sessions.md` | assistant 会话层已实现范围、API、权限、配额与测试 |
 | `docs/architecture-review.md` | 做架构演进、性能/安全加固、跨模块改造前必读（缺陷编号 AR-xx 可引用） |
 | `docs/architecture-remediation-plan.md` | 修 AR-01～AR-12 前必读：每项的方案、迁移、测试、回滚与批次 |
 | `docs/scan-archive-design-v0.4.md` | GC 扫描数据自动存档设计（项目级 scans、watcher、单副本存储、前端）；计划位置见 remediation-plan §16 |
@@ -107,6 +108,7 @@ hiaf-lab-system/
 │   ├── weekly/             # 周报模块（AI-1：手动端点 + 每周日 20:00 调度，复用 experiences 落库）
 │   ├── cmd/update-runner/  # 更新 runner 入口（独立容器内执行 git pull + compose 重建；cmd/ 下另有 devserver、seed-agent）
 │   ├── agent/              # Agent 交互模块
+│   ├── assistant/          # 多人助手会话/消息/run/配额（私有 + 项目共享）
 │   ├── audit/              # 审计日志模块（含 hash 链校验、事件列表端点）
 │   ├── attachments/        # 附件管理模块
 │   ├── notify/             # 消息通知模块
